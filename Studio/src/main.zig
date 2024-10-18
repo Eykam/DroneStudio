@@ -85,18 +85,19 @@ fn compileShader(shaderType: u32, source: []const u8) !u32 {
     const shader = c.glCreateShader(shaderType);
     if (shader == 0) return ShaderError.UnableToCreateShader;
 
-    const src_ptr: *const c.char = @ptrCast(source.ptr);
-    const src_len: c.int = @intCast(source.len);
-    c.glShaderSource(shader, 1, &src_ptr, &src_len);
+    const src_ptr: [*c]const u8 = @ptrCast(@alignCast(source.ptr));
+    const src_len = source.len;
+
+    c.glShaderSource(shader, 1, @ptrCast(&src_ptr), @ptrCast(&src_len));
     c.glCompileShader(shader);
 
     // Check for compilation errors
-    var success: c.int = 0;
-    c.glGetShaderiv(shader, c.GL_COMPILE_STATUS, &success);
+    var success: u32 = 0;
+    c.glGetShaderiv(shader, c.GL_COMPILE_STATUS, @alignCast(@ptrCast(&success)));
     if (success == 0) {
         var infoLog: [512]u8 = undefined;
         c.glGetShaderInfoLog(shader, 512, null, &infoLog);
-        std.debug.print("ERROR::SHADER::COMPILATION_FAILED\n{}\n", .{infoLog});
+        std.debug.print("ERROR::SHADER::COMPILATION_FAILED\n{any}\n", .{infoLog});
         return ShaderError.ShaderCompilationFailed;
     }
 
@@ -108,37 +109,32 @@ fn createShaderProgram(vertexPath: []const u8, fragmentPath: []const u8) !u32 {
     const vertexSource = try readShaderSource(vertexPath);
     const fragmentSource = try readShaderSource(fragmentPath);
 
-    std.debug.print("vertexSource: {any}\n", .{vertexSource});
-    std.debug.print("fragementSource: {any}\n", .{fragmentSource});
+    const vertexShader = try compileShader(c.GL_VERTEX_SHADER, vertexSource);
+    const fragmentShader = try compileShader(c.GL_FRAGMENT_SHADER, fragmentSource);
 
-    std.debug.print("VERTEX_SHADER: {any}\n", .{c.GL_VERTEX_SHADER});
-    std.debug.print("FRAGMENT_SHADER: {any}\n", .{c.GL_FRAGMENT_SHADER});
-    // const vertexShader = try compileShader(c.GL_VERTEX_SHADER, vertexSource);
-    // const fragmentShader = try compileShader(c.GL_FRAGMENT_SHADER, fragmentSource);
+    const shaderProgram = c.glCreateProgram();
+    if (shaderProgram == 0) return ShaderError.UnableToCreateProgram;
 
-    // const shaderProgram = c.glCreateProgram();
-    // if (shaderProgram == 0) return ShaderError.UnableToCreateProgram;
+    c.glAttachShader(shaderProgram, vertexShader);
+    c.glAttachShader(shaderProgram, fragmentShader);
+    c.glLinkProgram(shaderProgram);
 
-    // c.glAttachShader(shaderProgram, vertexShader);
-    // c.glAttachShader(shaderProgram, fragmentShader);
-    // c.glLinkProgram(shaderProgram);
+    // Check for linking errors
+    var success: u32 = 0;
+    c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, @ptrCast(@alignCast(&success)));
+    if (success == 0) {
+        var infoLog: [512]u8 = undefined;
+        c.glGetProgramInfoLog(shaderProgram, 512, null, &infoLog);
+        std.debug.print("ERROR::PROGRAM::LINKING_FAILED\n{any}\n", .{infoLog});
+        return ShaderError.ShaderLinkingFailed;
+    }
 
-    // // Check for linking errors
-    // var success: c.int = 0;
-    // c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, &success);
-    // if (success == 0) {
-    //     var infoLog: [512]u8 = undefined;
-    //     c.glGetProgramInfoLog(shaderProgram, 512, null, &infoLog);
-    //     std.debug.print("ERROR::PROGRAM::LINKING_FAILED\n{}\n", .{infoLog});
-    //     return ShaderError.ShaderLinkingFailed;
-    // }
+    // Shaders can be deleted after linking
+    c.glDeleteShader(vertexShader);
+    c.glDeleteShader(fragmentShader);
 
-    // // Shaders can be deleted after linking
-    // c.glDeleteShader(vertexShader);
-    // c.glDeleteShader(fragmentShader);
-
-    // return shaderProgram;
-    return 0;
+    return shaderProgram;
+    // return 0;
 }
 
 pub fn main() !void {
@@ -188,8 +184,8 @@ pub fn main() !void {
     c.glEnable(c.GL_DEPTH_TEST);
 
     // Compile and link shaders
-    // const shaderProgram = try createShaderProgram("src/shaders/vertex_shader.glsl", "src/shaders/fragment_shader.glsl");
-    // defer c.glDeleteProgram(shaderProgram);
+    const shaderProgram = try createShaderProgram("src/shaders/vertex_shader.glsl", "src/shaders/fragment_shader.glsl");
+    defer c.glDeleteProgram(shaderProgram);
 
     // Generate grid vertices
     // const gridVertices = generateGridVertices();
@@ -200,11 +196,11 @@ pub fn main() !void {
     // defer c.glDeleteBuffers(1, grid.VBO);
 
     // Set uniform color for the grid (e.g., white)
-    // c.glUseProgram(shaderProgram);
-    // const colorLocation = c.glGetUniformLocation(shaderProgram, "uColor");
-    // if (colorLocation != -1) {
-    // c.glUniform3f(colorLocation, 1.0, 1.0, 1.0); // White color
-    // }
+    c.glUseProgram(shaderProgram);
+    const colorLocation = c.glGetUniformLocation(shaderProgram, "uColor");
+    if (colorLocation != -1) {
+        c.glUniform3f(colorLocation, 1.0, 1.0, 1.0); // White color
+    }
 
     // Main loop
     while (c.glfwWindowShouldClose(window) == 0) {
@@ -215,7 +211,7 @@ pub fn main() !void {
         c.glClear(c.GL_COLOR_BUFFER_BIT);
 
         // Use shader program
-        // c.glUseProgram(shaderProgram);
+        c.glUseProgram(shaderProgram);
 
         // Bind the grid VAO
         // c.glBindVertexArray(grid.VAO);
