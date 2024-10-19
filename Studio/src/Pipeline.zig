@@ -1,6 +1,7 @@
 // src/Scene.zig
 const std = @import("std");
 const Shape = @import("Shape.zig");
+const Transformations = @import("Transformations.zig");
 const File = std.fs.File;
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
@@ -117,6 +118,8 @@ pub const Scene = struct {
     allocator: std.mem.Allocator,
     objects: std.StringHashMap(Shape.Object),
     shaderProgram: u32,
+    width: f32,
+    height: f32,
 
     pub fn init(allocator: std.mem.Allocator, window: ?*c.struct_GLFWwindow) !Self {
         if (window == null) {
@@ -124,12 +127,15 @@ pub const Scene = struct {
             return GSLWError.FailedToCreateWindow;
         }
 
+        var width: i32 = undefined;
+        var height: i32 = undefined;
+        c.glfwGetWindowSize(window.?, &width, &height);
+
         // Make the window's context current
         c.glfwMakeContextCurrent(window);
         c.glfwSwapInterval(0);
 
-        // Initialize OpenGL loader (optional, depending on usage)
-        // You might need to load OpenGL function pointers here if using modern OpenGL
+        // Initialize OpenGL Loader
         std.debug.print("Loading Glad...\n", .{});
         if (c.gladLoadGLLoader(@ptrCast(&c.glfwGetProcAddress)) == 0) {
             std.debug.print("Failed to initialize GLAD\n", .{});
@@ -137,9 +143,7 @@ pub const Scene = struct {
         }
 
         std.debug.print("Initializing viewport...\n\n", .{});
-        // Viewport setup
-        c.glViewport(0, 0, 1920 * 0.75, 1080 * 0.75);
-        // Enable depth testing if needed
+        c.glViewport(0, 0, width, height);
         c.glEnable(c.GL_DEPTH_TEST);
 
         const shaderProgram = try createShaderProgram("src/shaders/vertex_shader.glsl", "src/shaders/fragment_shader.glsl");
@@ -189,10 +193,12 @@ pub const Scene = struct {
             .allocator = allocator,
             .objects = std.StringHashMap(Shape.Object).init(allocator),
             .shaderProgram = shaderProgram,
+            .width = @floatFromInt(width),
+            .height = @floatFromInt(height),
         };
     }
 
-    pub fn deinit(self: Self) void {
+    pub fn deinit(self: *Self) void {
         // Delete OpenGL resources for each object
         var it = self.objects.iterator();
         while (it.next()) |entry| {
@@ -203,18 +209,32 @@ pub const Scene = struct {
                 c.glDeleteBuffers(1, &object.meta.EBO);
             }
         }
+
         self.objects.deinit();
+    }
+
+    pub fn setupCallbacks(self: *Self, window: ?*c.struct_GLFWwindow) void {
+        c.glfwSetWindowUserPointer(window, self);
+        _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+    }
+
+    pub fn updateProjection(self: *Self) [16]f32 {
+        return Transformations.perspective(45.0, self.width / self.height, 0.1, 100.0);
     }
 
     pub fn addObject(self: *Self, name: []const u8, object: Shape.Object) !void {
         try self.objects.put(name, object);
     }
 
-    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, view: [16]f32, projection: [16]f32) void {
+    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, view: [16]f32) void {
         c.glClearColor(0.15, 0.15, 0.15, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
+
         // Use the shader program
         c.glUseProgram(self.shaderProgram);
+
+        // Use the current projection matrix that accounts for window size
+        const currentProjection = self.updateProjection();
 
         // Set common uniforms
         const viewLoc = c.glGetUniformLocation(self.shaderProgram, "uView");
@@ -223,7 +243,7 @@ pub const Scene = struct {
             c.glUniformMatrix4fv(viewLoc, 1, c.GL_FALSE, &view);
         }
         if (projectionLoc != -1) {
-            c.glUniformMatrix4fv(projectionLoc, 1, c.GL_FALSE, &projection);
+            c.glUniformMatrix4fv(projectionLoc, 1, c.GL_FALSE, &currentProjection);
         }
 
         // Iterate through all objects in the hash map
@@ -264,3 +284,14 @@ pub const Scene = struct {
         }
     }
 };
+
+fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
+    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+
+    // Update scene dimensions
+    scene.width = @floatFromInt(width);
+    scene.height = @floatFromInt(height);
+
+    // Update viewport
+    c.glViewport(0, 0, width, height);
+}

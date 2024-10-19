@@ -30,16 +30,20 @@ pub fn main() !void {
     c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
 
     // Create a windowed mode window and its OpenGL context
-    const width = comptime 1920 * 0.75;
-    const height = comptime 1080 * 0.75;
+    const width: u32 = @intFromFloat(1920 * 0.75);
+    const height: u32 = @intFromFloat(1080 * 0.75);
+
     const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null);
     defer c.glfwDestroyWindow(window);
 
     //Initializing Scene
     var scene = try Scene.init(alloc, window);
+    defer scene.deinit();
+
+    scene.setupCallbacks(window);
+    // var projection = scene.updateProjection();
 
     // Define transformation matrices
-    const projection = Transformations.perspective(45.0, width / height, 0.1, 100.0);
     const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position
     const center = [3]f32{ 0.0, 0.0, 0.0 }; // Look at origin
     const up = [3]f32{ 0.0, 1.0, 0.0 }; // Up vector
@@ -56,6 +60,6 @@ pub fn main() !void {
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {
-        scene.render(window, view, projection);
+        scene.render(window, view);
     }
 }
