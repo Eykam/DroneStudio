@@ -34,8 +34,25 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(b.path("src/glad/include/"));
     exe.addCSourceFiles(.{ .root = b.path("."), .files = glad_files });
 
-    // Link against GLFW
-    exe.linkSystemLibrary("glfw");
+    if (target.result.os.tag == .windows) {
+        // Add GLFW paths for Windows
+        exe.addLibraryPath(b.path("lib/glfw/lib-mingw-w64"));
+        exe.addIncludePath(b.path("lib/glfw/include"));
+
+        // Link statically with GLFW
+        exe.addObjectFile(b.path("lib/glfw/lib-mingw-w64/libglfw3.a"));
+
+        // Windows system libraries required by GLFW
+        exe.linkSystemLibrary("gdi32");
+        exe.linkSystemLibrary("user32");
+        exe.linkSystemLibrary("kernel32");
+        exe.linkSystemLibrary("shell32");
+        exe.linkSystemLibrary("opengl32");
+    } else {
+        // For non-Windows platforms
+        exe.linkSystemLibrary("glfw");
+    }
+
     exe.linkLibC();
 
     // Link against the appropriate OpenGL library based on the target OS

@@ -1,5 +1,14 @@
 const std = @import("std");
 
+pub fn identity() [16]f32 {
+    return .{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
+
 pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) [16]f32 {
     return .{
         2.0 / (right - left), 0.0,                  0.0,                 -(right + left) / (right - left),
@@ -7,6 +16,18 @@ pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far
         0.0,                  0.0,                  -2.0 / (far - near), -(far + near) / (far - near),
         0.0,                  0.0,                  0.0,                 1.0,
     };
+}
+
+pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) [16]f32 {
+    const rad = radians(fov);
+    const tan_half_fov = tan(rad / 2.0);
+    var mat: [16]f32 = .{0} ** 16;
+    mat[0] = 1.0 / (aspect * tan_half_fov);
+    mat[5] = 1.0 / (tan_half_fov);
+    mat[10] = -(far + near) / (far - near);
+    mat[11] = -1.0;
+    mat[14] = -(2.0 * far * near) / (far - near);
+    return mat;
 }
 
 // Function to create a simple view matrix (camera at (0,0,5) looking at origin)
@@ -43,4 +64,12 @@ pub fn cross(a: [3]f32, b: [3]f32) [3]f32 {
 
 fn dot(a: [3]f32, b: [3]f32) f32 {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+fn radians(degrees: f32) f32 {
+    return degrees * (std.math.pi / 180.0);
+}
+
+fn tan(x: f32) f32 {
+    return @tan(x);
 }

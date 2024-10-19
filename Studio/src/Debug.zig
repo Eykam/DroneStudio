@@ -7,19 +7,18 @@ const c = @cImport({
     // Add OpenGL function declarations if needed
 });
 
-fn getVertexData(vbo: u32, size: usize) ![]f32 {
+pub fn printVertexShader(vbo: u32, size: usize) !void {
     const allocator = std.heap.page_allocator;
-    const data = try allocator.alloc(f32, size);
+    const vertexData = try allocator.alloc(f32, size);
+
     c.glBindBuffer(c.GL_ARRAY_BUFFER, vbo);
-    c.glGetBufferSubData(c.GL_ARRAY_BUFFER, 0, @intCast(size * @sizeOf(f32)), data.ptr);
+    c.glGetBufferSubData(c.GL_ARRAY_BUFFER, 0, @intCast(size * @sizeOf(f32)), vertexData.ptr);
     c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
-    return data;
+
+    std.debug.print("\n============================\n", .{});
+    std.debug.print("Debugging => {d}\n", .{vbo});
+
+    for (0..vertexData.len) |i| {
+        std.debug.print("Vertex {d}: {d}\n", .{ i, vertexData[i] });
+    }
 }
-
-// fn printVertexShader() !void {
-//     const vertexData = try getVertexData(triangle.VBO, triangleVertices.len);
-
-//     for (0..vertexData.len) |i| {
-//         std.debug.print("Vertex {d}: {d}\n", .{ i, vertexData[i] });
-//     }
-// }
