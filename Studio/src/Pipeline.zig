@@ -2,6 +2,7 @@
 const std = @import("std");
 const Shape = @import("Shape.zig");
 const Transformations = @import("Transformations.zig");
+const Vec3 = Transformations.Vec3;
 const File = std.fs.File;
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
@@ -113,12 +114,16 @@ fn checkOpenGLError(caller: []const u8) void {
 }
 
 pub const AppState = struct {
+    camera_pos: Vec3,
+    camera_front: Vec3,
+    camera_up: Vec3,
     rotation_x: f32 = 0.0,
     rotation_y: f32 = 0.0,
     last_mouse_x: f64 = 0.0,
     last_mouse_y: f64 = 0.0,
     first_mouse: bool = true,
     zoom: f32 = 90.0,
+    keys: [1024]bool, // Adjust size based on the number of keys you want to track
 };
 
 pub const Scene = struct {
@@ -200,7 +205,11 @@ pub const Scene = struct {
             .shaderProgram = shaderProgram,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
-            .appState = AppState{},
+            .appState = AppState{
+                .camera_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 3.0 },
+                .camera_front = Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 },
+                .camera_up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
+            },
         };
     }
 
@@ -256,14 +265,17 @@ pub const Scene = struct {
         try self.objects.put(name, object);
     }
 
-    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, base_view: [16]f32) void {
+    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, base_view: ?[16]f32) void {
         c.glClearColor(0.15, 0.15, 0.15, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
         // Use the shader program
         c.glUseProgram(self.shaderProgram);
 
-        var view = base_view;
+        _ = base_view;
+
+        const target = Vec3.add(self.appState.camera_pos, self.appState.camera_front);
+        var view = Transformations.lookAt(self.appState.camera_pos, target, self.appState.camera_up);
         view = Transformations.multiply_matrices(view, Transformations.rotate_y(self.appState.rotation_x));
         view = Transformations.multiply_matrices(view, Transformations.rotate_x(self.appState.rotation_y));
 
@@ -381,18 +393,51 @@ fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, actio
     // Retrieve the Scene instance from the user pointer
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
-    if (key == c.GLFW_KEY_ESCAPE and action == c.GLFW_PRESS) {
-        c.glfwSetWindowShouldClose(window, 1);
-    } else if (key == c.GLFW_KEY_UP and (action == c.GLFW_PRESS or action == c.GLFW_REPEAT)) {
-        // Zoom in (narrower FOV)
-        scene.appState.zoom -= 1.0;
-        if (scene.appState.zoom < 1.0) scene.appState.zoom = 1.0; // Clamp to prevent extreme zoom
-    } else if (key == c.GLFW_KEY_DOWN and (action == c.GLFW_PRESS or action == c.GLFW_REPEAT)) {
-        // Zoom out (wider FOV)
-        scene.appState.zoom += 1.0;
-        // if (scene.appState.zoom > 90.0) scene.appState.zoom = 90.0; // Clamp to prevent extreme zoom
-    }
+    const camera_speed: f32 = 1;
 
+    if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
+        switch (key) {
+            c.GLFW_KEY_ESCAPE => {
+                c.glfwSetWindowShouldClose(window, 1);
+            },
+            c.GLFW_KEY_W => {
+                // Move forward
+                const movement = scene.appState.camera_front.scale(camera_speed);
+                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
+                std.debug.print("Forward offset: {}\n", .{movement});
+            },
+            c.GLFW_KEY_S => {
+                // Move backward
+                const movement = scene.appState.camera_front.scale(-camera_speed);
+                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
+                std.debug.print("Back offset: {}\n", .{movement});
+            },
+            c.GLFW_KEY_A => {
+                // Move left
+                const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
+                const movement = right.scale(-camera_speed);
+                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
+                std.debug.print("Left offset: {}\n", .{movement});
+            },
+            c.GLFW_KEY_D => {
+                // Move right
+                const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
+                const movement = right.scale(camera_speed);
+                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
+                std.debug.print("Right offset: {}\n", .{movement});
+            },
+            c.GLFW_KEY_UP => {
+                // Zoom in (narrower FOV)
+                scene.appState.zoom -= 1.0;
+                if (scene.appState.zoom < 1.0) scene.appState.zoom = 1.0;
+            },
+            c.GLFW_KEY_DOWN => {
+                // Zoom out (wider FOV)
+                scene.appState.zoom += 1.0;
+            },
+            else => {},
+        }
+    }
     // Handle additional keys here
 }
 

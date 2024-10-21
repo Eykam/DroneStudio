@@ -23,8 +23,11 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 ### 2. Box Interaction
 
-- [ ] Implement box rotation based on mouse movement
-- [ ] Implement box rotation using keyboard inputs
+- [X] Implement box rotation based on mouse movement
+- [X] Implement box rotation using keyboard inputs
+- [X] Zooming in / out
+- [ ] Orbit Controls instead of Perspective
+- [ ] Look into using openGL Frustum instead
 
 ### 2.1 Build system and ImGui Integration
 

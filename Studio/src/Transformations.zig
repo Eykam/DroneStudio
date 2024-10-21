@@ -9,6 +9,58 @@ pub fn identity() [16]f32 {
     };
 }
 
+pub const Vec3 = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+
+    pub fn normalize(self: Vec3) Vec3 {
+        const length = @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
+        if (length == 0) return self;
+        return Vec3{
+            .x = self.x / length,
+            .y = self.y / length,
+            .z = self.z / length,
+        };
+    }
+
+    pub fn add(a: Vec3, b: Vec3) Vec3 {
+        return Vec3{
+            .x = a.x + b.x,
+            .y = a.y + b.y,
+            .z = a.z + b.z,
+        };
+    }
+
+    pub fn sub(a: Vec3, b: Vec3) Vec3 {
+        return Vec3{
+            .x = a.x - b.x,
+            .y = a.y - b.y,
+            .z = a.z - b.z,
+        };
+    }
+
+    pub fn scale(self: Vec3, scalar: f32) Vec3 {
+        return Vec3{
+            .x = self.x * scalar,
+            .y = self.y * scalar,
+            .z = self.z * scalar,
+        };
+    }
+
+    pub fn cross(a: Vec3, b: Vec3) Vec3 {
+        return Vec3{
+            .x = a.y * b.z - a.z * b.y,
+            .y = a.z * b.x - a.x * b.z,
+            .z = a.x * b.y - a.y * b.x,
+        };
+    }
+
+    pub fn dot(a: Vec3, b: Vec3) f32 {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+};
+
 pub fn rotate_x(angle_deg: f32) [16]f32 {
     const angle_rad = angle_deg * (std.math.pi / 180.0);
     const c = std.math.cos(angle_rad);
@@ -57,34 +109,16 @@ pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) [16]f32 {
 }
 
 // Function to create a simple view matrix (camera at (0,0,5) looking at origin)
-pub fn lookAt(eye: [3]f32, center: [3]f32, up: [3]f32) [16]f32 {
-    const f = normalize(subtract(center, eye));
-    const s = normalize(cross(f, up));
-    const u = cross(s, f);
+pub fn lookAt(eye: Vec3, center: Vec3, up: Vec3) [16]f32 {
+    const f = Vec3.normalize(Vec3.sub(center, eye));
+    const s = Vec3.normalize(Vec3.cross(f, up));
+    const u = Vec3.cross(s, f);
 
     return .{
-        s[0],         u[0],         -f[0],       0.0,
-        s[1],         u[1],         -f[1],       0.0,
-        s[2],         u[2],         -f[2],       0.0,
-        -dot(s, eye), -dot(u, eye), dot(f, eye), 1.0,
-    };
-}
-
-// Helper functions
-pub fn subtract(a: [3]f32, b: [3]f32) [3]f32 {
-    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
-}
-
-pub fn normalize(v: [3]f32) [3]f32 {
-    const length = std.math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    return .{ v[0] / length, v[1] / length, v[2] / length };
-}
-
-pub fn cross(a: [3]f32, b: [3]f32) [3]f32 {
-    return .{
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
+        s.x,               u.x,               -f.x,             0.0,
+        s.y,               u.y,               -f.y,             0.0,
+        s.z,               u.z,               -f.z,             0.0,
+        -Vec3.dot(s, eye), -Vec3.dot(u, eye), Vec3.dot(f, eye), 1.0,
     };
 }
 
@@ -100,10 +134,6 @@ pub fn multiply_matrices(a: [16]f32, b: [16]f32) [16]f32 {
         }
     }
     return result;
-}
-
-fn dot(a: [3]f32, b: [3]f32) f32 {
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 fn radians(degrees: f32) f32 {

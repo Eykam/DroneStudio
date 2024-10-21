@@ -103,10 +103,10 @@ pub fn main() !void {
     defer c.glfwDestroyWindow(window.?);
 
     // Define transformation matrices
-    const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position
-    const center = [3]f32{ 0.0, 0.0, 0.0 }; // Look at origin
-    const up = [3]f32{ 0.0, 1.0, 0.0 }; // Up vector
-    const view = Transformations.lookAt(eye, center, up);
+    // const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position
+    // const center = [3]f32{ 0.0, 0.0, 0.0 }; // Look at origin
+    // const up = [3]f32{ 0.0, 1.0, 0.0 }; // Up vector
+    // const view = Transformations.lookAt(eye, center, up);
 
     //Initializing Scene
     var scene = try Scene.init(alloc, window);
@@ -131,6 +131,6 @@ pub fn main() !void {
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {
-        scene.render(window, view);
+        scene.render(window, null);
     }
 }
