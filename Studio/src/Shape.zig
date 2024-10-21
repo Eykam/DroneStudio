@@ -241,7 +241,7 @@ pub const Grid = struct {
             .vertices = self.vertices,
             .indices = &.{}, // No indices for grid lines
             .modelMatrix = Transformations.identity(),
-            .color = .{ .r = 1.0, .g = 1.0, .b = 1.0 }, // Default color: White
+            .color = comptime .{ .r = 118.0 / 255.0, .g = 91.0 / 255.0, .b = 226.0 / 255.0 }, // Default color: White
             .drawType = c.GL_LINES,
         };
     }
