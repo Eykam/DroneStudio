@@ -41,7 +41,6 @@ pub fn main() !void {
     defer scene.deinit();
 
     scene.setupCallbacks(window);
-    // var projection = scene.updateProjection();
 
     // Define transformation matrices
     const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position
@@ -50,13 +49,19 @@ pub fn main() !void {
     const view = Transformations.lookAt(eye, center, up);
 
     //Initializing Entities
-    const triangle = try Shape.Triangle.init(alloc, null);
+    const triangle = try Shape.Triangle.init(null);
+    // const box = try Shape.Box.init();
+    const grid = try Shape.Grid.init(alloc, 10, 10);
 
     //Adding Entities to Scene
     try scene.addObject("triangle", triangle);
+    // try scene.addObject("rectangle", box);
+    try scene.addObject("grid", grid);
 
     //Debugging Entities
     triangle.debug();
+    // box.debug();
+    grid.debug();
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {

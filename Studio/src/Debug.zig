@@ -16,9 +16,15 @@ pub fn printVertexShader(vbo: u32, size: usize) !void {
     c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
 
     std.debug.print("\n============================\n", .{});
-    std.debug.print("Debugging => {d}\n", .{vbo});
+    std.debug.print("Debugging ([x,y,z]) => {d}\n", .{vbo});
 
     for (0..vertexData.len) |i| {
-        std.debug.print("Vertex {d}: {d}\n", .{ i, vertexData[i] });
+        if ((i + 1) % 3 == 0) {
+            std.debug.print(", {d}]\n", .{vertexData[i]});
+        } else if (i % 3 == 0) {
+            std.debug.print("~ {d} : [{d}, ", .{ i / 3, vertexData[i] });
+        } else {
+            std.debug.print("{d}", .{vertexData[i]});
+        }
     }
 }

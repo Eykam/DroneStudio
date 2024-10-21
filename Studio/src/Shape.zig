@@ -39,21 +39,17 @@ pub const Triangle = struct {
     meta: Metadata = Metadata{},
     vertices: []f32 = undefined,
 
-    pub fn init(allocator: std.mem.Allocator, newVertices: ?[]f32) !Object {
+    pub fn init(newVertices: ?[]f32) !Object {
         // Initialize OpenGL buffers for the triangle
 
+        const defaultVertices = Self.default();
         var triangle = Self{};
-        const defaultVertices = Triangle.default();
-
-        triangle.vertices = try allocator.alloc(f32, defaultVertices.len);
 
         if (newVertices) |verts| {
             triangle.vertices = verts;
         } else {
-            @memcpy(triangle.vertices, &defaultVertices);
+            triangle.vertices = defaultVertices;
         }
-
-        const vertices = triangle.vertices;
 
         c.glGenVertexArrays(1, &triangle.meta.VAO);
         c.glGenBuffers(1, &triangle.meta.VBO);
@@ -61,7 +57,7 @@ pub const Triangle = struct {
         c.glBindVertexArray(triangle.meta.VAO);
 
         c.glBindBuffer(c.GL_ARRAY_BUFFER, triangle.meta.VBO);
-        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(vertices.len * @sizeOf(f32)), vertices.ptr, c.GL_STATIC_DRAW);
+        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(triangle.vertices.len * @sizeOf(f32)), triangle.vertices.ptr, c.GL_STATIC_DRAW);
 
         // Vertex Attributes
         c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 3 * @sizeOf(f32), null);
@@ -87,71 +83,44 @@ pub const Triangle = struct {
         };
     }
 
-    pub inline fn default() [9]f32 {
-        return .{ // Default triangle vertices
+    pub inline fn default() []f32 {
+        var vertices = [_]f32{ // Default triangle vertices
             0.0, 0.5, 0.0, // Top
             -0.5, -0.5, 0.0, // Bottom Left
             0.5, -0.5, 0.0, // Bottom Right
         };
+        return &vertices;
     }
 };
 
-pub const Rectangle = struct {
-    meta: Metadata,
-    vertices: []f32 = &.{ // Rectangle vertices
-        // Front face
-        -0.5, -0.5, 0.5, // 0
-        0.5, -0.5, 0.5, // 1
-        0.5, 0.5, 0.5, // 2
-        -0.5, 0.5, 0.5, // 3
+pub const Box = struct {
+    const Self = @This();
 
-        // Back face
-        -0.5, -0.5, -0.5, // 4
-        0.5, -0.5, -0.5, // 5
-        0.5, 0.5, -0.5, // 6
-        -0.5, 0.5, -0.5, // 7
-    },
-    indices: []u32 = &.{ // Rectangle indices
-        // Front face
-        0, 1, 2,
-        2, 3, 0,
+    meta: Metadata = Metadata{},
+    vertices: []f32 = undefined,
+    indices: []u32 = undefined,
 
-        // Right face
-        1, 5, 6,
-        6, 2, 1,
+    pub fn init() !Object {
+        const defaults = Self.default();
+        var rect = Self{};
 
-        // Back face
-        7, 6, 5,
-        5, 4, 7,
+        rect.vertices = defaults.vertices;
+        // rect.indices = defaults.indices;
 
-        // Left face
-        4, 0, 3,
-        3, 7, 4,
-
-        // Bottom face
-        4, 5, 1,
-        1, 0, 4,
-
-        // Top face
-        3, 2, 6,
-        6, 7, 3,
-    },
-
-    pub fn init(self: *Rectangle) !Object {
         // Initialize OpenGL buffers for the rectangle
-        c.glGenVertexArrays(1, &self.meta.VAO);
-        c.glGenBuffers(1, &self.meta.VBO);
-        c.glGenBuffers(1, &self.meta.EBO);
+        c.glGenVertexArrays(1, &rect.meta.VAO);
+        c.glGenBuffers(1, &rect.meta.VBO);
+        // c.glGenBuffers(1, &rect.meta.EBO);
 
-        c.glBindVertexArray(self.meta.VAO);
+        c.glBindVertexArray(rect.meta.VAO);
 
         // Vertex Buffer
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
-        c.glBufferData(c.GL_ARRAY_BUFFER, self.vertices.len * @sizeOf(f32), @ptrCast(self.vertices), c.GL_STATIC_DRAW);
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, rect.meta.VBO);
+        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(rect.vertices.len * @sizeOf(f32)), rect.vertices.ptr, c.GL_STATIC_DRAW);
 
-        // Element Buffer
-        c.glBindBuffer(c.GL_ELEMENT_ARRAY_BUFFER, self.meta.EBO);
-        c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, self.indices.len * @sizeOf(u32), @ptrCast(self.indices), c.GL_STATIC_DRAW);
+        // // Element Buffer
+        // c.glBindBuffer(c.GL_ELEMENT_ARRAY_BUFFER, rect.meta.EBO);
+        // c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @intCast(rect.indices.len * @sizeOf(u32)), rect.indices.ptr, c.GL_STATIC_DRAW);
 
         // Vertex Attributes
         c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 3 * @sizeOf(f32), null);
@@ -160,10 +129,10 @@ pub const Rectangle = struct {
         c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
         c.glBindVertexArray(0);
 
-        return self.info();
+        return rect.info();
     }
 
-    pub fn info(self: Rectangle) Object {
+    pub fn info(self: Self) Object {
         return Object{
             .meta = self.meta,
             .vertices = self.vertices,
@@ -172,26 +141,77 @@ pub const Rectangle = struct {
             .color = .{ .r = 0.0, .g = 1.0, .b = 0.0 }, // Default color: Green
         };
     }
+
+    pub fn default() struct { vertices: []f32, indices: []u32 } {
+        var vertices = [_]f32{ // Rectangle vertices
+            // Front face
+            -0.5, -0.5, 0.5, // 0
+            0.5, -0.5, 0.5, // 1
+            0.5, 0.5, 0.5, // 2
+            -0.5, 0.5, 0.5, // 3
+
+            // Back face
+            -0.5, -0.5, -0.5, // 4
+            0.5, -0.5, -0.5, // 5
+            0.5, 0.5, -0.5, // 6
+            -0.5, 0.5, -0.5, // 7
+        };
+
+        var indices = [_]u32{ // Rectangle indices
+            // Front face
+            0, 1, 2,
+            2, 3, 0,
+
+            // Right face
+            1, 5, 6,
+            6, 2, 1,
+
+            // Back face
+            7, 6, 5,
+            5, 4, 7,
+
+            // Left face
+            4, 0, 3,
+            3, 7, 4,
+
+            // Bottom face
+            4, 5, 1,
+            1, 0, 4,
+
+            // Top face
+            3, 2, 6,
+            6, 7, 3,
+        };
+
+        return .{ .vertices = &vertices, .indices = &indices };
+    }
 };
 
 pub const Grid = struct {
     const Self = @This();
 
-    meta: Metadata,
-    vertices: []f32,
-    pub fn init(self: Self, allocator: std.mem.Allocator, gridSize: i32, spacing: f32) !Object {
+    meta: Metadata = Metadata{},
+    vertices: []f32 = undefined,
+
+    pub fn init(allocator: std.mem.Allocator, gridSize: ?usize, spacing: ?f32) !Object {
         // Generate grid vertices
-        self.vertices = Grid.generateGridVertices(allocator, gridSize, spacing);
+        var grid = Self{};
+
+        if (gridSize != null and spacing != null) {
+            grid.vertices = try Grid.generateGridVertices(allocator, gridSize.?, spacing.?);
+        } else {
+            grid.vertices = try Grid.generateGridVertices(allocator, 10, 10);
+        }
 
         // Initialize OpenGL buffers for the grid
-        c.glGenVertexArrays(1, &self.meta.VAO);
-        c.glGenBuffers(1, &self.meta.VBO);
+        c.glGenVertexArrays(1, &grid.meta.VAO);
+        c.glGenBuffers(1, &grid.meta.VBO);
 
-        c.glBindVertexArray(self.meta.VAO);
+        c.glBindVertexArray(grid.meta.VAO);
 
         // Vertex Buffer
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
-        c.glBufferData(c.GL_ARRAY_BUFFER, self.vertices.len * @sizeOf(f32), @ptrCast(self.vertices), c.GL_STATIC_DRAW);
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, grid.meta.VBO);
+        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(grid.vertices.len * @sizeOf(f32)), @ptrCast(grid.vertices), c.GL_STATIC_DRAW);
 
         // Vertex Attributes
         c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 3 * @sizeOf(f32), null);
@@ -200,11 +220,13 @@ pub const Grid = struct {
         c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
         c.glBindVertexArray(0);
 
-        return self.info();
+        return grid.info();
     }
 
-    pub fn deinit(self: Self, allocator: std.mem.Allocator) !void {
-        allocator.destroy(self.vertices);
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.vertices);
+        c.glDeleteBuffers(1, &self.meta.VBO);
+        c.glDeleteVertexArrays(1, &self.meta.VAO);
     }
 
     pub fn info(self: Self) Object {
@@ -217,62 +239,50 @@ pub const Grid = struct {
         };
     }
 
-    pub inline fn generateGridVertices(allocator: std.mem.Allocator, comptime gridSize: i32, comptime spacing: f32) []f32 {
-        const totalLines = gridSize * 2; // X and Z axes
-        const totalVertices = totalLines * 2; // Two vertices per line
-        var vertices = []f32{};
+    pub inline fn generateGridVertices(allocator: std.mem.Allocator, gridSize: usize, spacing: f32) ![]f32 {
+        const totalLines = gridSize * 2 + 1;
+        const totalVertices = totalLines * 2 * 3; // Two vertices per line, three components (x, y, z) each
 
         // Allocate memory for vertices
-        vertices = allocator.alloc(f32, totalVertices * 3) orelse @panic("Allocation failed");
+        var vertices = try allocator.alloc(f32, totalVertices);
 
         var index: usize = 0;
+        const halfSize = gridSize;
 
-        // Generate lines parallel to X-axis (varying Z)
-        for (0..gridSize) |i| {
-            const z = @as(f32, @floatFromInt(i)) * spacing;
-            // Start vertex
-            vertices[index] = -1.0 * @as(f32, @floatFromInt(gridSize / 2)) * spacing; // x
+        // Generate lines parallel to the X-axis (varying Z)
+        for (0..totalLines) |i| {
+            const z = @as(f32, @floatFromInt(i - halfSize)) * spacing;
+
+            // Start vertex (left)
+            vertices[index] = -@as(f32, @floatFromInt(halfSize)) * spacing; // x
             vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = z; // z
+            vertices[index + 2] = @as(f32, z) * 1.0; // z
             index += 3;
 
-            // End vertex
-            vertices[index] = @as(f32, @floatFromInt(gridSize / 2)) * spacing; // x
+            // End vertex (right)
+            vertices[index] = @as(f32, @floatFromInt(halfSize)) * spacing; // x
             vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = z; // z
+            vertices[index + 2] = @as(f32, z) * 1.0; // z
             index += 3;
         }
 
-        // Generate lines parallel to Z-axis (varying X)
-        for (0..gridSize) |i| {
-            const x = @as(f32, @floatFromInt(i)) * spacing;
-            // Start vertex
-            vertices[index] = x; // x
+        // Generate lines parallel to the Z-axis (varying X)
+        for (0..totalLines) |i| {
+            const x = @as(f32, @floatFromInt(i - halfSize)) * spacing;
+
+            // Start vertex (bottom)
+            vertices[index] = @as(f32, x) * 1.0; // x
             vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = -1 * @as(f32, @floatFromInt(gridSize / 2)) * spacing; // z
+            vertices[index + 2] = -@as(f32, @floatFromInt(halfSize)) * spacing; // z
             index += 3;
 
-            // End vertex
-            vertices[index] = x; // x
+            // End vertex (top)
+            vertices[index] = @as(f32, x) * 1.0; // x
             vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = @as(f32, @floatFromInt(gridSize / 2)) * spacing; // z
+            vertices[index + 2] = @as(f32, @floatFromInt(halfSize)) * spacing; // z
             index += 3;
         }
 
         return vertices;
-    }
-
-    inline fn flatten(comptime N: usize, arr: [N][3]f32) [N * 3]f32 {
-        var flat: [N * 3]f32 = undefined;
-        var idx: usize = 0;
-
-        for (arr) |vertex| {
-            flat[idx] = vertex[0];
-            flat[idx + 1] = vertex[1];
-            flat[idx + 2] = vertex[2];
-            idx += 3;
-        }
-
-        return flat;
     }
 };
