@@ -133,7 +133,7 @@ pub const Scene = struct {
 
         // Make the window's context current
         c.glfwMakeContextCurrent(window);
-        c.glfwSwapInterval(0);
+        c.glfwSwapInterval(1);
 
         // Initialize OpenGL Loader
         std.debug.print("Loading Glad...\n", .{});
@@ -284,9 +284,10 @@ pub const Scene = struct {
             }
 
             // Swap front and back buffers
-            c.glfwSwapBuffers(window);
-            c.glfwPollEvents();
         }
+
+        c.glfwSwapBuffers(window);
+        c.glfwPollEvents();
     }
 };
 
