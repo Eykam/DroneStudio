@@ -49,19 +49,19 @@ pub fn main() !void {
     const view = Transformations.lookAt(eye, center, up);
 
     //Initializing Entities
+    const grid = try Shape.Grid.init(alloc, 10, 10);
     const triangle = try Shape.Triangle.init(null);
     // const box = try Shape.Box.init();
-    const grid = try Shape.Grid.init(alloc, 10, 10);
 
     //Adding Entities to Scene
+    try scene.addObject("grid", grid);
     try scene.addObject("triangle", triangle);
     // try scene.addObject("rectangle", box);
-    try scene.addObject("grid", grid);
 
     //Debugging Entities
+    grid.debug();
     triangle.debug();
     // box.debug();
-    grid.debug();
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {

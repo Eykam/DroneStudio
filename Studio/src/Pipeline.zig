@@ -249,34 +249,39 @@ pub const Scene = struct {
         // Iterate through all objects in the hash map
         var it = self.objects.iterator();
         while (it.next()) |entry| {
-            // const key = entry.key_ptr.*;
-            const object = entry.value_ptr.*;
-
-            // std.debug.print("Rendering: {s} => VAO: {d}\n", .{ key, object.meta.VAO });
-
-            // Set object-specific uniforms
-            const modelLoc = c.glGetUniformLocation(self.shaderProgram, "uModel");
-            const colorLoc = c.glGetUniformLocation(self.shaderProgram, "uColor");
-
-            if (modelLoc != -1) {
-                c.glUniformMatrix4fv(modelLoc, 1, c.GL_FALSE, &object.modelMatrix);
-            }
-            if (colorLoc != -1) {
-                c.glUniform3f(colorLoc, object.color.r, object.color.g, object.color.b);
-            }
-
-            // Bind the object's VAO
-            c.glBindVertexArray(object.meta.VAO);
-
-            // Draw the object
-            if (object.indices.len > 0) {
-                c.glDrawElements(c.GL_TRIANGLES, @intCast(object.indices.len), c.GL_UNSIGNED_INT, null);
+            if (entry.value_ptr.draw) |drawFunction| {
+                drawFunction();
             } else {
-                c.glDrawArrays(c.GL_TRIANGLES, 0, @intCast(object.vertices.len / 3));
-            }
 
-            // Unbind the VAO
-            c.glBindVertexArray(0);
+                // const key = entry.key_ptr.*;
+                const object = entry.value_ptr.*;
+
+                // std.debug.print("Rendering: {s} => VAO: {d}\n", .{ key, object.meta.VAO });
+
+                // Set object-specific uniforms
+                const modelLoc = c.glGetUniformLocation(self.shaderProgram, "uModel");
+                const colorLoc = c.glGetUniformLocation(self.shaderProgram, "uColor");
+
+                if (modelLoc != -1) {
+                    c.glUniformMatrix4fv(modelLoc, 1, c.GL_FALSE, &object.modelMatrix);
+                }
+                if (colorLoc != -1) {
+                    c.glUniform3f(colorLoc, object.color.r, object.color.g, object.color.b);
+                }
+
+                // Bind the object's VAO
+                c.glBindVertexArray(object.meta.VAO);
+
+                // Draw the object
+                if (object.indices.len > 0) {
+                    c.glDrawElements(object.drawType, @intCast(object.indices.len), c.GL_UNSIGNED_INT, null);
+                } else {
+                    c.glDrawArrays(object.drawType, 0, @intCast(object.vertices.len / 3));
+                }
+
+                // Unbind the VAO
+                c.glBindVertexArray(0);
+            }
 
             // Swap front and back buffers
             c.glfwSwapBuffers(window);

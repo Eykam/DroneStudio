@@ -7,11 +7,15 @@ const c = @cImport({
     @cInclude("glad/glad.h");
 });
 
+const DrawErrors = error{FailedToDraw};
+
 pub const Metadata = struct {
     VAO: u32 = 0,
     VBO: u32 = 0,
     EBO: u32 = 0,
 };
+
+const draw = *const fn () void;
 
 pub const Object = struct {
     const Self = @This();
@@ -25,6 +29,8 @@ pub const Object = struct {
         g: f32 = 1.0,
         b: f32 = 1.0,
     },
+    drawType: c.GLenum = c.GL_TRIANGLES,
+    draw: ?draw = null,
 
     pub fn debug(self: Self) void {
         Debug.printVertexShader(self.meta.VBO, self.vertices.len) catch |err| {
@@ -200,7 +206,7 @@ pub const Grid = struct {
         if (gridSize != null and spacing != null) {
             grid.vertices = try Grid.generateGridVertices(allocator, gridSize.?, spacing.?);
         } else {
-            grid.vertices = try Grid.generateGridVertices(allocator, 10, 10);
+            grid.vertices = try Grid.generateGridVertices(allocator, 10, 1.0);
         }
 
         // Initialize OpenGL buffers for the grid
@@ -236,50 +242,76 @@ pub const Grid = struct {
             .indices = &.{}, // No indices for grid lines
             .modelMatrix = Transformations.identity(),
             .color = .{ .r = 1.0, .g = 1.0, .b = 1.0 }, // Default color: White
+            .drawType = c.GL_LINES,
         };
     }
 
-    pub inline fn generateGridVertices(allocator: std.mem.Allocator, gridSize: usize, spacing: f32) ![]f32 {
+    pub fn draw(self: Self) DrawErrors!void {
+        // Configure depth testing
+        c.glEnable(c.GL_DEPTH_TEST);
+        c.glDepthFunc(c.GL_LEQUAL);
+
+        // Enable line smoothing
+        c.glEnable(c.GL_LINE_SMOOTH);
+        c.glHint(c.GL_LINE_SMOOTH_HINT, c.GL_NICEST);
+
+        // Enable blending for smooth lines
+        c.glEnable(c.GL_BLEND);
+        c.glBlendFunc(c.GL_SRC_ALPHA, c.GL_ONE_MINUS_SRC_ALPHA);
+
+        // Set line width
+        c.glLineWidth(1.0);
+
+        // Small offset to prevent z-fighting
+        c.glEnable(c.GL_POLYGON_OFFSET_LINE);
+        c.glPolygonOffset(-1.0, -1.0);
+
+        c.glBindVertexArray(self.meta.VAO);
+        c.glDrawArrays(c.GL_LINES, 0, @intCast(self.vertices.len / 3));
+        c.glBindVertexArray(0);
+
+        // Reset states
+        c.glDisable(c.GL_POLYGON_OFFSET_LINE);
+        c.glDisable(c.GL_BLEND);
+        c.glDisable(c.GL_LINE_SMOOTH);
+    }
+
+    pub fn generateGridVertices(allocator: std.mem.Allocator, gridSize: usize, spacing: f32) ![]f32 {
         const totalLines = gridSize * 2 + 1;
-        const totalVertices = totalLines * 2 * 3; // Two vertices per line, three components (x, y, z) each
+        const totalVertices = totalLines * 2 * 2;
+        const vertexComponents = totalVertices * 3;
 
-        // Allocate memory for vertices
-        var vertices = try allocator.alloc(f32, totalVertices);
-
+        var vertices = try allocator.alloc(f32, vertexComponents);
         var index: usize = 0;
-        const halfSize = gridSize;
+        const halfSize = @as(f32, @floatFromInt(gridSize)) * spacing;
 
-        // Generate lines parallel to the X-axis (varying Z)
-        for (0..totalLines) |i| {
-            const z = @as(f32, @floatFromInt(i - halfSize)) * spacing;
+        const z_coord = -0.1;
 
-            // Start vertex (left)
-            vertices[index] = -@as(f32, @floatFromInt(halfSize)) * spacing; // x
-            vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = @as(f32, z) * 1.0; // z
+        // Generate horizontal lines (with a tiny Y offset)
+        var i: f32 = -halfSize;
+        while (i <= halfSize) : (i += spacing) {
+            vertices[index] = -halfSize * 0.05;
+            vertices[index + 1] = i * 0.05;
+            vertices[index + 2] = z_coord; // Small Y offset for horizontal lines
             index += 3;
 
-            // End vertex (right)
-            vertices[index] = @as(f32, @floatFromInt(halfSize)) * spacing; // x
-            vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = @as(f32, z) * 1.0; // z
+            vertices[index] = halfSize * 0.05;
+            vertices[index + 1] = i * 0.05;
+            vertices[index + 2] = z_coord; // Same offset
             index += 3;
         }
 
-        // Generate lines parallel to the Z-axis (varying X)
-        for (0..totalLines) |i| {
-            const x = @as(f32, @floatFromInt(i - halfSize)) * spacing;
-
-            // Start vertex (bottom)
-            vertices[index] = @as(f32, x) * 1.0; // x
-            vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = -@as(f32, @floatFromInt(halfSize)) * spacing; // z
+        // Vertical lines remain at y=0
+        i = -halfSize;
+        while (i <= halfSize) : (i += spacing) {
+            vertices[index] = i * 0.05;
+            vertices[index + 1] = -halfSize * 0.05;
+            vertices[index + 2] = z_coord;
             index += 3;
 
-            // End vertex (top)
-            vertices[index] = @as(f32, x) * 1.0; // x
-            vertices[index + 1] = 0.0; // y
-            vertices[index + 2] = @as(f32, @floatFromInt(halfSize)) * spacing; // z
+            vertices[index] = i * 0.05;
+            vertices[index + 1] = halfSize * 0.05;
+            vertices[index + 2] = z_coord;
             index += 3;
         }
 
