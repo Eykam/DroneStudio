@@ -9,6 +9,32 @@ pub fn identity() [16]f32 {
     };
 }
 
+pub fn rotate_x(angle_deg: f32) [16]f32 {
+    const angle_rad = angle_deg * (std.math.pi / 180.0);
+    const c = std.math.cos(angle_rad);
+    const s = std.math.sin(angle_rad);
+
+    return .{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, c,   -s,  0.0,
+        0.0, s,   c,   0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
+
+pub fn rotate_y(angle_deg: f32) [16]f32 {
+    const angle_rad = angle_deg * (std.math.pi / 180.0);
+    const c = std.math.cos(angle_rad);
+    const s = std.math.sin(angle_rad);
+
+    return .{
+        c,   0.0, s,   0.0,
+        0.0, 1.0, 0.0, 0.0,
+        -s,  0.0, c,   0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
+
 pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) [16]f32 {
     return .{
         2.0 / (right - left), 0.0,                  0.0,                 -(right + left) / (right - left),
@@ -60,6 +86,20 @@ pub fn cross(a: [3]f32, b: [3]f32) [3]f32 {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     };
+}
+
+pub fn multiply_matrices(a: [16]f32, b: [16]f32) [16]f32 {
+    var result: [16]f32 = .{0} ** 16;
+    for (0..4) |row| {
+        for (0..4) |col| {
+            var sum: f32 = 0.0;
+            for (0..4) |i| {
+                sum += a[row * 4 + i] * b[i * 4 + col];
+            }
+            result[row * 4 + col] = sum;
+        }
+    }
+    return result;
 }
 
 fn dot(a: [3]f32, b: [3]f32) f32 {

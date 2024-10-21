@@ -36,17 +36,17 @@ pub fn main() !void {
     const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null);
     defer c.glfwDestroyWindow(window);
 
-    //Initializing Scene
-    var scene = try Scene.init(alloc, window);
-    defer scene.deinit();
-
-    scene.setupCallbacks(window);
-
     // Define transformation matrices
     const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position
     const center = [3]f32{ 0.0, 0.0, 0.0 }; // Look at origin
     const up = [3]f32{ 0.0, 1.0, 0.0 }; // Up vector
     const view = Transformations.lookAt(eye, center, up);
+
+    //Initializing Scene
+    var scene = try Scene.init(alloc, window);
+    defer scene.deinit();
+
+    scene.setupCallbacks(window);
 
     //Initializing Entities
     const grid = try Shape.Grid.init(alloc, 10, 10);

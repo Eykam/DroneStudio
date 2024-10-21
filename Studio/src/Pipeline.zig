@@ -112,6 +112,15 @@ fn checkOpenGLError(caller: []const u8) void {
     }
 }
 
+pub const AppState = struct {
+    rotation_x: f32 = 0.0,
+    rotation_y: f32 = 0.0,
+    last_mouse_x: f64 = 0.0,
+    last_mouse_y: f64 = 0.0,
+    first_mouse: bool = true,
+    zoom: f32 = 0.0,
+};
+
 pub const Scene = struct {
     const Self = @This();
 
@@ -120,6 +129,7 @@ pub const Scene = struct {
     shaderProgram: u32,
     width: f32,
     height: f32,
+    appState: AppState,
 
     pub fn init(allocator: std.mem.Allocator, window: ?*c.struct_GLFWwindow) !Self {
         if (window == null) {
@@ -147,14 +157,9 @@ pub const Scene = struct {
         c.glEnable(c.GL_DEPTH_TEST);
 
         const shaderProgram = try createShaderProgram("src/shaders/vertex_shader.glsl", "src/shaders/fragment_shader.glsl");
-        defer c.glDeleteProgram(shaderProgram);
-
-        // Set uniform color for the grid (e.g., white)
-
         c.glUseProgram(shaderProgram);
 
         var currentProgram: u32 = 0;
-
         c.glGetIntegerv(c.GL_CURRENT_PROGRAM, @ptrCast(&currentProgram));
         if (currentProgram != shaderProgram) {
             std.debug.print("Shader program not active!\n", .{});
@@ -195,6 +200,7 @@ pub const Scene = struct {
             .shaderProgram = shaderProgram,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
+            .appState = AppState{},
         };
     }
 
@@ -211,27 +217,42 @@ pub const Scene = struct {
         }
 
         self.objects.deinit();
+
+        c.glDeleteProgram(self.shaderProgram);
     }
 
     pub fn setupCallbacks(self: *Self, window: ?*c.struct_GLFWwindow) void {
+        if (window == null) return;
+
         c.glfwSetWindowUserPointer(window, self);
+
+        // Set callbacks
         _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+        _ = c.glfwSetCursorPosCallback(window, mouseCallback);
+        _ = c.glfwSetKeyCallback(window, keyCallback);
+
+        // Capture the mouse
+        c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
     }
 
     pub fn updateProjection(self: *Self) [16]f32 {
-        return Transformations.perspective(45.0, self.width / self.height, 0.1, 100.0);
+        return Transformations.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
     }
 
     pub fn addObject(self: *Self, name: []const u8, object: Shape.Object) !void {
         try self.objects.put(name, object);
     }
 
-    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, view: [16]f32) void {
+    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, base_view: [16]f32) void {
         c.glClearColor(0.15, 0.15, 0.15, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
         // Use the shader program
         c.glUseProgram(self.shaderProgram);
+
+        var view = base_view;
+        view = Transformations.multiply_matrices(view, Transformations.rotate_y(self.appState.rotation_x));
+        view = Transformations.multiply_matrices(view, Transformations.rotate_x(self.appState.rotation_y));
 
         // Use the current projection matrix that accounts for window size
         const currentProjection = self.updateProjection();
@@ -252,11 +273,7 @@ pub const Scene = struct {
             if (entry.value_ptr.draw) |drawFunction| {
                 drawFunction();
             } else {
-
-                // const key = entry.key_ptr.*;
                 const object = entry.value_ptr.*;
-
-                // std.debug.print("Rendering: {s} => VAO: {d}\n", .{ key, object.meta.VAO });
 
                 // Set object-specific uniforms
                 const modelLoc = c.glGetUniformLocation(self.shaderProgram, "uModel");
@@ -292,12 +309,71 @@ pub const Scene = struct {
 };
 
 fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
+    if (window == null) return;
+    // Retrieve the Scene instance from the user pointer
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
-    // Update scene dimensions
+    // Update the viewport
+    c.glViewport(0, 0, width, height);
+
+    // Update Scene's width and height
     scene.width = @floatFromInt(width);
     scene.height = @floatFromInt(height);
+}
 
-    // Update viewport
-    c.glViewport(0, 0, width, height);
+fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.C) void {
+    if (window == null) return;
+
+    // Retrieve the Scene instance from the user pointer
+
+    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.first_mouse) {
+        scene.appState.last_mouse_x = xpos;
+        scene.appState.last_mouse_y = ypos;
+        scene.appState.first_mouse = false;
+        return;
+    }
+
+    const xoffset = xpos - scene.appState.last_mouse_x;
+    const yoffset = scene.appState.last_mouse_y - ypos; // Reversed Y
+
+    scene.appState.last_mouse_x = xpos;
+    scene.appState.last_mouse_y = ypos;
+
+    const sensitivity: f32 = 0.1;
+    scene.appState.rotation_x += @as(f32, @floatCast(xoffset)) * sensitivity;
+    scene.appState.rotation_y += @as(f32, @floatCast(yoffset)) * sensitivity;
+
+    // Clamp the vertical rotation to prevent flipping
+    if (scene.appState.rotation_y > 89.0) {
+        scene.appState.rotation_y = 89.0;
+    }
+    if (scene.appState.rotation_y < -89.0) {
+        scene.appState.rotation_y = -89.0;
+    }
+}
+
+fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
+    if (window == null) return;
+
+    _ = scancode;
+    _ = mods;
+
+    // Retrieve the Scene instance from the user pointer
+    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+
+    if (key == c.GLFW_KEY_ESCAPE and action == c.GLFW_PRESS) {
+        c.glfwSetWindowShouldClose(window, 1);
+    } else if (key == c.GLFW_KEY_UP and (action == c.GLFW_PRESS or action == c.GLFW_REPEAT)) {
+        // Zoom in (narrower FOV)
+        scene.appState.zoom -= 1.0;
+        if (scene.appState.zoom < 1.0) scene.appState.zoom = 1.0; // Clamp to prevent extreme zoom
+    } else if (key == c.GLFW_KEY_DOWN and (action == c.GLFW_PRESS or action == c.GLFW_REPEAT)) {
+        // Zoom out (wider FOV)
+        scene.appState.zoom += 1.0;
+        if (scene.appState.zoom > 90.0) scene.appState.zoom = 90.0; // Clamp to prevent extreme zoom
+    }
+
+    // Handle additional keys here
 }
