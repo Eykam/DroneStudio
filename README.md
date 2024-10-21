@@ -26,6 +26,15 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Implement box rotation based on mouse movement
 - [ ] Implement box rotation using keyboard inputs
 
+### 2.1 Build system and ImGui Integration
+
+- [] Embed Shaders inline instead of reading from fs
+- [] Find way to link dependencies without using @cimport ???
+- [] Create zig bindings for ImGui
+- [] Create drop down menus for basic configuration editing 
+
+
+
 ### 3. Sensor Integration
 
 - [ ] Add compass overlay
@@ -39,7 +48,8 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Set up UDP server for communication
 - [ ] Ensure reliable data transmission between devices
 
-## Future Enhancements
+
+## Future Milestones
 
 ### 5. 3D Model Integration
 
@@ -54,12 +64,13 @@ Later goals are to add object avoidance, image detection and synchronization wit
 ### 7. LiDAR Integration
 
 - [ ] Define LiDAR sensor field of view (FOV)
+- [ ] Visualize FOV's captured by scanners in 3D space
 - [ ] Develop ESP firmware for LiDAR integration
 
 ### 8. Camera and Depth Sensing
 
 - [ ] Integrate camera functionality
-- [ ] Utilize depth of field models for enhanced visualization
+- [ ] Utilize depth of field models for enhanced visualization / segmentation
 
 ### 9. SLAM (Simultaneous Localization and Mapping)
 
@@ -73,3 +84,7 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 - [ ] Implement synchronization for multiple devices or components
 
+### 12. Convert entire Repo to Zig
+
+- [ ] Generate glad bindings in zig
+- [ ] Create HAL for ESP32 in Zig
