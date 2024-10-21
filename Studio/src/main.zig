@@ -10,6 +10,81 @@ const c = @cImport({
     @cInclude("GLFW/glfw3.h");
 });
 
+fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
+    if (window == null) return null;
+
+    var monitor_count: i32 = undefined;
+    const monitors = c.glfwGetMonitors(&monitor_count);
+    if (monitors == null or monitor_count == 0) return null;
+
+    // Get window position
+    var win_x: i32 = undefined;
+    var win_y: i32 = undefined;
+    c.glfwGetWindowPos(window, &win_x, &win_y);
+
+    // Get window size
+    var win_width: i32 = undefined;
+    var win_height: i32 = undefined;
+    c.glfwGetWindowSize(window, &win_width, &win_height);
+
+    // Find the monitor that contains the window center
+    const center_x = win_x + @divTrunc(win_width, 2);
+    const center_y = win_y + @divTrunc(win_height, 2);
+
+    var i: usize = 0;
+    while (i < @as(i32, @intCast(monitor_count))) : (i += 1) {
+        const mon = monitors[i];
+        var mx: i32 = undefined;
+        var my: i32 = undefined;
+        var mw: i32 = undefined;
+        var mh: i32 = undefined;
+        c.glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh);
+
+        if (center_x >= mx and center_x < mx + mw and
+            center_y >= my and center_y < my + mh)
+        {
+            return mon;
+        }
+    }
+
+    // Default to primary monitor if no match found
+    return c.glfwGetPrimaryMonitor();
+}
+
+// Window creation with proper monitor handling
+pub fn createWindow() ?*c.GLFWwindow {
+    const width: i32 = @intFromFloat(1920 * 0.75);
+    const height: i32 = @intFromFloat(1080 * 0.75);
+
+    // Create window initially in windowed mode
+    const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null) orelse return null;
+
+    // Get the monitor the window should be on
+    const monitor = getCurrentMonitor(window);
+    if (monitor != null) {
+        // Get monitor position and video mode
+        var x: i32 = undefined;
+        var y: i32 = undefined;
+        c.glfwGetMonitorPos(monitor, &x, &y);
+
+        const video_mode = c.glfwGetVideoMode(monitor);
+        if (video_mode != null) {
+            // Correctly dereference the video mode pointer
+            const mode_width = video_mode.*.width;
+            const mode_height = video_mode.*.height;
+            const mode_refresh = video_mode.*.refreshRate;
+
+            c.glfwSetWindowMonitor(window, monitor, 0, 0, mode_width, mode_height, mode_refresh);
+        }
+    }
+
+    // Force focus and raise window (helpful for WSL)
+    c.glfwFocusWindow(window);
+    c.glfwShowWindow(window);
+
+    return window;
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -24,17 +99,8 @@ pub fn main() !void {
 
     defer c.glfwTerminate();
 
-    // Set OpenGL version (3.3 Core)
-    c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MAJOR, 3);
-    c.glfwWindowHint(c.GLFW_CONTEXT_VERSION_MINOR, 3);
-    c.glfwWindowHint(c.GLFW_OPENGL_PROFILE, c.GLFW_OPENGL_CORE_PROFILE);
-
-    // Create a windowed mode window and its OpenGL context
-    const width: u32 = @intFromFloat(1920 * 0.75);
-    const height: u32 = @intFromFloat(1080 * 0.75);
-
-    const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null);
-    defer c.glfwDestroyWindow(window);
+    const window = createWindow();
+    defer c.glfwDestroyWindow(window.?);
 
     // Define transformation matrices
     const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position

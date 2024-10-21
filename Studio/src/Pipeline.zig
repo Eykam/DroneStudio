@@ -118,7 +118,7 @@ pub const AppState = struct {
     last_mouse_x: f64 = 0.0,
     last_mouse_y: f64 = 0.0,
     first_mouse: bool = true,
-    zoom: f32 = 0.0,
+    zoom: f32 = 90.0,
 };
 
 pub const Scene = struct {
@@ -224,15 +224,28 @@ pub const Scene = struct {
     pub fn setupCallbacks(self: *Self, window: ?*c.struct_GLFWwindow) void {
         if (window == null) return;
 
+        const center_x = @as(f64, self.width) / 2.0;
+        const center_y = @as(f64, self.height) / 2.0;
+        self.appState.last_mouse_x = center_x;
+        self.appState.last_mouse_y = center_y;
+
         c.glfwSetWindowUserPointer(window, self);
 
         // Set callbacks
         _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
         _ = c.glfwSetCursorPosCallback(window, mouseCallback);
         _ = c.glfwSetKeyCallback(window, keyCallback);
+        _ = c.glfwSetScrollCallback(window, scrollCallback); // Set the new scroll callback
 
         // Capture the mouse
         c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
+        if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
+            std.debug.print("\nRaw Input supported\n", .{});
+            c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
+        }
+
+        // Set initial cursor position to center
+        c.glfwSetCursorPos(window, center_x, center_y);
     }
 
     pub fn updateProjection(self: *Self) [16]f32 {
@@ -324,6 +337,11 @@ fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) 
 fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.C) void {
     if (window == null) return;
 
+    // Only process mouse input if window is focused
+    if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) != c.GLFW_TRUE) {
+        return;
+    }
+
     // Retrieve the Scene instance from the user pointer
 
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
@@ -341,8 +359,8 @@ fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.
     scene.appState.last_mouse_x = xpos;
     scene.appState.last_mouse_y = ypos;
 
-    const sensitivity: f32 = 0.1;
-    scene.appState.rotation_x += @as(f32, @floatCast(xoffset)) * sensitivity;
+    const sensitivity: f32 = 0.5;
+    scene.appState.rotation_x -= @as(f32, @floatCast(xoffset)) * sensitivity;
     scene.appState.rotation_y += @as(f32, @floatCast(yoffset)) * sensitivity;
 
     // Clamp the vertical rotation to prevent flipping
@@ -372,8 +390,33 @@ fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, actio
     } else if (key == c.GLFW_KEY_DOWN and (action == c.GLFW_PRESS or action == c.GLFW_REPEAT)) {
         // Zoom out (wider FOV)
         scene.appState.zoom += 1.0;
-        if (scene.appState.zoom > 90.0) scene.appState.zoom = 90.0; // Clamp to prevent extreme zoom
+        // if (scene.appState.zoom > 90.0) scene.appState.zoom = 90.0; // Clamp to prevent extreme zoom
     }
 
     // Handle additional keys here
+}
+
+fn scrollCallback(window: ?*c.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
+    if (window == null) return;
+
+    _ = xoffset;
+
+    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+
+    // Define zoom sensitivity
+    const zoomSensitivity: f32 = 0.05;
+    const newZoom = scene.appState.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.appState.zoom;
+
+    // Clamp the zoom level to prevent extreme zooming
+
+    if (newZoom < 1.0) {
+        scene.appState.zoom = 1.0;
+    } else if (newZoom >= 160) {
+        scene.appState.zoom = 160;
+    } else {
+        scene.appState.zoom = newZoom;
+    }
+
+    std.debug.print("yOffset: {d}\n", .{yoffset});
+    std.debug.print("Zoom Level: {d}\n", .{newZoom});
 }
