@@ -1,6 +1,7 @@
 // src/Shapes.zig
 const std = @import("std");
 const Transformations = @import("Transformations.zig");
+const Vec3 = Transformations.Vec3;
 const Debug = @import("Debug.zig");
 
 const c = @cImport({
@@ -189,7 +190,130 @@ pub const Box = struct {
             6, 7, 3,
         };
 
-        return .{ .vertices = &vertices, .indices = &indices };
+        return .{
+            .vertices = &vertices,
+            .indices = &indices,
+        };
+    }
+};
+
+pub const Axis = struct {
+    const Self = @This();
+
+    meta: Metadata = Metadata{},
+    vertices: []f32 = undefined,
+
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !Object {
+        var axis = Self{};
+
+        if (position != null and length != null) {
+            axis.vertices = try generateVertices(
+                allocator,
+                position.?,
+                length.?,
+            );
+        } else {
+            axis.vertices = try generateVertices(
+                allocator,
+                Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
+                5.0,
+            );
+        }
+
+        // Initialize OpenGL buffers for the grid
+        c.glGenVertexArrays(1, &axis.meta.VAO);
+        c.glGenBuffers(1, &axis.meta.VBO);
+
+        c.glBindVertexArray(axis.meta.VAO);
+
+        // Vertex Buffer
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, axis.meta.VBO);
+        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(axis.vertices.len * @sizeOf(f32)), @ptrCast(axis.vertices), c.GL_STATIC_DRAW);
+
+        // Vertex Attributes
+        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, 3 * @sizeOf(f32), null);
+        c.glEnableVertexAttribArray(0);
+
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
+        c.glBindVertexArray(0);
+
+        return axis.info();
+    }
+
+    pub fn draw(self: Self) void {
+        // Configure depth testing
+        c.glEnable(c.GL_DEPTH_TEST);
+        c.glDepthFunc(c.GL_LEQUAL);
+
+        // Enable line smoothing
+        c.glEnable(c.GL_LINE_SMOOTH);
+        c.glHint(c.GL_LINE_SMOOTH_HINT, c.GL_NICEST);
+
+        // Enable blending for smooth lines
+        c.glEnable(c.GL_BLEND);
+        c.glBlendFunc(c.GL_SRC_ALPHA, c.GL_ONE_MINUS_SRC_ALPHA);
+
+        // Set line width
+        c.glLineWidth(@as(c.GL_FLOAT, 50.0));
+
+        // Small offset to prevent z-fighting
+        c.glEnable(c.GL_POLYGON_OFFSET_LINE);
+        c.glPolygonOffset(-1.0, -1.0);
+
+        c.glBindVertexArray(self.meta.VAO);
+        c.glDrawArrays(c.GL_LINES, 0, @intCast(self.vertices.len / 3));
+        c.glBindVertexArray(0);
+
+        // Reset states
+        c.glDisable(c.GL_POLYGON_OFFSET_LINE);
+        c.glDisable(c.GL_BLEND);
+        c.glDisable(c.GL_LINE_SMOOTH);
+    }
+
+    pub fn generateVertices(allocator: std.mem.Allocator, position: Vec3, length: f32) ![]f32 {
+        const vertex_count: usize = @intFromFloat(3 * 3 * 2);
+        var vertices: []f32 = try allocator.alloc(f32, vertex_count);
+        var index: usize = 0;
+
+        while (index < vertex_count) {
+            vertices[index] = position.x;
+            vertices[index + 1] = position.y;
+            vertices[index + 2] = position.z;
+            index += 3;
+
+            switch ((index / 2) / 3) {
+                0 => {
+                    vertices[index] = position.x + length;
+                    vertices[index + 1] = position.y;
+                    vertices[index + 2] = position.z;
+                },
+                1 => {
+                    vertices[index] = position.x;
+                    vertices[index + 1] = position.y + length;
+                    vertices[index + 2] = position.z;
+                },
+                2 => {
+                    vertices[index] = position.x;
+                    vertices[index + 1] = position.y;
+                    vertices[index + 2] = position.z + length;
+                },
+                else => unreachable,
+            }
+
+            index += 3;
+        }
+
+        return vertices;
+    }
+
+    pub fn info(self: Self) Object {
+        return Object{
+            .meta = self.meta,
+            .vertices = self.vertices,
+            .modelMatrix = Transformations.identity(),
+            .color = comptime .{ .r = 0 / 255, .g = 255 / 255, .b = 0 / 225 },
+            .drawType = c.GL_LINES,
+        };
     }
 };
 
@@ -206,7 +330,7 @@ pub const Grid = struct {
         if (gridSize != null and spacing != null) {
             grid.vertices = try Grid.generateGridVertices(allocator, gridSize.?, spacing.?);
         } else {
-            grid.vertices = try Grid.generateGridVertices(allocator, 10, 1.0);
+            grid.vertices = try Grid.generateGridVertices(allocator, 1000, 1.0);
         }
 
         // Initialize OpenGL buffers for the grid
@@ -285,19 +409,19 @@ pub const Grid = struct {
         var index: usize = 0;
         const halfSize = @as(f32, @floatFromInt(gridSize)) * spacing;
 
-        const z_coord = -0.1;
+        const y_coord = 0.0;
 
         // Generate horizontal lines (with a tiny Y offset)
         var i: f32 = -halfSize;
         while (i <= halfSize) : (i += spacing) {
             vertices[index] = -halfSize * 0.05;
-            vertices[index + 1] = i * 0.05;
-            vertices[index + 2] = z_coord; // Small Y offset for horizontal lines
+            vertices[index + 1] = y_coord; // Small Y offset for horizontal lines
+            vertices[index + 2] = i * 0.05;
             index += 3;
 
             vertices[index] = halfSize * 0.05;
-            vertices[index + 1] = i * 0.05;
-            vertices[index + 2] = z_coord; // Same offset
+            vertices[index + 1] = y_coord; // Same offset
+            vertices[index + 2] = i * 0.05;
             index += 3;
         }
 
@@ -305,13 +429,13 @@ pub const Grid = struct {
         i = -halfSize;
         while (i <= halfSize) : (i += spacing) {
             vertices[index] = i * 0.05;
-            vertices[index + 1] = -halfSize * 0.05;
-            vertices[index + 2] = z_coord;
+            vertices[index + 1] = y_coord;
+            vertices[index + 2] = -halfSize * 0.05;
             index += 3;
 
             vertices[index] = i * 0.05;
-            vertices[index + 1] = halfSize * 0.05;
-            vertices[index + 2] = z_coord;
+            vertices[index + 1] = y_coord;
+            vertices[index + 2] = halfSize * 0.05;
             index += 3;
         }
 

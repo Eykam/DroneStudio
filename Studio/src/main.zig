@@ -101,13 +101,21 @@ pub fn createWindow() ?*c.GLFWwindow {
 }
 
 fn processInput(scene: *Scene, debug: bool) void {
-    const camera_speed_base: f32 = 10; // Units per second
+    var camera_speed_base: f32 = 2.5; // Units per second
+    if (scene.appState.keys[@as(usize, c.GLFW_KEY_LEFT_SHIFT)]) {
+        camera_speed_base = 5.0;
+    }
+
     const camera_speed = camera_speed_base * scene.appState.delta_time;
 
     // Forward
     if (scene.appState.keys[@as(usize, c.GLFW_KEY_W)]) {
         const movement = scene.appState.camera_front.scale(camera_speed);
-        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+        const newCoords = Vec3.add(scene.appState.camera_pos, Vec3{
+            .x = movement.x,
+            .y = 0.0,
+            .z = movement.z,
+        });
 
         if (debug) {
             std.debug.print("==============\nForward\n", .{});
@@ -118,7 +126,7 @@ fn processInput(scene: *Scene, debug: bool) void {
             }});
             std.debug.print("Offset: {d:.6}\n", .{[_]f32{
                 movement.x,
-                movement.y,
+                0,
                 movement.z,
             }});
             std.debug.print("New: {d:.6}\n", .{[_]f32{
@@ -135,7 +143,11 @@ fn processInput(scene: *Scene, debug: bool) void {
     if (scene.appState.keys[@as(usize, c.GLFW_KEY_A)]) {
         const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
         const movement = right.scale(-camera_speed);
-        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+        const newCoords = Vec3.add(scene.appState.camera_pos, Vec3{
+            .x = movement.x,
+            .y = 0.0,
+            .z = movement.z,
+        });
 
         if (debug) {
             std.debug.print("==============\nLeft\n", .{});
@@ -146,7 +158,7 @@ fn processInput(scene: *Scene, debug: bool) void {
             }});
             std.debug.print("Offset: {d:.6}\n", .{[_]f32{
                 movement.x,
-                movement.y,
+                0.0,
                 movement.z,
             }});
             std.debug.print("New: {d:.6}\n", .{[_]f32{
@@ -162,7 +174,11 @@ fn processInput(scene: *Scene, debug: bool) void {
     // Backward
     if (scene.appState.keys[@as(usize, c.GLFW_KEY_S)]) {
         const movement = scene.appState.camera_front.scale(-camera_speed);
-        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+        const newCoords = Vec3.add(scene.appState.camera_pos, Vec3{
+            .x = movement.x,
+            .y = 0.0,
+            .z = movement.z,
+        });
 
         if (debug) {
             std.debug.print("\nBack\n", .{});
@@ -173,7 +189,7 @@ fn processInput(scene: *Scene, debug: bool) void {
             }});
             std.debug.print("Offset: {d:.6}\n", .{[_]f32{
                 movement.x,
-                movement.y,
+                0.0,
                 movement.z,
             }});
             std.debug.print("New: {d:.6}\n", .{[_]f32{
@@ -190,7 +206,11 @@ fn processInput(scene: *Scene, debug: bool) void {
     if (scene.appState.keys[@as(usize, c.GLFW_KEY_D)]) {
         const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
         const movement = right.scale(camera_speed);
-        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+        const newCoords = Vec3.add(scene.appState.camera_pos, Vec3{
+            .x = movement.x,
+            .y = 0.0,
+            .z = movement.z,
+        });
 
         if (debug) {
             std.debug.print("==============\nRight\n", .{});
@@ -201,7 +221,7 @@ fn processInput(scene: *Scene, debug: bool) void {
             }});
             std.debug.print("Offset: {d:.6}\n", .{[_]f32{
                 movement.x,
-                movement.y,
+                0.0,
                 movement.z,
             }});
             std.debug.print("New: {d:.6}\n", .{[_]f32{
@@ -248,18 +268,21 @@ pub fn main() !void {
     scene.setupCallbacks(window);
 
     //Initializing Entities
-    const grid = try Shape.Grid.init(alloc, 10, 10);
+    const grid = try Shape.Grid.init(alloc, 1000, 5);
     const triangle = try Shape.Triangle.init(null);
+    const axis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
     // const box = try Shape.Box.init();
 
     //Adding Entities to Scene
     try scene.addObject("grid", grid);
     try scene.addObject("triangle", triangle);
+    try scene.addObject("axis", axis);
     // try scene.addObject("rectangle", box);
 
     //Debugging Entities
     grid.debug();
     triangle.debug();
+    axis.debug();
     // box.debug();
 
     std.debug.print("\nIntial Camera Pos: {d}\n", .{[_]f32{

@@ -202,7 +202,7 @@ pub const Scene = struct {
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
             .appState = AppState{
-                .camera_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 3.0 },
+                .camera_pos = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
                 .camera_front = Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 },
                 .camera_up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
             },
@@ -273,8 +273,6 @@ pub const Scene = struct {
 
         const target = Vec3.add(self.appState.camera_pos, self.appState.camera_front);
         var view = Transformations.lookAt(self.appState.camera_pos, target, self.appState.camera_up);
-        // view = Transformations.multiply_matrices(view, Transformations.rotate_y(self.appState.rotation_x));
-        // view = Transformations.multiply_matrices(view, Transformations.rotate_x(self.appState.rotation_y));
 
         // Use the current projection matrix that accounts for window size
         const currentProjection = self.updateProjection();
@@ -381,23 +379,10 @@ fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.
     scene.appState.rotation_x += @as(f32, @floatCast(xoffset)) * sensitivity_x;
     scene.appState.rotation_y += @as(f32, @floatCast(yoffset)) * sensitivity_y;
 
-    // Clamp the vertical rotation to prevent flipping
-    // if (scene.appState.rotation_y > 89.0) {
-    //     scene.appState.rotation_y = 89.0;
-    // }
-    // if (scene.appState.rotation_y < -89.0) {
-    //     scene.appState.rotation_y = -89.0;
-    // }
-
     const yaw = Transformations.radians(scene.appState.rotation_x);
     const pitch = Transformations.radians(scene.appState.rotation_y);
 
     scene.appState.camera_front = Vec3.from_angles(yaw, pitch);
-
-    // const center_x = @as(f64, scene.width) / 2.0;
-    // const center_y = @as(f64, scene.height) / 2.0;
-
-    // c.glfwSetCursorPos(window, center_x, center_y);
 }
 
 fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -445,15 +430,15 @@ fn scrollCallback(window: ?*c.struct_GLFWwindow, xoffset: f64, yoffset: f64) cal
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
     // Define zoom sensitivity
-    const zoomSensitivity: f32 = 0.05;
+    const zoomSensitivity: f32 = 0.1;
     const newZoom = scene.appState.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.appState.zoom;
 
     // Clamp the zoom level to prevent extreme zooming
 
     if (newZoom < 1.0) {
         scene.appState.zoom = 1.0;
-    } else if (newZoom >= 160) {
-        scene.appState.zoom = 160;
+    } else if (newZoom >= 120) {
+        scene.appState.zoom = 120;
     } else {
         scene.appState.zoom = newZoom;
     }
