@@ -14,16 +14,10 @@ const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
 
 // Function to read shader source from a file
-fn readShaderSource(path: []const u8) ![]const u8 {
-    const allocator = std.heap.page_allocator;
-    var file = try std.fs.cwd().openFile(path, .{ .mode = File.OpenMode.read_only });
-    defer file.close();
-
-    const file_size = try file.getEndPos();
-    const buffer = try allocator.alloc(u8, file_size);
-    const status = try file.readAll(buffer);
-    std.debug.print("Source Length: {}\n", .{status});
-    return buffer;
+inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
+    const file: []const u8 = @embedFile(path);
+    std.debug.print("Source Length: {}\n", .{file.len});
+    return file;
 }
 
 // Function to compile a shader
@@ -55,7 +49,7 @@ fn compileShader(shaderType: u32, source: []const u8) !u32 {
 }
 
 // Function to create a shader program
-pub fn createShaderProgram(vertexPath: []const u8, fragmentPath: []const u8) !u32 {
+pub fn createShaderProgram(comptime vertexPath: []const u8, comptime fragmentPath: []const u8) !u32 {
     std.debug.print("Initializing Vertex Shader...\n", .{});
     std.debug.print("Reading Vertex Shader from Source...\n", .{});
     const vertexSource = try readShaderSource(vertexPath);
@@ -123,7 +117,9 @@ pub const AppState = struct {
     last_mouse_y: f64 = 0.0,
     first_mouse: bool = true,
     zoom: f32 = 90.0,
-    keys: [1024]bool, // Adjust size based on the number of keys you want to track
+    keys: [1024]bool = .{false} ** 1024,
+    last_frame_time: f64 = 0.0, // Time of the last frame
+    delta_time: f32 = 0.0, // Time between current frame and last frame
 };
 
 pub const Scene = struct {
@@ -161,7 +157,7 @@ pub const Scene = struct {
         c.glViewport(0, 0, width, height);
         c.glEnable(c.GL_DEPTH_TEST);
 
-        const shaderProgram = try createShaderProgram("src/shaders/vertex_shader.glsl", "src/shaders/fragment_shader.glsl");
+        const shaderProgram = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
         c.glUseProgram(shaderProgram);
 
         var currentProgram: u32 = 0;
@@ -233,12 +229,13 @@ pub const Scene = struct {
     pub fn setupCallbacks(self: *Self, window: ?*c.struct_GLFWwindow) void {
         if (window == null) return;
 
-        const center_x = @as(f64, self.width) / 2.0;
-        const center_y = @as(f64, self.height) / 2.0;
-        self.appState.last_mouse_x = center_x;
-        self.appState.last_mouse_y = center_y;
+        c.glfwSetWindowUserPointer(window, @ptrCast(self));
 
-        c.glfwSetWindowUserPointer(window, self);
+        const ptr = c.glfwGetWindowUserPointer(window);
+        if (ptr == null) {
+            std.debug.print("Failed to set window user pointer\n", .{});
+            return;
+        }
 
         // Set callbacks
         _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
@@ -246,15 +243,17 @@ pub const Scene = struct {
         _ = c.glfwSetKeyCallback(window, keyCallback);
         _ = c.glfwSetScrollCallback(window, scrollCallback); // Set the new scroll callback
 
-        // Capture the mouse
-        c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_NORMAL);
-        if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
-            std.debug.print("\nRaw Input supported\n", .{});
-            c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
-        }
+        const current_mode = c.glfwGetInputMode(window, c.GLFW_CURSOR);
+        if (current_mode != c.GLFW_CURSOR_DISABLED) {
+            // Try setting it again
+            c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
 
-        // Set initial cursor position to center
-        c.glfwSetCursorPos(window, center_x, center_y);
+            // Check if it worked this time
+            const new_mode = c.glfwGetInputMode(window, c.GLFW_CURSOR);
+            if (new_mode != c.GLFW_CURSOR_DISABLED) {
+                std.debug.print("Failed to disable cursor in setupCallbacks\n", .{});
+            }
+        }
     }
 
     pub fn updateProjection(self: *Self) [16]f32 {
@@ -265,19 +264,17 @@ pub const Scene = struct {
         try self.objects.put(name, object);
     }
 
-    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow, base_view: ?[16]f32) void {
+    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow) void {
         c.glClearColor(0.15, 0.15, 0.15, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
         // Use the shader program
         c.glUseProgram(self.shaderProgram);
 
-        _ = base_view;
-
         const target = Vec3.add(self.appState.camera_pos, self.appState.camera_front);
         var view = Transformations.lookAt(self.appState.camera_pos, target, self.appState.camera_up);
-        view = Transformations.multiply_matrices(view, Transformations.rotate_y(self.appState.rotation_x));
-        view = Transformations.multiply_matrices(view, Transformations.rotate_x(self.appState.rotation_y));
+        // view = Transformations.multiply_matrices(view, Transformations.rotate_y(self.appState.rotation_x));
+        // view = Transformations.multiply_matrices(view, Transformations.rotate_x(self.appState.rotation_y));
 
         // Use the current projection matrix that accounts for window size
         const currentProjection = self.updateProjection();
@@ -335,6 +332,13 @@ pub const Scene = struct {
 
 fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
     if (window == null) return;
+
+    const user_ptr = c.glfwGetWindowUserPointer(window);
+    if (user_ptr == null) {
+        std.debug.print("Error: Window user pointer is null in framebufferSizeCallback\n", .{});
+        return;
+    }
+
     // Retrieve the Scene instance from the user pointer
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
@@ -371,17 +375,29 @@ fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.
     scene.appState.last_mouse_x = xpos;
     scene.appState.last_mouse_y = ypos;
 
-    const sensitivity: f32 = 0.5;
-    scene.appState.rotation_x -= @as(f32, @floatCast(xoffset)) * sensitivity;
-    scene.appState.rotation_y += @as(f32, @floatCast(yoffset)) * sensitivity;
+    const sensitivity_y: f32 = 7;
+    const sensitivity_x: f32 = sensitivity_y * scene.width / scene.width;
+
+    scene.appState.rotation_x += @as(f32, @floatCast(xoffset)) * sensitivity_x;
+    scene.appState.rotation_y += @as(f32, @floatCast(yoffset)) * sensitivity_y;
 
     // Clamp the vertical rotation to prevent flipping
-    if (scene.appState.rotation_y > 89.0) {
-        scene.appState.rotation_y = 89.0;
-    }
-    if (scene.appState.rotation_y < -89.0) {
-        scene.appState.rotation_y = -89.0;
-    }
+    // if (scene.appState.rotation_y > 89.0) {
+    //     scene.appState.rotation_y = 89.0;
+    // }
+    // if (scene.appState.rotation_y < -89.0) {
+    //     scene.appState.rotation_y = -89.0;
+    // }
+
+    const yaw = Transformations.radians(scene.appState.rotation_x);
+    const pitch = Transformations.radians(scene.appState.rotation_y);
+
+    scene.appState.camera_front = Vec3.from_angles(yaw, pitch);
+
+    // const center_x = @as(f64, scene.width) / 2.0;
+    // const center_y = @as(f64, scene.height) / 2.0;
+
+    // c.glfwSetCursorPos(window, center_x, center_y);
 }
 
 fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -393,38 +409,18 @@ fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, actio
     // Retrieve the Scene instance from the user pointer
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
-    const camera_speed: f32 = 1;
+    if (key < 0 or key >= 1024) return; // Prevent out-of-bounds
+
+    if (action == c.GLFW_PRESS) {
+        scene.appState.keys[@intCast(key)] = true;
+    } else if (action == c.GLFW_RELEASE) {
+        scene.appState.keys[@intCast(key)] = false;
+    }
 
     if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
         switch (key) {
             c.GLFW_KEY_ESCAPE => {
                 c.glfwSetWindowShouldClose(window, 1);
-            },
-            c.GLFW_KEY_W => {
-                // Move forward
-                const movement = scene.appState.camera_front.scale(camera_speed);
-                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
-                std.debug.print("Forward offset: {}\n", .{movement});
-            },
-            c.GLFW_KEY_S => {
-                // Move backward
-                const movement = scene.appState.camera_front.scale(-camera_speed);
-                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
-                std.debug.print("Back offset: {}\n", .{movement});
-            },
-            c.GLFW_KEY_A => {
-                // Move left
-                const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
-                const movement = right.scale(-camera_speed);
-                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
-                std.debug.print("Left offset: {}\n", .{movement});
-            },
-            c.GLFW_KEY_D => {
-                // Move right
-                const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
-                const movement = right.scale(camera_speed);
-                scene.appState.camera_pos = Vec3.add(scene.appState.camera_pos, movement);
-                std.debug.print("Right offset: {}\n", .{movement});
             },
             c.GLFW_KEY_UP => {
                 // Zoom in (narrower FOV)

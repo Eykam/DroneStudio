@@ -3,15 +3,9 @@ const std = @import("std");
 // Helper function to determine the OpenGL library based on the target OS
 fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
     return switch (target.result.os.tag) {
-        .linux => "GL", // For Linux (including WSL2)
-        .windows => "opengl32", // For Windows
-        else => {
-            if (std.Target.isDarwin(target.result)) {
-                return "OpenGL";
-            } else {
-                return "";
-            }
-        },
+        .linux => "GL",
+        .windows => "opengl32",
+        else => if (std.Target.isDarwin(target.result)) "OpenGL" else "",
     };
 }
 
@@ -30,51 +24,87 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const glad_files = &.{"src/glad/src/glad.c"};
-    exe.addIncludePath(b.path("src/glad/include/"));
-    exe.addCSourceFiles(.{ .root = b.path("."), .files = glad_files });
+    const glad_path = "src/glad";
+    const glad_include_path = b.path(b.pathJoin(&.{ glad_path, "include" }));
+    const glad_src_path = b.path(b.pathJoin(&.{ glad_path, "src", "glad.c" }));
 
-    if (target.result.os.tag == .windows) {
-        // Add GLFW paths for Windows
-        exe.addLibraryPath(b.path("lib/glfw/lib-mingw-w64"));
-        exe.addIncludePath(b.path("lib/glfw/include"));
-
-        // Link statically with GLFW
-        exe.addObjectFile(b.path("lib/glfw/lib-mingw-w64/libglfw3.a"));
-
-        // Windows system libraries required by GLFW
-        exe.linkSystemLibrary("gdi32");
-        exe.linkSystemLibrary("user32");
-        exe.linkSystemLibrary("kernel32");
-        exe.linkSystemLibrary("shell32");
-        exe.linkSystemLibrary("opengl32");
-    } else {
-        // For non-Windows platforms
-        exe.linkSystemLibrary("glfw");
-    }
+    exe.addIncludePath(glad_include_path);
+    exe.addCSourceFile(.{
+        .file = glad_src_path,
+        .flags = &.{"-std=c99"},
+    });
 
     exe.linkLibC();
+    exe.linkSystemLibrary("glfw");
 
     // Link against the appropriate OpenGL library based on the target OS
     exe.linkSystemLibrary(getOpenGLLib(target));
 
     // For macOS, link additional frameworks required by GLFW and OpenGL
     if (std.Target.isDarwin(target.result)) {
-        exe.linkSystemLibrary("Cocoa");
-        exe.linkSystemLibrary("IOKit");
-        exe.linkSystemLibrary("CoreFoundation");
-    }
+        const frameworks = [_][]const u8{
+            "Cocoa", "IOKit", "CoreFoundation",
+        };
 
-    exe.linkSystemLibrary("c");
+        for (frameworks) |framework| {
+            exe.linkFramework(framework);
+        }
+    }
 
     // Optionally, specify additional include and library paths if GLFW is in a non-standard location
     // Uncomment and modify the paths below if necessary
 
-    // exe.addSystemIncludeDir("/path/to/glfw/include");
-    // exe.addLibraryPath("/path/to/glfw/lib");
-
     // Install the executable artifact
     b.installArtifact(exe);
+
+    const exe_win = b.addExecutable(.{
+        .name = "main_windows",
+        .root_source_file = b.path("src/main.zig"),
+        .target = b.resolveTargetQuery(.{
+            .os_tag = .windows,
+            .abi = .gnu,
+        }),
+        .optimize = optimize,
+    });
+
+    const glfw_path = "lib/glfw";
+    const glfw_include_path = b.pathJoin(&.{ glfw_path, "include" });
+    const glfw_lib_path = b.pathJoin(&.{ glfw_path, "lib-mingw-w64" });
+
+    // Ensure Windows SDK headers are available
+    exe_win.addIncludePath(glad_include_path);
+    exe_win.addCSourceFile(.{
+        .file = glad_src_path,
+        .flags = &.{"-std=c99"},
+    });
+
+    // Add GLFW paths
+    exe_win.addIncludePath(b.path(glfw_include_path));
+    exe_win.addLibraryPath(b.path(glfw_lib_path));
+    exe_win.addObjectFile(b.path(b.pathJoin(&.{ glfw_lib_path, "libglfw3.a" })));
+
+    // Add Windows-specific system libraries
+    const win_libs = [_][]const u8{
+        "gdi32",
+        "user32",
+        "kernel32",
+        "shell32",
+        "opengl32",
+        "comdlg32",
+        "winmm",
+        "ole32",
+        "uuid",
+    };
+
+    // Link Windows system libraries
+    for (win_libs) |lib| {
+        exe_win.linkSystemLibrary(lib);
+    }
+
+    exe_win.linkLibC();
+    exe_win.linkage = std.builtin.LinkMode.dynamic;
+
+    b.installArtifact(exe_win);
 
     // Create a Run step to execute the program
     const run_cmd = b.addRunArtifact(exe);

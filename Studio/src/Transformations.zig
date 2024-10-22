@@ -59,6 +59,18 @@ pub const Vec3 = struct {
     pub fn dot(a: Vec3, b: Vec3) f32 {
         return a.x * b.x + a.y * b.y + a.z * b.z;
     }
+
+    pub fn from_angles(yaw_deg: f32, pitch_deg: f32) Vec3 {
+        const yaw = radians(yaw_deg);
+        const pitch = radians(pitch_deg);
+
+        const front = Vec3{
+            .x = @cos(yaw) * @cos(pitch),
+            .y = @sin(pitch),
+            .z = @sin(yaw) * @cos(pitch),
+        };
+        return Vec3.normalize(front);
+    }
 };
 
 pub fn rotate_x(angle_deg: f32) [16]f32 {
@@ -136,7 +148,7 @@ pub fn multiply_matrices(a: [16]f32, b: [16]f32) [16]f32 {
     return result;
 }
 
-fn radians(degrees: f32) f32 {
+pub fn radians(degrees: f32) f32 {
     return degrees * (std.math.pi / 180.0);
 }
 

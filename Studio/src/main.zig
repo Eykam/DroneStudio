@@ -1,5 +1,6 @@
 const std = @import("std");
 const Transformations = @import("Transformations.zig");
+const Vec3 = Transformations.Vec3;
 const Pipeline = @import("Pipeline.zig");
 const Scene = Pipeline.Scene;
 const Shape = @import("Shape.zig");
@@ -53,11 +54,25 @@ fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
 
 // Window creation with proper monitor handling
 pub fn createWindow() ?*c.GLFWwindow {
+    // Set window hints before creation
+    c.glfwWindowHint(c.GLFW_FOCUSED, c.GLFW_TRUE);
+    c.glfwWindowHint(c.GLFW_FOCUS_ON_SHOW, c.GLFW_TRUE);
+    c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_OPENGL_API);
+    c.glfwWindowHint(c.GLFW_CONTEXT_CREATION_API, c.GLFW_NATIVE_CONTEXT_API);
+
     const width: i32 = @intFromFloat(1920 * 0.75);
     const height: i32 = @intFromFloat(1080 * 0.75);
 
-    // Create window initially in windowed mode
     const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null) orelse return null;
+
+    // Make context current immediately after window creation
+    c.glfwMakeContextCurrent(window);
+
+    // Set up cursor mode BEFORE changing monitor settings
+    c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+    if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
+        c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
+    }
 
     // Get the monitor the window should be on
     const monitor = getCurrentMonitor(window);
@@ -85,6 +100,123 @@ pub fn createWindow() ?*c.GLFWwindow {
     return window;
 }
 
+fn processInput(scene: *Scene, debug: bool) void {
+    const camera_speed_base: f32 = 10; // Units per second
+    const camera_speed = camera_speed_base * scene.appState.delta_time;
+
+    // Forward
+    if (scene.appState.keys[@as(usize, c.GLFW_KEY_W)]) {
+        const movement = scene.appState.camera_front.scale(camera_speed);
+        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+
+        if (debug) {
+            std.debug.print("==============\nForward\n", .{});
+            std.debug.print("Initial: {d:.6}\n", .{[_]f32{
+                scene.appState.camera_pos.x,
+                scene.appState.camera_pos.y,
+                scene.appState.camera_pos.z,
+            }});
+            std.debug.print("Offset: {d:.6}\n", .{[_]f32{
+                movement.x,
+                movement.y,
+                movement.z,
+            }});
+            std.debug.print("New: {d:.6}\n", .{[_]f32{
+                newCoords.x,
+                newCoords.y,
+                newCoords.z,
+            }});
+        }
+
+        scene.appState.camera_pos = newCoords;
+    }
+
+    // Left
+    if (scene.appState.keys[@as(usize, c.GLFW_KEY_A)]) {
+        const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
+        const movement = right.scale(-camera_speed);
+        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+
+        if (debug) {
+            std.debug.print("==============\nLeft\n", .{});
+            std.debug.print("Initial: {d:.6}\n", .{[_]f32{
+                scene.appState.camera_pos.x,
+                scene.appState.camera_pos.y,
+                scene.appState.camera_pos.z,
+            }});
+            std.debug.print("Offset: {d:.6}\n", .{[_]f32{
+                movement.x,
+                movement.y,
+                movement.z,
+            }});
+            std.debug.print("New: {d:.6}\n", .{[_]f32{
+                newCoords.x,
+                newCoords.y,
+                newCoords.z,
+            }});
+        }
+
+        scene.appState.camera_pos = newCoords;
+    }
+
+    // Backward
+    if (scene.appState.keys[@as(usize, c.GLFW_KEY_S)]) {
+        const movement = scene.appState.camera_front.scale(-camera_speed);
+        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+
+        if (debug) {
+            std.debug.print("\nBack\n", .{});
+            std.debug.print("Initial: {d:.6}\n", .{[_]f32{
+                scene.appState.camera_pos.x,
+                scene.appState.camera_pos.y,
+                scene.appState.camera_pos.z,
+            }});
+            std.debug.print("Offset: {d:.6}\n", .{[_]f32{
+                movement.x,
+                movement.y,
+                movement.z,
+            }});
+            std.debug.print("New: {d:.6}\n", .{[_]f32{
+                newCoords.x,
+                newCoords.y,
+                newCoords.z,
+            }});
+        }
+
+        scene.appState.camera_pos = newCoords;
+    }
+
+    // Right
+    if (scene.appState.keys[@as(usize, c.GLFW_KEY_D)]) {
+        const right = Vec3.cross(scene.appState.camera_front, scene.appState.camera_up).normalize();
+        const movement = right.scale(camera_speed);
+        const newCoords = Vec3.add(scene.appState.camera_pos, movement);
+
+        if (debug) {
+            std.debug.print("==============\nRight\n", .{});
+            std.debug.print("Initial: {d:.6}\n", .{[_]f32{
+                scene.appState.camera_pos.x,
+                scene.appState.camera_pos.y,
+                scene.appState.camera_pos.z,
+            }});
+            std.debug.print("Offset: {d:.6}\n", .{[_]f32{
+                movement.x,
+                movement.y,
+                movement.z,
+            }});
+            std.debug.print("New: {d:.6}\n", .{[_]f32{
+                newCoords.x,
+                newCoords.y,
+                newCoords.z,
+            }});
+        }
+
+        scene.appState.camera_pos = newCoords;
+    }
+
+    // Zoom controls can remain in the keyCallback if they are discrete actions
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -99,14 +231,15 @@ pub fn main() !void {
 
     defer c.glfwTerminate();
 
-    const window = createWindow();
-    defer c.glfwDestroyWindow(window.?);
+    const window = createWindow() orelse {
+        std.debug.print("Failed to create window\n", .{});
+        return;
+    };
+    defer c.glfwDestroyWindow(window);
 
-    // Define transformation matrices
-    // const eye = [3]f32{ 0.0, 0.0, 5.0 }; // Camera position
-    // const center = [3]f32{ 0.0, 0.0, 0.0 }; // Look at origin
-    // const up = [3]f32{ 0.0, 1.0, 0.0 }; // Up vector
-    // const view = Transformations.lookAt(eye, center, up);
+    if (c.glfwGetInputMode(window, c.GLFW_CURSOR) != c.GLFW_CURSOR_DISABLED) {
+        std.debug.print("Warning: Cursor not disabled as expected\n", .{});
+    }
 
     //Initializing Scene
     var scene = try Scene.init(alloc, window);
@@ -129,8 +262,25 @@ pub fn main() !void {
     triangle.debug();
     // box.debug();
 
+    std.debug.print("\nIntial Camera Pos: {d}\n", .{[_]f32{
+        scene.appState.camera_pos.x,
+        scene.appState.camera_pos.y,
+        scene.appState.camera_pos.z,
+    }});
+
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {
-        scene.render(window, null);
+        if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) == c.GLFW_FALSE) {
+            continue; // Skip frame if window is not focused
+        }
+
+        const current_time = c.glfwGetTime();
+
+        // Calculate delta time
+        scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
+        scene.appState.last_frame_time = current_time;
+
+        processInput(&scene, false);
+        scene.render(window);
     }
 }

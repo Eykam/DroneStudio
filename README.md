@@ -31,10 +31,11 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 ### 2.1 Build system and ImGui Integration
 
-- [] Embed Shaders inline instead of reading from fs
-- [] Find way to link dependencies without using @cimport ???
-- [] Create zig bindings for ImGui
-- [] Create drop down menus for basic configuration editing 
+- [X] Embed Shaders inline instead of reading from fs
+- [X] Cross Compile for Windows
+- [ ] Find way to link dependencies without using @cimport ???
+- [ ] Create zig bindings for ImGui
+- [ ] Create drop down menus for basic configuration editing 
 
 
 
