@@ -269,20 +269,22 @@ pub fn main() !void {
 
     //Initializing Entities
     const grid = try Shape.Grid.init(alloc, 1000, 5);
-    const triangle = try Shape.Triangle.init(null);
-    const axis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
-    // const box = try Shape.Box.init();
+    const triangle = try Shape.Triangle.init(alloc, null);
+    // const axis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
+    // const box = try Shape.Box.init(alloc, null, null, null, null);
 
     //Adding Entities to Scene
-    try scene.addObject("grid", grid);
-    try scene.addObject("triangle", triangle);
-    try scene.addObject("axis", axis);
+    try scene.addMesh("grid", grid);
+    try scene.addMesh("triangle", triangle);
+    // try scene.addObject("axis", axis);
     // try scene.addObject("rectangle", box);
 
     //Debugging Entities
+    scene.getMeshNames();
+
     grid.debug();
     triangle.debug();
-    axis.debug();
+    // axis.debug();
     // box.debug();
 
     std.debug.print("\nIntial Camera Pos: {d}\n", .{[_]f32{

@@ -126,7 +126,7 @@ pub const Scene = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    objects: std.StringHashMap(Shape.Object),
+    meshes: std.StringHashMap(Shape.Mesh),
     shaderProgram: u32,
     width: f32,
     height: f32,
@@ -197,7 +197,7 @@ pub const Scene = struct {
 
         return Self{
             .allocator = allocator,
-            .objects = std.StringHashMap(Shape.Object).init(allocator),
+            .meshes = std.StringHashMap(Shape.Mesh).init(allocator),
             .shaderProgram = shaderProgram,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
@@ -210,18 +210,19 @@ pub const Scene = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        // Delete OpenGL resources for each object
-        var it = self.objects.iterator();
+        // Delete OpenGL resources for each mesh
+        var it = self.meshes.iterator();
         while (it.next()) |entry| {
-            const object = entry.value_ptr;
-            c.glDeleteVertexArrays(1, &object.meta.VAO);
-            c.glDeleteBuffers(1, &object.meta.VBO);
-            if (object.indices.len > 0) {
-                c.glDeleteBuffers(1, &object.meta.EBO);
+            const mesh = entry.value_ptr;
+            c.glDeleteVertexArrays(1, &mesh.meta.VAO);
+            c.glDeleteBuffers(1, &mesh.meta.VBO);
+            if (mesh.indices) |indices| {
+                _ = indices;
+                c.glDeleteBuffers(1, &mesh.meta.IBO);
             }
         }
 
-        self.objects.deinit();
+        self.meshes.deinit();
 
         c.glDeleteProgram(self.shaderProgram);
     }
@@ -260,8 +261,16 @@ pub const Scene = struct {
         return Transformations.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
     }
 
-    pub fn addObject(self: *Self, name: []const u8, object: Shape.Object) !void {
-        try self.objects.put(name, object);
+    pub fn getMeshNames(self: Self) void {
+        var it = self.meshes.iterator();
+
+        while (it.next()) |entry| {
+            std.debug.print("{d} => {s}\n", .{ entry.value_ptr.*.meta.VBO, entry.key_ptr.* });
+        }
+    }
+
+    pub fn addMesh(self: *Self, name: []const u8, mesh: Shape.Mesh) !void {
+        try self.meshes.put(name, mesh);
     }
 
     pub fn render(self: *Self, window: ?*c.struct_GLFWwindow) void {
@@ -287,34 +296,59 @@ pub const Scene = struct {
             c.glUniformMatrix4fv(projectionLoc, 1, c.GL_FALSE, &currentProjection);
         }
 
-        // Iterate through all objects in the hash map
-        var it = self.objects.iterator();
+        // Iterate through all meshes in the hash map
+        var it = self.meshes.iterator();
         while (it.next()) |entry| {
             if (entry.value_ptr.draw) |drawFunction| {
-                drawFunction();
+                drawFunction(entry.value_ptr.*);
             } else {
-                const object = entry.value_ptr.*;
+                const mesh = entry.value_ptr.*;
 
-                // Set object-specific uniforms
+                // Set mesh-specific uniforms
                 const modelLoc = c.glGetUniformLocation(self.shaderProgram, "uModel");
-                const colorLoc = c.glGetUniformLocation(self.shaderProgram, "uColor");
 
                 if (modelLoc != -1) {
-                    c.glUniformMatrix4fv(modelLoc, 1, c.GL_FALSE, &object.modelMatrix);
-                }
-                if (colorLoc != -1) {
-                    c.glUniform3f(colorLoc, object.color.r, object.color.g, object.color.b);
+                    c.glUniformMatrix4fv(modelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
                 }
 
-                // Bind the object's VAO
-                c.glBindVertexArray(object.meta.VAO);
+                // Bind the mesh's VAO
+                c.glBindVertexArray(mesh.meta.VAO);
 
-                // Draw the object
-                if (object.indices.len > 0) {
-                    c.glDrawElements(object.drawType, @intCast(object.indices.len), c.GL_UNSIGNED_INT, null);
+                // Setup vertex attributes for position and color
+                c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+
+                // Position attribute (location = 0)
+                c.glVertexAttribPointer(0, // location
+                    3, // size (vec3)
+                    c.GL_FLOAT, // type
+                    c.GL_FALSE, // normalized
+                    @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
+                    null // offset for position (starts at beginning)
+                );
+                c.glEnableVertexAttribArray(0);
+
+                // Color attribute (location = 1)
+                const color_offset = @offsetOf(Shape.Vertex, "color");
+                c.glVertexAttribPointer(1, // location
+                    3, // size (vec3)
+                    c.GL_FLOAT, // type
+                    c.GL_FALSE, // normalized
+                    @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
+                    @ptrFromInt(color_offset) // offset for color
+                );
+                c.glEnableVertexAttribArray(1);
+
+                // Draw the mesh
+                if (mesh.indices) |indices| {
+                    c.glDrawElements(mesh.drawType, @intCast(indices.len), c.GL_UNSIGNED_INT, null);
                 } else {
-                    c.glDrawArrays(object.drawType, 0, @intCast(object.vertices.len / 3));
+                    // When drawing without indices, we need to account for the full vertex struct size
+                    c.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
                 }
+
+                // Disable vertex attributes
+                c.glDisableVertexAttribArray(0);
+                c.glDisableVertexAttribArray(1);
 
                 // Unbind the VAO
                 c.glBindVertexArray(0);
