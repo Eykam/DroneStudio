@@ -18,9 +18,10 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Render 'Hello Triangle'
 - [X] Render grid
 - [X] Setup basic rendering pipeline
-- [ ] Change line rendering to quads
+- [X] Each vertex assigned a color using shaders
 - [ ] Render box
 - [ ] Color each face of the box differently
+- [ ] Change line rendering to quads
 
 ### 2. Box Interaction
 

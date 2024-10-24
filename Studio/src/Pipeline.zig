@@ -4,6 +4,8 @@ const Shape = @import("Shape.zig");
 const Transformations = @import("Transformations.zig");
 const Vec3 = Transformations.Vec3;
 const File = std.fs.File;
+const Camera = @import("Camera.zig");
+
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
     @cInclude("glad/glad.h"); // Ensure GLAD is included
@@ -13,14 +15,12 @@ const c = @cImport({
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
 
-// Function to read shader source from a file
 inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
     const file: []const u8 = @embedFile(path);
     std.debug.print("Source Length: {}\n", .{file.len});
     return file;
 }
 
-// Function to compile a shader
 fn compileShader(shaderType: u32, source: []const u8) !u32 {
     const shader = c.glCreateShader(shaderType);
     if (shader == 0) {
@@ -48,7 +48,6 @@ fn compileShader(shaderType: u32, source: []const u8) !u32 {
     return shader;
 }
 
-// Function to create a shader program
 pub fn createShaderProgram(comptime vertexPath: []const u8, comptime fragmentPath: []const u8) !u32 {
     std.debug.print("Initializing Vertex Shader...\n", .{});
     std.debug.print("Reading Vertex Shader from Source...\n", .{});
@@ -108,11 +107,6 @@ fn checkOpenGLError(caller: []const u8) void {
 }
 
 pub const AppState = struct {
-    camera_pos: Vec3,
-    camera_front: Vec3,
-    camera_up: Vec3,
-    rotation_x: f32 = 0.0,
-    rotation_y: f32 = 0.0,
     last_mouse_x: f64 = 0.0,
     last_mouse_y: f64 = 0.0,
     first_mouse: bool = true,
@@ -131,6 +125,7 @@ pub const Scene = struct {
     width: f32,
     height: f32,
     appState: AppState,
+    camera: Camera,
 
     pub fn init(allocator: std.mem.Allocator, window: ?*c.struct_GLFWwindow) !Self {
         if (window == null) {
@@ -201,16 +196,12 @@ pub const Scene = struct {
             .shaderProgram = shaderProgram,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
-            .appState = AppState{
-                .camera_pos = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
-                .camera_front = Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 },
-                .camera_up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
-            },
+            .appState = AppState{},
+            .camera = Camera.init(null, null),
         };
     }
 
     pub fn deinit(self: *Self) void {
-        // Delete OpenGL resources for each mesh
         var it = self.meshes.iterator();
         while (it.next()) |entry| {
             const mesh = entry.value_ptr;
@@ -238,18 +229,15 @@ pub const Scene = struct {
             return;
         }
 
-        // Set callbacks
         _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
         _ = c.glfwSetCursorPosCallback(window, mouseCallback);
         _ = c.glfwSetKeyCallback(window, keyCallback);
-        _ = c.glfwSetScrollCallback(window, scrollCallback); // Set the new scroll callback
+        _ = c.glfwSetScrollCallback(window, scrollCallback);
 
         const current_mode = c.glfwGetInputMode(window, c.GLFW_CURSOR);
         if (current_mode != c.GLFW_CURSOR_DISABLED) {
-            // Try setting it again
             c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
 
-            // Check if it worked this time
             const new_mode = c.glfwGetInputMode(window, c.GLFW_CURSOR);
             if (new_mode != c.GLFW_CURSOR_DISABLED) {
                 std.debug.print("Failed to disable cursor in setupCallbacks\n", .{});
@@ -277,11 +265,9 @@ pub const Scene = struct {
         c.glClearColor(0.15, 0.15, 0.15, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
 
-        // Use the shader program
         c.glUseProgram(self.shaderProgram);
 
-        const target = Vec3.add(self.appState.camera_pos, self.appState.camera_front);
-        var view = Transformations.lookAt(self.appState.camera_pos, target, self.appState.camera_up);
+        var view = self.camera.get_view_matrix();
 
         // Use the current projection matrix that accounts for window size
         const currentProjection = self.updateProjection();
@@ -289,6 +275,7 @@ pub const Scene = struct {
         // Set common uniforms
         const viewLoc = c.glGetUniformLocation(self.shaderProgram, "uView");
         const projectionLoc = c.glGetUniformLocation(self.shaderProgram, "uProjection");
+
         if (viewLoc != -1) {
             c.glUniformMatrix4fv(viewLoc, 1, c.GL_FALSE, &view);
         }
@@ -311,31 +298,23 @@ pub const Scene = struct {
                     c.glUniformMatrix4fv(modelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
                 }
 
-                // Bind the mesh's VAO
                 c.glBindVertexArray(mesh.meta.VAO);
-
-                // Setup vertex attributes for position and color
                 c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
                 // Position attribute (location = 0)
                 c.glVertexAttribPointer(0, // location
-                    3, // size (vec3)
-                    c.GL_FLOAT, // type
-                    c.GL_FALSE, // normalized
-                    @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
-                    null // offset for position (starts at beginning)
+                    3, // (vec3)
+                    c.GL_FLOAT, c.GL_FALSE, @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
+                    null // offset for position
                 );
                 c.glEnableVertexAttribArray(0);
 
                 // Color attribute (location = 1)
                 const color_offset = @offsetOf(Shape.Vertex, "color");
                 c.glVertexAttribPointer(1, // location
-                    3, // size (vec3)
-                    c.GL_FLOAT, // type
-                    c.GL_FALSE, // normalized
-                    @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
-                    @ptrFromInt(color_offset) // offset for color
-                );
+                    3, // (vec3)
+                    c.GL_FLOAT, c.GL_FALSE, @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
+                    @ptrFromInt(color_offset));
                 c.glEnableVertexAttribArray(1);
 
                 // Draw the mesh
@@ -353,14 +332,125 @@ pub const Scene = struct {
                 // Unbind the VAO
                 c.glBindVertexArray(0);
             }
-
-            // Swap front and back buffers
         }
 
         c.glfwSwapBuffers(window);
         c.glfwPollEvents();
     }
+
+    pub fn processInput(self: *Self, debug: bool) void {
+        const sprinting = self.appState.keys[@as(usize, c.GLFW_KEY_LEFT_SHIFT)];
+
+        // Forward
+        if (self.appState.keys[@as(usize, c.GLFW_KEY_W)]) {
+            self.camera.move_forward(self.appState.delta_time, sprinting, debug);
+        }
+
+        // Left
+        if (self.appState.keys[@as(usize, c.GLFW_KEY_A)]) {
+            self.camera.move_left(self.appState.delta_time, sprinting, debug);
+        }
+
+        // Backward
+        if (self.appState.keys[@as(usize, c.GLFW_KEY_S)]) {
+            self.camera.move_backward(self.appState.delta_time, sprinting, debug);
+        }
+
+        // Right
+        if (self.appState.keys[@as(usize, c.GLFW_KEY_D)]) {
+            self.camera.move_right(self.appState.delta_time, sprinting, debug);
+        }
+
+        // Zoom controls can remain in the keyCallback if they are discrete actions
+    }
 };
+
+fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
+    if (window == null) return null;
+
+    var monitor_count: i32 = undefined;
+    const monitors = c.glfwGetMonitors(&monitor_count);
+    if (monitors == null or monitor_count == 0) return null;
+
+    // Get window position
+    var win_x: i32 = undefined;
+    var win_y: i32 = undefined;
+    c.glfwGetWindowPos(window, &win_x, &win_y);
+
+    // Get window size
+    var win_width: i32 = undefined;
+    var win_height: i32 = undefined;
+    c.glfwGetWindowSize(window, &win_width, &win_height);
+
+    // Find the monitor that contains the window center
+    const center_x = win_x + @divTrunc(win_width, 2);
+    const center_y = win_y + @divTrunc(win_height, 2);
+
+    var i: usize = 0;
+    while (i < @as(i32, @intCast(monitor_count))) : (i += 1) {
+        const mon = monitors[i];
+        var mx: i32 = undefined;
+        var my: i32 = undefined;
+        var mw: i32 = undefined;
+        var mh: i32 = undefined;
+        c.glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh);
+
+        if (center_x >= mx and center_x < mx + mw and
+            center_y >= my and center_y < my + mh)
+        {
+            return mon;
+        }
+    }
+
+    // Default to primary monitor if no match
+    return c.glfwGetPrimaryMonitor();
+}
+
+// Window creation with proper monitor handling
+pub fn createWindow() ?*c.GLFWwindow {
+    c.glfwWindowHint(c.GLFW_FOCUSED, c.GLFW_TRUE);
+    c.glfwWindowHint(c.GLFW_FOCUS_ON_SHOW, c.GLFW_TRUE);
+    c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_OPENGL_API);
+    c.glfwWindowHint(c.GLFW_CONTEXT_CREATION_API, c.GLFW_NATIVE_CONTEXT_API);
+
+    const width: i32 = @intFromFloat(1920 * 0.75);
+    const height: i32 = @intFromFloat(1080 * 0.75);
+
+    const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null) orelse return null;
+
+    // Make context current immediately after window creation
+    c.glfwMakeContextCurrent(window);
+
+    // Set up cursor mode BEFORE changing monitor settings
+    c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+    if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
+        c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
+    }
+
+    const monitor = getCurrentMonitor(window);
+    if (monitor != null) {
+        // Get monitor position and video mode
+        var x: i32 = undefined;
+        var y: i32 = undefined;
+        c.glfwGetMonitorPos(monitor, &x, &y);
+
+        const video_mode = c.glfwGetVideoMode(monitor);
+        if (video_mode != null) {
+            // Correctly dereference the video mode pointer
+            const mode_width = video_mode.*.width;
+            const mode_height = video_mode.*.height;
+            const mode_refresh = video_mode.*.refreshRate;
+
+            c.glfwSetWindowMonitor(window, monitor, 0, 0, mode_width, mode_height, mode_refresh);
+        }
+    }
+
+    // Force focus and raise window
+    c.glfwFocusWindow(window);
+    c.glfwShowWindow(window);
+
+    return window;
+}
 
 fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
     if (window == null) return;
@@ -371,10 +461,8 @@ fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) 
         return;
     }
 
-    // Retrieve the Scene instance from the user pointer
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
-    // Update the viewport
     c.glViewport(0, 0, width, height);
 
     // Update Scene's width and height
@@ -389,8 +477,6 @@ fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.
     if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) != c.GLFW_TRUE) {
         return;
     }
-
-    // Retrieve the Scene instance from the user pointer
 
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
@@ -407,16 +493,9 @@ fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.
     scene.appState.last_mouse_x = xpos;
     scene.appState.last_mouse_y = ypos;
 
-    const sensitivity_y: f32 = 7;
-    const sensitivity_x: f32 = sensitivity_y * scene.width / scene.width;
+    const aspectRatio: f32 = scene.width / scene.height;
 
-    scene.appState.rotation_x += @as(f32, @floatCast(xoffset)) * sensitivity_x;
-    scene.appState.rotation_y += @as(f32, @floatCast(yoffset)) * sensitivity_y;
-
-    const yaw = Transformations.radians(scene.appState.rotation_x);
-    const pitch = Transformations.radians(scene.appState.rotation_y);
-
-    scene.appState.camera_front = Vec3.from_angles(yaw, pitch);
+    scene.camera.process_mouse_movement(xoffset, yoffset, aspectRatio, false);
 }
 
 fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -425,10 +504,9 @@ fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, actio
     _ = scancode;
     _ = mods;
 
-    // Retrieve the Scene instance from the user pointer
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
-    if (key < 0 or key >= 1024) return; // Prevent out-of-bounds
+    if (key < 0 or key >= 1024) return;
 
     if (action == c.GLFW_PRESS) {
         scene.appState.keys[@intCast(key)] = true;
@@ -453,6 +531,7 @@ fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, actio
             else => {},
         }
     }
+
     // Handle additional keys here
 }
 
@@ -463,12 +542,10 @@ fn scrollCallback(window: ?*c.struct_GLFWwindow, xoffset: f64, yoffset: f64) cal
 
     const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
 
-    // Define zoom sensitivity
     const zoomSensitivity: f32 = 0.1;
     const newZoom = scene.appState.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.appState.zoom;
 
-    // Clamp the zoom level to prevent extreme zooming
-
+    // Clamp the zoom level to prevent weird behavior at larger FOV's
     if (newZoom < 1.0) {
         scene.appState.zoom = 1.0;
     } else if (newZoom >= 120) {

@@ -3,9 +3,8 @@ const Vertex = @import("Shape.zig").Vertex;
 
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
-    @cInclude("glad/glad.h"); // Include GLAD
+    @cInclude("glad/glad.h");
     @cInclude("GLFW/glfw3.h");
-    // Add OpenGL function declarations if needed
 });
 
 pub fn printVertexShader(vbo: u32, size: usize) !void {
