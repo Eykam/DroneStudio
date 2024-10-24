@@ -48,8 +48,9 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 ### 3. Communication
 
-- [ ] Develop ESP firmware for MPU-9250
-- [ ] Set up UDP server for communication
+- [X] Develop ESP firmware for MPU-9250
+- [X] Set up UDP server on ESP
+- [ ] Set up UDP server in renderer 
 - [ ] Abstraction / protocol for sending data between esp & renderer
 
 ### 4. MPU Integration

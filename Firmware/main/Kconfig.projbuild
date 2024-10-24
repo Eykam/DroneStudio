@@ -12,6 +12,12 @@ menu "Wifi Config"
         help
             WiFi password (WPA or WPA2) for the example to use.
 
+    config CLIENT_IP
+        string "Client's IP"
+        default "192.168.1.0"
+        help
+            The IP of the client you are trying to connect to.
+
     config ESP_MAXIMUM_RETRY
         int "Maximum retry"
         default 5
