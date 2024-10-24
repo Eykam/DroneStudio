@@ -2,4 +2,5 @@ build/
 .zig-cache
 zig-out
 .vscode
+sdkconfig
 sdkconfig.old

@@ -23,7 +23,6 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Color each face of the box differently
 - [ ] Change line rendering to quads
 
-
 ### 1.2 Camera
 
 - [X] Perspective Camera
@@ -47,50 +46,55 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Create zig bindings for ImGui
 - [ ] Create drop down menus for basic configuration editing 
 
-### 3. Sensor Integration
+### 3. Communication
+
+- [ ] Develop ESP firmware for MPU-9250
+- [ ] Set up UDP server for communication
+- [ ] Abstraction / protocol for sending data between esp & renderer
+
+### 4. MPU Integration
 
 - [ ] Add compass overlay
 - [ ] Integrate gyro data
 - [ ] Overlay acceleration data
 - [ ] Connect MPU (Motion Processing Unit) data to the box
 
-### 4. Communication
+### 5. LiDAR Integration
 
-- [ ] Develop ESP firmware
-- [ ] Set up UDP server for communication
-- [ ] Ensure reliable data transmission between devices
+- [ ] Develop ESP firmware for LiDAR integration
+- [ ] Define LiDAR sensor field of view (FOV)
+- [ ] Find way to calibrate sensors / get physical location of areas in FOV
+- [ ] Visualize FOV's captured by scanners in 3D space relative to drone
 
+### 6. Camera and Depth Sensing
 
-## Future Milestones
+- [ ] Use camera to stream image data to renderer
+- [ ] Use image data to color mesh
+- [ ] Use some image => depth map transformers
+- [ ] Maybe some segmentation? 
 
-### 5. 3D Model Integration
+### 7. SLAM (Simultaneous Localization and Mapping)
+
+- [ ] Combine MPU & LiDAR / Image data to associate FOV with location
+- [ ] Implement SLAM to stitch together FOV's / map the room in 3D
+
+### 8. Visualization
+
+- [ ] Cube Marching to turn point clouds into mesh.
+- [ ] Visualize 3D models of scan in DroneStudio
+- [ ] Ability to walk around / tour room in real time
+- [ ] Colored / textured meshes
+- [ ] If segmented objects. highlight / click on those with details
+
+### 9. 3D Model Integration
 
 - [ ] Import GLTF models
 - [ ] Scan drone and import its 3D model
 
-### 6. Motor Control
+### 10. Motor Control
 
 - [ ] Calibrate motor speeds
 - [ ] Implement motor speed control algorithms
-
-### 7. LiDAR Integration
-
-- [ ] Define LiDAR sensor field of view (FOV)
-- [ ] Visualize FOV's captured by scanners in 3D space
-- [ ] Develop ESP firmware for LiDAR integration
-
-### 8. Camera and Depth Sensing
-
-- [ ] Integrate camera functionality
-- [ ] Utilize depth of field models for enhanced visualization / segmentation
-
-### 9. SLAM (Simultaneous Localization and Mapping)
-
-- [ ] Implement SLAM to map the room in 3D
-
-### 10. Visualization
-
-- [ ] Visualize 3D models within DroneStudio
 
 ### 11. Synchronization
 
