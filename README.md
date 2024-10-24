@@ -19,17 +19,25 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Render grid
 - [X] Setup basic rendering pipeline
 - [X] Each vertex assigned a color using shaders
-- [ ] Render box
-- [ ] Color each face of the box differently
+- [X] Render box
+- [X] Color each face of the box differently
 - [ ] Change line rendering to quads
+
+
+### 1.2 Camera
+
+- [X] Perspective Camera
+- [X] WASD movement
+- [X] Sprinting / speed up with Shift
+- [X] Free look with mouse
+- [X] Zooming in / out
+- [ ] Look into using openGL Frustum instead
 
 ### 2. Box Interaction
 
-- [X] Implement box rotation based on mouse movement
-- [X] Implement box rotation using keyboard inputs
-- [X] Zooming in / out
+- [ ] Implement yaw / roll based on keyboard movement
+- [ ] Implement pitch using mouse inputs
 - [ ] Orbit Controls instead of Perspective
-- [ ] Look into using openGL Frustum instead
 
 ### 2.1 Build system and ImGui Integration
 
@@ -38,8 +46,6 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Find way to link dependencies without using @cimport ???
 - [ ] Create zig bindings for ImGui
 - [ ] Create drop down menus for basic configuration editing 
-
-
 
 ### 3. Sensor Integration
 
