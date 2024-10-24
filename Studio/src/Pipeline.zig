@@ -15,97 +15,6 @@ const c = @cImport({
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
 
-inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
-    const file: []const u8 = @embedFile(path);
-    std.debug.print("Source Length: {}\n", .{file.len});
-    return file;
-}
-
-fn compileShader(shaderType: u32, source: []const u8) !u32 {
-    const shader = c.glCreateShader(shaderType);
-    if (shader == 0) {
-        std.debug.print("Failed to compile shader\n", .{});
-        return ShaderError.UnableToCreateShader;
-    }
-
-    const src_ptr: [*c]const u8 = @ptrCast(@alignCast(source.ptr));
-    const src_len = source.len;
-
-    std.debug.print("Compiling Shader...\n", .{});
-    c.glShaderSource(shader, 1, @ptrCast(&src_ptr), @ptrCast(&src_len));
-    c.glCompileShader(shader);
-
-    // Check for compilation errors
-    var success: u32 = 0;
-    c.glGetShaderiv(shader, c.GL_COMPILE_STATUS, @alignCast(@ptrCast(&success)));
-    if (success == 0) {
-        var infoLog: [512]u8 = undefined;
-        c.glGetShaderInfoLog(shader, 512, null, &infoLog);
-        std.debug.print("ERROR::SHADER::COMPILATION_FAILED\n{any}\n", .{infoLog});
-        return ShaderError.ShaderCompilationFailed;
-    }
-
-    return shader;
-}
-
-pub fn createShaderProgram(comptime vertexPath: []const u8, comptime fragmentPath: []const u8) !u32 {
-    std.debug.print("Initializing Vertex Shader...\n", .{});
-    std.debug.print("Reading Vertex Shader from Source...\n", .{});
-    const vertexSource = try readShaderSource(vertexPath);
-    const vertexShader = compileShader(c.GL_VERTEX_SHADER, vertexSource) catch |err| {
-        std.debug.print("Failed to read vertex shader '{s}': {any}\n", .{ vertexPath, err });
-        return ShaderError.ShaderCompilationFailed;
-    };
-    std.debug.print("\n", .{});
-
-    std.debug.print("Initializing Fragment Shader...\n", .{});
-    std.debug.print("Reading Fragment Shader from Source...\n", .{});
-    const fragmentSource = try readShaderSource(fragmentPath);
-    const fragmentShader = compileShader(c.GL_FRAGMENT_SHADER, fragmentSource) catch |err| {
-        std.debug.print("Failed to read fragment shader '{s}': {any}\n", .{ fragmentPath, err });
-        return ShaderError.ShaderCompilationFailed;
-    };
-    std.debug.print("\n", .{});
-
-    std.debug.print("Creating ShaderProgram...\n", .{});
-    const shaderProgram = c.glCreateProgram();
-    if (shaderProgram == 0) {
-        std.debug.print("Failed to create Shader Program\n", .{});
-        return ShaderError.UnableToCreateProgram;
-    }
-
-    std.debug.print("Attaching ShaderProgram to openGL...\n", .{});
-    c.glAttachShader(shaderProgram, vertexShader);
-    c.glAttachShader(shaderProgram, fragmentShader);
-    c.glLinkProgram(shaderProgram);
-
-    // Check for linking errors
-    var success: u32 = 0;
-    c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, @ptrCast(@alignCast(&success)));
-
-    if (success == 0) {
-        var infoLog: [512]u8 = undefined;
-        c.glGetProgramInfoLog(shaderProgram, 512, null, &infoLog);
-        std.debug.print("ERROR::PROGRAM::LINKING_FAILED\n{any}\n", .{infoLog});
-        return ShaderError.ShaderLinkingFailed;
-    }
-
-    std.debug.print("Running cleanup on Shaders...\n", .{});
-    // Shaders can be deleted after linking
-    c.glDeleteShader(vertexShader);
-    c.glDeleteShader(fragmentShader);
-
-    return shaderProgram;
-}
-
-fn checkOpenGLError(caller: []const u8) void {
-    var err: u32 = c.glGetError();
-    while (err != c.GL_NO_ERROR) {
-        std.debug.print("OpenGL Error: {x} from Caller: {s}\n", .{ err, caller });
-        err = c.glGetError();
-    }
-}
-
 pub const AppState = struct {
     last_mouse_x: f64 = 0.0,
     last_mouse_y: f64 = 0.0,
@@ -364,6 +273,97 @@ pub const Scene = struct {
         // Zoom controls can remain in the keyCallback if they are discrete actions
     }
 };
+
+inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
+    const file: []const u8 = @embedFile(path);
+    std.debug.print("Source Length: {}\n", .{file.len});
+    return file;
+}
+
+fn compileShader(shaderType: u32, source: []const u8) !u32 {
+    const shader = c.glCreateShader(shaderType);
+    if (shader == 0) {
+        std.debug.print("Failed to compile shader\n", .{});
+        return ShaderError.UnableToCreateShader;
+    }
+
+    const src_ptr: [*c]const u8 = @ptrCast(@alignCast(source.ptr));
+    const src_len = source.len;
+
+    std.debug.print("Compiling Shader...\n", .{});
+    c.glShaderSource(shader, 1, @ptrCast(&src_ptr), @ptrCast(&src_len));
+    c.glCompileShader(shader);
+
+    // Check for compilation errors
+    var success: u32 = 0;
+    c.glGetShaderiv(shader, c.GL_COMPILE_STATUS, @alignCast(@ptrCast(&success)));
+    if (success == 0) {
+        var infoLog: [512]u8 = undefined;
+        c.glGetShaderInfoLog(shader, 512, null, &infoLog);
+        std.debug.print("ERROR::SHADER::COMPILATION_FAILED\n{any}\n", .{infoLog});
+        return ShaderError.ShaderCompilationFailed;
+    }
+
+    return shader;
+}
+
+pub fn createShaderProgram(comptime vertexPath: []const u8, comptime fragmentPath: []const u8) !u32 {
+    std.debug.print("Initializing Vertex Shader...\n", .{});
+    std.debug.print("Reading Vertex Shader from Source...\n", .{});
+    const vertexSource = try readShaderSource(vertexPath);
+    const vertexShader = compileShader(c.GL_VERTEX_SHADER, vertexSource) catch |err| {
+        std.debug.print("Failed to read vertex shader '{s}': {any}\n", .{ vertexPath, err });
+        return ShaderError.ShaderCompilationFailed;
+    };
+    std.debug.print("\n", .{});
+
+    std.debug.print("Initializing Fragment Shader...\n", .{});
+    std.debug.print("Reading Fragment Shader from Source...\n", .{});
+    const fragmentSource = try readShaderSource(fragmentPath);
+    const fragmentShader = compileShader(c.GL_FRAGMENT_SHADER, fragmentSource) catch |err| {
+        std.debug.print("Failed to read fragment shader '{s}': {any}\n", .{ fragmentPath, err });
+        return ShaderError.ShaderCompilationFailed;
+    };
+    std.debug.print("\n", .{});
+
+    std.debug.print("Creating ShaderProgram...\n", .{});
+    const shaderProgram = c.glCreateProgram();
+    if (shaderProgram == 0) {
+        std.debug.print("Failed to create Shader Program\n", .{});
+        return ShaderError.UnableToCreateProgram;
+    }
+
+    std.debug.print("Attaching ShaderProgram to openGL...\n", .{});
+    c.glAttachShader(shaderProgram, vertexShader);
+    c.glAttachShader(shaderProgram, fragmentShader);
+    c.glLinkProgram(shaderProgram);
+
+    // Check for linking errors
+    var success: u32 = 0;
+    c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, @ptrCast(@alignCast(&success)));
+
+    if (success == 0) {
+        var infoLog: [512]u8 = undefined;
+        c.glGetProgramInfoLog(shaderProgram, 512, null, &infoLog);
+        std.debug.print("ERROR::PROGRAM::LINKING_FAILED\n{any}\n", .{infoLog});
+        return ShaderError.ShaderLinkingFailed;
+    }
+
+    std.debug.print("Running cleanup on Shaders...\n", .{});
+    // Shaders can be deleted after linking
+    c.glDeleteShader(vertexShader);
+    c.glDeleteShader(fragmentShader);
+
+    return shaderProgram;
+}
+
+fn checkOpenGLError(caller: []const u8) void {
+    var err: u32 = c.glGetError();
+    while (err != c.GL_NO_ERROR) {
+        std.debug.print("OpenGL Error: {x} from Caller: {s}\n", .{ err, caller });
+        err = c.glGetError();
+    }
+}
 
 fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
     if (window == null) return null;

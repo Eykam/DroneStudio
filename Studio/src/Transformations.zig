@@ -1,14 +1,5 @@
 const std = @import("std");
 
-pub fn identity() [16]f32 {
-    return .{
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
 pub const Vec3 = struct {
     x: f32,
     y: f32,
@@ -72,6 +63,15 @@ pub const Vec3 = struct {
         return Vec3.normalize(front);
     }
 };
+
+pub fn identity() [16]f32 {
+    return .{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
 
 pub fn rotate_x(angle_deg: f32) [16]f32 {
     const angle_rad = angle_deg * (std.math.pi / 180.0);

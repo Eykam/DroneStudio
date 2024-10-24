@@ -17,8 +17,8 @@ sensitivity: f32, // Mouse sensitivity
 pub fn init(position: ?Vec3, front: ?Vec3) Self {
     var camera = Self{
         .position = position orelse Vec3{ .x = 0.0, .y = 1.0, .z = 5.0 },
-        .front = front orelse Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 }, // Default front
-        .up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 }, // Default up
+        .front = front orelse Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 },
+        .up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
         .right = Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 },
         .yaw = 0.0,
         .pitch = 0.0,
