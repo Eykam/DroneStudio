@@ -58,8 +58,10 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 ### 4. MPU Integration
 
+- [X] Connect Accelerometer data to cube uniform
+- [ ] Connect Gyro data to cube uniform
+- [ ] Connect Magnetometer data to cube uniform 
 - [ ] Kalman filter or some type of cleaning of MPU data
-- [ ] Connect MPU data to transform model in renderer
 - [ ] Calibrate sensors
     - [X] Larger Accelerometer range (+- 8g's)
     - [ ] 0 values when not moving
