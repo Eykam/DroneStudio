@@ -50,15 +50,19 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 - [X] Develop ESP firmware for MPU-9250
 - [X] Set up UDP server on ESP
-- [ ] Set up UDP server in renderer 
-- [ ] Abstraction / protocol for sending data between esp & renderer
+- [x] Set up UDP server in renderer 
+- [x] Abstraction / protocol for sending data between esp & renderer
+- [ ] Kill threads / end processes when program closed
 
 ### 4. MPU Integration
 
+- [ ] Calibrate sensors
+    - [ ] Larger Accelerometer range
+    - [ ] 0 values when not moving
 - [ ] Add compass overlay
 - [ ] Integrate gyro data
 - [ ] Overlay acceleration data
-- [ ] Connect MPU (Motion Processing Unit) data to the box
+- [ ] Connect MPU (Motion Processing Unit) data move model in renderer
 
 ### 5. LiDAR Integration
 

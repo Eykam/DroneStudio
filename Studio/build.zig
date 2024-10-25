@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const exe_win = b.addExecutable(.{
-        .name = "main_windows",
+        .name = "DroneStudio_x86-64-win-gnu",
         .root_source_file = b.path("src/main.zig"),
         .target = b.resolveTargetQuery(.{
             .os_tag = .windows,

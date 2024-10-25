@@ -4,6 +4,9 @@ const Vec3 = Transformations.Vec3;
 const Pipeline = @import("Pipeline.zig");
 const Scene = Pipeline.Scene;
 const Shape = @import("Shape.zig");
+const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
+const Secrets = _Secrets{};
+const UDP = @import("UDP.zig");
 
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
@@ -67,6 +70,10 @@ pub fn main() !void {
         scene.camera.position.y,
         scene.camera.position.z,
     }});
+
+    //Initialize UDP server
+    var server = UDP.init(Secrets.host_ip, Secrets.host_port, Secrets.client_ip, Secrets.client_port);
+    try server.start();
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {

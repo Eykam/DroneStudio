@@ -4,3 +4,4 @@ zig-out
 .vscode
 sdkconfig
 sdkconfig.old
+Secrets.local.zig
