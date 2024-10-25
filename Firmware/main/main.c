@@ -172,7 +172,7 @@ void wifi_transmission_task(void *pvParameters) {
 
         // If neither queue had data, add a small delay to prevent tight-looping
         if ((bits & ( POINT_QUEUE_BIT)) == 0) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
 
@@ -208,11 +208,11 @@ void read_sensor_task(void *pvParameters) {
                 ESP_LOGI(TAG, "Accel: X=%.2f Y=%.2f Z=%.2f (g)",
                         sensor_data.accel_x, sensor_data.accel_y, sensor_data.accel_z);
                 
-                ESP_LOGI(TAG, "Gyro: X=%.2f Y=%.2f Z=%.2f (deg/s)",
-                        sensor_data.gyro_x, sensor_data.gyro_y, sensor_data.gyro_z);
+                // ESP_LOGI(TAG, "Gyro: X=%.2f Y=%.2f Z=%.2f (deg/s)",
+                        // sensor_data.gyro_x, sensor_data.gyro_y, sensor_data.gyro_z);
                 
-                ESP_LOGI(TAG, "Mag: X=%.2f Y=%.2f Z=%.2f (uT)",
-                        sensor_data.mag_x, sensor_data.mag_y, sensor_data.mag_z);
+                // ESP_LOGI(TAG, "Mag: X=%.2f Y=%.2f Z=%.2f (uT)",
+                        // sensor_data.mag_x, sensor_data.mag_y, sensor_data.mag_z);
                 
                  if (xQueueSend(point_queue, &sensor_data, 0) == pdPASS) {
                     xEventGroupSetBits(event_group, POINT_QUEUE_BIT);

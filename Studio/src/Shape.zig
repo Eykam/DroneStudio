@@ -31,6 +31,7 @@ pub const Mesh = struct {
     draw: ?draw = null,
     drawType: c.GLenum = c.GL_TRIANGLES,
     modelMatrix: [16]f32 = Transformations.identity(),
+    matrix_mutex: std.Thread.Mutex = .{},
 
     pub fn init(vertices: []Vertex, indices: ?[]u32) !Mesh {
         var mesh = Mesh{
@@ -69,6 +70,13 @@ pub const Mesh = struct {
         c.glBindVertexArray(0);
 
         return mesh;
+    }
+
+    pub fn updateMatrix(self: *Self, new_matrix: [16]f32) void {
+        self.matrix_mutex.lock();
+        defer self.matrix_mutex.unlock();
+
+        @memcpy(&self.modelMatrix, &new_matrix);
     }
 
     pub fn setFaceColor(self: *Mesh, face_index: usize, color: [3]f32) void {

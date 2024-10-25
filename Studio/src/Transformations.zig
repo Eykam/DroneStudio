@@ -1,4 +1,5 @@
 const std = @import("std");
+const Mesh = @import("Shape.zig").Mesh;
 
 pub const Vec3 = struct {
     x: f32,
@@ -63,6 +64,29 @@ pub const Vec3 = struct {
         return Vec3.normalize(front);
     }
 };
+
+pub fn createRotationMatrix(roll: f32, pitch: f32) [16]f32 {
+    const rollRad = roll; // assuming roll is already in radians
+    const pitchRad = pitch;
+
+    const cr = @cos(rollRad);
+    const sr = @sin(rollRad);
+    const cp = @cos(pitchRad);
+    const sp = @sin(pitchRad);
+
+    // Combined roll and pitch rotation matrix
+    return .{
+        cp,  sr * sp, cr * sp, 0,
+        0,   cr,      -sr,     0,
+        -sp, sr * cp, cr * cp, 0,
+        0,   0,       0,       1,
+    };
+}
+
+pub fn updateModelMatrix(mesh: *Mesh, roll: f32, pitch: f32) void {
+    const intermediate = createRotationMatrix(roll, pitch);
+    mesh.updateMatrix(intermediate);
+}
 
 pub fn identity() [16]f32 {
     return .{
@@ -148,10 +172,26 @@ pub fn multiply_matrices(a: [16]f32, b: [16]f32) [16]f32 {
     return result;
 }
 
-pub fn radians(degrees: f32) f32 {
-    return degrees * (std.math.pi / 180.0);
+pub fn radians(_degrees: f32) f32 {
+    return _degrees * (std.math.pi / 180.0);
+}
+
+fn degrees(_radians: f32) f32 {
+    return _radians / (std.math.pi / 180.0);
 }
 
 fn tan(x: f32) f32 {
     return @tan(x);
+}
+
+fn atan(x: f32) f32 {
+    return std.math.atan(x);
+}
+
+pub fn angleRoll(angles: Vec3) f32 {
+    return atan(angles.z / std.math.sqrt(angles.x * angles.x + angles.y * angles.y));
+}
+
+pub fn anglePitch(angles: Vec3) f32 {
+    return atan(-1 * angles.x / std.math.sqrt(angles.y * angles.y + angles.z * angles.z));
 }

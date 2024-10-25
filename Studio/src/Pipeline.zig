@@ -29,12 +29,15 @@ pub const Scene = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    meshes: std.StringHashMap(Shape.Mesh),
+    meshes: std.StringHashMap(*Shape.Mesh),
     shaderProgram: u32,
     width: f32,
     height: f32,
     appState: AppState,
     camera: Camera,
+    uModelLoc: c.GLint,
+    uViewLoc: c.GLint,
+    uProjectionLoc: c.GLint,
 
     pub fn init(allocator: std.mem.Allocator, window: ?*c.struct_GLFWwindow) !Self {
         if (window == null) {
@@ -99,21 +102,34 @@ pub const Scene = struct {
 
         c.glDepthFunc(c.GL_LESS);
 
+        // Cache uniform locations
+        const uModelLoc = c.glGetUniformLocation(shaderProgram, "uModel");
+        const uViewLoc = c.glGetUniformLocation(shaderProgram, "uView");
+        const uProjectionLoc = c.glGetUniformLocation(shaderProgram, "uProjection");
+
+        if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
+            std.debug.print("Failed to get one or more uniform locations\n", .{});
+            // Handle error appropriately
+        }
+
         return Self{
             .allocator = allocator,
-            .meshes = std.StringHashMap(Shape.Mesh).init(allocator),
+            .meshes = std.StringHashMap(*Shape.Mesh).init(allocator),
             .shaderProgram = shaderProgram,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
             .appState = AppState{},
             .camera = Camera.init(null, null),
+            .uModelLoc = uModelLoc,
+            .uViewLoc = uViewLoc,
+            .uProjectionLoc = uProjectionLoc,
         };
     }
 
     pub fn deinit(self: *Self) void {
         var it = self.meshes.iterator();
         while (it.next()) |entry| {
-            const mesh = entry.value_ptr;
+            const mesh = entry.value_ptr.*;
             c.glDeleteVertexArrays(1, &mesh.meta.VAO);
             c.glDeleteBuffers(1, &mesh.meta.VBO);
             if (mesh.indices) |indices| {
@@ -123,7 +139,6 @@ pub const Scene = struct {
         }
 
         self.meshes.deinit();
-
         c.glDeleteProgram(self.shaderProgram);
     }
 
@@ -166,7 +181,7 @@ pub const Scene = struct {
         }
     }
 
-    pub fn addMesh(self: *Self, name: []const u8, mesh: Shape.Mesh) !void {
+    pub fn addMesh(self: *Self, name: []const u8, mesh: *Shape.Mesh) !void {
         try self.meshes.put(name, mesh);
     }
 
@@ -181,30 +196,26 @@ pub const Scene = struct {
         // Use the current projection matrix that accounts for window size
         const currentProjection = self.updateProjection();
 
-        // Set common uniforms
-        const viewLoc = c.glGetUniformLocation(self.shaderProgram, "uView");
-        const projectionLoc = c.glGetUniformLocation(self.shaderProgram, "uProjection");
-
-        if (viewLoc != -1) {
-            c.glUniformMatrix4fv(viewLoc, 1, c.GL_FALSE, &view);
+        if (self.uViewLoc != -1) {
+            c.glUniformMatrix4fv(self.uViewLoc, 1, c.GL_FALSE, &view);
         }
-        if (projectionLoc != -1) {
-            c.glUniformMatrix4fv(projectionLoc, 1, c.GL_FALSE, &currentProjection);
+        if (self.uProjectionLoc != -1) {
+            c.glUniformMatrix4fv(self.uProjectionLoc, 1, c.GL_FALSE, &currentProjection);
         }
 
         // Iterate through all meshes in the hash map
         var it = self.meshes.iterator();
         while (it.next()) |entry| {
-            if (entry.value_ptr.draw) |drawFunction| {
-                drawFunction(entry.value_ptr.*);
+            if (entry.value_ptr.*.draw) |drawFunction| {
+                var mesh = entry.value_ptr.*;
+                c.glUniformMatrix4fv(self.uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
+                drawFunction(mesh.*);
             } else {
-                const mesh = entry.value_ptr.*;
+                var mesh = entry.value_ptr.*;
 
                 // Set mesh-specific uniforms
-                const modelLoc = c.glGetUniformLocation(self.shaderProgram, "uModel");
-
-                if (modelLoc != -1) {
-                    c.glUniformMatrix4fv(modelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
+                if (self.uModelLoc != -1) {
+                    c.glUniformMatrix4fv(self.uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
                 }
 
                 c.glBindVertexArray(mesh.meta.VAO);
@@ -406,8 +417,28 @@ fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
     return c.glfwGetPrimaryMonitor();
 }
 
+pub fn openDebugConsole() void {
+    if (@import("builtin").os.tag == .windows) {
+        // Windows-specific console allocation
+        _ = c.AllocConsole();
+
+        // Get the console window handle and show it
+        const console_window = c.GetConsoleWindow();
+        if (console_window != null) {
+            _ = c.ShowWindow(console_window, c.SW_SHOW);
+        }
+
+        // For Windows, we'll use the Windows API directly instead of stdio
+        _ = c.GetStdHandle(c.STD_OUTPUT_HANDLE);
+        _ = c.GetStdHandle(c.STD_ERROR_HANDLE);
+        _ = c.GetStdHandle(c.STD_INPUT_HANDLE);
+    }
+}
+
 // Window creation with proper monitor handling
 pub fn createWindow() ?*c.GLFWwindow {
+    // openDebugConsole();
+
     c.glfwWindowHint(c.GLFW_FOCUSED, c.GLFW_TRUE);
     c.glfwWindowHint(c.GLFW_FOCUS_ON_SHOW, c.GLFW_TRUE);
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_OPENGL_API);

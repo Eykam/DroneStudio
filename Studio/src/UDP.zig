@@ -1,6 +1,9 @@
 // const Queue = @import("./queue.zig").Queue;
 const std = @import("std");
 const time = std.time;
+const Mesh = @import("Shape.zig").Mesh;
+const Transformations = @import("Transformations.zig");
+const Vec3 = Transformations.Vec3;
 
 const Self = @This();
 
@@ -24,15 +27,15 @@ pub fn init(host_ip: []const u8, host_port: u16, client_ip: []const u8, client_p
     };
 }
 
-pub fn start(self: *Self) !void {
-    _ = try std.Thread.spawn(self.spawn_config, receive, .{self});
+pub fn start(self: *Self, mesh: *Mesh, update: anytype) !void {
+    _ = try std.Thread.spawn(self.spawn_config, receive, .{ self, mesh, update });
     // var udp_transmitting_thread = try std.Thread.spawn(spawn_config, send, .{});
 
     // _ = receiveThread.join();
     // _ = udp_transmitting_thread.join();
 }
 
-pub fn receive(self: *Self) !void {
+pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
     std.debug.print("Starting UDP server\n", .{});
     const parsed_address = try std.net.Address.parseIp4("0.0.0.0", self.host_port);
 
@@ -50,7 +53,7 @@ pub fn receive(self: *Self) !void {
     var recv_buf: [1024]u8 = undefined;
 
     while (true) {
-        const recv_len = try std.posix.recvfrom(
+        _ = try std.posix.recvfrom(
             socket,
             &recv_buf,
             0,
@@ -58,22 +61,35 @@ pub fn receive(self: *Self) !void {
             &src_addr_len,
         );
 
-        std.debug.print("====================\nBuffer Length (Bytes): {d}\n", .{recv_len});
-        std.debug.print("Accel => {d}\n", .{[_]f32{
-            @bitCast(std.mem.readInt(u32, recv_buf[0..4], .little)),
-            @bitCast(std.mem.readInt(u32, recv_buf[4..8], .little)),
-            @bitCast(std.mem.readInt(u32, recv_buf[8..12], .little)),
-        }});
-        std.debug.print("Gyro => {d}\n", .{[_]f32{
-            @bitCast(std.mem.readInt(u32, recv_buf[12..16], .little)),
-            @bitCast(std.mem.readInt(u32, recv_buf[16..20], .little)),
-            @bitCast(std.mem.readInt(u32, recv_buf[20..24], .little)),
-        }});
-        std.debug.print("Mag => {d}\n", .{[_]f32{
-            @bitCast(std.mem.readInt(u32, recv_buf[24..28], .little)),
-            @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little)),
-            @bitCast(std.mem.readInt(u32, recv_buf[32..36], .little)),
-        }});
+        // std.debug.print("====================\nBuffer Length (Bytes): {d}\n", .{recv_len});
+
+        const accel = Vec3{
+            .x = @bitCast(std.mem.readInt(u32, recv_buf[0..4], .little)),
+            .z = @bitCast(std.mem.readInt(u32, recv_buf[4..8], .little)),
+            .y = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[8..12], .little))),
+        };
+
+        const roll = Transformations.angleRoll(accel);
+        const pitch = Transformations.anglePitch(accel);
+
+        // std.debug.print("Roll => {d}\nPitch => {d}\n", .{ roll, pitch });
+        update(mesh, roll, pitch);
+
+        // std.debug.print("Accel => {d}\n", .{[_]f32{
+        //     accel.x,
+        //     accel.y,
+        //     accel.z,
+        // }});
+        // std.debug.print("Gyro => {d}\n", .{[_]f32{
+        //     @bitCast(std.mem.readInt(u32, recv_buf[12..16], .little)),
+        //     @bitCast(std.mem.readInt(u32, recv_buf[16..20], .little)),
+        //     @bitCast(std.mem.readInt(u32, recv_buf[20..24], .little)),
+        // }});
+        // std.debug.print("Mag => {d}\n", .{[_]f32{
+        //     @bitCast(std.mem.readInt(u32, recv_buf[24..28], .little)),
+        //     @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little)),
+        //     @bitCast(std.mem.readInt(u32, recv_buf[32..36], .little)),
+        // }});
     }
 }
 

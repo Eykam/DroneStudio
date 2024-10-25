@@ -7,7 +7,7 @@ static const char *TAG = "MPU9250";
 
 // Static variables
 static i2c_port_t i2c_port;
-static float accel_scale = 16384.0f;  // ±2g default
+static float accel_scale = 4096.0f;  // ±8g default
 static float gyro_scale = 131.0f;     // ±250°/s default
 static float mag_scale[3] = {0};
 
@@ -95,7 +95,7 @@ esp_err_t mpu9250_init(mpu9250_config_t *config)
     if (ret != ESP_OK) return ret;
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    ret = write_byte(MPU9250_ADDR, ACCEL_CONFIG, 0x00);  // ±2g range
+    ret = write_byte(MPU9250_ADDR, ACCEL_CONFIG, 0x10);  // ±8g range
     if (ret != ESP_OK) return ret;
 
     ret = write_byte(MPU9250_ADDR, GYRO_CONFIG, 0x00);   // ±250°/s range

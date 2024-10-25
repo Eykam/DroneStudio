@@ -58,10 +58,10 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 ### 4. MPU Integration
 
-- [ ] Kolman filter or some type of cleaning of MPU data
+- [ ] Kalman filter or some type of cleaning of MPU data
 - [ ] Connect MPU data to transform model in renderer
 - [ ] Calibrate sensors
-    - [ ] Larger Accelerometer range
+    - [X] Larger Accelerometer range (+- 8g's)
     - [ ] 0 values when not moving
 - [ ] Add compass overlay
 - [ ] Overlay avg of sensor data

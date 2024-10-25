@@ -46,21 +46,21 @@ pub fn main() !void {
     scene.setupCallbacks(window);
 
     //Initializing Entities
-    const grid = try Shape.Grid.init(alloc, 1000, 5);
-    const axis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
-    const triangle = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    const box = try Shape.Box.init(alloc, null, null, null, null);
+    var grid = try Shape.Grid.init(alloc, 1000, 5);
+    var axis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
+    var triangle = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
+    var box = try Shape.Box.init(alloc, null, null, null, null);
 
     //Adding Entities to Scene
-    try scene.addMesh("grid", grid);
-    try scene.addMesh("axis", axis);
-    try scene.addMesh("triangle", triangle);
-    try scene.addMesh("rectangle", box);
+    try scene.addMesh("grid", &grid);
+    try scene.addMesh("axis", &axis);
+    try scene.addMesh("triangle", &triangle);
+    try scene.addMesh("rectangle", &box);
 
     //Debugging Entities
     scene.getMeshNames();
 
-    grid.debug();
+    // grid.debug();
     axis.debug();
     triangle.debug();
     box.debug();
@@ -72,8 +72,13 @@ pub fn main() !void {
     }});
 
     //Initialize UDP server
-    var server = UDP.init(Secrets.host_ip, Secrets.host_port, Secrets.client_ip, Secrets.client_port);
-    try server.start();
+    var server = UDP.init(
+        Secrets.host_ip,
+        Secrets.host_port,
+        Secrets.client_ip,
+        Secrets.client_port,
+    );
+    try server.start(&box, Transformations.updateModelMatrix);
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {
