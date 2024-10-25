@@ -53,7 +53,7 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Develop ESP firmware for MPU-9250
 - [X] Set up UDP server on ESP
 - [x] Set up UDP server in renderer 
-- [x] Abstraction / protocol for sending data between esp & renderer
+- [x] Convert []u8 into little-endian signed f32
 - [ ] Kill threads / end processes when program closed
 
 ### 4. MPU Integration
