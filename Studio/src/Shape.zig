@@ -1,6 +1,7 @@
 // src/Shapes.zig
 const std = @import("std");
 const Transformations = @import("Transformations.zig");
+const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
 const Debug = @import("Debug.zig");
 
@@ -31,7 +32,8 @@ pub const Mesh = struct {
     draw: ?draw = null,
     drawType: c.GLenum = c.GL_TRIANGLES,
     modelMatrix: [16]f32 = Transformations.identity(),
-    matrix_mutex: std.Thread.Mutex = .{},
+    rollKalman: KalmanState = Transformations.initKalmanState(0.0, 1.0),
+    pitchKalman: KalmanState = Transformations.initKalmanState(0.0, 1.0),
 
     pub fn init(vertices: []Vertex, indices: ?[]u32) !Mesh {
         var mesh = Mesh{
@@ -70,13 +72,6 @@ pub const Mesh = struct {
         c.glBindVertexArray(0);
 
         return mesh;
-    }
-
-    pub fn updateMatrix(self: *Self, new_matrix: [16]f32) void {
-        self.matrix_mutex.lock();
-        defer self.matrix_mutex.unlock();
-
-        @memcpy(&self.modelMatrix, &new_matrix);
     }
 
     pub fn setFaceColor(self: *Mesh, face_index: usize, color: [3]f32) void {

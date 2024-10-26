@@ -65,27 +65,113 @@ pub const Vec3 = struct {
     }
 };
 
-pub fn createRotationMatrix(roll: f32, pitch: f32) [16]f32 {
-    const rollRad = roll; // assuming roll is already in radians
-    const pitchRad = pitch;
+pub const KalmanState = struct {
+    angle: f32, // Current angle estimate
+    bias: f32, // Gyro bias estimate
+    P: [2][2]f32, // Error covariance matrix
+    Q_angle: f32, // Process noise for angle
+    Q_bias: f32, // Process noise for bias
+    R_measure: f32, // Measurement noise
+    dt: f32, // Time step
+};
 
-    const cr = @cos(rollRad);
-    const sr = @sin(rollRad);
-    const cp = @cos(pitchRad);
-    const sp = @sin(pitchRad);
-
-    // Combined roll and pitch rotation matrix
-    return .{
-        cp,  sr * sp, cr * sp, 0,
-        0,   cr,      -sr,     0,
-        -sp, sr * cp, cr * cp, 0,
-        0,   0,       0,       1,
+pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
+    return KalmanState{
+        .angle = initial_angle,
+        .bias = initial_bias,
+        .P = .{
+            .{ 0.0001, 0.0 },
+            .{ 0.0, 0.0001 },
+        },
+        .Q_angle = 0.001,
+        .Q_bias = 0.003,
+        .R_measure = 0.03,
+        .dt = 1.0 / 1000.0, // Assuming 100Hz update rate
     };
 }
 
-pub fn updateModelMatrix(mesh: *Mesh, roll: f32, pitch: f32) void {
-    const intermediate = createRotationMatrix(roll, pitch);
-    mesh.updateMatrix(intermediate);
+pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32) f32 {
+    // Predict step
+    const rate = gyro_rate - state.bias;
+    state.angle += state.dt * rate;
+
+    // Update error covariance matrix
+    state.P[0][0] += state.dt * (state.dt * state.P[1][1] - state.P[0][1] - state.P[1][0] + state.Q_angle);
+    state.P[0][1] -= state.dt * state.P[1][1];
+    state.P[1][0] -= state.dt * state.P[1][1];
+    state.P[1][1] += state.Q_bias * state.dt;
+
+    // Calculate Kalman gain
+    const S = state.P[0][0] + state.R_measure;
+    const K = .{
+        state.P[0][0] / S,
+        state.P[1][0] / S,
+    };
+
+    // Update step
+    const y = accel_angle - state.angle;
+    state.angle += K[0] * y;
+    state.bias += K[1] * y;
+
+    // Update error covariance matrix
+    const P00_temp = state.P[0][0];
+    const P01_temp = state.P[0][1];
+
+    state.P[0][0] -= K[0] * P00_temp;
+    state.P[0][1] -= K[0] * P01_temp;
+    state.P[1][0] -= K[1] * P00_temp;
+    state.P[1][1] -= K[1] * P01_temp;
+
+    return state.angle;
+}
+
+// const pitch: [16]f32 = [_]f32{};
+//
+pub fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
+    const cy = @cos(yaw); // cos of Y-axis rotation (yaw)
+    const sy = @sin(yaw); // sin of Y-axis rotation (yaw)
+    const cp = @cos(pitch); // cos of X-axis rotation (pitch)
+    const sp = @sin(pitch); // sin of X-axis rotation (pitch)
+    const cr = @cos(roll); // cos of Z-axis rotation (roll)
+    const sr = @sin(roll); // sin of Z-axis rotation (roll)
+
+    // Combined rotation matrix (in row-major order)
+    return .{
+        // First column
+        cy * cr,                 -cy * sr,                sy,       0,
+        // Second column
+        sp * sy * cr + cp * sr,  -sp * sy * sr + cp * cr, -sp * cy, 0,
+        // Third column
+        -cp * sy * cr + sp * sr, cp * sy * sr + sp * cr,  cp * cy,  0,
+        // Fourth column
+        0,                       0,                       0,        1,
+    };
+}
+pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3) !void {
+    // const sensitivity: f32 = 1.0;
+
+    // const norm_accel = accel.normalize();
+
+    // Scale down the gyro values as well
+    const scaled_gyro = Vec3{
+        .x = radians(gyro.x),
+        .y = radians(gyro.y),
+        .z = radians(gyro.z),
+    };
+
+    const accel_roll = angleRoll(accel);
+    // const accel_pitch = anglePitch(scaled_accel);
+
+    // Update Kalman filter with scaled values
+    const filtered_roll = updateKalman(&mesh.rollKalman, accel_roll, scaled_gyro.x);
+    // const filtered_pitch = updateKalman(&mesh.pitchKalman, accel_pitch, scaled_gyro.y);
+
+    //   mesh.yaw += scaled_gyro.z * mesh.rollKalman.dt; // Increment yaw using gyro z-axis data
+
+    mesh.modelMatrix = createRotationMatrix(0.0, // Yaw (rotation around Y-axis)
+        0.0, // Pitch (rotation around X-axis)
+        filtered_roll // Roll (rotation around Z-axis)
+    );
 }
 
 pub fn identity() [16]f32 {
@@ -188,10 +274,18 @@ fn atan(x: f32) f32 {
     return std.math.atan(x);
 }
 
+fn atan2(x: f32, y: f32) f32 {
+    return std.math.atan2(x, y);
+}
+
 pub fn angleRoll(angles: Vec3) f32 {
-    return atan(angles.z / std.math.sqrt(angles.x * angles.x + angles.y * angles.y));
+    // Roll (rotation around X axis)
+    // In OpenGL: Y is up, Z is backward
+    return atan2(angles.y, angles.x);
 }
 
 pub fn anglePitch(angles: Vec3) f32 {
-    return atan(-1 * angles.x / std.math.sqrt(angles.y * angles.y + angles.z * angles.z));
+    // Pitch (rotation around Z axis)
+    // In OpenGL: Y is up, Z is backward
+    return atan2(-angles.x, @sqrt(angles.y * angles.y + angles.z * angles.z));
 }

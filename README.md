@@ -101,16 +101,26 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Import GLTF models
 - [ ] Scan drone and import its 3D model
 
-### 10. Motor Control
+### 10. Drone Simulator
+
+- [ ] Import / Randomly generate scene
+- [ ] Scene invisible but vertex data available
+- [ ] Spawn drone in random position
+- [ ] Raycasting to simulate lidar
+- [ ] Map scene and route taken by drone w/ collisions
+- [ ] Make scene dynamic / changing overtime to see behavior
+
+### 11. Motor Control
 
 - [ ] Calibrate motor speeds
 - [ ] Implement motor speed control algorithms
 
-### 11. Synchronization
+### 12. Synchronization
 
 - [ ] Implement synchronization for multiple devices or components
 
-### 12. Convert entire Repo to Zig
+
+### 13. Convert entire Repo to Zig
 
 - [ ] Generate glad bindings in zig
 - [ ] Create HAL for ESP32 in Zig
