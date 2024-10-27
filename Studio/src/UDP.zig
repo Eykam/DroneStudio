@@ -75,7 +75,13 @@ pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
             .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[16..20], .little))),
         };
 
-        try update(mesh, accel, gyro);
+        const mag = Vec3{
+            .x = @bitCast(std.mem.readInt(u32, recv_buf[24..28], .little)),
+            .y = @bitCast(std.mem.readInt(u32, recv_buf[32..36], .little)),
+            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little))),
+        };
+
+        try update(mesh, accel, gyro, mag);
 
         // std.debug.print("Accel => {d}\n", .{[_]f32{
         //     accel.x,

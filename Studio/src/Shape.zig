@@ -32,8 +32,11 @@ pub const Mesh = struct {
     draw: ?draw = null,
     drawType: c.GLenum = c.GL_TRIANGLES,
     modelMatrix: [16]f32 = Transformations.identity(),
-    rollKalman: KalmanState = Transformations.initKalmanState(0.0, 1.0),
-    pitchKalman: KalmanState = Transformations.initKalmanState(0.0, 1.0),
+    rollKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
+    pitchKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
+    yawKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
+    yaw: f32 = 0.0,
+    // yawKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
 
     pub fn init(vertices: []Vertex, indices: ?[]u32) !Mesh {
         var mesh = Mesh{

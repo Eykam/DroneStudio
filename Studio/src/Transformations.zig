@@ -164,18 +164,20 @@ pub inline fn createYawMatrix(angle_rad: f32) [16]f32 {
     };
 }
 pub inline fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
-    _ = yaw;
+    // _ = yaw;
     // _ = pitch;
     // _ = roll;
 
-    const rotation = multiply_matrices(createRollMatrix(roll), createPitchMatrix(pitch));
+    // return createYawMatrix(yaw);
+    const rotation = multiply_matrices(createYawMatrix(yaw), multiply_matrices(createRollMatrix(roll), createPitchMatrix(pitch)));
 
     return rotation;
 }
-pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3) !void {
+pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3, mag: Vec3) !void {
     // const sensitivity: f32 = 1.0;
 
     // const norm_accel = accel.normalize();
+    _ = mag;
 
     const scaled_gyro = Vec3{
         .x = radians(gyro.x),
@@ -190,10 +192,17 @@ pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3) !void {
     const filtered_roll = updateKalman(&mesh.rollKalman, accel_roll, scaled_gyro.x);
     const filtered_pitch = updateKalman(&mesh.pitchKalman, accel_pitch, scaled_gyro.z);
 
-    //   mesh.yaw += scaled_gyro.z * mesh.rollKalman.dt; // Increment yaw using gyro z-axis data
+    // const raw_yaw = angleYaw(mag, filtered_pitch, filtered_roll);
+    // const filtered_yaw = updateKalman(&mesh.yawKalman, raw_yaw, scaled_gyro.y);
+
+    // _ = filtered_yaw;
+
+    mesh.yaw += -1.0 * scaled_gyro.y * mesh.rollKalman.dt; // Increment yaw using gyro z-axis data
 
     mesh.modelMatrix = createRotationMatrix(
-        0.0, // Yaw (rotation around Y-axis)
+        mesh.yaw, // Yaw (rotation around Y-axis)
+        // 0.0,
+        // 0.0,
         filtered_pitch, // Pitch (rotation around X-axis)
         filtered_roll, // Roll (rotation around Z-axis)
     );
@@ -312,4 +321,22 @@ pub fn anglePitch(angles: Vec3) f32 {
     // Pitch (rotation around Z axis)
     // In OpenGL: Y is up, Z is backward
     return atan2(angles.z, @sqrt(angles.x * angles.x + angles.y * angles.y));
+}
+
+pub fn angleYaw(angles: Vec3, pitch: f32, roll: f32) f32 {
+    const mag_x = angles.x * @cos(pitch) +
+        angles.y * @sin(roll) * @sin(pitch) +
+        angles.z * @cos(roll) * @sin(pitch);
+
+    const mag_y = angles.y * @cos(roll) -
+        angles.z * @sin(roll);
+
+    // Calculate heading
+    // const yaw = atan2(-mag_y, mag_x);
+
+    // Convert to degrees and normalize to 0-360
+    // yaw = degrees(yaw);
+    // if (yaw < 0) yaw += 360;
+
+    return atan2(-mag_y, mag_x);
 }
