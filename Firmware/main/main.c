@@ -138,9 +138,6 @@ void wifi_transmission_task(void *pvParameters) {
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(PORT);
 
-    // Set socket buffer size
-    int sendbuff = 64000;  // 16KB buffer
-    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sendbuff, sizeof(sendbuff));
 
     while (1) {
         if (sock < 0) {
@@ -158,7 +155,7 @@ void wifi_transmission_task(void *pvParameters) {
             POINT_QUEUE_BIT,
             pdTRUE,
             pdFALSE,
-            pdMS_TO_TICKS(1)
+            0
         );
 
         if (bits & POINT_QUEUE_BIT) {
@@ -173,8 +170,8 @@ void wifi_transmission_task(void *pvParameters) {
                            (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             
             if (err < 0) {
-                ESP_LOGE(TAG, "Error during sending: errno %d", errno);
-                vTaskDelay(pdMS_TO_TICKS(5));  // Small backoff on error
+                vTaskDelay(1);
+                // ESP_LOGE(TAG, "Error during sending: errno %d", errno);
             }
         }
 
