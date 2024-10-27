@@ -54,6 +54,7 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Set up UDP server on ESP
 - [x] Set up UDP server in renderer 
 - [x] Convert []u8 into little-endian signed f32
+- [ ] Add timestamp / checksum to UDP packets to discard old poses
 - [ ] Kill threads / end processes when program closed
 
 ### 4. MPU Integration

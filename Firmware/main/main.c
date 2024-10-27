@@ -131,49 +131,53 @@ void wifi_init_sta(void)
 
 void wifi_transmission_task(void *pvParameters) {
     mpu9250_data_t data;
-    
-    // Create a UDP socket
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
 
     struct sockaddr_in dest_addr;
     dest_addr.sin_addr.s_addr = inet_addr(CLIENT_IP);
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(8035);
+    dest_addr.sin_port = htons(PORT);
+
+    // Set socket buffer size
+    int sendbuff = 64000;  // 16KB buffer
+    setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sendbuff, sizeof(sendbuff));
 
     while (1) {
         if (sock < 0) {
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            if (sock != -1) {
+                shutdown(sock, 0);
+                close(sock);
+            }
             sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
             continue;
         }
 
-        // Check both queues without blocking
         EventBits_t bits = xEventGroupWaitBits(
             event_group,
             POINT_QUEUE_BIT,
-            pdTRUE,  // Clear bits before returning
-            pdFALSE,  // Don't wait for all bits
-            0  // Don't block
+            pdTRUE,
+            pdFALSE,
+            pdMS_TO_TICKS(1)
         );
 
         if (bits & POINT_QUEUE_BIT) {
-            if (xQueueReceive(point_queue, &data, 0) == pdPASS) {
-                // uint16_t packet[PACKET_SIZE];
-                // Pack data into the packet
-                // packet[0] = data;
-                
-                int err = sendto(sock, &data, sizeof(mpu9250_data_t), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+            // Clear the queue by reading until empty, keeping only the last value
+            mpu9250_data_t latest_data;
+            while (xQueueReceive(point_queue, &latest_data, 0) == pdPASS) {
+                data = latest_data;  // Keep overwriting with newer values
+            }
+
+            // Send the most recent value
+            int err = sendto(sock, &data, sizeof(mpu9250_data_t), 0, 
+                           (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             
-                if (err < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                }
+            if (err < 0) {
+                ESP_LOGE(TAG, "Error during sending: errno %d", errno);
+                vTaskDelay(pdMS_TO_TICKS(5));  // Small backoff on error
             }
         }
 
-        // If neither queue had data, add a small delay to prevent tight-looping
-        if ((bits & ( POINT_QUEUE_BIT)) == 0) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }
     }
 
     shutdown(sock, 0);
@@ -181,48 +185,37 @@ void wifi_transmission_task(void *pvParameters) {
 }
 
 void read_sensor_task(void *pvParameters) {
-    // Configure MPU9250
     mpu9250_config_t mpu_config = {
         .i2c_port = I2C_NUM_0,
-        .sda_pin = GPIO_NUM_26,  // Adjust according to your setup
-        .scl_pin = GPIO_NUM_25,  // Adjust according to your setup
-        .clk_speed = 400000      // 400 KHz
+        .sda_pin = GPIO_NUM_26,
+        .scl_pin = GPIO_NUM_25,
+        .clk_speed = 400000
     };
 
-    // Initialize MPU9250
     esp_err_t ret = mpu9250_init(&mpu_config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize MPU9250: %d", ret);
         return;
     }
 
-    int counter = 0;
+    // TickType_t last_wake_time = xTaskGetTickCount();
+    // const TickType_t frequency = 1;
 
-    // Main loop
     while (1) {
         mpu9250_data_t sensor_data;
         ret = mpu9250_read_sensors(&sensor_data);
         
-        if (counter == 0){
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Accel: X=%.2f Y=%.2f Z=%.2f (g)",
-                        sensor_data.accel_x, sensor_data.accel_y, sensor_data.accel_z);
-                
-                // ESP_LOGI(TAG, "Gyro: X=%.2f Y=%.2f Z=%.2f (deg/s)",
-                        // sensor_data.gyro_x, sensor_data.gyro_y, sensor_data.gyro_z);
-                
-                // ESP_LOGI(TAG, "Mag: X=%.2f Y=%.2f Z=%.2f (uT)",
-                        // sensor_data.mag_x, sensor_data.mag_y, sensor_data.mag_z);
-                
-                 if (xQueueSend(point_queue, &sensor_data, 0) == pdPASS) {
-                    xEventGroupSetBits(event_group, POINT_QUEUE_BIT);
-                }
-            } else{
-                ESP_LOGI(TAG, "Failed to obtained data from sensor");
-            }
+        if (ret == ESP_OK) {
+            // Overwrite old data in queue - if queue is full, overwrite the oldest value
+            xQueueOverwrite(point_queue, &sensor_data);
+            xEventGroupSetBits(event_group, POINT_QUEUE_BIT);
+        } else {
+            ESP_LOGI(TAG, "Failed to obtain data from sensor");
         }
-
-        // counter += 1;
+        
+        // Maintain precise timing for sensor reads
+        vTaskDelay(pdMS_TO_TICKS(1));
+        // vTaskDelayUntil(&last_wake_time, frequency);
     }
 }
 
@@ -238,7 +231,7 @@ void app_main(void)
     init_nvs();
     wifi_init_sta();
 
-    point_queue = xQueueCreate(100, sizeof(mpu9250_data_t));
+    point_queue = xQueueCreate(1, sizeof(mpu9250_data_t));
     event_group = xEventGroupCreate();
 
     xTaskCreatePinnedToCore(
@@ -248,7 +241,7 @@ void app_main(void)
         NULL,
         5,
         NULL,
-        0  // Pin to Core 1
+        0  // Pin to Core 0
     );
 
     xTaskCreatePinnedToCore(

@@ -77,16 +77,16 @@ pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
 
         try update(mesh, accel, gyro);
 
-        std.debug.print("Accel => {d}\n", .{[_]f32{
-            accel.x,
-            accel.y,
-            accel.z,
-        }});
-        std.debug.print("Gyro => {d}\n", .{[_]f32{
-            gyro.x,
-            gyro.y,
-            gyro.z,
-        }});
+        // std.debug.print("Accel => {d}\n", .{[_]f32{
+        //     accel.x,
+        //     accel.y,
+        //     accel.z,
+        // }});
+        // std.debug.print("Gyro => {d}\n", .{[_]f32{
+        //     gyro.x,
+        //     gyro.y,
+        //     gyro.z,
+        // }});
         // std.debug.print("Mag => {d}\n", .{[_]f32{
         //     @bitCast(std.mem.readInt(u32, recv_buf[24..28], .little)),
         //     @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little)),
