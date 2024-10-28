@@ -21,6 +21,7 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Each vertex assigned a color using shaders
 - [X] Render box
 - [X] Color each face of the box differently
+- [ ] Create Hierarchy of nodes instead of flatmap of meshes
 - [ ] Change line rendering to quads
 
 ### 1.2 Camera
@@ -54,15 +55,17 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Set up UDP server on ESP
 - [x] Set up UDP server in renderer 
 - [x] Convert []u8 into little-endian signed f32
+- [ ] Optimize Wifi UDP Tx speed (currently around 500Kb/s ideally would need 1Mb/s)
 - [ ] Add timestamp / checksum to UDP packets to discard old poses
 - [ ] Kill threads / end processes when program closed
 
 ### 4. MPU Integration
 
 - [X] Connect Accelerometer data to cube uniform
-- [ ] Connect Gyro data to cube uniform
+- [X] Connect Gyro data to cube uniform
 - [ ] Connect Magnetometer data to cube uniform 
-- [ ] Kalman filter or some type of cleaning of MPU data
+- [X] Kalman filter or some type of cleaning of MPU data
+- [ ] Measure fps from MPU & incrementally update kalman filter delta time 
 - [ ] Calibrate sensors
     - [X] Larger Accelerometer range (+- 8g's)
     - [ ] 0 values when not moving
@@ -72,18 +75,12 @@ Later goals are to add object avoidance, image detection and synchronization wit
 ### 5. LiDAR Integration
 
 - [ ] Develop ESP firmware for LiDAR integration
-- [ ] Find way to calibrate sensors / get physical location of areas in FOV
-- [ ] Visualize FOV's captured by scanners in 3D space relative to drone
+- [ ] Relate SPAD matrix with current pose from MPU
 - [ ] Interpolate points between SPAD matrix obtained from sensor
+- [ ] Visualize FOV's captured by scanners in 3D space relative to drone
 
-### 6. Camera and Depth Sensing
 
-- [ ] Use camera to stream image data to renderer
-- [ ] Use image data to color mesh
-- [ ] Use some image => depth map transformers
-- [ ] Maybe some segmentation? 
-
-### 7. Visualization
+### 6. Visualization
 
 - [ ] Cube Marching to turn point clouds into mesh.
 - [ ] Visualize 3D models of scan in DroneStudio
@@ -91,11 +88,18 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Colored / textured meshes
 - [ ] If segmented objects. highlight / click on those with details
 
-### 8. SLAM (Simultaneous Localization and Mapping)
+
+### 7. SLAM (Simultaneous Localization and Mapping)
 
 - [ ] Combine MPU & LiDAR / Image data to associate FOV with location
 - [ ] Implement SLAM to stitch together FOV's / map the room in 3D
 
+### 8. Camera and Depth Sensing
+
+- [ ] Use camera to stream image data to renderer
+- [ ] Use image data to color mesh
+- [ ] Use some image => depth map transformers
+- [ ] Maybe some segmentation? 
 
 ### 9. 3D Model Integration
 
