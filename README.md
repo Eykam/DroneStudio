@@ -21,8 +21,9 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Each vertex assigned a color using shaders
 - [X] Render box
 - [X] Color each face of the box differently
-- [ ] Create Hierarchy of nodes instead of flatmap of meshes
+- [ ] Create hierarchy of nodes instead of flatmap of meshes
 - [ ] Change line rendering to quads
+- [ ] Kill threads / end processes when program closed
 
 ### 1.2 Camera
 
@@ -33,11 +34,13 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Zooming in / out
 - [ ] Look into using openGL Frustum instead
 
-### 2. Box Interaction
+### 2. Model Controls 
 
 - [ ] Implement yaw / roll based on keyboard movement
 - [ ] Implement pitch using mouse inputs
 - [ ] Orbit Controls instead of Perspective
+- [ ] UDP Tx from renderer with Yaw / Pitch / Roll / Throttle
+- [ ] UDP Rx on ESP to receive & control drone
 
 ### 2.1 Build system and ImGui Integration
 
@@ -49,7 +52,7 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] FPS counter
 - [ ] Debug / view meshes and vertices
 
-### 3. Communication
+### 3. Obtaining Poses
 
 - [X] Develop ESP firmware for MPU-9250
 - [X] Set up UDP server on ESP
@@ -57,20 +60,21 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [x] Convert []u8 into little-endian signed f32
 - [ ] Optimize Wifi UDP Tx speed (currently around 500Kb/s ideally would need 1Mb/s)
 - [ ] Add timestamp / checksum to UDP packets to discard old poses
-- [ ] Kill threads / end processes when program closed
 
-### 4. MPU Integration
+### 4. MPU Integration with Model
 
-- [X] Connect Accelerometer data to cube uniform
-- [X] Connect Gyro data to cube uniform
-- [ ] Connect Magnetometer data to cube uniform 
-- [X] Kalman filter or some type of cleaning of MPU data
+- [X] Obtain Accelerometer data in renderer
+- [X] Obtain Gyro data in renderer
+- [X] Obtain Magnetometer in renderer
+- [X] Kalman filter on gyro & accelerometer for estimating Pitch and Roll
+- [ ] Kalman filter on gyro and magnetometer for estimating Yaw
 - [ ] Measure fps from MPU & incrementally update kalman filter delta time 
 - [ ] Calibrate sensors
     - [X] Larger Accelerometer range (+- 8g's)
     - [ ] 0 values when not moving
 - [ ] Add compass overlay
-- [ ] Overlay avg of sensor data
+- [ ] Overlay avg of sensor data / Tx rate
+- [ ] Lidar / Barometric sensor for altitude control
 
 ### 5. LiDAR Integration
 
@@ -79,8 +83,14 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Interpolate points between SPAD matrix obtained from sensor
 - [ ] Visualize FOV's captured by scanners in 3D space relative to drone
 
+### 6. Motor Control
+- [X] ESP firmware for driving BLHELI_S based ESC
+- [ ] Lerp between current & min throttle when changing states
+- [ ] Arduino as bootloader to flash necessary config to ESC
+- [ ] PID loop
+- [ ] Look into using smaller chassis / motors
 
-### 6. Visualization
+### 7. Visualization
 
 - [ ] Cube Marching to turn point clouds into mesh.
 - [ ] Visualize 3D models of scan in DroneStudio
@@ -88,25 +98,24 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Colored / textured meshes
 - [ ] If segmented objects. highlight / click on those with details
 
-
-### 7. SLAM (Simultaneous Localization and Mapping)
+### 8. SLAM (Simultaneous Localization and Mapping)
 
 - [ ] Combine MPU & LiDAR / Image data to associate FOV with location
 - [ ] Implement SLAM to stitch together FOV's / map the room in 3D
 
-### 8. Camera and Depth Sensing
+### 9. Camera and Depth Sensing
 
 - [ ] Use camera to stream image data to renderer
 - [ ] Use image data to color mesh
 - [ ] Use some image => depth map transformers
 - [ ] Maybe some segmentation? 
 
-### 9. 3D Model Integration
+### 10. 3D Model Integration
 
 - [ ] Import GLTF models
 - [ ] Scan drone and import its 3D model
 
-### 10. Drone Simulator
+### 11. Drone Simulator
 
 - [ ] Import / Randomly generate scene
 - [ ] Scene invisible but vertex data available
@@ -115,17 +124,23 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [ ] Map scene and route taken by drone w/ collisions
 - [ ] Make scene dynamic / changing overtime to see behavior
 
-### 11. Motor Control
-
-- [ ] Calibrate motor speeds
-- [ ] Implement motor speed control algorithms
-
 ### 12. Synchronization
 
 - [ ] Implement synchronization for multiple devices or components
+- [ ] Swarm mode vs. Divide & conquer?
+- [ ] maybe some type of animations?
 
 
-### 13. Convert entire Repo to Zig
+### 13. Create custom PCB's for ESC
+
+- [ ] Model components in LTSpice
+- [ ] Create PCB model gerber file
+- [ ] Print PCB's from manufacturer
+- [ ] Solder SMD's to printed pcb
+- [ ] Flash BLHELI_S or write custom firmware
+
+
+### 14. Convert entire Repo to Zig
 
 - [ ] Generate glad bindings in zig
 - [ ] Create HAL for ESP32 in Zig
