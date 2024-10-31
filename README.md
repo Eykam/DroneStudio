@@ -1,13 +1,42 @@
 # Drone Studio
 
-Autonomous drone firmware and viewer for data collected through various sensors.
+Autonomous drone firmware, renderer and simulator for mapping environments.
 
+![alt text](https://www.reddit.com/media?url=https%3A%2F%2Fpreview.redd.it%2Fnew-app-idea-quest-3-as-matterport-cheaper-replacement-v0-6qz7bt3b0s0d1.jpeg%3Fwidth%3D1080%26crop%3Dsmart%26auto%3Dwebp%26s%3De5d04b6bd36de0844c1d7ca5f5183b35d7e42507)
 
 ## Overall Goal
 
-Goal at the moment is to have the drone autonomously map a room in 3D using lidar / photogrammetry. Once the room is mapped, it should hover in the center. 
+Goal at the moment is to have the drone autonomously map a building in 3D using LiDAR / photogrammetry. The renderer will then allow the user to walk around, view the scene like a video game. 
+
+Should be able to use pose from MPU (mpu-9250) along with distance data from lidar sensors to construct pose-graph of environment. With current sensors, would be able to obtain and transmit 1 khz of pose data, and 60 hz of distance data (looking into faster LiDAR sensors), over a UDP Tx server. The UDP Tx server will be hosted on a 2.4ghz access point from the esp32.
 
 Later goals are to add object avoidance, image detection and synchronization with other drones within the same network / swarm.
+
+## Part list
+
+### Drone
+- Flight Controller => Esp32
+  - Motion Processing Unit (MPU) => Mpu-9250
+  - LiDAR => VL53L1X 
+- Electronic Speed Controller (ESC) => Jhemcu EM-40 4-in-1
+- Frame => 5" Carbon Fiber (looking into making 3" 3D printed frame)
+- Motors => 2205 2300kV 3-phase BLDC motor
+- Propellers => 5" (included with motors)
+- LiPo Battery => 3s 2200 mAh (35C)
+
+### Tools Needed
+- Linux / Windows Computer (might cross-compile for darwin later)
+- 3D Printer
+- Soldering Iron
+- Flux
+- Power Supply / battery chargers
+- 22 awg wire
+- Wire cutter / stripper
+- Resistors (optional)
+- Potentiometer (optional)
+- Multimeter (optional)
+- Oscilloscope (optional)
+
 
 ## Milestones
 
@@ -58,9 +87,9 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Set up UDP server on ESP
 - [x] Set up UDP server in renderer 
 - [x] Convert []u8 into little-endian signed f32
-- [X] Optimize Wifi UDP Tx speed (currently around 500Kb/s ideally would need 1Mb/s)
-- [ ] Try to get 1 kHz refresh rate on gyro
-- [ ] Add timestamp / checksum to UDP packets to discard old poses
+- [X] Optimize Wifi UDP Tx speed (change to AP instead of relying on router)
+- [X] Try to get 1 kHz refresh rate on gyro
+- [X] Add timestamp / checksum to UDP packets to discard old poses
 
 ### 4. MPU Integration with Model
 
@@ -69,7 +98,8 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Obtain Magnetometer in renderer
 - [X] Kalman filter on gyro & accelerometer for estimating Pitch and Roll
 - [ ] Kalman filter on gyro and magnetometer for estimating Yaw
-- [ ] Measure fps from MPU & incrementally update kalman filter delta time 
+- [X] Measure fps from MPU & incrementally update kalman filter delta time
+- [ ] Find out why varying dt on kalman filter results in janky movement
 - [ ] Calibrate sensors
     - [X] Larger Accelerometer range (+- 8g's)
     - [ ] 0 values when not moving
@@ -86,6 +116,8 @@ Later goals are to add object avoidance, image detection and synchronization wit
 
 ### 6. Motor Control
 - [X] ESP firmware for driving BLHELI_S based ESC
+- [ ] Create testing rig for running motor w/ propellers
+- [X] Add support for potentiometer based throttle
 - [ ] Lerp between current & min throttle when changing states
 - [ ] Arduino as bootloader to flash necessary config to ESC
 - [ ] PID loop
