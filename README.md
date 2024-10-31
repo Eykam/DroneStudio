@@ -2,7 +2,7 @@
 
 Autonomous drone firmware, renderer and simulator for mapping environments.
 
-![alt text](https://www.reddit.com/media?url=https%3A%2F%2Fpreview.redd.it%2Fnew-app-idea-quest-3-as-matterport-cheaper-replacement-v0-6qz7bt3b0s0d1.jpeg%3Fwidth%3D1080%26crop%3Dsmart%26auto%3Dwebp%26s%3De5d04b6bd36de0844c1d7ca5f5183b35d7e42507)
+![alt text](https://github.com/Eykam/DroneStudio/blob/main/assets/hero.webp)
 
 ## Overall Goal
 
