@@ -25,6 +25,7 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - 4 Motors => [2205 2300kV 3-phase BLDC motor](https://www.aliexpress.us/item/3256806367616768.html?spm=a2g0o.productlist.main.3.3184ZtfdZtfd8D&algo_pvid=d8c1175d-6549-49c9-9d73-1175be48bbf3&algo_exp_id=d8c1175d-6549-49c9-9d73-1175be48bbf3-1&pdp_npi=4%40dis%21USD%2111.69%216.90%21%21%2111.69%216.90%21%402101c5a717303537115667019ee4af%2112000037653045149%21sea%21US%216164672369%21X&curPageLogUid=LovAIBWsRDjV&utparam-url=scene%3Asearch%7Cquery_from%3A)
 - Propellers => 5" (too many options, most are fine)
 - LiPo Battery => [3s 2200 mAh (35C)](https://www.amazon.com/dp/B0CS2YZCYD?ref=ppx_yo2ov_dt_b_fed_asin_title)
+- XT90 Connectors => Female (Might be included with ESC)
 
 ### Tools Needed
 - Linux / Windows Computer (might cross-compile for darwin later)
