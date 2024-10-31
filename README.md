@@ -53,9 +53,9 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Each vertex assigned a color using shaders
 - :white_check_mark: Render box
 - :white_check_mark: Color each face of the box differently
-- :white_large_square: Create hierarchy of nodes instead of flatmap of meshes
-- :white_large_square: Change line rendering to quads
-- :white_large_square: Kill threads / end processes when program closed
+- :white_square_button: Create hierarchy of nodes instead of flatmap of meshes
+- :white_square_button: Change line rendering to quads
+- :white_square_button: Kill threads / end processes when program closed
 
 ### 1.2 Camera
 
@@ -64,25 +64,25 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Sprinting / speed up with Shift
 - :white_check_mark: Free look with mouse
 - :white_check_mark: Zooming in / out
-- :white_large_square: Look into using openGL Frustum instead
+- :white_square_button: Look into using openGL Frustum instead
 
 ### 2. Model Controls 
 
-- :white_large_square: Implement yaw / roll based on keyboard movement
-- :white_large_square: Implement pitch using mouse inputs
-- :white_large_square: Orbit Controls instead of Perspective
-- :white_large_square: UDP Tx from renderer with Yaw / Pitch / Roll / Throttle
-- :white_large_square: UDP Rx on ESP to receive & control drone
+- :white_square_button: Implement yaw / roll based on keyboard movement
+- :white_square_button: Implement pitch using mouse inputs
+- :white_square_button: Orbit Controls instead of Perspective
+- :white_square_button: UDP Tx from renderer with Yaw / Pitch / Roll / Throttle
+- :white_square_button: UDP Rx on ESP to receive & control drone
 
 ### 2.1 Build system and ImGui Integration
 
 - :white_check_mark: Embed Shaders inline instead of reading from fs
 - :white_check_mark: Cross Compile for Windows
-- :white_large_square: Find way to link dependencies without using @cimport ???
-- :white_large_square: Create zig bindings for ImGui
-- :white_large_square: Create drop down menus for basic configuration editing 
-- :white_large_square: FPS counter
-- :white_large_square: Debug / view meshes and vertices
+- :white_square_button: Find way to link dependencies without using @cimport ???
+- :white_square_button: Create zig bindings for ImGui
+- :white_square_button: Create drop down menus for basic configuration editing 
+- :white_square_button: FPS counter
+- :white_square_button: Debug / view meshes and vertices
 
 ### 3. Obtaining Poses
 
@@ -100,83 +100,83 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Obtain Gyro data in renderer
 - :white_check_mark: Obtain Magnetometer in renderer
 - :white_check_mark: Kalman filter on gyro & accelerometer for estimating Pitch and Roll
-- :white_large_square: Kalman filter on gyro and magnetometer for estimating Yaw
+- :white_square_button: Kalman filter on gyro and magnetometer for estimating Yaw
 - :white_check_mark: Measure fps from MPU & incrementally update kalman filter delta time
-- :white_large_square: Find out why varying dt on kalman filter results in janky movement
-- :white_large_square: Calibrate sensors
+- :white_square_button: Find out why varying dt on kalman filter results in janky movement
+- :white_square_button: Calibrate sensors
     - :white_check_mark: Larger Accelerometer range (+- 8g's)
-    - :white_large_square: 0 values when not moving
-- :white_large_square: Add compass overlay
-- :white_large_square: Overlay avg of sensor data / Tx rate
-- :white_large_square: Lidar / Barometric sensor for altitude control
+    - :white_square_button: 0 values when not moving
+- :white_square_button: Add compass overlay
+- :white_square_button: Overlay avg of sensor data / Tx rate
+- :white_square_button: Lidar / Barometric sensor for altitude control
 
 ### 5. LiDAR Integration
 
-- :white_large_square: Develop ESP firmware for LiDAR integration
-- :white_large_square: Relate SPAD matrix with current pose from MPU
-- :white_large_square: Interpolate points between SPAD matrix obtained from sensor
-- :white_large_square: Visualize FOV's captured by scanners in 3D space relative to drone
+- :white_square_button: Develop ESP firmware for LiDAR integration
+- :white_square_button: Relate SPAD matrix with current pose from MPU
+- :white_square_button: Interpolate points between SPAD matrix obtained from sensor
+- :white_square_button: Visualize FOV's captured by scanners in 3D space relative to drone
 
 ### 6. Motor Control
 - :white_check_mark: ESP firmware for driving BLHELI_S based ESC
-- :white_large_square: Create testing rig for running motor w/ propellers
+- :white_square_button: Create testing rig for running motor w/ propellers
 - :white_check_mark: Add support for potentiometer based throttle
-- :white_large_square: Lerp between current & min throttle when changing states
-- :white_large_square: Arduino as bootloader to flash necessary config to ESC
-- :white_large_square: PID loop
-- :white_large_square: Look into using smaller chassis / motors
+- :white_square_button: Lerp between current & min throttle when changing states
+- :white_square_button: Arduino as bootloader to flash necessary config to ESC
+- :white_square_button: PID loop
+- :white_square_button: Look into using smaller chassis / motors
 
 ### 7. Visualization
 
-- :white_large_square: Cube Marching to turn point clouds into mesh.
-- :white_large_square: Visualize 3D models of scan in DroneStudio
-- :white_large_square: Ability to walk around / tour room in real time
-- :white_large_square: Colored / textured meshes
-- :white_large_square: If segmented objects. highlight / click on those with details
+- :white_square_button: Cube Marching to turn point clouds into mesh.
+- :white_square_button: Visualize 3D models of scan in DroneStudio
+- :white_square_button: Ability to walk around / tour room in real time
+- :white_square_button: Colored / textured meshes
+- :white_square_button: If segmented objects. highlight / click on those with details
 
 ### 8. SLAM (Simultaneous Localization and Mapping)
 
-- :white_large_square: Combine MPU & LiDAR / Image data to associate FOV with location
-- :white_large_square: Implement SLAM to stitch together FOV's / map the room in 3D
+- :white_square_button: Combine MPU & LiDAR / Image data to associate FOV with location
+- :white_square_button: Implement SLAM to stitch together FOV's / map the room in 3D
 
 ### 9. Camera and Depth Sensing
 
-- :white_large_square: Use camera to stream image data to renderer
-- :white_large_square: Use image data to color mesh
-- :white_large_square: Use some image => depth map transformers
-- :white_large_square: Maybe some segmentation? 
+- :white_square_button: Use camera to stream image data to renderer
+- :white_square_button: Use image data to color mesh
+- :white_square_button: Use some image => depth map transformers
+- :white_square_button: Maybe some segmentation? 
 
 ### 10. 3D Model Integration
 
-- :white_large_square: Import GLTF models
-- :white_large_square: Scan drone and import its 3D model
+- :white_square_button: Import GLTF models
+- :white_square_button: Scan drone and import its 3D model
 
 ### 11. Drone Simulator
 
-- :white_large_square: Import / Randomly generate scene
-- :white_large_square: Scene invisible but vertex data available
-- :white_large_square: Spawn drone in random position
-- :white_large_square: Raycasting to simulate lidar
-- :white_large_square: Map scene and route taken by drone w/ collisions
-- :white_large_square: Make scene dynamic / changing overtime to see behavior
+- :white_square_button: Import / Randomly generate scene
+- :white_square_button: Scene invisible but vertex data available
+- :white_square_button: Spawn drone in random position
+- :white_square_button: Raycasting to simulate lidar
+- :white_square_button: Map scene and route taken by drone w/ collisions
+- :white_square_button: Make scene dynamic / changing overtime to see behavior
 
 ### 12. Synchronization
 
-- :white_large_square: Implement synchronization for multiple devices or components
-- :white_large_square: Swarm mode vs. Divide & conquer?
-- :white_large_square: maybe some type of animations?
+- :white_square_button: Implement synchronization for multiple devices or components
+- :white_square_button: Swarm mode vs. Divide & conquer?
+- :white_square_button: maybe some type of animations?
 
 
 ### 13. Create custom PCB's for ESC
 
-- :white_large_square: Model components in LTSpice
-- :white_large_square: Create PCB model gerber file
-- :white_large_square: Print PCB's from manufacturer
-- :white_large_square: Solder SMD's to printed pcb
-- :white_large_square: Flash BLHELI_S or write custom firmware
+- :white_square_button: Model components in LTSpice
+- :white_square_button: Create PCB model gerber file
+- :white_square_button: Print PCB's from manufacturer
+- :white_square_button: Solder SMD's to printed pcb
+- :white_square_button: Flash BLHELI_S or write custom firmware
 
 
 ### 14. Convert entire Repo to Zig
 
-- :white_large_square: Generate glad bindings in zig
-- :white_large_square: Create HAL for ESP32 in Zig
+- :white_square_button: Generate glad bindings in zig
+- :white_square_button: Create HAL for ESP32 in Zig
