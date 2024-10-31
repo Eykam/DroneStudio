@@ -17,15 +17,15 @@ Later goals are to add object avoidance, image detection and synchronization wit
 Most of these parts can be found for cheaper from Aliexpress, etc.
 
 ### Drone
-- Flight Controller => [Esp32](https://www.amazon.com/dp/B09GK74F7N?ref=ppx_yo2ov_dt_b_fed_asin_title)
-  - Motion Processing Unit (MPU) => [Mpu-9250](https://www.amazon.com/dp/B01I1J0Z7Y?ref=ppx_yo2ov_dt_b_fed_asin_title)
-  - LiDAR => [VL53L1X](https://www.amazon.com/dp/B0CLDKMGZR?ref=ppx_yo2ov_dt_b_fed_asin_title)
-- Electronic Speed Controller (ESC) => [Jhemcu EM40a 4-in-1](https://www.aliexpress.us/item/2255799889128915.html?spm=a2g0o.productlist.main.1.3c37q24Bq24BjE&algo_pvid=f9d88402-ce9d-4e3c-a412-ddb82016e26e&algo_exp_id=f9d88402-ce9d-4e3c-a412-ddb82016e26e-2&pdp_npi=4%40dis%21USD%2123.99%2116.79%21%21%2123.99%2116.79%21%402103245417303536374263010edcc3%2112000024266524726%21sea%21US%216164672369%21X&curPageLogUid=e6vfdxoFeAjy&utparam-url=scene%3Asearch%7Cquery_from%3A)
-- Frame => [5" Carbon Fiber (looking into making 3" 3D printed frame)](https://www.aliexpress.us/item/3256806814368043.html?spm=a2g0o.productlist.main.17.56a134f3a8JusT&algo_pvid=1ff9789c-b6ee-44c9-9c11-23c2d6d53f0c&algo_exp_id=1ff9789c-b6ee-44c9-9c11-23c2d6d53f0c-9&pdp_npi=4%40dis%21USD%2125.86%2115.26%21%21%2125.86%2115.26%21%402103209b17303538958174736ead90%2112000039007991042%21sea%21US%216164672369%21X&curPageLogUid=XdxX0TVz20sx&utparam-url=scene%3Asearch%7Cquery_from%3A)
-- 4 Motors => [2205 2300kV 3-phase BLDC motor](https://www.aliexpress.us/item/3256806367616768.html?spm=a2g0o.productlist.main.3.3184ZtfdZtfd8D&algo_pvid=d8c1175d-6549-49c9-9d73-1175be48bbf3&algo_exp_id=d8c1175d-6549-49c9-9d73-1175be48bbf3-1&pdp_npi=4%40dis%21USD%2111.69%216.90%21%21%2111.69%216.90%21%402101c5a717303537115667019ee4af%2112000037653045149%21sea%21US%216164672369%21X&curPageLogUid=LovAIBWsRDjV&utparam-url=scene%3Asearch%7Cquery_from%3A)
-- Propellers => 5" (too many options, most are fine)
-- LiPo Battery => [3s 2200 mAh (35C)](https://www.amazon.com/dp/B0CS2YZCYD?ref=ppx_yo2ov_dt_b_fed_asin_title)
-- XT90 Connectors => Female (Might be included with ESC)
+- Flight Controller: [Esp32](https://www.amazon.com/dp/B09GK74F7N?ref=ppx_yo2ov_dt_b_fed_asin_title)
+  - Motion Processing Unit (MPU): [Mpu-9250](https://www.amazon.com/dp/B01I1J0Z7Y?ref=ppx_yo2ov_dt_b_fed_asin_title)
+  - LiDAR: [VL53L1X](https://www.amazon.com/dp/B0CLDKMGZR?ref=ppx_yo2ov_dt_b_fed_asin_title)
+- Electronic Speed Controller (ESC): [Jhemcu EM40a 4-in-1](https://www.aliexpress.us/item/2255799889128915.html?spm=a2g0o.productlist.main.1.3c37q24Bq24BjE&algo_pvid=f9d88402-ce9d-4e3c-a412-ddb82016e26e&algo_exp_id=f9d88402-ce9d-4e3c-a412-ddb82016e26e-2&pdp_npi=4%40dis%21USD%2123.99%2116.79%21%21%2123.99%2116.79%21%402103245417303536374263010edcc3%2112000024266524726%21sea%21US%216164672369%21X&curPageLogUid=e6vfdxoFeAjy&utparam-url=scene%3Asearch%7Cquery_from%3A)
+- Frame: [5" Carbon Fiber (looking into making 3" 3D printed frame)](https://www.aliexpress.us/item/3256806814368043.html?spm=a2g0o.productlist.main.17.56a134f3a8JusT&algo_pvid=1ff9789c-b6ee-44c9-9c11-23c2d6d53f0c&algo_exp_id=1ff9789c-b6ee-44c9-9c11-23c2d6d53f0c-9&pdp_npi=4%40dis%21USD%2125.86%2115.26%21%21%2125.86%2115.26%21%402103209b17303538958174736ead90%2112000039007991042%21sea%21US%216164672369%21X&curPageLogUid=XdxX0TVz20sx&utparam-url=scene%3Asearch%7Cquery_from%3A)
+- 4 Motors: [2205 2300kV 3-phase BLDC motor](https://www.aliexpress.us/item/3256806367616768.html?spm=a2g0o.productlist.main.3.3184ZtfdZtfd8D&algo_pvid=d8c1175d-6549-49c9-9d73-1175be48bbf3&algo_exp_id=d8c1175d-6549-49c9-9d73-1175be48bbf3-1&pdp_npi=4%40dis%21USD%2111.69%216.90%21%21%2111.69%216.90%21%402101c5a717303537115667019ee4af%2112000037653045149%21sea%21US%216164672369%21X&curPageLogUid=LovAIBWsRDjV&utparam-url=scene%3Asearch%7Cquery_from%3A)
+- Propellers: 5" (too many options, most are fine)
+- LiPo Battery: [3s 2200 mAh (35C)](https://www.amazon.com/dp/B0CS2YZCYD?ref=ppx_yo2ov_dt_b_fed_asin_title)
+- XT90 Connectors: Female (Might be included with ESC)
 
 ### Tools Needed
 - Linux / Windows Computer (might cross-compile for darwin later)
@@ -143,7 +143,7 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 
 - :white_square_button: Use camera to stream image data to renderer
 - :white_square_button: Use image data to color mesh
-- :white_square_button: Use some image => depth map transformers
+- :white_square_button: Use some image: depth map transformers
 - :white_square_button: Maybe some segmentation? 
 
 ### 10. 3D Model Integration
