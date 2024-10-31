@@ -45,8 +45,8 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 
 ### 1. Basic Rendering
 
-- [X] Zig openGL bindings
-- [X] Create window
+- ✅ Zig openGL bindings
+- ✅ Create window
 - [X] Render 'Hello Triangle'
 - [X] Render grid
 - [X] Setup basic rendering pipeline
