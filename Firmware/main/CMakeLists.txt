@@ -3,4 +3,5 @@ idf_component_register(SRCS "./main.c"
                     REQUIRES mpu9250
                     REQUIRES esp_wifi
                     REQUIRES nvs_flash
+                    REQUIRES esp_timer
                     )

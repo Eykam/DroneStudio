@@ -58,7 +58,8 @@ Later goals are to add object avoidance, image detection and synchronization wit
 - [X] Set up UDP server on ESP
 - [x] Set up UDP server in renderer 
 - [x] Convert []u8 into little-endian signed f32
-- [ ] Optimize Wifi UDP Tx speed (currently around 500Kb/s ideally would need 1Mb/s)
+- [X] Optimize Wifi UDP Tx speed (currently around 500Kb/s ideally would need 1Mb/s)
+- [ ] Try to get 1 kHz refresh rate on gyro
 - [ ] Add timestamp / checksum to UDP packets to discard old poses
 
 ### 4. MPU Integration with Model

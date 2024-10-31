@@ -1,6 +1,7 @@
 // const Queue = @import("./queue.zig").Queue;
 const std = @import("std");
 const time = std.time;
+const Instant = time.Instant;
 const Mesh = @import("Shape.zig").Mesh;
 const Transformations = @import("Transformations.zig");
 const Vec3 = Transformations.Vec3;
@@ -51,17 +52,18 @@ pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
     var src_addr: std.posix.sockaddr = undefined;
     var src_addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
     var recv_buf: [1024]u8 = undefined;
+    var packet_count: usize = 0;
+    var prev_time: time.Instant = try Instant.now();
+    var prev_timestamp: i64 = 0;
 
     while (true) {
-        _ = try std.posix.recvfrom(
+        const packet_size = try std.posix.recvfrom(
             socket,
             &recv_buf,
             0,
             &src_addr,
             &src_addr_len,
         );
-
-        // std.debug.print("====================\nBuffer Length (Bytes): {d}\n", .{recv_len});
 
         const accel = Vec3{
             .x = @bitCast(std.mem.readInt(u32, recv_buf[0..4], .little)),
@@ -81,23 +83,35 @@ pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
             .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little))),
         };
 
-        try update(mesh, accel, gyro, mag);
+        const timestamp: i64 = @bitCast(std.mem.readInt(i64, recv_buf[36..44], .little));
 
-        // std.debug.print("Accel => {d}\n", .{[_]f32{
-        //     accel.x,
-        //     accel.y,
-        //     accel.z,
-        // }});
-        // std.debug.print("Gyro => {d}\n", .{[_]f32{
-        //     gyro.x,
-        //     gyro.y,
-        //     gyro.z,
-        // }});
-        // std.debug.print("Mag => {d}\n", .{[_]f32{
-        //     @bitCast(std.mem.readInt(u32, recv_buf[24..28], .little)),
-        //     @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little)),
-        //     @bitCast(std.mem.readInt(u32, recv_buf[32..36], .little)),
-        // }});
+        if (timestamp - prev_timestamp < 0) {
+            std.debug.print("Received stale packet, continuing...\n", .{ prev_timestamp, timestamp });
+            prev_timestamp = timestamp;
+            continue;
+        }
+
+        prev_timestamp = timestamp;
+
+        const curr_time = try Instant.now();
+        const delta_time = Instant.since(curr_time, prev_time);
+
+        // const delta_time = @as(f32, @floatFromInt(Instant.since(curr_time, prev_time))) / 1e9;
+        // prev_time = curr_time;
+        // std.debug.print("Delta Time: {d} vs default : {d} => {d}\n", .{ delta_time, 1.0 / 875.0, delta_time - (1.0 / 875.0) });
+
+        if (delta_time > 1e9) {
+            const time_to_secs = delta_time / @as(u64, @intFromFloat(1e9));
+            const packets_per_sec = packet_count / time_to_secs;
+            std.debug.print("==========\nTwo seconds have passed.\nPackets / sec counted: {d}\nThroughput: {d} B/s\n", .{ packets_per_sec, packets_per_sec * packet_size });
+            prev_time = curr_time;
+            packet_count = 0;
+        }
+
+        // for right now, 0.0 is a placeholder for delta_time passed to updateKalman function
+        // need to figure out why giving actual seconds in dt gives janky results
+        try update(mesh, accel, gyro, mag, 0.0);
+        packet_count += 1;
     }
 }
 
