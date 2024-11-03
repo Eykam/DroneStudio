@@ -86,7 +86,7 @@ pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
         .Q_angle = 0.001,
         .Q_bias = 0.003,
         .R_measure = 0.03,
-        .dt = 1.0 / 875.0, // Assuming 950hz update rate
+        .dt = 1.0 / 900.0, // Assuming 950hz update rate
     };
 }
 
@@ -202,10 +202,7 @@ pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3, mag: Vec3, delta_
     mesh.yaw += -1.0 * scaled_gyro.y * mesh.rollKalman.dt; // Increment yaw using gyro z-axis data
 
     mesh.modelMatrix = createRotationMatrix(
-        0.0,
-        // mesh.yaw, // Yaw (rotation around Y-axis)
-        // 0.0,
-        // 0.0,
+        mesh.yaw, // Yaw (rotation around Y-axis)
         filtered_pitch, // Pitch (rotation around X-axis)
         filtered_roll, // Roll (rotation around Z-axis)
     );

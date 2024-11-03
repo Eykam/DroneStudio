@@ -8,6 +8,8 @@ const Vec3 = Transformations.Vec3;
 
 const Self = @This();
 
+const HandlerError = error{FailedToParse};
+
 host_ip: []const u8,
 host_port: u16,
 
@@ -19,6 +21,43 @@ spawn_config: std.Thread.SpawnConfig = std.Thread.SpawnConfig{
     .stack_size = 16 * 1024 * 1024, // You can adjust the stack size as needed
 },
 
+pub const HandlerInterface = struct {
+    ptr: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        update: *const fn (ptr: *anyopaque, data: []const u8) anyerror!void,
+    };
+
+    pub fn update(self: @This(), data: []const u8) !void {
+        return self.vtable.update(self.ptr, data);
+    }
+};
+
+pub fn Handler(comptime T: type) type {
+    return struct {
+        inner: T,
+
+        pub fn init(inner: T) Handler {
+            return .{ .inner = inner };
+        }
+
+        pub fn interface(self: *Handler) HandlerInterface {
+            return .{
+                .ptr = @ptrCast(self),
+                .vtable = &.{
+                    .update = update,
+                },
+            };
+        }
+
+        fn update(ptr: *anyopaque, data: []const u8) !void {
+            const self = @as(*Handler, @ptrCast(@alignCast(ptr)));
+            return self.inner.update(data);
+        }
+    };
+}
+
 pub fn init(host_ip: []const u8, host_port: u16, client_ip: []const u8, client_port: u16) Self {
     return Self{
         .host_ip = host_ip,
@@ -28,15 +67,16 @@ pub fn init(host_ip: []const u8, host_port: u16, client_ip: []const u8, client_p
     };
 }
 
-pub fn start(self: *Self, mesh: *Mesh, update: anytype) !void {
-    _ = try std.Thread.spawn(self.spawn_config, receive, .{ self, mesh, update });
+pub fn start(self: *Self, handler: HandlerInterface) !void {
+    _ = try std.Thread.spawn(self.spawn_config, receive, .{ self, handler });
     // var udp_transmitting_thread = try std.Thread.spawn(spawn_config, send, .{});
 
     // _ = receiveThread.join();
     // _ = udp_transmitting_thread.join();
 }
 
-pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
+//Refactor into a generic function event_handler
+pub fn receive(self: *Self, handler: HandlerInterface) !void {
     std.debug.print("Starting UDP server\n", .{});
     const parsed_address = try std.net.Address.parseIp4("0.0.0.0", self.host_port);
 
@@ -52,12 +92,9 @@ pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
     var src_addr: std.posix.sockaddr = undefined;
     var src_addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
     var recv_buf: [1024]u8 = undefined;
-    var packet_count: usize = 0;
-    var prev_time: time.Instant = try Instant.now();
-    var prev_timestamp: i64 = 0;
 
     while (true) {
-        const packet_size = try std.posix.recvfrom(
+        const bytes_received = try std.posix.recvfrom(
             socket,
             &recv_buf,
             0,
@@ -65,53 +102,7 @@ pub fn receive(self: *Self, mesh: *Mesh, update: anytype) !void {
             &src_addr_len,
         );
 
-        const accel = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, recv_buf[0..4], .little)),
-            .y = @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[8..12], .little))),
-            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[4..8], .little))),
-        };
-
-        const gyro = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, recv_buf[12..16], .little)),
-            .y = @bitCast(std.mem.readInt(u32, recv_buf[20..24], .little)),
-            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[16..20], .little))),
-        };
-
-        const mag = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, recv_buf[24..28], .little)),
-            .y = @bitCast(std.mem.readInt(u32, recv_buf[32..36], .little)),
-            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, recv_buf[28..32], .little))),
-        };
-
-        const timestamp: i64 = @bitCast(std.mem.readInt(i64, recv_buf[36..44], .little));
-
-        if (timestamp - prev_timestamp < 0) {
-            std.debug.print("Received stale packet, continuing...\n", .{ prev_timestamp, timestamp });
-            prev_timestamp = timestamp;
-            continue;
-        }
-
-        prev_timestamp = timestamp;
-
-        const curr_time = try Instant.now();
-        const delta_time = Instant.since(curr_time, prev_time);
-
-        // const delta_time = @as(f32, @floatFromInt(Instant.since(curr_time, prev_time))) / 1e9;
-        // prev_time = curr_time;
-        // std.debug.print("Delta Time: {d} vs default : {d} => {d}\n", .{ delta_time, 1.0 / 875.0, delta_time - (1.0 / 875.0) });
-
-        if (delta_time > 1e9) {
-            const time_to_secs = delta_time / @as(u64, @intFromFloat(1e9));
-            const packets_per_sec = packet_count / time_to_secs;
-            std.debug.print("==========\nTwo seconds have passed.\nPackets / sec counted: {d}\nThroughput: {d} B/s\n", .{ packets_per_sec, packets_per_sec * packet_size });
-            prev_time = curr_time;
-            packet_count = 0;
-        }
-
-        // for right now, 0.0 is a placeholder for delta_time passed to updateKalman function
-        // need to figure out why giving actual seconds in dt gives janky results
-        try update(mesh, accel, gyro, mag, 0.0);
-        packet_count += 1;
+        try handler.update(recv_buf[0..bytes_received]);
     }
 }
 
@@ -138,3 +129,87 @@ pub fn send(self: *Self) !void {
         std.time.sleep(sleep_duration_ns);
     }
 }
+
+pub const Pose = struct {
+    accel: Vec3,
+    gyro: Vec3,
+    mag: Vec3,
+    timestamp: i64,
+};
+
+pub const PoseHandler = struct {
+    mesh: *Mesh,
+    packet_count: usize = 0,
+    prev_instant: time.Instant,
+    prev_timestamp: i64 = 0,
+    stale_count: usize = 0,
+
+    pub fn init(mesh: *Mesh) PoseHandler {
+        return .{
+            .mesh = mesh,
+            .prev_instant = time.Instant.now() catch unreachable,
+        };
+    }
+
+    pub fn parse(packet: []const u8) !Pose {
+        const accel = Vec3{
+            .x = @bitCast(std.mem.readInt(u32, packet[0..4], .little)),
+            .y = @as(f32, @bitCast(std.mem.readInt(u32, packet[8..12], .little))),
+            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[4..8], .little))),
+        };
+
+        const gyro = Vec3{
+            .x = @bitCast(std.mem.readInt(u32, packet[12..16], .little)),
+            .y = @bitCast(std.mem.readInt(u32, packet[20..24], .little)),
+            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[16..20], .little))),
+        };
+
+        const mag = Vec3{
+            .x = @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
+            .y = @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
+            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[28..32], .little))),
+        };
+
+        const timestamp: i64 = @bitCast(std.mem.readInt(i64, packet[36..44], .little));
+
+        return Pose{
+            .accel = accel,
+            .gyro = gyro,
+            .mag = mag,
+            .timestamp = timestamp,
+        };
+    }
+
+    pub fn update(self: *PoseHandler, data: []const u8) !void {
+        const pose = try PoseHandler.parse(data);
+
+        if (pose.timestamp - self.prev_timestamp < 0) {
+            std.debug.print("Received stale packet, continuing...\n", .{ self.prev_timestamp, pose.timestamp });
+            self.prev_timestamp = pose.timestamp;
+            self.stale_count += 1;
+            return;
+        }
+
+        self.prev_timestamp = pose.timestamp;
+
+        const curr_instant = try Instant.now();
+        const delta_time = Instant.since(curr_instant, self.prev_instant);
+
+        // const delta_time = @as(f32, @floatFromInt(Instant.since(curr_time, prev_time))) / 1e9;
+        // prev_time = curr_time;
+        // std.debug.print("Delta Time: {d} vs default : {d} => {d}\n", .{ delta_time, 1.0 / 875.0, delta_time - (1.0 / 875.0) });
+
+        if (delta_time > 1e9) {
+            const time_to_secs = delta_time / @as(u64, @intFromFloat(1e9));
+            const packets_per_sec = self.packet_count / time_to_secs;
+            std.debug.print("==========\nTwo seconds have passed.\nPackets / sec counted: {d}\nThroughput: {d} B/s\n", .{ packets_per_sec, packets_per_sec * data.len });
+            self.prev_instant = curr_instant;
+            self.packet_count = 0;
+        }
+
+        // for right now, 0.0 is a placeholder for delta_time passed to updateKalman function
+        // need to figure out why giving actual seconds in dt gives janky results
+        try Transformations.updateModelMatrix(self.mesh, pose.accel, pose.gyro, pose.mag, 0.0);
+        self.packet_count += 1;
+    }
+};
