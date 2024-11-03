@@ -38,11 +38,11 @@ pub fn Handler(comptime T: type) type {
     return struct {
         inner: T,
 
-        pub fn init(inner: T) Handler {
+        pub fn init(inner: T) @This() {
             return .{ .inner = inner };
         }
 
-        pub fn interface(self: *Handler) HandlerInterface {
+        pub fn interface(self: *@This()) HandlerInterface {
             return .{
                 .ptr = @ptrCast(self),
                 .vtable = &.{
@@ -52,7 +52,7 @@ pub fn Handler(comptime T: type) type {
         }
 
         fn update(ptr: *anyopaque, data: []const u8) !void {
-            const self = @as(*Handler, @ptrCast(@alignCast(ptr)));
+            const self = @as(*@This(), @ptrCast(@alignCast(ptr)));
             return self.inner.update(data);
         }
     };
@@ -184,7 +184,7 @@ pub const PoseHandler = struct {
         const pose = try PoseHandler.parse(data);
 
         if (pose.timestamp - self.prev_timestamp < 0) {
-            std.debug.print("Received stale packet, continuing...\n", .{ self.prev_timestamp, pose.timestamp });
+            std.debug.print("Received stale packet, continuing...\n", .{});
             self.prev_timestamp = pose.timestamp;
             self.stale_count += 1;
             return;

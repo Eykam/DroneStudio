@@ -78,7 +78,11 @@ pub fn main() !void {
         Secrets.client_ip,
         Secrets.client_port,
     );
-    try server.start(&box, Transformations.updateModelMatrix);
+
+    var pose_handler = UDP.Handler(UDP.PoseHandler).init(UDP.PoseHandler.init(&box));
+    const pose_interface = pose_handler.interface();
+
+    try server.start(pose_interface);
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {
