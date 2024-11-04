@@ -343,7 +343,7 @@ pub fn updateModelMatrix(
 ) !void {
     const scaled_gyro = Vec3{
         .x = radians(gyro.x),
-        .y = radians(gyro.y),
+        .y = radians(gyro.y) * -1.0,
         .z = radians(gyro.z),
     };
 
@@ -368,8 +368,9 @@ pub fn updateModelMatrix(
         const mag_yaw = angleYaw(normalized_mag, filtered_pitch, filtered_roll);
 
         if (!sensor_state.mag_valid) {
-            sensor_state.gyro_integrated_yaw = mag_yaw;
-            sensor_state.previous_yaw = mag_yaw;
+            // sensor_state.gyro_integrated_yaw = mag_yaw;
+            // sensor_state.previous_yaw = mag_yaw;
+            sensor_state.gyro_integrated_yaw = 0.0;
             sensor_state.mag_valid = true;
             std.debug.print("Initial mag yaw: {d}\n", .{degrees(mag_yaw)});
         } else {
@@ -389,10 +390,10 @@ pub fn updateModelMatrix(
             });
 
             // Complementary filter with adaptive weights
-            const alpha = calculateAdaptiveAlpha(normalized_mag, accel);
-            sensor_state.gyro_integrated_yaw = alpha * sensor_state.gyro_integrated_yaw +
-                (1.0 - alpha) * (sensor_state.previous_yaw + yaw_diff);
-            sensor_state.previous_yaw = mag_yaw; // Store the raw mag reading for next diff calculation
+            // const alpha = calculateAdaptiveAlpha(normalized_mag, accel);
+            // sensor_state.gyro_integrated_yaw = alpha * sensor_state.gyro_integrated_yaw +
+            //     (1.0 - alpha) * (sensor_state.previous_yaw + yaw_diff);
+            // sensor_state.previous_yaw = mag_yaw; // Store the raw mag reading for next diff calculation
         }
     }
 
