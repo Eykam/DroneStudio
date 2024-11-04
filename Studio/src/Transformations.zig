@@ -86,15 +86,15 @@ pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
         .Q_angle = 0.001,
         .Q_bias = 0.003,
         .R_measure = 0.03,
-        .dt = 1.0 / 900.0, // Assuming 950hz update rate
+        .dt = 1.0 / 850.0, // Assuming 950hz update rate
     };
 }
 
 pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32, delta_time: f32) f32 {
     // Predict step
     const rate = gyro_rate - state.bias;
-    // state.dt = delta_time;
-    _ = delta_time;
+    // _ = delta_time;
+    state.dt = delta_time;
     state.angle += state.dt * rate;
 
     // Update error covariance matrix
@@ -128,7 +128,7 @@ pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32, delta
 }
 
 /// Creates a rotation matrix around the Z axis (Roll)
-pub fn createRollMatrix(angle_rad: f32) [16]f32 {
+pub inline fn createRollMatrix(angle_rad: f32) [16]f32 {
     const c = @cos(angle_rad);
     const s = @sin(angle_rad);
 
@@ -141,7 +141,7 @@ pub fn createRollMatrix(angle_rad: f32) [16]f32 {
 }
 
 /// Creates a rotation matrix around the X axis (Pitch)
-pub fn createPitchMatrix(angle_rad: f32) [16]f32 {
+pub inline fn createPitchMatrix(angle_rad: f32) [16]f32 {
     const c = @cos(angle_rad);
     const s = @sin(angle_rad);
 
@@ -166,21 +166,17 @@ pub inline fn createYawMatrix(angle_rad: f32) [16]f32 {
     };
 }
 pub inline fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
-    // _ = yaw;
-    // _ = pitch;
-    // _ = roll;
-
-    // return createYawMatrix(yaw);
-    const rotation = multiply_matrices(createYawMatrix(yaw), multiply_matrices(createRollMatrix(roll), createPitchMatrix(pitch)));
+    const rotation = multiply_matrices(
+        createYawMatrix(yaw),
+        multiply_matrices(
+            createRollMatrix(roll),
+            createPitchMatrix(pitch),
+        ),
+    );
 
     return rotation;
 }
 pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3, mag: Vec3, delta_time: f32) !void {
-    // const sensitivity: f32 = 1.0;
-
-    // const norm_accel = accel.normalize();
-    _ = mag;
-
     const scaled_gyro = Vec3{
         .x = radians(gyro.x),
         .y = radians(gyro.y),
@@ -194,15 +190,39 @@ pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3, mag: Vec3, delta_
     const filtered_roll = updateKalman(&mesh.rollKalman, accel_roll, scaled_gyro.x, delta_time);
     const filtered_pitch = updateKalman(&mesh.pitchKalman, accel_pitch, scaled_gyro.z, delta_time);
 
-    // const raw_yaw = angleYaw(mag, filtered_pitch, filtered_roll);
-    // const filtered_yaw = updateKalman(&mesh.yawKalman, raw_yaw, scaled_gyro.y);
+    const raw_yaw = angleYaw(mag, filtered_pitch, filtered_roll);
 
-    // _ = filtered_yaw;
+    if (!mesh.yawInitialized) {
+        mesh.yawFilter = raw_yaw;
+        mesh.yawInitialized = true;
+    } else {
+        // mesh.yawFilter += -1.0 * scaled_gyro.y * (delta_time);
+        // var yaw_diff = (-1.0 * raw_yaw) - mesh.yawFilter;
 
-    mesh.yaw += -1.0 * scaled_gyro.y * mesh.rollKalman.dt; // Increment yaw using gyro z-axis data
+        // if (yaw_diff > std.math.pi) {
+        //     yaw_diff -= 2.0 * std.math.pi;
+        // } else if (yaw_diff < -std.math.pi) {
+        //     yaw_diff += 2.0 * std.math.pi;
+        // }
+
+        // // Apply complementary filter
+        // const ALPHA = 0.98; // 98% gyro, 2% magnetometer
+        // mesh.yawFilter += (1.0 - ALPHA) * yaw_diff;
+        const ALPHA = 0.1; // Adjust based on desired responsiveness
+        mesh.yawFilter = ALPHA * raw_yaw + (1.0 - ALPHA) * mesh.yawFilter;
+
+        std.debug.print("Mag Data: {any}\nRaw Yaw: {d} => filtered_yaw: {}\n", .{ mag, raw_yaw, mesh.yawFilter });
+
+        // Wrap yawFilter to [-pi, pi]
+        if (mesh.yawFilter > std.math.pi) {
+            mesh.yawFilter -= 2.0 * std.math.pi;
+        } else if (mesh.yawFilter < -std.math.pi) {
+            mesh.yawFilter += 2.0 * std.math.pi;
+        }
+    }
 
     mesh.modelMatrix = createRotationMatrix(
-        mesh.yaw, // Yaw (rotation around Y-axis)
+        mesh.yawFilter, // Yaw (rotation around Y-axis)
         filtered_pitch, // Pitch (rotation around X-axis)
         filtered_roll, // Roll (rotation around Z-axis)
     );
@@ -305,38 +325,29 @@ fn tan(x: f32) f32 {
 }
 
 fn atan(x: f32) f32 {
-    return std.math.atan(x);
+    return atan(x);
 }
 
 fn atan2(x: f32, y: f32) f32 {
     return std.math.atan2(x, y);
 }
 
-pub fn angleRoll(accel: Vec3) f32 {
+pub inline fn angleRoll(accel: Vec3) f32 {
     // More stable roll calculation from accelerometer
     return atan2(-accel.x, @sqrt(accel.y * accel.y + accel.z * accel.z));
 }
 
-pub fn anglePitch(angles: Vec3) f32 {
+pub inline fn anglePitch(angles: Vec3) f32 {
     // Pitch (rotation around Z axis)
     // In OpenGL: Y is up, Z is backward
     return atan2(angles.z, @sqrt(angles.x * angles.x + angles.y * angles.y));
 }
 
-pub fn angleYaw(angles: Vec3, pitch: f32, roll: f32) f32 {
-    const mag_x = angles.x * @cos(pitch) +
-        angles.y * @sin(roll) * @sin(pitch) +
-        angles.z * @cos(roll) * @sin(pitch);
+pub inline fn angleYaw(angles: Vec3, pitch: f32, roll: f32) f32 {
+    // const mag_x = angles.x * @cos(pitch) + angles.z * @sin(pitch);
+    // const mag_y = angles.x * @sin(roll) * @sin(pitch) + angles.y * @cos(roll) - angles.z * @sin(roll) * @cos(pitch);
+    _ = pitch;
+    _ = roll;
 
-    const mag_y = angles.y * @cos(roll) -
-        angles.z * @sin(roll);
-
-    // Calculate heading
-    // const yaw = atan2(-mag_y, mag_x);
-
-    // Convert to degrees and normalize to 0-360
-    // yaw = degrees(yaw);
-    // if (yaw < 0) yaw += 360;
-
-    return atan2(-mag_y, mag_x);
+    return atan2(angles.y, angles.x);
 }

@@ -166,7 +166,7 @@ pub const PoseHandler = struct {
 
         const mag = Vec3{
             .x = @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
+            .y = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[32..36], .little))),
             .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[28..32], .little))),
         };
 
@@ -183,7 +183,8 @@ pub const PoseHandler = struct {
     pub fn update(self: *PoseHandler, data: []const u8) !void {
         const pose = try PoseHandler.parse(data);
 
-        if (pose.timestamp - self.prev_timestamp < 0) {
+        const delta_time = @as(f32, @floatFromInt(pose.timestamp - self.prev_timestamp)) / 1e6;
+        if (delta_time < 0) {
             std.debug.print("Received stale packet, continuing...\n", .{});
             self.prev_timestamp = pose.timestamp;
             self.stale_count += 1;
@@ -193,15 +194,15 @@ pub const PoseHandler = struct {
         self.prev_timestamp = pose.timestamp;
 
         const curr_instant = try Instant.now();
-        const delta_time = Instant.since(curr_instant, self.prev_instant);
+        const delta_instant = Instant.since(curr_instant, self.prev_instant);
+        const delta_instant_to_seconds = @as(f32, @floatFromInt(delta_instant)) / 1e9;
 
-        // const delta_time = @as(f32, @floatFromInt(Instant.since(curr_time, prev_time))) / 1e9;
+        // const delta_instant = @as(f32, @floatFromInt(Instant.since(curr_time, prev_time))) / 1e9;
         // prev_time = curr_time;
-        // std.debug.print("Delta Time: {d} vs default : {d} => {d}\n", .{ delta_time, 1.0 / 875.0, delta_time - (1.0 / 875.0) });
+        // std.debug.print("Delta Time: {d} vs default : {d} => {d}\n", .{ delta_tdelta_instantime, 1.0 / 875.0, delta_instant - (1.0 / 875.0) });
 
-        if (delta_time > 1e9) {
-            const time_to_secs = delta_time / @as(u64, @intFromFloat(1e9));
-            const packets_per_sec = self.packet_count / time_to_secs;
+        if (delta_instant_to_seconds > 1.0) {
+            const packets_per_sec = self.packet_count / @as(u32, @intFromFloat(delta_instant_to_seconds));
             std.debug.print("==========\nTwo seconds have passed.\nPackets / sec counted: {d}\nThroughput: {d} B/s\n", .{ packets_per_sec, packets_per_sec * data.len });
             self.prev_instant = curr_instant;
             self.packet_count = 0;
@@ -209,7 +210,7 @@ pub const PoseHandler = struct {
 
         // for right now, 0.0 is a placeholder for delta_time passed to updateKalman function
         // need to figure out why giving actual seconds in dt gives janky results
-        try Transformations.updateModelMatrix(self.mesh, pose.accel, pose.gyro, pose.mag, 0.0);
+        try Transformations.updateModelMatrix(self.mesh, pose.accel, pose.gyro, pose.mag, delta_time);
         self.packet_count += 1;
     }
 };
