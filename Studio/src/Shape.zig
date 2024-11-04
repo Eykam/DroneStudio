@@ -1,7 +1,6 @@
 // src/Shapes.zig
 const std = @import("std");
 const Transformations = @import("Transformations.zig");
-const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
 const Debug = @import("Debug.zig");
 
@@ -32,10 +31,6 @@ pub const Mesh = struct {
     draw: ?draw = null,
     drawType: c.GLenum = c.GL_TRIANGLES,
     modelMatrix: [16]f32 = Transformations.identity(),
-    rollKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
-    pitchKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
-    yawInitialized: bool = false,
-    yawFilter: f32 = 0.0,
 
     pub fn init(vertices: []Vertex, indices: ?[]u32) !Mesh {
         var mesh = Mesh{

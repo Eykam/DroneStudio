@@ -7,6 +7,7 @@ const Shape = @import("Shape.zig");
 const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
 const Secrets = _Secrets{};
 const UDP = @import("UDP.zig");
+const Sensors = @import("Sensors.zig");
 
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
@@ -79,7 +80,7 @@ pub fn main() !void {
         Secrets.client_port,
     );
 
-    var pose_handler = UDP.Handler(UDP.PoseHandler).init(UDP.PoseHandler.init(&box));
+    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(&box));
     const pose_interface = pose_handler.interface();
 
     try server.start(pose_interface);

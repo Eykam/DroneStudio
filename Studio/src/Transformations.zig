@@ -1,5 +1,7 @@
 const std = @import("std");
 const Mesh = @import("Shape.zig").Mesh;
+const Sensors = @import("Sensors.zig");
+const SensorState = Sensors.SensorState;
 
 pub const Vec3 = struct {
     x: f32,
@@ -64,169 +66,6 @@ pub const Vec3 = struct {
         return Vec3.normalize(front);
     }
 };
-
-pub const KalmanState = struct {
-    angle: f32, // Current angle estimate
-    bias: f32, // Gyro bias estimate
-    P: [2][2]f32, // Error covariance matrix
-    Q_angle: f32, // Process noise for angle
-    Q_bias: f32, // Process noise for bias
-    R_measure: f32, // Measurement noise
-    dt: f32, // Time step
-};
-
-pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
-    return KalmanState{
-        .angle = initial_angle,
-        .bias = initial_bias,
-        .P = .{
-            .{ 0.0001, 0.0 },
-            .{ 0.0, 0.0001 },
-        },
-        .Q_angle = 0.001,
-        .Q_bias = 0.003,
-        .R_measure = 0.03,
-        .dt = 1.0 / 850.0, // Assuming 950hz update rate
-    };
-}
-
-pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32, delta_time: f32) f32 {
-    // Predict step
-    const rate = gyro_rate - state.bias;
-    // _ = delta_time;
-    state.dt = delta_time;
-    state.angle += state.dt * rate;
-
-    // Update error covariance matrix
-    state.P[0][0] += state.dt * (state.dt * state.P[1][1] - state.P[0][1] - state.P[1][0] + state.Q_angle);
-    state.P[0][1] -= state.dt * state.P[1][1];
-    state.P[1][0] -= state.dt * state.P[1][1];
-    state.P[1][1] += state.Q_bias * state.dt;
-
-    // Calculate Kalman gain
-    const S = state.P[0][0] + state.R_measure;
-    const K = .{
-        state.P[0][0] / S,
-        state.P[1][0] / S,
-    };
-
-    // Update step
-    const y = accel_angle - state.angle;
-    state.angle += K[0] * y;
-    state.bias += K[1] * y;
-
-    // Update error covariance matrix
-    const P00_temp = state.P[0][0];
-    const P01_temp = state.P[0][1];
-
-    state.P[0][0] -= K[0] * P00_temp;
-    state.P[0][1] -= K[0] * P01_temp;
-    state.P[1][0] -= K[1] * P00_temp;
-    state.P[1][1] -= K[1] * P01_temp;
-
-    return state.angle;
-}
-
-/// Creates a rotation matrix around the Z axis (Roll)
-pub inline fn createRollMatrix(angle_rad: f32) [16]f32 {
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        c,   -s,  0.0, 0.0,
-        s,   c,   0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-/// Creates a rotation matrix around the X axis (Pitch)
-pub inline fn createPitchMatrix(angle_rad: f32) [16]f32 {
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        1.0, 0.0, 0.0, 0.0,
-        0.0, c,   -s,  0.0,
-        0.0, s,   c,   0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-/// Creates a rotation matrix around the Y axis (Yaw)
-pub inline fn createYawMatrix(angle_rad: f32) [16]f32 {
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        c,   0.0, s,   0.0,
-        0.0, 1.0, 0.0, 0.0,
-        -s,  0.0, c,   0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-pub inline fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
-    const rotation = multiply_matrices(
-        createYawMatrix(yaw),
-        multiply_matrices(
-            createRollMatrix(roll),
-            createPitchMatrix(pitch),
-        ),
-    );
-
-    return rotation;
-}
-pub fn updateModelMatrix(mesh: *Mesh, accel: Vec3, gyro: Vec3, mag: Vec3, delta_time: f32) !void {
-    const scaled_gyro = Vec3{
-        .x = radians(gyro.x),
-        .y = radians(gyro.y),
-        .z = radians(gyro.z),
-    };
-
-    const accel_roll = angleRoll(accel);
-    const accel_pitch = anglePitch(accel);
-
-    // Update Kalman filter with scaled values
-    const filtered_roll = updateKalman(&mesh.rollKalman, accel_roll, scaled_gyro.x, delta_time);
-    const filtered_pitch = updateKalman(&mesh.pitchKalman, accel_pitch, scaled_gyro.z, delta_time);
-
-    const raw_yaw = angleYaw(mag, filtered_pitch, filtered_roll);
-
-    if (!mesh.yawInitialized) {
-        mesh.yawFilter = raw_yaw;
-        mesh.yawInitialized = true;
-    } else {
-        // mesh.yawFilter += -1.0 * scaled_gyro.y * (delta_time);
-        // var yaw_diff = (-1.0 * raw_yaw) - mesh.yawFilter;
-
-        // if (yaw_diff > std.math.pi) {
-        //     yaw_diff -= 2.0 * std.math.pi;
-        // } else if (yaw_diff < -std.math.pi) {
-        //     yaw_diff += 2.0 * std.math.pi;
-        // }
-
-        // // Apply complementary filter
-        // const ALPHA = 0.98; // 98% gyro, 2% magnetometer
-        // mesh.yawFilter += (1.0 - ALPHA) * yaw_diff;
-        const ALPHA = 0.1; // Adjust based on desired responsiveness
-        mesh.yawFilter = ALPHA * raw_yaw + (1.0 - ALPHA) * mesh.yawFilter;
-
-        std.debug.print("Mag Data: {any}\nRaw Yaw: {d} => filtered_yaw: {}\n", .{ mag, raw_yaw, mesh.yawFilter });
-
-        // Wrap yawFilter to [-pi, pi]
-        if (mesh.yawFilter > std.math.pi) {
-            mesh.yawFilter -= 2.0 * std.math.pi;
-        } else if (mesh.yawFilter < -std.math.pi) {
-            mesh.yawFilter += 2.0 * std.math.pi;
-        }
-    }
-
-    mesh.modelMatrix = createRotationMatrix(
-        mesh.yawFilter, // Yaw (rotation around Y-axis)
-        filtered_pitch, // Pitch (rotation around X-axis)
-        filtered_roll, // Roll (rotation around Z-axis)
-    );
-}
 
 pub fn identity() [16]f32 {
     return .{
@@ -343,11 +182,223 @@ pub inline fn anglePitch(angles: Vec3) f32 {
     return atan2(angles.z, @sqrt(angles.x * angles.x + angles.y * angles.y));
 }
 
-pub inline fn angleYaw(angles: Vec3, pitch: f32, roll: f32) f32 {
-    // const mag_x = angles.x * @cos(pitch) + angles.z * @sin(pitch);
-    // const mag_y = angles.x * @sin(roll) * @sin(pitch) + angles.y * @cos(roll) - angles.z * @sin(roll) * @cos(pitch);
-    _ = pitch;
-    _ = roll;
+pub inline fn angleYaw(mag: Vec3, pitch: f32, roll: f32) f32 {
+    const sin_roll = @sin(roll);
+    const cos_roll = @cos(roll);
+    const sin_pitch = @sin(pitch);
+    const cos_pitch = @cos(pitch);
 
-    return atan2(angles.y, angles.x);
+    // Tilt compensated magnetic field X component
+    const bx = mag.x * cos_pitch +
+        mag.y * sin_roll * sin_pitch -
+        mag.z * cos_roll * sin_pitch;
+
+    // Tilt compensated magnetic field Z component
+    const bz = mag.y * cos_roll +
+        mag.z * sin_roll;
+
+    // Calculate yaw
+    return atan2(bz, bx);
+}
+
+/// Creates a rotation matrix around the Z axis (Roll)
+pub inline fn createRollMatrix(angle_rad: f32) [16]f32 {
+    const c = @cos(angle_rad);
+    const s = @sin(angle_rad);
+
+    return .{
+        c,   -s,  0.0, 0.0,
+        s,   c,   0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
+
+/// Creates a rotation matrix around the X axis (Pitch)
+pub inline fn createPitchMatrix(angle_rad: f32) [16]f32 {
+    const c = @cos(angle_rad);
+    const s = @sin(angle_rad);
+
+    return .{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, c,   -s,  0.0,
+        0.0, s,   c,   0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
+
+/// Creates a rotation matrix around the Y axis (Yaw)
+pub inline fn createYawMatrix(angle_rad: f32) [16]f32 {
+    const c = @cos(angle_rad);
+    const s = @sin(angle_rad);
+
+    return .{
+        c,   0.0, s,   0.0,
+        0.0, 1.0, 0.0, 0.0,
+        -s,  0.0, c,   0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+}
+pub inline fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
+    const rotation = multiply_matrices(
+        createRollMatrix(roll),
+        multiply_matrices(
+            createPitchMatrix(pitch),
+            createYawMatrix(yaw),
+        ),
+    );
+
+    return rotation;
+}
+
+fn calculateAdaptiveAlpha(mag: Vec3, accel: Vec3) f32 {
+    const MAG_STRENGTH_NOMINAL = 30; // Adjust based on your magnetometer's typical readings
+    const ACCEL_MAGNITUDE_NOMINAL = 1; // Standard gravity
+
+    // Calculate magnetic field strength
+    const mag_strength = @sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
+    const mag_error = @abs(mag_strength - MAG_STRENGTH_NOMINAL) / MAG_STRENGTH_NOMINAL;
+
+    // Calculate acceleration magnitude to detect motion
+    const accel_magnitude = @sqrt(accel.x * accel.x + accel.y * accel.y + accel.z * accel.z);
+    const accel_error = @abs(accel_magnitude - ACCEL_MAGNITUDE_NOMINAL) / ACCEL_MAGNITUDE_NOMINAL;
+
+    // Combine errors to determine filter weight
+    const total_error = mag_error + accel_error;
+    const base_alpha = 0.98; // Base gyro weight
+    const min_alpha = 0.75; // Minimum gyro weight
+
+    return @max(min_alpha, base_alpha - total_error);
+}
+
+pub const KalmanState = struct {
+    angle: f32, // Current angle estimate
+    bias: f32, // Gyro bias estimate
+    P: [2][2]f32, // Error covariance matrix
+    Q_angle: f32, // Process noise for angle
+    Q_bias: f32, // Process noise for bias
+    R_measure: f32, // Measurement noise
+    dt: f32, // Time step
+};
+
+pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
+    return KalmanState{
+        .angle = initial_angle,
+        .bias = initial_bias,
+        .P = .{
+            .{ 0.0001, 0.0 },
+            .{ 0.0, 0.0001 },
+        },
+        .Q_angle = 0.001,
+        .Q_bias = 0.003,
+        .R_measure = 0.03,
+        .dt = 1.0 / 850.0, // Assuming 950hz update rate
+    };
+}
+
+pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32, delta_time: f32) f32 {
+    // Predict step
+    const rate = gyro_rate - state.bias;
+    // _ = delta_time;
+    state.dt = delta_time;
+    state.angle += state.dt * rate;
+
+    // Update error covariance matrix
+    state.P[0][0] += state.dt * (state.dt * state.P[1][1] - state.P[0][1] - state.P[1][0] + state.Q_angle);
+    state.P[0][1] -= state.dt * state.P[1][1];
+    state.P[1][0] -= state.dt * state.P[1][1];
+    state.P[1][1] += state.Q_bias * state.dt;
+
+    // Calculate Kalman gain
+    const S = state.P[0][0] + state.R_measure;
+    const K = .{
+        state.P[0][0] / S,
+        state.P[1][0] / S,
+    };
+
+    // Update step
+    const y = accel_angle - state.angle;
+    state.angle += K[0] * y;
+    state.bias += K[1] * y;
+
+    // Update error covariance matrix
+    const P00_temp = state.P[0][0];
+    const P01_temp = state.P[0][1];
+
+    state.P[0][0] -= K[0] * P00_temp;
+    state.P[0][1] -= K[0] * P01_temp;
+    state.P[1][0] -= K[1] * P00_temp;
+    state.P[1][1] -= K[1] * P01_temp;
+
+    return state.angle;
+}
+
+pub fn updateModelMatrix(
+    mesh: *Mesh,
+    accel: Vec3,
+    gyro: Vec3,
+    mag: Vec3,
+    delta_time: f32,
+    sensor_state: *SensorState,
+) !void {
+    const scaled_gyro = Vec3{
+        .x = radians(gyro.x),
+        .y = radians(gyro.y),
+        .z = radians(gyro.z),
+    };
+
+    const accel_roll = angleRoll(accel);
+    const accel_pitch = anglePitch(accel);
+
+    // Update Kalman filter with scaled values
+    const filtered_roll = updateKalman(&sensor_state.rollKalman, accel_roll, scaled_gyro.x, delta_time);
+    const filtered_pitch = updateKalman(&sensor_state.pitchKalman, accel_pitch, scaled_gyro.z, delta_time);
+
+    sensor_state.gyro_integrated_yaw += scaled_gyro.y * delta_time;
+
+    if (sensor_state.mag_updated) {
+        // Normalize magnetometer readings before processing
+        const mag_length = @sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
+        const normalized_mag = Vec3{
+            .x = mag.x / mag_length,
+            .y = mag.y / mag_length,
+            .z = mag.z / mag_length,
+        };
+
+        const mag_yaw = angleYaw(normalized_mag, filtered_pitch, filtered_roll);
+
+        if (!sensor_state.mag_valid) {
+            sensor_state.gyro_integrated_yaw = mag_yaw;
+            sensor_state.previous_yaw = mag_yaw;
+            sensor_state.mag_valid = true;
+            std.debug.print("Initial mag yaw: {d}\n", .{degrees(mag_yaw)});
+        } else {
+            // Handle wraparound for magnetic yaw
+            var yaw_diff = mag_yaw - sensor_state.previous_yaw;
+            if (yaw_diff > std.math.pi) {
+                yaw_diff -= 2.0 * std.math.pi;
+            } else if (yaw_diff < -std.math.pi) {
+                yaw_diff += 2.0 * std.math.pi;
+            }
+
+            // Debug print the yaw values
+            std.debug.print("Mag: {d:.2}, Gyro: {d:.2}, Diff: {d:.2}\n", .{
+                degrees(mag_yaw),
+                degrees(sensor_state.gyro_integrated_yaw),
+                degrees(yaw_diff),
+            });
+
+            // Complementary filter with adaptive weights
+            const alpha = calculateAdaptiveAlpha(normalized_mag, accel);
+            sensor_state.gyro_integrated_yaw = alpha * sensor_state.gyro_integrated_yaw +
+                (1.0 - alpha) * (sensor_state.previous_yaw + yaw_diff);
+            sensor_state.previous_yaw = mag_yaw; // Store the raw mag reading for next diff calculation
+        }
+    }
+
+    mesh.modelMatrix = createRotationMatrix(
+        sensor_state.gyro_integrated_yaw, // Yaw (rotation around Y-axis)
+        filtered_pitch, // Pitch (rotation around X-axis)
+        filtered_roll, // Roll (rotation around Z-axis)
+    );
 }
