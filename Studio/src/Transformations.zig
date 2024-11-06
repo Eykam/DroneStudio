@@ -1,5 +1,5 @@
 const std = @import("std");
-const Mesh = @import("Shape.zig").Mesh;
+const Mesh = @import("Mesh.zig");
 const Sensors = @import("Sensors.zig");
 const SensorState = Sensors.SensorState;
 

@@ -4,6 +4,8 @@ const Vec3 = Transformations.Vec3;
 const Pipeline = @import("Pipeline.zig");
 const Scene = Pipeline.Scene;
 const Shape = @import("Shape.zig");
+const Node = @import("Node.zig");
+const Mesh = @import("Mesh.zig");
 const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
 const Secrets = _Secrets{};
 const UDP = @import("UDP.zig");
@@ -47,24 +49,28 @@ pub fn main() !void {
     scene.setupCallbacks(window);
 
     //Initializing Entities
-    var grid = try Shape.Grid.init(alloc, 1000, 5);
-    var axis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
-    var triangle = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    var box = try Shape.Box.init(alloc, null, null, null, null);
+    var gridNode = try Shape.Grid.init(alloc, 1000, 5);
+    var axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
+    var triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
+    var boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
-    //Adding Entities to Scene
-    try scene.addMesh("grid", &grid);
-    try scene.addMesh("axis", &axis);
-    try scene.addMesh("triangle", &triangle);
-    try scene.addMesh("rectangle", &box);
+    //Adding Nodes to Environment (parent node)
+    var environment = try Node.init(alloc, null);
+    try environment.addChild(&gridNode);
+    try environment.addChild(&axisNode);
+    try environment.addChild(&triangleNode);
+    try environment.addChild(&boxNode);
+
+    //Adding environment to scene
+    try scene.addNode("Environment", &environment);
 
     //Debugging Entities
-    scene.getMeshNames();
+    scene.getNodeNames();
 
     // grid.debug();
-    axis.debug();
-    triangle.debug();
-    box.debug();
+    // axis.debug();
+    // triangle.debug();
+    // box.debug();
 
     std.debug.print("\nIntial Camera Pos: {d}\n", .{[_]f32{
         scene.camera.position.x,
@@ -80,7 +86,7 @@ pub fn main() !void {
         Secrets.client_port,
     );
 
-    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(&box));
+    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(boxNode.mesh.?));
     const pose_interface = pose_handler.interface();
 
     try server.start(pose_interface);

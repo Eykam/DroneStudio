@@ -2,7 +2,7 @@ const std = @import("std");
 const Transformations = @import("Transformations.zig");
 const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
-const Mesh = @import("Shape.zig").Mesh;
+const Mesh = @import("Mesh.zig");
 const time = std.time;
 const Instant = time.Instant;
 

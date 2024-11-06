@@ -8,8 +8,6 @@ const Vec3 = Transformations.Vec3;
 
 const Self = @This();
 
-const HandlerError = error{FailedToParse};
-
 host_ip: []const u8,
 host_port: u16,
 
@@ -20,6 +18,8 @@ spawn_config: std.Thread.SpawnConfig = std.Thread.SpawnConfig{
     .allocator = std.heap.page_allocator,
     .stack_size = 16 * 1024 * 1024, // You can adjust the stack size as needed
 },
+
+const HandlerError = error{FailedToParse};
 
 pub const HandlerInterface = struct {
     ptr: *anyopaque,

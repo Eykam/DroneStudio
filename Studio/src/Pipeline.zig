@@ -2,6 +2,7 @@
 const std = @import("std");
 const Shape = @import("Shape.zig");
 const Transformations = @import("Transformations.zig");
+const Node = @import("Node.zig");
 const Vec3 = Transformations.Vec3;
 const File = std.fs.File;
 const Camera = @import("Camera.zig");
@@ -29,7 +30,7 @@ pub const Scene = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    meshes: std.StringHashMap(*Shape.Mesh),
+    nodes: std.StringHashMap(*Node),
     shaderProgram: u32,
     width: f32,
     height: f32,
@@ -114,7 +115,7 @@ pub const Scene = struct {
 
         return Self{
             .allocator = allocator,
-            .meshes = std.StringHashMap(*Shape.Mesh).init(allocator),
+            .nodes = std.StringHashMap(*Node).init(allocator),
             .shaderProgram = shaderProgram,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
@@ -127,18 +128,18 @@ pub const Scene = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        var it = self.meshes.iterator();
+        var it = self.nodes.iterator();
         while (it.next()) |entry| {
-            const mesh = entry.value_ptr.*;
-            c.glDeleteVertexArrays(1, &mesh.meta.VAO);
-            c.glDeleteBuffers(1, &mesh.meta.VBO);
-            if (mesh.indices) |indices| {
+            const node = entry.value_ptr.*;
+            c.glDeleteVertexArrays(1, &node.mesh.?.meta.VAO);
+            c.glDeleteBuffers(1, &node.mesh.?.meta.VBO);
+            if (node.mesh.?.indices) |indices| {
                 _ = indices;
-                c.glDeleteBuffers(1, &mesh.meta.IBO);
+                c.glDeleteBuffers(1, &node.mesh.?.meta.IBO);
             }
         }
 
-        self.meshes.deinit();
+        self.nodes.deinit();
         c.glDeleteProgram(self.shaderProgram);
     }
 
@@ -173,16 +174,16 @@ pub const Scene = struct {
         return Transformations.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
     }
 
-    pub fn getMeshNames(self: Self) void {
-        var it = self.meshes.iterator();
+    pub fn getNodeNames(self: Self) void {
+        var it = self.nodes.iterator();
 
         while (it.next()) |entry| {
-            std.debug.print("{d} => {s}\n", .{ entry.value_ptr.*.meta.VBO, entry.key_ptr.* });
+            std.debug.print("{d} => {s}\n", .{ entry.value_ptr.*.mesh.?.meta.VBO, entry.key_ptr.* });
         }
     }
 
-    pub fn addMesh(self: *Self, name: []const u8, mesh: *Shape.Mesh) !void {
-        try self.meshes.put(name, mesh);
+    pub fn addNode(self: *Self, name: []const u8, node: *Node) !void {
+        try self.nodes.put(name, node);
     }
 
     pub fn render(self: *Self, window: ?*c.struct_GLFWwindow) void {
@@ -203,55 +204,10 @@ pub const Scene = struct {
             c.glUniformMatrix4fv(self.uProjectionLoc, 1, c.GL_FALSE, &currentProjection);
         }
 
-        // Iterate through all meshes in the hash map
-        var it = self.meshes.iterator();
+        // Iterate through all nodes in the hash map
+        var it = self.nodes.iterator();
         while (it.next()) |entry| {
-            if (entry.value_ptr.*.draw) |drawFunction| {
-                var mesh = entry.value_ptr.*;
-                c.glUniformMatrix4fv(self.uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
-                drawFunction(mesh.*);
-            } else {
-                var mesh = entry.value_ptr.*;
-
-                // Set mesh-specific uniforms
-                if (self.uModelLoc != -1) {
-                    c.glUniformMatrix4fv(self.uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
-                }
-
-                c.glBindVertexArray(mesh.meta.VAO);
-                c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
-
-                // Position attribute (location = 0)
-                c.glVertexAttribPointer(0, // location
-                    3, // (vec3)
-                    c.GL_FLOAT, c.GL_FALSE, @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
-                    null // offset for position
-                );
-                c.glEnableVertexAttribArray(0);
-
-                // Color attribute (location = 1)
-                const color_offset = @offsetOf(Shape.Vertex, "color");
-                c.glVertexAttribPointer(1, // location
-                    3, // (vec3)
-                    c.GL_FLOAT, c.GL_FALSE, @sizeOf(Shape.Vertex), // stride (size of entire vertex struct)
-                    @ptrFromInt(color_offset));
-                c.glEnableVertexAttribArray(1);
-
-                // Draw the mesh
-                if (mesh.indices) |indices| {
-                    c.glDrawElements(mesh.drawType, @intCast(indices.len), c.GL_UNSIGNED_INT, null);
-                } else {
-                    // When drawing without indices, we need to account for the full vertex struct size
-                    c.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
-                }
-
-                // Disable vertex attributes
-                c.glDisableVertexAttribArray(0);
-                c.glDisableVertexAttribArray(1);
-
-                // Unbind the VAO
-                c.glBindVertexArray(0);
-            }
+            entry.value_ptr.*.update.?(entry.value_ptr.*.mesh.?, self.uModelLoc);
         }
 
         c.glfwSwapBuffers(window);

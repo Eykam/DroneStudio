@@ -1,114 +1,21 @@
 // src/Shapes.zig
 const std = @import("std");
 const Transformations = @import("Transformations.zig");
+const Mesh = @import("Mesh.zig");
+const Node = @import("Node.zig");
+const Vertex = Mesh.Vertex;
 const Vec3 = Transformations.Vec3;
-const Debug = @import("Debug.zig");
 
 const c = @cImport({
     @cInclude("glad/glad.h");
 });
 
-const draw = *const fn (mesh: Mesh) void;
 const DrawErrors = error{FailedToDraw};
-
-pub const Metadata = struct {
-    VAO: u32 = 0,
-    VBO: u32 = 0,
-    IBO: u32 = 0,
-};
-
-pub const Vertex = struct {
-    position: [3]f32,
-    color: [3]f32,
-};
-
-pub const Mesh = struct {
-    const Self = @This();
-
-    vertices: []Vertex,
-    indices: ?[]u32 = null,
-    meta: Metadata,
-    draw: ?draw = null,
-    drawType: c.GLenum = c.GL_TRIANGLES,
-    modelMatrix: [16]f32 = Transformations.identity(),
-
-    pub fn init(vertices: []Vertex, indices: ?[]u32) !Mesh {
-        var mesh = Mesh{
-            .vertices = vertices,
-            .indices = indices,
-            .meta = Metadata{},
-        };
-
-        // Initialize OpenGL buffers
-        c.glGenVertexArrays(1, &mesh.meta.VAO);
-        c.glGenBuffers(1, &mesh.meta.VBO);
-        c.glGenBuffers(1, &mesh.meta.IBO);
-
-        c.glBindVertexArray(mesh.meta.VAO);
-
-        // Vertex Buffer
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
-        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(vertices.len * @sizeOf(Vertex)), vertices.ptr, c.GL_STATIC_DRAW);
-
-        // Index Buffer
-        if (indices) |ind| {
-            c.glBindBuffer(c.GL_ELEMENT_ARRAY_BUFFER, mesh.meta.IBO);
-            c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @intCast(ind.len * @sizeOf(u32)), ind.ptr, c.GL_STATIC_DRAW);
-        }
-
-        // Position attribute
-        c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), null);
-        c.glEnableVertexAttribArray(0);
-
-        // Color attribute
-        const color_offset = @offsetOf(Vertex, "color");
-        c.glVertexAttribPointer(1, 3, c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(color_offset));
-        c.glEnableVertexAttribArray(1);
-
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
-        c.glBindVertexArray(0);
-
-        return mesh;
-    }
-
-    pub fn setFaceColor(self: *Mesh, face_index: usize, color: [3]f32) void {
-        const vertices_per_face = 3;
-        const start_idx = face_index * vertices_per_face;
-        const end_idx = start_idx + vertices_per_face;
-
-        for (start_idx..end_idx) |i| {
-            const vertex_idx = self.indices[i];
-            self.vertices[vertex_idx].color = color;
-        }
-
-        // Update vertex buffer
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
-        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, c.GL_STATIC_DRAW);
-    }
-
-    pub fn setColor(self: *Mesh, color: [3]f32) void {
-        for (self.vertices) |*vertex| {
-            vertex.color = color;
-        }
-
-        // Update vertex buffer
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
-        c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, c.GL_STATIC_DRAW);
-    }
-
-    pub fn debug(self: Self) void {
-        Debug.printVertexShader(self.meta.VBO, self.vertices.len) catch |err| {
-            std.debug.print("Failed to debug vertex shader {any}\n", .{err});
-        };
-    }
-};
 
 pub const Triangle = struct {
     const Self = @This();
 
-    mesh: Mesh,
-
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, newVertices: ?[]Vertex) !Mesh {
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, newVertices: ?[]Vertex) !Node {
         var vertices: []Vertex = undefined;
 
         if (newVertices) |verts| {
@@ -117,8 +24,10 @@ pub const Triangle = struct {
             vertices = Self.default(position);
         }
 
-        const mesh = try Mesh.init(vertices, null);
-        return mesh;
+        var mesh = try Mesh.init(vertices, null, null);
+        const node = try Node.init(allocator, &mesh);
+
+        return node;
     }
 
     pub inline fn default(origin: ?Vec3) []Vertex {
@@ -156,18 +65,18 @@ pub const Triangle = struct {
 pub const Box = struct {
     const Self = @This();
 
-    mesh: Mesh,
-
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, height: ?f32, width: ?f32, depth: ?f32) !Mesh {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, height: ?f32, width: ?f32, depth: ?f32) !Node {
         _ = pos;
         _ = height;
         _ = width;
         _ = depth;
 
         const defaults = try Self.default(allocator);
-        const mesh = try Mesh.init(defaults.vertices, defaults.indices);
 
-        return mesh;
+        var mesh = try Mesh.init(defaults.vertices, defaults.indices, null);
+        const node = try Node.init(allocator, &mesh);
+
+        return node;
     }
 
     pub fn default(allocator: std.mem.Allocator) !struct { vertices: []Vertex, indices: []u32 } {
@@ -256,9 +165,7 @@ pub const Box = struct {
 pub const Axis = struct {
     const Self = @This();
 
-    mesh: Mesh,
-
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !Mesh {
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !Node {
         var vertices: []Vertex = undefined;
 
         if (position != null and length != null) {
@@ -275,15 +182,17 @@ pub const Axis = struct {
             );
         }
 
-        var mesh = try Mesh.init(vertices, null);
-
-        mesh.draw = Axis.draw;
+        var mesh = try Mesh.init(vertices, null, Self.draw);
         mesh.drawType = c.GL_LINES;
 
-        return mesh;
+        const node = try Node.init(allocator, &mesh);
+
+        return node;
     }
 
-    pub fn draw(mesh: Mesh) void {
+    pub fn draw(mesh: *Mesh, uModelLoc: c.GLint) void {
+        _ = uModelLoc;
+
         // Configure depth testing
         c.glEnable(c.GL_DEPTH_TEST);
         c.glDepthFunc(c.GL_LEQUAL);
@@ -411,9 +320,7 @@ pub const Axis = struct {
 pub const Grid = struct {
     const Self = @This();
 
-    mesh: Mesh,
-
-    pub fn init(allocator: std.mem.Allocator, gridSize: ?usize, spacing: ?f32) !Mesh {
+    pub fn init(allocator: std.mem.Allocator, gridSize: ?usize, spacing: ?f32) !Node {
         // Generate grid vertices
         var vertices: []Vertex = undefined;
 
@@ -423,14 +330,16 @@ pub const Grid = struct {
             vertices = try Grid.generateGridVertices(allocator, 1000, 1.0);
         }
 
-        var mesh: Mesh = try Mesh.init(vertices, null);
+        var mesh: Mesh = try Mesh.init(vertices, null, Self.draw);
         mesh.drawType = c.GL_LINES;
-        mesh.draw = Grid.draw;
 
-        return mesh;
+        const node = try Node.init(allocator, &mesh);
+        return node;
     }
 
-    pub fn draw(mesh: Mesh) void {
+    pub fn draw(mesh: *Mesh, uModelLoc: c.GLint) void {
+        _ = uModelLoc;
+
         // Configure depth testing
         c.glEnable(c.GL_DEPTH_TEST);
         c.glDepthFunc(c.GL_LEQUAL);
