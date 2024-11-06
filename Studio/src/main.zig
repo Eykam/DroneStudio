@@ -86,7 +86,7 @@ pub fn main() !void {
         Secrets.client_port,
     );
 
-    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(boxNode.mesh.?));
+    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(&boxNode.mesh.?));
     const pose_interface = pose_handler.interface();
 
     try server.start(pose_interface);

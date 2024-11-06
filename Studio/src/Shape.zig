@@ -24,8 +24,8 @@ pub const Triangle = struct {
             vertices = Self.default(position);
         }
 
-        var mesh = try Mesh.init(vertices, null, null);
-        const node = try Node.init(allocator, &mesh);
+        const mesh = try Mesh.init(vertices, null, null);
+        const node = try Node.init(allocator, mesh);
 
         return node;
     }
@@ -73,8 +73,8 @@ pub const Box = struct {
 
         const defaults = try Self.default(allocator);
 
-        var mesh = try Mesh.init(defaults.vertices, defaults.indices, null);
-        const node = try Node.init(allocator, &mesh);
+        const mesh = try Mesh.init(defaults.vertices, defaults.indices, null);
+        const node = try Node.init(allocator, mesh);
 
         return node;
     }
@@ -185,7 +185,7 @@ pub const Axis = struct {
         var mesh = try Mesh.init(vertices, null, Self.draw);
         mesh.drawType = c.GL_LINES;
 
-        const node = try Node.init(allocator, &mesh);
+        const node = try Node.init(allocator, mesh);
 
         return node;
     }
@@ -333,7 +333,7 @@ pub const Grid = struct {
         var mesh: Mesh = try Mesh.init(vertices, null, Self.draw);
         mesh.drawType = c.GL_LINES;
 
-        const node = try Node.init(allocator, &mesh);
+        const node = try Node.init(allocator, mesh);
         return node;
     }
 
@@ -383,6 +383,7 @@ pub const Grid = struct {
             @sizeOf(Vertex), // stride (size of entire vertex struct)
             @ptrFromInt(color_offset),
         );
+
         c.glEnableVertexAttribArray(1);
         c.glDrawArrays(c.GL_LINES, 0, @intCast(mesh.vertices.len));
 

@@ -130,12 +130,15 @@ pub const Scene = struct {
     pub fn deinit(self: *Self) void {
         var it = self.nodes.iterator();
         while (it.next()) |entry| {
-            const node = entry.value_ptr.*;
-            c.glDeleteVertexArrays(1, &node.mesh.?.meta.VAO);
-            c.glDeleteBuffers(1, &node.mesh.?.meta.VBO);
-            if (node.mesh.?.indices) |indices| {
-                _ = indices;
-                c.glDeleteBuffers(1, &node.mesh.?.meta.IBO);
+            const curr_mesh = entry.value_ptr.*.mesh;
+            if (curr_mesh) |mesh| {
+                c.glDeleteVertexArrays(1, mesh.meta.VAO);
+                c.glDeleteBuffers(1, mesh.meta.VBO);
+
+                if (mesh.indices) |indices| {
+                    _ = indices;
+                    c.glDeleteBuffers(1, mesh.meta.IBO);
+                }
             }
         }
 
@@ -178,7 +181,8 @@ pub const Scene = struct {
         var it = self.nodes.iterator();
 
         while (it.next()) |entry| {
-            std.debug.print("{d} => {s}\n", .{ entry.value_ptr.*.mesh.?.meta.VBO, entry.key_ptr.* });
+            _ = entry;
+            // std.debug.print("{d} => {s}\n", .{ entry.value_ptr.*.mesh.?.meta.VBO, entry.key_ptr.* });
         }
     }
 
@@ -207,7 +211,7 @@ pub const Scene = struct {
         // Iterate through all nodes in the hash map
         var it = self.nodes.iterator();
         while (it.next()) |entry| {
-            entry.value_ptr.*.update.?(entry.value_ptr.*.mesh.?, self.uModelLoc);
+            entry.value_ptr.*.update(self.uModelLoc);
         }
 
         c.glfwSwapBuffers(window);

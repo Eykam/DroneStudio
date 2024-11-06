@@ -7,16 +7,16 @@ const c = @cImport({
 
 const Self = @This();
 
-mesh: ?*Mesh,
-update: ?*const fn (*Mesh, c.GLint) void,
+mesh: ?Mesh,
+update_mesh: ?*const fn (*Mesh, c.GLint) void,
 children: std.ArrayList(*Self),
 
-pub fn init(allocator: std.mem.Allocator, mesh: ?*Mesh) !Self {
+pub fn init(allocator: std.mem.Allocator, mesh: ?Mesh) !Self {
     const update_fn = if (mesh) |mesh_pt| mesh_pt.draw else null;
 
     return Self{
         .mesh = mesh,
-        .update = update_fn,
+        .update_mesh = update_fn,
         .children = try std.ArrayList(*Self).initCapacity(allocator, 0),
     };
 }
@@ -33,11 +33,13 @@ pub fn addChild(self: *Self, child: *Self) !void {
 }
 
 pub fn update(self: *Self, uModelLoc: c.GLint) void {
-    if (self.mesh) |mesh| {
-        self.update(mesh, uModelLoc);
+    if (self.update_mesh) |update_fn| {
+        update_fn(&self.mesh.?, uModelLoc);
     }
 
     for (self.children.items) |child| {
-        child.update(child.mesh, uModelLoc);
+        if (child.update_mesh) |update_fn| {
+            update_fn(&child.mesh.?, uModelLoc);
+        }
     }
 }
