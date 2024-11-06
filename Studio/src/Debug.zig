@@ -1,5 +1,5 @@
 const std = @import("std");
-const Vertex = @import("Shape.zig").Vertex;
+const Vertex = @import("Mesh.zig").Vertex;
 
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
@@ -15,16 +15,12 @@ pub fn printVertexShader(vbo: u32, size: usize) !void {
     c.glGetBufferSubData(c.GL_ARRAY_BUFFER, 0, @intCast(size * @sizeOf(Vertex)), vertexData.ptr);
     c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
 
-    std.debug.print("\n============================\n", .{});
-    std.debug.print("Debugging ([x,y,z]) => {d}\n", .{vbo});
+    std.debug.print("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n", .{});
+    std.debug.print("VBO => {d}\n", .{vbo});
 
-    for (0..vertexData.len) |i| {
-        if ((i + 1) % 3 == 0) {
-            std.debug.print(", {any}]\n", .{vertexData[i]});
-        } else if (i % 3 == 0) {
-            std.debug.print("~ {d} : [{any}, ", .{ i / 3, vertexData[i] });
-        } else {
-            std.debug.print("{any}", .{vertexData[i]});
+    if (vertexData.len < 500) {
+        for (0..vertexData.len) |i| {
+            std.debug.print("~ {d} : \n{s}Position : {d}\n{s}Color : {d}\n", .{ i, " " ** 4, vertexData[i].position, " " ** 4, vertexData[i].color });
         }
     }
 }

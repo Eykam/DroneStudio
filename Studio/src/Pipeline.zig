@@ -177,12 +177,16 @@ pub const Scene = struct {
         return Transformations.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
     }
 
-    pub fn getNodeNames(self: Self) void {
+    pub fn getSceneGraph(self: Self) void {
         var it = self.nodes.iterator();
 
+        std.debug.print("\nGetting Nodes...\n", .{});
+
         while (it.next()) |entry| {
-            _ = entry;
-            // std.debug.print("{d} => {s}\n", .{ entry.value_ptr.*.mesh.?.meta.VBO, entry.key_ptr.* });
+            const curr_node = entry.value_ptr.*;
+
+            std.debug.print("\n=================================\nNode: {s}", .{entry.key_ptr.*});
+            curr_node.debug();
         }
     }
 

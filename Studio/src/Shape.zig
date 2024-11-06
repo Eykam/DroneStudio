@@ -90,42 +90,44 @@ pub const Box = struct {
         const bottom_color = [3]f32{ 0.7, 0.7, 0.7 }; // Darker for bottom
         const top_color = [3]f32{ 0.85, 0.85, 0.85 }; // Lighter for top
 
+        const y_offset = 0.5;
+
         vertices = @constCast(&[_]Vertex{
             // Front face (0-3)
-            .{ .position = .{ -0.5, -0.5, 0.5 }, .color = front_color },
-            .{ .position = .{ 0.5, -0.5, 0.5 }, .color = front_color },
-            .{ .position = .{ 0.5, 0.5, 0.5 }, .color = front_color },
-            .{ .position = .{ -0.5, 0.5, 0.5 }, .color = front_color },
+            .{ .position = .{ -0.5, -0.5 + y_offset, 0.5 }, .color = front_color },
+            .{ .position = .{ 0.5, -0.5 + y_offset, 0.5 }, .color = front_color },
+            .{ .position = .{ 0.5, 0.5 + y_offset, 0.5 }, .color = front_color },
+            .{ .position = .{ -0.5, 0.5 + y_offset, 0.5 }, .color = front_color },
 
             // Right face (4-7)
-            .{ .position = .{ 0.5, -0.5, 0.5 }, .color = right_color },
-            .{ .position = .{ 0.5, -0.5, -0.5 }, .color = right_color },
-            .{ .position = .{ 0.5, 0.5, -0.5 }, .color = right_color },
-            .{ .position = .{ 0.5, 0.5, 0.5 }, .color = right_color },
+            .{ .position = .{ 0.5, -0.5 + y_offset, 0.5 }, .color = right_color },
+            .{ .position = .{ 0.5, -0.5 + y_offset, -0.5 }, .color = right_color },
+            .{ .position = .{ 0.5, 0.5 + y_offset, -0.5 }, .color = right_color },
+            .{ .position = .{ 0.5, 0.5 + y_offset, 0.5 }, .color = right_color },
 
             // Back face (8-11)
-            .{ .position = .{ -0.5, -0.5, -0.5 }, .color = back_color },
-            .{ .position = .{ 0.5, -0.5, -0.5 }, .color = back_color },
-            .{ .position = .{ 0.5, 0.5, -0.5 }, .color = back_color },
-            .{ .position = .{ -0.5, 0.5, -0.5 }, .color = back_color },
+            .{ .position = .{ -0.5, -0.5 + y_offset, -0.5 }, .color = back_color },
+            .{ .position = .{ 0.5, -0.5 + y_offset, -0.5 }, .color = back_color },
+            .{ .position = .{ 0.5, 0.5 + y_offset, -0.5 }, .color = back_color },
+            .{ .position = .{ -0.5, 0.5 + y_offset, -0.5 }, .color = back_color },
 
             // Left face (12-15)
-            .{ .position = .{ -0.5, -0.5, -0.5 }, .color = left_color },
-            .{ .position = .{ -0.5, -0.5, 0.5 }, .color = left_color },
-            .{ .position = .{ -0.5, 0.5, 0.5 }, .color = left_color },
-            .{ .position = .{ -0.5, 0.5, -0.5 }, .color = left_color },
+            .{ .position = .{ -0.5, -0.5 + y_offset, -0.5 }, .color = left_color },
+            .{ .position = .{ -0.5, -0.5 + y_offset, 0.5 }, .color = left_color },
+            .{ .position = .{ -0.5, 0.5 + y_offset, 0.5 }, .color = left_color },
+            .{ .position = .{ -0.5, 0.5 + y_offset, -0.5 }, .color = left_color },
 
             // Bottom face (16-19)
-            .{ .position = .{ -0.5, -0.5, -0.5 }, .color = bottom_color },
-            .{ .position = .{ 0.5, -0.5, -0.5 }, .color = bottom_color },
-            .{ .position = .{ 0.5, -0.5, 0.5 }, .color = bottom_color },
-            .{ .position = .{ -0.5, -0.5, 0.5 }, .color = bottom_color },
+            .{ .position = .{ -0.5, -0.5 + y_offset, -0.5 }, .color = bottom_color },
+            .{ .position = .{ 0.5, -0.5 + y_offset, -0.5 }, .color = bottom_color },
+            .{ .position = .{ 0.5, -0.5 + y_offset, 0.5 }, .color = bottom_color },
+            .{ .position = .{ -0.5, -0.5 + y_offset, 0.5 }, .color = bottom_color },
 
             // Top face (20-23)
-            .{ .position = .{ -0.5, 0.5, 0.5 }, .color = top_color },
-            .{ .position = .{ 0.5, 0.5, 0.5 }, .color = top_color },
-            .{ .position = .{ 0.5, 0.5, -0.5 }, .color = top_color },
-            .{ .position = .{ -0.5, 0.5, -0.5 }, .color = top_color },
+            .{ .position = .{ -0.5, 0.5 + y_offset, 0.5 }, .color = top_color },
+            .{ .position = .{ 0.5, 0.5 + y_offset, 0.5 }, .color = top_color },
+            .{ .position = .{ 0.5, 0.5 + y_offset, -0.5 }, .color = top_color },
+            .{ .position = .{ -0.5, 0.5 + y_offset, -0.5 }, .color = top_color },
         });
 
         var indices: []u32 = try allocator.alloc(u32, 36); // 6 faces * 2 triangles * 3 vertices
@@ -191,7 +193,9 @@ pub const Axis = struct {
     }
 
     pub fn draw(mesh: *Mesh, uModelLoc: c.GLint) void {
-        _ = uModelLoc;
+        if (uModelLoc != -1) {
+            c.glUniformMatrix4fv(uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
+        }
 
         // Configure depth testing
         c.glEnable(c.GL_DEPTH_TEST);
@@ -338,7 +342,9 @@ pub const Grid = struct {
     }
 
     pub fn draw(mesh: *Mesh, uModelLoc: c.GLint) void {
-        _ = uModelLoc;
+        if (uModelLoc != -1) {
+            c.glUniformMatrix4fv(uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
+        }
 
         // Configure depth testing
         c.glEnable(c.GL_DEPTH_TEST);

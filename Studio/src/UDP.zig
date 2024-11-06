@@ -77,7 +77,7 @@ pub fn start(self: *Self, handler: HandlerInterface) !void {
 }
 
 pub fn receive(self: *Self, handler: HandlerInterface) !void {
-    std.debug.print("UDP Rx server started\n", .{});
+    std.debug.print("\nUDP Rx server started\n", .{});
     const parsed_address = try std.net.Address.parseIp4("0.0.0.0", self.host_port);
 
     const socket = try std.posix.socket(
@@ -87,7 +87,7 @@ pub fn receive(self: *Self, handler: HandlerInterface) !void {
     );
 
     try std.posix.bind(socket, &parsed_address.any, parsed_address.getOsSockLen());
-    std.debug.print("UDP server listening on {}\n", .{parsed_address});
+    std.debug.print("UDP server listening on {}\n\n", .{parsed_address});
 
     var src_addr: std.posix.sockaddr = undefined;
     var src_addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);

@@ -52,25 +52,27 @@ pub fn main() !void {
     var gridNode = try Shape.Grid.init(alloc, 1000, 5);
     var axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
     var triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
+    var droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 2.0);
     var boxNode = try Shape.Box.init(alloc, null, null, null, null);
+
+    //Initializing drone node group (axis & box rotated by PoseHandler)
+    var droneNode = try Node.init(alloc, null);
+    try droneNode.addChild(&boxNode);
+    try droneNode.addChild(&droneAxis);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null);
     try environment.addChild(&gridNode);
     try environment.addChild(&axisNode);
     try environment.addChild(&triangleNode);
-    try environment.addChild(&boxNode);
+    try environment.addChild(&droneNode);
 
     //Adding environment to scene
     try scene.addNode("Environment", &environment);
+    // try scene.addNode("Drone", &droneNode);
 
     //Debugging Entities
-    scene.getNodeNames();
-
-    // grid.debug();
-    // axis.debug();
-    // triangle.debug();
-    // box.debug();
+    scene.getSceneGraph();
 
     std.debug.print("\nIntial Camera Pos: {d}\n", .{[_]f32{
         scene.camera.position.x,
@@ -86,7 +88,7 @@ pub fn main() !void {
         Secrets.client_port,
     );
 
-    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(&boxNode.mesh.?));
+    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(&droneNode));
     const pose_interface = pose_handler.interface();
 
     try server.start(pose_interface);

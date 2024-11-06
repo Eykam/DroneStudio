@@ -1,5 +1,4 @@
 const std = @import("std");
-const Mesh = @import("Mesh.zig");
 const Sensors = @import("Sensors.zig");
 const SensorState = Sensors.SensorState;
 
@@ -171,18 +170,18 @@ fn atan2(x: f32, y: f32) f32 {
     return std.math.atan2(x, y);
 }
 
-pub inline fn angleRoll(accel: Vec3) f32 {
+pub fn angleRoll(accel: Vec3) f32 {
     // More stable roll calculation from accelerometer
     return atan2(-accel.x, @sqrt(accel.y * accel.y + accel.z * accel.z));
 }
 
-pub inline fn anglePitch(angles: Vec3) f32 {
+pub fn anglePitch(angles: Vec3) f32 {
     // Pitch (rotation around Z axis)
     // In OpenGL: Y is up, Z is backward
     return atan2(angles.z, @sqrt(angles.x * angles.x + angles.y * angles.y));
 }
 
-pub inline fn angleYaw(mag: Vec3, pitch: f32, roll: f32) f32 {
+pub fn angleYaw(mag: Vec3, pitch: f32, roll: f32) f32 {
     const sin_roll = @sin(roll);
     const cos_roll = @cos(roll);
     const sin_pitch = @sin(pitch);
@@ -202,7 +201,7 @@ pub inline fn angleYaw(mag: Vec3, pitch: f32, roll: f32) f32 {
 }
 
 /// Creates a rotation matrix around the Z axis (Roll)
-pub inline fn createRollMatrix(angle_rad: f32) [16]f32 {
+pub fn createRollMatrix(angle_rad: f32) [16]f32 {
     const c = @cos(angle_rad);
     const s = @sin(angle_rad);
 
@@ -215,7 +214,7 @@ pub inline fn createRollMatrix(angle_rad: f32) [16]f32 {
 }
 
 /// Creates a rotation matrix around the X axis (Pitch)
-pub inline fn createPitchMatrix(angle_rad: f32) [16]f32 {
+pub fn createPitchMatrix(angle_rad: f32) [16]f32 {
     const c = @cos(angle_rad);
     const s = @sin(angle_rad);
 
@@ -228,7 +227,7 @@ pub inline fn createPitchMatrix(angle_rad: f32) [16]f32 {
 }
 
 /// Creates a rotation matrix around the Y axis (Yaw)
-pub inline fn createYawMatrix(angle_rad: f32) [16]f32 {
+pub fn createYawMatrix(angle_rad: f32) [16]f32 {
     const c = @cos(angle_rad);
     const s = @sin(angle_rad);
 
@@ -239,7 +238,8 @@ pub inline fn createYawMatrix(angle_rad: f32) [16]f32 {
         0.0, 0.0, 0.0, 1.0,
     };
 }
-pub inline fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
+
+pub fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
     const rotation = multiply_matrices(
         createRollMatrix(roll),
         multiply_matrices(
@@ -249,6 +249,15 @@ pub inline fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
     );
 
     return rotation;
+}
+
+pub fn createTranslationMatrix(position: Vec3) [16]f32 {
+    return .{
+        1.0, 0.0, 0.0, position.x,
+        0.0, 1.0, 0.0, position.y,
+        0.0, 0.0, 1.0, position.z,
+        0.0, 0.0, 0.0, 1.0,
+    };
 }
 
 fn calculateAdaptiveAlpha(mag: Vec3, accel: Vec3) f32 {
@@ -292,7 +301,7 @@ pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
         .Q_angle = 0.001,
         .Q_bias = 0.003,
         .R_measure = 0.03,
-        .dt = 1.0 / 850.0, // Assuming 950hz update rate
+        .dt = 1.0 / 950.0, // Assuming 950hz update rate
     };
 }
 
@@ -334,13 +343,12 @@ pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32, delta
 }
 
 pub fn updateModelMatrix(
-    mesh: *Mesh,
     accel: Vec3,
     gyro: Vec3,
     mag: Vec3,
     delta_time: f32,
     sensor_state: *SensorState,
-) !void {
+) ![16]f32 {
     const scaled_gyro = Vec3{
         .x = radians(gyro.x),
         .y = radians(gyro.y) * -1.0,
@@ -397,9 +405,16 @@ pub fn updateModelMatrix(
         }
     }
 
-    mesh.modelMatrix = createRotationMatrix(
-        sensor_state.gyro_integrated_yaw, // Yaw (rotation around Y-axis)
+    // const translation_matrix_origin = createTranslationMatrix(Vec3{ .x = -position.x, .y = -position.y, .z = -position.z });
+    // const translation_matrix_pos = createTranslationMatrix(position);
+    const rotation_matrix = createRotationMatrix(
+        // sensor_state.gyro_integrated_yaw, // Yaw (rotation around Y-axis)
+        0.0,
         filtered_pitch, // Pitch (rotation around X-axis)
         filtered_roll, // Roll (rotation around Z-axis)
     );
+
+    // const intermediate = multiply_matrices(rotation_matrix, translation_matrix_origin);
+
+    return rotation_matrix;
 }

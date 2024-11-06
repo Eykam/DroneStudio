@@ -3,6 +3,7 @@ const Transformations = @import("Transformations.zig");
 const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
 const Mesh = @import("Mesh.zig");
+const Node = @import("Node.zig");
 const time = std.time;
 const Instant = time.Instant;
 
@@ -32,16 +33,16 @@ pub const Pose = struct {
 };
 
 pub const PoseHandler = struct {
-    mesh: *Mesh,
+    node: *Node,
     packet_count: usize = 0,
     prev_instant: time.Instant,
     prev_timestamp: i64 = 0,
     stale_count: usize = 0,
     sensor_state: SensorState,
 
-    pub fn init(mesh: *Mesh) PoseHandler {
+    pub fn init(node: *Node) PoseHandler {
         return .{
-            .mesh = mesh,
+            .node = node,
             .prev_instant = time.Instant.now() catch unreachable,
             .sensor_state = SensorState.init(),
         };
@@ -106,9 +107,19 @@ pub const PoseHandler = struct {
             self.packet_count = 0;
         }
 
-        // for right now, 0.0 is a placeholder for delta_time passed to updateKalman function
-        // need to figure out why giving actual seconds in dt gives janky results
-        try Transformations.updateModelMatrix(self.mesh, pose.accel, pose.gyro, pose.mag, delta_time, &self.sensor_state);
+        // placeholder for current position
+        const updatedMatrix = try Transformations.updateModelMatrix(pose.accel, pose.gyro, pose.mag, delta_time, &self.sensor_state);
+
+        if (self.node.mesh) |mesh| {
+            mesh.modelMatrix = updatedMatrix;
+        }
+
+        for (self.node.children.items) |child| {
+            if (child.mesh) |mesh| {
+                mesh.modelMatrix = updatedMatrix;
+            }
+        }
+
         self.packet_count += 1;
     }
 };

@@ -53,7 +53,9 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Each vertex assigned a color using shaders
 - :white_check_mark: Render box
 - :white_check_mark: Color each face of the box differently
-- :white_square_button: Create hierarchy of nodes instead of flatmap of meshes
+- :white_check_mark: Create hierarchy of nodes instead of flatmap of meshes
+- :white_square_button: Find way to position children as offset to parents position (rotation & scale too)
+- :white_square_button: Convert Euler rotations / transformations to Quaternions
 - :white_square_button: Change line rendering to quads
 - :white_square_button: Kill threads / end processes when program closed
 
