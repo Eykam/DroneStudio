@@ -13,9 +13,8 @@ indices: ?[]u32 = null,
 meta: Metadata,
 draw: draw,
 drawType: c.GLenum = c.GL_TRIANGLES,
-modelMatrix: [16]f32 = Transformations.identity(),
 
-const draw = *const fn (mesh: *Self, uModelLoc: c.GLint) void;
+const draw = *const fn (mesh: *Self) void;
 
 pub const Vertex = struct {
     position: [3]f32,
@@ -28,12 +27,7 @@ pub const Metadata = struct {
     IBO: u32 = 0,
 };
 
-pub fn default_draw(mesh: *Self, uModelLoc: c.GLint) void {
-    // Set mesh-specific uniforms
-    if (uModelLoc != -1) {
-        c.glUniformMatrix4fv(uModelLoc, 1, c.GL_FALSE, &mesh.modelMatrix);
-    }
-
+pub fn default_draw(mesh: *Self) void {
     c.glBindVertexArray(mesh.meta.VAO);
     c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
 

@@ -2,7 +2,6 @@ const std = @import("std");
 const Transformations = @import("Transformations.zig");
 const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
-const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const time = std.time;
 const Instant = time.Instant;
@@ -108,18 +107,8 @@ pub const PoseHandler = struct {
         }
 
         // placeholder for current position
-        const updatedMatrix = try Transformations.updateModelMatrix(pose.accel, pose.gyro, pose.mag, delta_time, &self.sensor_state);
-
-        if (self.node.mesh) |mesh| {
-            mesh.modelMatrix = updatedMatrix;
-        }
-
-        for (self.node.children.items) |child| {
-            if (child.mesh) |mesh| {
-                mesh.modelMatrix = updatedMatrix;
-            }
-        }
-
+        const updatedMatrix = Transformations.updateModelMatrix(pose.accel, pose.gyro, pose.mag, delta_time, &self.sensor_state);
+        self.node.setRotation(updatedMatrix[0], updatedMatrix[1], updatedMatrix[2]);
         self.packet_count += 1;
     }
 };

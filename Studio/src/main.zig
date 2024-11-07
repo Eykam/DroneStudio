@@ -52,11 +52,12 @@ pub fn main() !void {
     var gridNode = try Shape.Grid.init(alloc, 1000, 5);
     var axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
     var triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    var droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 2.0);
+    var droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
     var boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
     var droneNode = try Node.init(alloc, null);
+    droneNode.setPosition(0, 0.5, 0);
     try droneNode.addChild(&boxNode);
     try droneNode.addChild(&droneAxis);
 

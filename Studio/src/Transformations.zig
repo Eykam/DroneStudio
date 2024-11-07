@@ -2,6 +2,8 @@ const std = @import("std");
 const Sensors = @import("Sensors.zig");
 const SensorState = Sensors.SensorState;
 
+pub const Mat4 = [16]f32;
+
 pub const Vec3 = struct {
     x: f32,
     y: f32,
@@ -88,8 +90,82 @@ pub fn rotate_x(angle_deg: f32) [16]f32 {
     };
 }
 
+pub fn translate(matrix: Mat4, x: f32, y: f32, z: f32) Mat4 {
+    // Create translation matrix
+    var result = matrix;
+
+    // Translation components go in the last column (indices 12,13,14)
+    // In column-major order: matrix[12] = x, matrix[13] = y, matrix[14] = z
+    result[12] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+    result[13] = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+    result[14] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+    result[15] = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+
+    return result;
+}
+
+pub fn scale(matrix: Mat4, x: f32, y: f32, z: f32) Mat4 {
+    var result = matrix;
+
+    // Scale the basis vectors
+    result[0] *= x;
+    result[1] *= x;
+    result[2] *= x;
+    result[3] *= x;
+
+    result[4] *= y;
+    result[5] *= y;
+    result[6] *= y;
+    result[7] *= y;
+
+    result[8] *= z;
+    result[9] *= z;
+    result[10] *= z;
+    result[11] *= z;
+
+    return result;
+}
+
+pub fn rotate(matrix: Mat4, angle_rads: f32, axis: Vec3) Mat4 {
+    const c = @cos(angle_rads);
+    const s = @sin(angle_rads);
+    const one_minus_c = 1.0 - c;
+
+    // Normalize the axis
+    const magnitude = @sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+    const x = axis.x / magnitude;
+    const y = axis.y / magnitude;
+    const z = axis.z / magnitude;
+
+    // Build rotation matrix
+    const rotation = Mat4{
+        // First column
+        c + x * x * one_minus_c,
+        x * y * one_minus_c + z * s,
+        x * z * one_minus_c - y * s,
+        0,
+        // Second column
+        x * y * one_minus_c - z * s,
+        c + y * y * one_minus_c,
+        y * z * one_minus_c + x * s,
+        0,
+        // Third column
+        x * z * one_minus_c + y * s,
+        y * z * one_minus_c - x * s,
+        c + z * z * one_minus_c,
+        0,
+        // Fourth column
+        0,
+        0,
+        0,
+        1,
+    };
+
+    return multiply_matrices(matrix, rotation);
+}
+
 pub fn rotate_y(angle_deg: f32) [16]f32 {
-    const angle_rad = angle_deg * (std.math.pi / 180.0);
+    const angle_rad = radians(angle_deg);
     const c = std.math.cos(angle_rad);
     const s = std.math.sin(angle_rad);
 
@@ -200,66 +276,6 @@ pub fn angleYaw(mag: Vec3, pitch: f32, roll: f32) f32 {
     return atan2(bz, bx);
 }
 
-/// Creates a rotation matrix around the Z axis (Roll)
-pub fn createRollMatrix(angle_rad: f32) [16]f32 {
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        c,   -s,  0.0, 0.0,
-        s,   c,   0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-/// Creates a rotation matrix around the X axis (Pitch)
-pub fn createPitchMatrix(angle_rad: f32) [16]f32 {
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        1.0, 0.0, 0.0, 0.0,
-        0.0, c,   -s,  0.0,
-        0.0, s,   c,   0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-/// Creates a rotation matrix around the Y axis (Yaw)
-pub fn createYawMatrix(angle_rad: f32) [16]f32 {
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        c,   0.0, s,   0.0,
-        0.0, 1.0, 0.0, 0.0,
-        -s,  0.0, c,   0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-pub fn createRotationMatrix(yaw: f32, pitch: f32, roll: f32) [16]f32 {
-    const rotation = multiply_matrices(
-        createRollMatrix(roll),
-        multiply_matrices(
-            createPitchMatrix(pitch),
-            createYawMatrix(yaw),
-        ),
-    );
-
-    return rotation;
-}
-
-pub fn createTranslationMatrix(position: Vec3) [16]f32 {
-    return .{
-        1.0, 0.0, 0.0, position.x,
-        0.0, 1.0, 0.0, position.y,
-        0.0, 0.0, 1.0, position.z,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
 fn calculateAdaptiveAlpha(mag: Vec3, accel: Vec3) f32 {
     const MAG_STRENGTH_NOMINAL = 30; // Adjust based on your magnetometer's typical readings
     const ACCEL_MAGNITUDE_NOMINAL = 1; // Standard gravity
@@ -348,7 +364,7 @@ pub fn updateModelMatrix(
     mag: Vec3,
     delta_time: f32,
     sensor_state: *SensorState,
-) ![16]f32 {
+) [3]f32 {
     const scaled_gyro = Vec3{
         .x = radians(gyro.x),
         .y = radians(gyro.y) * -1.0,
@@ -363,58 +379,52 @@ pub fn updateModelMatrix(
     const filtered_pitch = updateKalman(&sensor_state.pitchKalman, accel_pitch, scaled_gyro.z, delta_time);
 
     sensor_state.gyro_integrated_yaw += scaled_gyro.y * delta_time;
+    _ = mag;
 
-    if (sensor_state.mag_updated) {
-        // Normalize magnetometer readings before processing
-        const mag_length = @sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
-        const normalized_mag = Vec3{
-            .x = mag.x / mag_length,
-            .y = mag.y / mag_length,
-            .z = mag.z / mag_length,
-        };
+    // if (sensor_state.mag_updated) {
+    //     // Normalize magnetometer readings before processing
+    //     const mag_length = @sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
+    //     const normalized_mag = Vec3{
+    //         .x = mag.x / mag_length,
+    //         .y = mag.y / mag_length,
+    //         .z = mag.z / mag_length,
+    //     };
 
-        const mag_yaw = angleYaw(normalized_mag, filtered_pitch, filtered_roll);
+    //     const mag_yaw = angleYaw(normalized_mag, filtered_pitch, filtered_roll);
 
-        if (!sensor_state.mag_valid) {
-            // sensor_state.gyro_integrated_yaw = mag_yaw;
-            // sensor_state.previous_yaw = mag_yaw;
-            sensor_state.gyro_integrated_yaw = 0.0;
-            sensor_state.mag_valid = true;
-            std.debug.print("Initial mag yaw: {d}\n", .{degrees(mag_yaw)});
-        } else {
-            // Handle wraparound for magnetic yaw
-            var yaw_diff = mag_yaw - sensor_state.previous_yaw;
-            if (yaw_diff > std.math.pi) {
-                yaw_diff -= 2.0 * std.math.pi;
-            } else if (yaw_diff < -std.math.pi) {
-                yaw_diff += 2.0 * std.math.pi;
-            }
+    //     if (!sensor_state.mag_valid) {
+    //         // sensor_state.gyro_integrated_yaw = mag_yaw;
+    //         // sensor_state.previous_yaw = mag_yaw;
+    //         sensor_state.gyro_integrated_yaw = 0.0;
+    //         sensor_state.mag_valid = true;
+    //         std.debug.print("Initial mag yaw: {d}\n", .{degrees(mag_yaw)});
+    //     } else {
+    //         // Handle wraparound for magnetic yaw
+    //         var yaw_diff = mag_yaw - sensor_state.previous_yaw;
+    //         if (yaw_diff > std.math.pi) {
+    //             yaw_diff -= 2.0 * std.math.pi;
+    //         } else if (yaw_diff < -std.math.pi) {
+    //             yaw_diff += 2.0 * std.math.pi;
+    //         }
 
-            // Debug print the yaw values
-            std.debug.print("Mag: {d:.2}, Gyro: {d:.2}, Diff: {d:.2}\n", .{
-                degrees(mag_yaw),
-                degrees(sensor_state.gyro_integrated_yaw),
-                degrees(yaw_diff),
-            });
+    //         // Debug print the yaw values
+    //         std.debug.print("Mag: {d:.2}, Gyro: {d:.2}, Diff: {d:.2}\n", .{
+    //             degrees(mag_yaw),
+    //             degrees(sensor_state.gyro_integrated_yaw),
+    //             degrees(yaw_diff),
+    //         });
 
-            // Complementary filter with adaptive weights
-            // const alpha = calculateAdaptiveAlpha(normalized_mag, accel);
-            // sensor_state.gyro_integrated_yaw = alpha * sensor_state.gyro_integrated_yaw +
-            //     (1.0 - alpha) * (sensor_state.previous_yaw + yaw_diff);
-            // sensor_state.previous_yaw = mag_yaw; // Store the raw mag reading for next diff calculation
-        }
-    }
+    //         // Complementary filter with adaptive weights
+    //         // const alpha = calculateAdaptiveAlpha(normalized_mag, accel);
+    //         // sensor_state.gyro_integrated_yaw = alpha * sensor_state.gyro_integrated_yaw +
+    //         //     (1.0 - alpha) * (sensor_state.previous_yaw + yaw_diff);
+    //         // sensor_state.previous_yaw = mag_yaw; // Store the raw mag reading for next diff calculation
+    //     }
+    // }
 
-    // const translation_matrix_origin = createTranslationMatrix(Vec3{ .x = -position.x, .y = -position.y, .z = -position.z });
-    // const translation_matrix_pos = createTranslationMatrix(position);
-    const rotation_matrix = createRotationMatrix(
-        // sensor_state.gyro_integrated_yaw, // Yaw (rotation around Y-axis)
+    return [_]f32{
+        filtered_pitch,
         0.0,
-        filtered_pitch, // Pitch (rotation around X-axis)
-        filtered_roll, // Roll (rotation around Z-axis)
-    );
-
-    // const intermediate = multiply_matrices(rotation_matrix, translation_matrix_origin);
-
-    return rotation_matrix;
+        filtered_roll,
+    };
 }
