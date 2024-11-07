@@ -54,7 +54,7 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Render box
 - :white_check_mark: Color each face of the box differently
 - :white_check_mark: Create hierarchy of nodes instead of flatmap of meshes
-- :white_square_button: Find way to position children as offset to parents position (rotation & scale too)
+- :white_check_mark: Find way to position children as offset to parents position (rotation & scale too)
 - :white_square_button: Convert Euler rotations / transformations to Quaternions
 - :white_square_button: Change line rendering to quads
 - :white_square_button: Kill threads / end processes when program closed
@@ -66,7 +66,7 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Sprinting / speed up with Shift
 - :white_check_mark: Free look with mouse
 - :white_check_mark: Zooming in / out
-- :white_square_button: Look into using openGL Frustum instead
+- :white_square_button: Look into using openGL Frustum culling
 
 ### 2. Model Controls 
 
@@ -119,9 +119,10 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_square_button: Interpolate points between SPAD matrix obtained from sensor
 - :white_square_button: Visualize FOV's captured by scanners in 3D space relative to drone
 
-### 6. Motor Control
+### 6. Drone & Motor Control
 - :white_check_mark: ESP firmware for driving BLHELI_S based ESC
 - :white_square_button: Create testing rig for running motor w/ propellers
+- :white_square_button: Create 3d model for mounting ESC + Esp32 + LiDAR + Mpu-9250
 - :white_check_mark: Add support for potentiometer based throttle
 - :white_square_button: Lerp between current & min throttle when changing states
 - :white_square_button: Arduino as bootloader to flash necessary config to ESC
