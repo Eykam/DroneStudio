@@ -55,7 +55,9 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Color each face of the box differently
 - :white_check_mark: Create hierarchy of nodes instead of flatmap of meshes
 - :white_check_mark: Find way to position children as offset to parents position (rotation & scale too)
-- :white_square_button: Convert Euler rotations / transformations to Quaternions
+- :white_check_mark: Convert Euler rotations / transformations to Quaternions
+- :white_square_button: Profile rendering time / mem allocations. Check to see if llvm IC uses SIMD automatically
+- :white_square_button: Allow Vec and Matrix calculations to utilize SIMD
 - :white_square_button: Change line rendering to quads
 - :white_square_button: Kill threads / end processes when program closed
 
@@ -68,15 +70,8 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Zooming in / out
 - :white_square_button: Look into using openGL Frustum culling
 
-### 2. Model Controls 
 
-- :white_square_button: Implement yaw / roll based on keyboard movement
-- :white_square_button: Implement pitch using mouse inputs
-- :white_square_button: Orbit Controls instead of Perspective
-- :white_square_button: UDP Tx from renderer with Yaw / Pitch / Roll / Throttle
-- :white_square_button: UDP Rx on ESP to receive & control drone
-
-### 2.1 Build system and ImGui Integration
+### 2 Build system and ImGui Integration
 
 - :white_check_mark: Embed Shaders inline instead of reading from fs
 - :white_check_mark: Cross Compile for Windows
@@ -103,11 +98,14 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Obtain Magnetometer in renderer
 - :white_check_mark: Kalman filter on gyro & accelerometer for estimating Pitch and Roll
 - :white_square_button: Kalman filter on gyro and magnetometer for estimating Yaw
+- :white_square_button: Convert Kalman filter to Madgwick filter
 - :white_check_mark: Measure fps from MPU & incrementally update kalman filter delta time
-- :white_square_button: Find out why varying dt on kalman filter results in janky movement
+- :white_check_mark: Find out why varying dt on kalman filter results in janky movement (Delta time calculation wasnt being calculated correctly)
 - :white_square_button: Calibrate sensors
     - :white_check_mark: Larger Accelerometer range (+- 8g's)
-    - :white_square_button: 0 values when not moving
+    - :white_check_mark: 0 values when not moving
+    - :white_square_button: Store calibration settings to disk, to avoid having to run on every start-up (also option to recalibrate)
+    - :white_square_button: Continuous magnetometer hard iron and soft iron calibration. (store max / min on renderer and update every x minutes)
 - :white_square_button: Add compass overlay
 - :white_square_button: Overlay avg of sensor data / Tx rate
 - :white_square_button: Lidar / Barometric sensor for altitude control
@@ -129,7 +127,15 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_square_button: PID loop
 - :white_square_button: Look into using smaller chassis / motors
 
-### 7. Visualization
+### 7. Model Controls 
+
+- :white_square_button: Implement yaw / roll based on keyboard movement
+- :white_square_button: Implement pitch using mouse inputs
+- :white_square_button: Orbit Controls instead of Perspective
+- :white_square_button: UDP Tx from renderer with Yaw / Pitch / Roll / Throttle
+- :white_square_button: UDP Rx on ESP to receive & control drone
+
+### 8. Visualization
 
 - :white_square_button: Cube Marching to turn point clouds into mesh.
 - :white_square_button: Visualize 3D models of scan in DroneStudio
@@ -137,24 +143,24 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_square_button: Colored / textured meshes
 - :white_square_button: If segmented objects. highlight / click on those with details
 
-### 8. SLAM (Simultaneous Localization and Mapping)
+### 9. SLAM (Simultaneous Localization and Mapping)
 
 - :white_square_button: Combine MPU & LiDAR / Image data to associate FOV with location
 - :white_square_button: Implement SLAM to stitch together FOV's / map the room in 3D
 
-### 9. Camera and Depth Sensing
+### 10. Camera and Depth Sensing
 
 - :white_square_button: Use camera to stream image data to renderer
 - :white_square_button: Use image data to color mesh
 - :white_square_button: Use some image: depth map transformers
 - :white_square_button: Maybe some segmentation? 
 
-### 10. 3D Model Integration
+### 11. 3D Model Integration
 
 - :white_square_button: Import GLTF models
 - :white_square_button: Scan drone and import its 3D model
 
-### 11. Drone Simulator
+### 12. Drone Simulator
 
 - :white_square_button: Import / Randomly generate scene
 - :white_square_button: Scene invisible but vertex data available
@@ -163,14 +169,14 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_square_button: Map scene and route taken by drone w/ collisions
 - :white_square_button: Make scene dynamic / changing overtime to see behavior
 
-### 12. Synchronization
+### 13. Synchronization
 
 - :white_square_button: Implement synchronization for multiple devices or components
 - :white_square_button: Swarm mode vs. Divide & conquer?
 - :white_square_button: maybe some type of animations?
 
 
-### 13. Create custom PCB's for ESC
+### 14. Create custom PCB's for ESC
 
 - :white_square_button: Model components in LTSpice
 - :white_square_button: Create PCB model gerber file
@@ -179,7 +185,7 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_square_button: Flash BLHELI_S or write custom firmware
 
 
-### 14. Convert entire Repo to Zig
+### 15. Convert entire Repo to Zig
 
 - :white_square_button: Generate glad bindings in zig
 - :white_square_button: Create HAL for ESP32 in Zig

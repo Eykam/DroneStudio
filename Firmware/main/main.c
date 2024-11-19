@@ -26,6 +26,7 @@
 #define CLIENT_IP  "192.168.4.2" // CONFIG_CLIENT_IP , IP of client you'd like to connect to
 #define HOST_IP "192.168.4.1"  // ESP32 AP IP
 
+
 typedef struct __attribute__ ((packed)) {
    mpu9250_data_t mpu;
    int64_t timestamp;
@@ -227,6 +228,7 @@ void app_main(void)
 
     init_nvs();
     wifi_init_ap();
+    
 
     point_queue = xQueueCreate(1, sizeof(mpu9250_data_t));
 

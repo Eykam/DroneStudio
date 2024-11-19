@@ -2,26 +2,21 @@ const std = @import("std");
 const Transformations = @import("Transformations.zig");
 const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
+const MadgwickFilter = Transformations.MadgwickFilter;
 const Node = @import("Node.zig");
 const time = std.time;
 const Instant = time.Instant;
 
-pub const SensorState = struct {
-    previous_yaw: f32,
-    gyro_integrated_yaw: f32,
-    mag_valid: bool,
-    mag_updated: bool = false,
-    previous_mag: f32 = 0,
-    rollKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
-    pitchKalman: KalmanState = Transformations.initKalmanState(0.0, 0.0),
+const DECLINATION_ANGLE: f32 = -10;
 
-    pub fn init() SensorState {
-        return SensorState{
-            .previous_yaw = 0,
-            .gyro_integrated_yaw = 0,
-            .mag_valid = false,
-        };
-    }
+pub const SensorState = struct {
+    previous_mag: f32 = 0,
+    mag_updated: bool = false,
+    filter: ?MadgwickFilter = null,
+    initialized: bool = false,
+    sample_count: u32 = 0,
+    gyro_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
+    accel_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
 };
 
 pub const Pose = struct {
@@ -43,27 +38,27 @@ pub const PoseHandler = struct {
         return .{
             .node = node,
             .prev_instant = time.Instant.now() catch unreachable,
-            .sensor_state = SensorState.init(),
+            .sensor_state = SensorState{},
         };
     }
 
     pub fn parse(packet: []const u8) !Pose {
         const accel = Vec3{
             .x = @bitCast(std.mem.readInt(u32, packet[0..4], .little)),
-            .y = @as(f32, @bitCast(std.mem.readInt(u32, packet[8..12], .little))),
-            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[4..8], .little))),
+            .y = @bitCast(std.mem.readInt(u32, packet[4..8], .little)),
+            .z = @bitCast(std.mem.readInt(u32, packet[8..12], .little)),
         };
 
         const gyro = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, packet[12..16], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[20..24], .little)),
-            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[16..20], .little))),
+            .x = Transformations.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
+            .y = Transformations.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
+            .z = Transformations.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
         };
 
         const mag = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, packet[28..32], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
-            .z = -1.0 * @as(f32, @bitCast(std.mem.readInt(u32, packet[24..28], .little))),
+            .x = @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
+            .y = @bitCast(std.mem.readInt(u32, packet[28..32], .little)),
+            .z = @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
         };
 
         const timestamp: i64 = @bitCast(std.mem.readInt(i64, packet[36..44], .little));
@@ -77,6 +72,39 @@ pub const PoseHandler = struct {
     }
 
     pub fn update(self: *PoseHandler, data: []const u8) !void {
+        if (!self.sensor_state.initialized) {
+            const pose = try PoseHandler.parse(data);
+
+            if (self.sensor_state.sample_count < 10000) {
+                self.sensor_state.accel_offset = self.sensor_state.accel_offset.add(Vec3{
+                    .x = pose.accel.x,
+                    .y = pose.accel.y,
+                    .z = 1.0 - pose.accel.z,
+                });
+                self.sensor_state.gyro_offset = self.sensor_state.gyro_offset.add(pose.gyro);
+                self.sensor_state.sample_count += 1;
+                return;
+            }
+
+            self.sensor_state.accel_offset = self.sensor_state.accel_offset.scale(1.0 / 10000.0);
+            self.sensor_state.gyro_offset = self.sensor_state.gyro_offset.scale((1.0 / 10000.0));
+
+            std.debug.print("Accel Offset: {d:.2}, Gyro Offset: {d:.2}", .{
+                [_]f32{
+                    self.sensor_state.accel_offset.x,
+                    self.sensor_state.accel_offset.y,
+                    self.sensor_state.accel_offset.z,
+                },
+                [_]f32{
+                    self.sensor_state.gyro_offset.x,
+                    self.sensor_state.gyro_offset.y,
+                    self.sensor_state.gyro_offset.z,
+                },
+            });
+
+            self.sensor_state.initialized = true;
+        }
+
         const pose = try PoseHandler.parse(data);
 
         const delta_time = @as(f32, @floatFromInt(pose.timestamp - self.prev_timestamp)) / 1e6;
@@ -106,9 +134,11 @@ pub const PoseHandler = struct {
             self.packet_count = 0;
         }
 
-        // placeholder for current position
-        const updatedMatrix = Transformations.updateModelMatrix(pose.accel, pose.gyro, pose.mag, delta_time, &self.sensor_state);
-        self.node.setRotation(updatedMatrix[0], updatedMatrix[1], updatedMatrix[2]);
+        const accel_calibrated = pose.accel.sub(self.sensor_state.accel_offset);
+        const gyro_calibrated = pose.gyro.sub(self.sensor_state.gyro_offset);
+
+        const rotation = Transformations.updateModelMatrix(accel_calibrated, gyro_calibrated, pose.mag, DECLINATION_ANGLE, delta_time, &self.sensor_state);
+        self.node.setRotation(rotation);
         self.packet_count += 1;
     }
 };

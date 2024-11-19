@@ -4,6 +4,144 @@ const SensorState = Sensors.SensorState;
 
 pub const Mat4 = [16]f32;
 
+pub const Quaternion = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+
+    pub fn identity() Quaternion {
+        return Quaternion{ .w = 1, .x = 0, .y = 0, .z = 0 };
+    }
+
+    pub fn fromAxisAngle(axis: Vec3, angle: f32) Quaternion {
+        // First normalize the axis vector
+        const normalized_axis = axis.normalize();
+
+        // Calculate the sine and cosine of half the angle
+        const half_angle = angle * 0.5;
+        const sin_half = @sin(half_angle);
+        const cos_half = @cos(half_angle);
+
+        // Calculate the quaternion components
+        return Quaternion{
+            .x = normalized_axis.x * sin_half,
+            .y = normalized_axis.y * sin_half,
+            .z = normalized_axis.z * sin_half,
+            .w = cos_half,
+        };
+    }
+
+    pub fn fromEuler(pitch: f32, yaw: f32, roll: f32) Quaternion {
+        const cy = @cos(yaw * 0.5);
+        const sy = @sin(yaw * 0.5);
+        const cp = @cos(pitch * 0.5);
+        const sp = @sin(pitch * 0.5);
+        const cr = @cos(roll * 0.5);
+        const sr = @sin(roll * 0.5);
+
+        return Quaternion{
+            .w = cr * cp * cy + sr * sp * sy,
+            .x = sr * cp * cy - cr * sp * sy,
+            .y = cr * sp * cy + sr * cp * sy,
+            .z = cr * cp * sy - sr * sp * cy,
+        };
+    }
+
+    pub fn normalize(q: Quaternion) Quaternion {
+        const mag = @sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+
+        if (mag == 0) {
+            std.debug.print("Quaternion with 0 Length Detected", .{});
+            return q;
+        }
+
+        return Quaternion{
+            .x = q.x / mag,
+            .y = q.y / mag,
+            .z = q.z / mag,
+            .w = q.w / mag,
+        };
+    }
+
+    pub fn toMatrix(q: Quaternion) Mat4 {
+        const xx = q.x * q.x;
+        const yy = q.y * q.y;
+        const zz = q.z * q.z;
+        const xy = q.x * q.y;
+        const xz = q.x * q.z;
+        const yz = q.y * q.z;
+        const wx = q.w * q.x;
+        const wy = q.w * q.y;
+        const wz = q.w * q.z;
+
+        return Mat4{
+            1 - 2 * (yy + zz), 2 * (xy - wz),     2 * (xz + wy),     0,
+            2 * (xy + wz),     1 - 2 * (xx + zz), 2 * (yz - wx),     0,
+            2 * (xz - wy),     2 * (yz + wx),     1 - 2 * (xx + yy), 0,
+            0,                 0,                 0,                 1,
+        };
+    }
+    pub fn add(self: Quaternion, other: Quaternion) Quaternion {
+        return Quaternion{
+            .x = self.x + other.x,
+            .y = self.y + other.y,
+            .z = self.z + other.z,
+            .w = self.w + other.w,
+        };
+    }
+
+    pub fn multiply(a: Quaternion, b: Quaternion) Quaternion {
+        return Quaternion{
+            .w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+            .x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+            .y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            .z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        };
+    }
+
+    pub fn scale(self: Quaternion, scalar: f32) Quaternion {
+        return Quaternion{
+            .x = self.x * scalar,
+            .y = self.y * scalar,
+            .z = self.z * scalar,
+            .w = self.w * scalar,
+        };
+    }
+
+    // Optional: Implement slerp for smooth interpolation
+    pub fn slerp(a: Quaternion, b: Quaternion, t: f32) Quaternion {
+        var cos_half_theta = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
+
+        var b_copy = b;
+        if (cos_half_theta < 0.0) {
+            b_copy = Quaternion{ .x = -b.x, .y = -b.y, .z = -b.z, .w = -b.w };
+            cos_half_theta = -cos_half_theta;
+        }
+
+        if (cos_half_theta > 0.9995) {
+            return Quaternion.normalize(Quaternion{
+                .x = a.x + t * (b_copy.x - a.x),
+                .y = a.y + t * (b_copy.y - a.y),
+                .z = a.z + t * (b_copy.z - a.z),
+                .w = a.w + t * (b_copy.w - a.w),
+            });
+        } else {
+            const half_theta = std.math.acos(cos_half_theta);
+            const sin_half_theta = @sin(half_theta);
+            const ratio_a = @sin((1 - t) * half_theta) / sin_half_theta;
+            const ratio_b = @sin(t * half_theta) / sin_half_theta;
+
+            return Quaternion{
+                .x = a.x * ratio_a + b_copy.x * ratio_b,
+                .y = a.y * ratio_a + b_copy.y * ratio_b,
+                .z = a.z * ratio_a + b_copy.z * ratio_b,
+                .w = a.w * ratio_a + b_copy.w * ratio_b,
+            };
+        }
+    }
+};
+
 pub const Vec3 = struct {
     x: f32,
     y: f32,
@@ -11,7 +149,12 @@ pub const Vec3 = struct {
 
     pub fn normalize(self: Vec3) Vec3 {
         const length = @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
-        if (length == 0) return self;
+
+        if (length == 0) {
+            std.debug.print("Vec3 with 0 Length Detected", .{});
+            return self;
+        }
+
         return Vec3{
             .x = self.x / length,
             .y = self.y / length,
@@ -68,7 +211,7 @@ pub const Vec3 = struct {
     }
 };
 
-pub fn identity() [16]f32 {
+pub fn identity() Mat4 {
     return .{
         1.0, 0.0, 0.0, 0.0,
         0.0, 1.0, 0.0, 0.0,
@@ -77,10 +220,10 @@ pub fn identity() [16]f32 {
     };
 }
 
-pub fn rotate_x(angle_deg: f32) [16]f32 {
+pub fn rotate_x(angle_deg: f32) Mat4 {
     const angle_rad = angle_deg * (std.math.pi / 180.0);
-    const c = std.math.cos(angle_rad);
-    const s = std.math.sin(angle_rad);
+    const c = @cos(angle_rad);
+    const s = @sin(angle_rad);
 
     return .{
         1.0, 0.0, 0.0, 0.0,
@@ -126,45 +269,7 @@ pub fn scale(matrix: Mat4, x: f32, y: f32, z: f32) Mat4 {
     return result;
 }
 
-pub fn rotate(matrix: Mat4, angle_rads: f32, axis: Vec3) Mat4 {
-    const c = @cos(angle_rads);
-    const s = @sin(angle_rads);
-    const one_minus_c = 1.0 - c;
-
-    // Normalize the axis
-    const magnitude = @sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
-    const x = axis.x / magnitude;
-    const y = axis.y / magnitude;
-    const z = axis.z / magnitude;
-
-    // Build rotation matrix
-    const rotation = Mat4{
-        // First column
-        c + x * x * one_minus_c,
-        x * y * one_minus_c + z * s,
-        x * z * one_minus_c - y * s,
-        0,
-        // Second column
-        x * y * one_minus_c - z * s,
-        c + y * y * one_minus_c,
-        y * z * one_minus_c + x * s,
-        0,
-        // Third column
-        x * z * one_minus_c + y * s,
-        y * z * one_minus_c - x * s,
-        c + z * z * one_minus_c,
-        0,
-        // Fourth column
-        0,
-        0,
-        0,
-        1,
-    };
-
-    return multiply_matrices(matrix, rotation);
-}
-
-pub fn rotate_y(angle_deg: f32) [16]f32 {
+pub fn rotate_y(angle_deg: f32) Mat4 {
     const angle_rad = radians(angle_deg);
     const c = std.math.cos(angle_rad);
     const s = std.math.sin(angle_rad);
@@ -177,7 +282,7 @@ pub fn rotate_y(angle_deg: f32) [16]f32 {
     };
 }
 
-pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) [16]f32 {
+pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) Mat4 {
     return .{
         2.0 / (right - left), 0.0,                  0.0,                 -(right + left) / (right - left),
         0.0,                  2.0 / (top - bottom), 0.0,                 -(top + bottom) / (top - bottom),
@@ -186,10 +291,10 @@ pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far
     };
 }
 
-pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) [16]f32 {
+pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) Mat4 {
     const rad = radians(fov);
-    const tan_half_fov = tan(rad / 2.0);
-    var mat: [16]f32 = .{0} ** 16;
+    const tan_half_fov = @tan(rad / 2.0);
+    var mat: Mat4 = .{0} ** 16;
     mat[0] = 1.0 / (aspect * tan_half_fov);
     mat[5] = 1.0 / (tan_half_fov);
     mat[10] = -(far + near) / (far - near);
@@ -199,7 +304,7 @@ pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) [16]f32 {
 }
 
 // Function to create a simple view matrix (camera at (0,0,5) looking at origin)
-pub fn lookAt(eye: Vec3, center: Vec3, up: Vec3) [16]f32 {
+pub fn lookAt(eye: Vec3, center: Vec3, up: Vec3) Mat4 {
     const f = Vec3.normalize(Vec3.sub(center, eye));
     const s = Vec3.normalize(Vec3.cross(f, up));
     const u = Vec3.cross(s, f);
@@ -212,8 +317,8 @@ pub fn lookAt(eye: Vec3, center: Vec3, up: Vec3) [16]f32 {
     };
 }
 
-pub fn multiply_matrices(a: [16]f32, b: [16]f32) [16]f32 {
-    var result: [16]f32 = .{0} ** 16;
+pub fn multiply_matrices(a: Mat4, b: Mat4) Mat4 {
+    var result: Mat4 = .{0} ** 16;
     for (0..4) |row| {
         for (0..4) |col| {
             var sum: f32 = 0.0;
@@ -234,197 +339,212 @@ fn degrees(_radians: f32) f32 {
     return _radians / (std.math.pi / 180.0);
 }
 
-fn tan(x: f32) f32 {
-    return @tan(x);
-}
+pub const MadgwickFilter = struct {
+    const Self = @This();
+    q: Quaternion,
+    err: [3]f32,
+    beta: f32,
+    zeta: f32,
+    bx: f32,
+    bz: f32,
+    w_bx: f32 = 0,
+    w_by: f32 = 0,
+    w_bz: f32 = 0,
 
-fn atan(x: f32) f32 {
-    return atan(x);
-}
+    pub fn init() Self {
+        // These gains significantly affect stability
+        const gyroMeasError = std.math.pi * (5.0 / 180.0); // increased from 5.0
+        const gyroMeasDrift = std.math.pi * (0.2 / 180.0); // kept same
 
-fn atan2(x: f32, y: f32) f32 {
-    return std.math.atan2(x, y);
-}
+        return Self{
+            .q = Quaternion.identity(),
+            .beta = std.math.sqrt(3.0 / 4.0) * gyroMeasError,
+            .zeta = std.math.sqrt(3.0 / 4.0) * gyroMeasDrift,
+            .err = [_]f32{ 0.0, 0.0, 0.0 },
+            .bx = 1.0,
+            .bz = 0.0,
+        };
+    }
 
-pub fn angleRoll(accel: Vec3) f32 {
-    // More stable roll calculation from accelerometer
-    return atan2(-accel.x, @sqrt(accel.y * accel.y + accel.z * accel.z));
-}
+    pub fn update(
+        self: *Self,
+        gyro: Vec3,
+        accel: Vec3,
+        mag: Vec3,
+        delta_t: f32,
+    ) void {
+        // Pre-compute quantities used multiple times
+        var q_conj = Quaternion{ .w = self.q.w, .x = self.q.x, .y = self.q.y, .z = self.q.z };
 
-pub fn anglePitch(angles: Vec3) f32 {
-    // Pitch (rotation around Z axis)
-    // In OpenGL: Y is up, Z is backward
-    return atan2(angles.z, @sqrt(angles.x * angles.x + angles.y * angles.y));
-}
+        var q1 = self.q.w;
+        var q2 = self.q.x;
+        var q3 = self.q.y;
+        var q4 = self.q.z;
 
-pub fn angleYaw(mag: Vec3, pitch: f32, roll: f32) f32 {
-    const sin_roll = @sin(roll);
-    const cos_roll = @cos(roll);
-    const sin_pitch = @sin(pitch);
-    const cos_pitch = @cos(pitch);
+        var q1q2 = q1 * q2;
+        var q1q3 = q1 * q3;
+        var q1q4 = q1 * q4;
+        var q2q2 = q2 * q2;
+        var q2q3 = q2 * q3;
+        var q2q4 = q2 * q4;
+        var q3q3 = q3 * q3;
+        var q3q4 = q3 * q4;
+        var q4q4 = q4 * q4;
 
-    // Tilt compensated magnetic field X component
-    const bx = mag.x * cos_pitch +
-        mag.y * sin_roll * sin_pitch -
-        mag.z * cos_roll * sin_pitch;
+        // Normalize accelerometer measurement
+        const a_norm = accel.normalize();
 
-    // Tilt compensated magnetic field Z component
-    const bz = mag.y * cos_roll +
-        mag.z * sin_roll;
+        // Normalize magnetometer measurement
+        const m_norm = mag.normalize();
 
-    // Calculate yaw
-    return atan2(bz, bx);
-}
+        // Gradient decent algorithm corrective step
+        const F = [6]f32{
+            2.0 * (q2q4 - q1q3) - a_norm.x,
+            2.0 * (q1q2 + q3q4) - a_norm.y,
+            2.0 * (0.5 - q2q2 - q3q3) - a_norm.z,
+            2.0 * self.bx * (0.5 - q3q3 - q4q4) + 2.0 * self.bz * (q2q4 - q1q3) - m_norm.x,
+            2.0 * self.bx * (q2q3 - q1q4) + 2.0 * self.bz * (q1q2 + q3q4) - m_norm.y,
+            2.0 * self.bx * (q1q3 + q2q4) + 2.0 * self.bz * (0.5 - q2q2 - q3q3) - m_norm.z,
+        };
 
-fn calculateAdaptiveAlpha(mag: Vec3, accel: Vec3) f32 {
-    const MAG_STRENGTH_NOMINAL = 30; // Adjust based on your magnetometer's typical readings
-    const ACCEL_MAGNITUDE_NOMINAL = 1; // Standard gravity
+        const J_t = [6][4]f32{
+            [4]f32{ -2.0 * q3, 2.0 * q4, -2.0 * q1, 2.0 * q2 },
+            [4]f32{ 2.0 * q2, 2.0 * q1, 2.0 * q4, 2.0 * q3 },
+            [4]f32{ 0.0, -4.0 * q2, -4.0 * q3, 0.0 },
+            [4]f32{ -2.0 * self.bz * q3, 2.0 * self.bz * q4, -4.0 * self.bx * q3 - 2.0 * self.bz * q1, -4.0 * self.bx * q4 + 2.0 * self.bz * q2 },
+            [4]f32{ -2.0 * self.bx * q4 + 2.0 * self.bz * q2, 2.0 * self.bx * q3 + 2.0 * self.bz * q1, 2.0 * self.bx * q2 + 2.0 * self.bz * q4, -2.0 * self.bx * q1 + 2.0 * self.bz * q3 },
+            [4]f32{ 2.0 * self.bx * q3, 2.0 * self.bx * q4 - 4.0 * self.bz * q2, 2.0 * self.bx * q1 - 4.0 * self.bz * q3, 2.0 * self.bx * q2 },
+        };
 
-    // Calculate magnetic field strength
-    const mag_strength = @sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
-    const mag_error = @abs(mag_strength - MAG_STRENGTH_NOMINAL) / MAG_STRENGTH_NOMINAL;
+        var step = [4]f32{ 0, 0, 0, 0 };
 
-    // Calculate acceleration magnitude to detect motion
-    const accel_magnitude = @sqrt(accel.x * accel.x + accel.y * accel.y + accel.z * accel.z);
-    const accel_error = @abs(accel_magnitude - ACCEL_MAGNITUDE_NOMINAL) / ACCEL_MAGNITUDE_NOMINAL;
+        // Compute gradient (matrix multiplication)
+        for (0..4) |j| {
+            for (0..6) |i| {
+                step[j] += J_t[i][j] * F[i];
+            }
+        }
 
-    // Combine errors to determine filter weight
-    const total_error = mag_error + accel_error;
-    const base_alpha = 0.98; // Base gyro weight
-    const min_alpha = 0.75; // Minimum gyro weight
+        // Normalize step magnitude
 
-    return @max(min_alpha, base_alpha - total_error);
-}
+        var SEq_hat_dot = Quaternion{ .w = step[0], .x = step[1], .y = step[2], .z = step[3] };
+        SEq_hat_dot = SEq_hat_dot.normalize();
 
-pub const KalmanState = struct {
-    angle: f32, // Current angle estimate
-    bias: f32, // Gyro bias estimate
-    P: [2][2]f32, // Error covariance matrix
-    Q_angle: f32, // Process noise for angle
-    Q_bias: f32, // Process noise for bias
-    R_measure: f32, // Measurement noise
-    dt: f32, // Time step
+        const w_err_x = q_conj.multiply(SEq_hat_dot).scale(2);
+
+        // **Gyroscope Bias Correction**
+        // Update gyro biases based on step and zeta
+        self.w_bx += self.zeta * w_err_x.x * delta_t;
+        self.w_by += self.zeta * w_err_x.y * delta_t;
+        self.w_bz += self.zeta * w_err_x.z * delta_t;
+
+        // **Compute rate of change of quaternion with bias-corrected gyroscope data**
+        var q_omega = Quaternion{ .w = 0, .x = gyro.x, .y = gyro.y, .z = gyro.z };
+        q_omega = self.q.multiply(q_omega).scale(1.0 / 2.0);
+
+        // Integrate to yield quaternion
+        q1 = q_omega.w - (self.beta * SEq_hat_dot.w * delta_t);
+        q2 = q_omega.x - (self.beta * SEq_hat_dot.x * delta_t);
+        q3 = q_omega.y - (self.beta * SEq_hat_dot.y * delta_t);
+        q4 = q_omega.z - (self.beta * SEq_hat_dot.z * delta_t);
+
+        self.q = Quaternion{
+            .w = q1,
+            .x = q2,
+            .y = q3,
+            .z = q4,
+        };
+
+        self.q = self.q.normalize();
+
+        // Update reference direction of flux
+        // Reference direction of Earth's magnetic field
+        q1q2 = q1 * q2;
+        q1q3 = q1 * q3;
+        q1q4 = q1 * q4;
+        q2q2 = q2 * q2;
+        q2q3 = q2 * q3;
+        q2q4 = q2 * q4;
+        q3q3 = q3 * q3;
+        q3q4 = q3 * q4;
+        q4q4 = q4 * q4;
+
+        const mag_q = Quaternion{ .w = 0.0, .x = m_norm.x, .y = m_norm.y, .z = m_norm.z };
+        q_conj = Quaternion{ .w = self.q.w, .x = self.q.x, .y = self.q.y, .z = self.q.z };
+
+        const h = self.q.multiply(mag_q).multiply(q_conj);
+
+        const bx = std.math.sqrt(h.x * h.x + h.y * h.y);
+        const bz = h.z;
+
+        self.bx = bx;
+        self.bz = bz;
+    }
 };
-
-pub fn initKalmanState(initial_angle: f32, initial_bias: f32) KalmanState {
-    return KalmanState{
-        .angle = initial_angle,
-        .bias = initial_bias,
-        .P = .{
-            .{ 0.0001, 0.0 },
-            .{ 0.0, 0.0001 },
-        },
-        .Q_angle = 0.001,
-        .Q_bias = 0.003,
-        .R_measure = 0.03,
-        .dt = 1.0 / 950.0, // Assuming 950hz update rate
-    };
-}
-
-pub fn updateKalman(state: *KalmanState, accel_angle: f32, gyro_rate: f32, delta_time: f32) f32 {
-    // Predict step
-    const rate = gyro_rate - state.bias;
-    // _ = delta_time;
-    state.dt = delta_time;
-    state.angle += state.dt * rate;
-
-    // Update error covariance matrix
-    state.P[0][0] += state.dt * (state.dt * state.P[1][1] - state.P[0][1] - state.P[1][0] + state.Q_angle);
-    state.P[0][1] -= state.dt * state.P[1][1];
-    state.P[1][0] -= state.dt * state.P[1][1];
-    state.P[1][1] += state.Q_bias * state.dt;
-
-    // Calculate Kalman gain
-    const S = state.P[0][0] + state.R_measure;
-    const K = .{
-        state.P[0][0] / S,
-        state.P[1][0] / S,
-    };
-
-    // Update step
-    const y = accel_angle - state.angle;
-    state.angle += K[0] * y;
-    state.bias += K[1] * y;
-
-    // Update error covariance matrix
-    const P00_temp = state.P[0][0];
-    const P01_temp = state.P[0][1];
-
-    state.P[0][0] -= K[0] * P00_temp;
-    state.P[0][1] -= K[0] * P01_temp;
-    state.P[1][0] -= K[1] * P00_temp;
-    state.P[1][1] -= K[1] * P01_temp;
-
-    return state.angle;
-}
 
 pub fn updateModelMatrix(
     accel: Vec3,
     gyro: Vec3,
     mag: Vec3,
+    declination: f32,
     delta_time: f32,
     sensor_state: *SensorState,
-) [3]f32 {
-    const scaled_gyro = Vec3{
-        .x = radians(gyro.x),
-        .y = radians(gyro.y) * -1.0,
-        .z = radians(gyro.z),
+) Quaternion {
+    // Initialize Madgwick filter if not already done
+    if (sensor_state.filter == null) {
+        sensor_state.filter = MadgwickFilter.init();
+    }
+
+    const accel_gl = Vec3{
+        .x = accel.x, // Right
+        .y = accel.y, // Up
+        .z = accel.z, // Back
     };
 
-    const accel_roll = angleRoll(accel);
-    const accel_pitch = anglePitch(accel);
-
-    // Update Kalman filter with scaled values
-    const filtered_roll = updateKalman(&sensor_state.rollKalman, accel_roll, scaled_gyro.x, delta_time);
-    const filtered_pitch = updateKalman(&sensor_state.pitchKalman, accel_pitch, scaled_gyro.z, delta_time);
-
-    sensor_state.gyro_integrated_yaw += scaled_gyro.y * delta_time;
-    _ = mag;
-
-    // if (sensor_state.mag_updated) {
-    //     // Normalize magnetometer readings before processing
-    //     const mag_length = @sqrt(mag.x * mag.x + mag.y * mag.y + mag.z * mag.z);
-    //     const normalized_mag = Vec3{
-    //         .x = mag.x / mag_length,
-    //         .y = mag.y / mag_length,
-    //         .z = mag.z / mag_length,
-    //     };
-
-    //     const mag_yaw = angleYaw(normalized_mag, filtered_pitch, filtered_roll);
-
-    //     if (!sensor_state.mag_valid) {
-    //         // sensor_state.gyro_integrated_yaw = mag_yaw;
-    //         // sensor_state.previous_yaw = mag_yaw;
-    //         sensor_state.gyro_integrated_yaw = 0.0;
-    //         sensor_state.mag_valid = true;
-    //         std.debug.print("Initial mag yaw: {d}\n", .{degrees(mag_yaw)});
-    //     } else {
-    //         // Handle wraparound for magnetic yaw
-    //         var yaw_diff = mag_yaw - sensor_state.previous_yaw;
-    //         if (yaw_diff > std.math.pi) {
-    //             yaw_diff -= 2.0 * std.math.pi;
-    //         } else if (yaw_diff < -std.math.pi) {
-    //             yaw_diff += 2.0 * std.math.pi;
-    //         }
-
-    //         // Debug print the yaw values
-    //         std.debug.print("Mag: {d:.2}, Gyro: {d:.2}, Diff: {d:.2}\n", .{
-    //             degrees(mag_yaw),
-    //             degrees(sensor_state.gyro_integrated_yaw),
-    //             degrees(yaw_diff),
-    //         });
-
-    //         // Complementary filter with adaptive weights
-    //         // const alpha = calculateAdaptiveAlpha(normalized_mag, accel);
-    //         // sensor_state.gyro_integrated_yaw = alpha * sensor_state.gyro_integrated_yaw +
-    //         //     (1.0 - alpha) * (sensor_state.previous_yaw + yaw_diff);
-    //         // sensor_state.previous_yaw = mag_yaw; // Store the raw mag reading for next diff calculation
-    //     }
-    // }
-
-    return [_]f32{
-        filtered_pitch,
-        0.0,
-        filtered_roll,
+    const gyro_gl = Vec3{
+        .x = gyro.x,
+        .y = gyro.y,
+        .z = gyro.z,
     };
+
+    const mag_gl = Vec3{
+        .x = mag.x, // Right
+        .y = mag.y, // Up
+        .z = mag.z, // Back
+    };
+
+    _ = declination;
+
+    sensor_state.filter.?.update(
+        gyro_gl,
+        accel_gl,
+        mag_gl,
+        delta_time,
+    );
+
+    std.debug.print("Gyro: {d:.2}, Accel: {d:.2}, Mag: {d:.2}, Quat: {d:.2}\n", .{
+        [_]f32{
+            gyro_gl.x,
+            gyro_gl.y,
+            gyro_gl.z,
+        },
+        [_]f32{
+            accel_gl.x,
+            accel_gl.y,
+            accel_gl.z,
+        },
+        [_]f32{
+            mag_gl.x,
+            mag_gl.y,
+            mag_gl.z,
+        },
+        [_]f32{
+            sensor_state.filter.?.q.w,
+            sensor_state.filter.?.q.x,
+            sensor_state.filter.?.q.y,
+            sensor_state.filter.?.q.z,
+        },
+    });
+
+    return sensor_state.filter.?.q;
 }

@@ -381,28 +381,8 @@ fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
     return c.glfwGetPrimaryMonitor();
 }
 
-pub fn openDebugConsole() void {
-    if (@import("builtin").os.tag == .windows) {
-        // Windows-specific console allocation
-        _ = c.AllocConsole();
-
-        // Get the console window handle and show it
-        const console_window = c.GetConsoleWindow();
-        if (console_window != null) {
-            _ = c.ShowWindow(console_window, c.SW_SHOW);
-        }
-
-        // For Windows, we'll use the Windows API directly instead of stdio
-        _ = c.GetStdHandle(c.STD_OUTPUT_HANDLE);
-        _ = c.GetStdHandle(c.STD_ERROR_HANDLE);
-        _ = c.GetStdHandle(c.STD_INPUT_HANDLE);
-    }
-}
-
 // Window creation with proper monitor handling
 pub fn createWindow() ?*c.GLFWwindow {
-    // openDebugConsole();
-
     c.glfwWindowHint(c.GLFW_FOCUSED, c.GLFW_TRUE);
     c.glfwWindowHint(c.GLFW_FOCUS_ON_SHOW, c.GLFW_TRUE);
     c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_OPENGL_API);

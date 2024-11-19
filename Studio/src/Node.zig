@@ -2,6 +2,7 @@ const std = @import("std");
 const Mesh = @import("Mesh.zig");
 const Transformations = @import("Transformations.zig");
 const Vec3 = Transformations.Vec3;
+const Quaternion = Transformations.Quaternion;
 
 const c = @cImport({
     @cInclude("glad/glad.h");
@@ -17,7 +18,7 @@ parent: ?*Self = null,
 
 // Add transformation properties
 position: [3]f32 = .{ 0, 0, 0 },
-rotation: [3]f32 = .{ 0, 0, 0 }, // Euler angles in radians
+rotation: Quaternion = Quaternion.identity(),
 scale: [3]f32 = .{ 1, 1, 1 },
 local_transform: [16]f32 = Transformations.identity(),
 world_transform: [16]f32 = Transformations.identity(),
@@ -66,8 +67,13 @@ pub fn setPosition(self: *Self, x: f32, y: f32, z: f32) void {
     self.updateLocalTransform();
 }
 
-pub fn setRotation(self: *Self, x: f32, y: f32, z: f32) void {
-    self.rotation = .{ x, y, z };
+pub fn setRotation(self: *Self, q: Quaternion) void {
+    self.rotation = Quaternion.normalize(q);
+    self.updateLocalTransform();
+}
+
+pub fn setRotationEuler(self: *Self, pitch: f32, yaw: f32, roll: f32) void {
+    self.rotation = Quaternion.normalize(Quaternion.fromEuler(pitch, yaw, roll));
     self.updateLocalTransform();
 }
 
@@ -92,9 +98,8 @@ fn updateLocalTransform(self: *Self) void {
     transform = Transformations.scale(transform, self.scale[0], self.scale[1], self.scale[2]);
 
     // Apply rotation around center
-    transform = Transformations.rotate(transform, -self.rotation[0], Vec3{ .x = 1, .y = 0, .z = 0 });
-    transform = Transformations.rotate(transform, -self.rotation[1], Vec3{ .x = 0, .y = 1, .z = 0 });
-    transform = Transformations.rotate(transform, -self.rotation[2], Vec3{ .x = 0, .y = 0, .z = 1 });
+    const rotation_matrix = Quaternion.toMatrix(self.rotation);
+    transform = Transformations.multiply_matrices(transform, rotation_matrix);
 
     // Move back and translate to position
     const inv_center = Transformations.translate(Transformations.identity(), self.position[0], self.position[1], self.position[2]);

@@ -89,8 +89,9 @@ pub fn main() !void {
         Secrets.client_port,
     );
 
-    var pose_handler = UDP.Handler(Sensors.PoseHandler).init(Sensors.PoseHandler.init(&droneNode));
-    const pose_interface = pose_handler.interface();
+    const pose_handler = Sensors.PoseHandler.init(&droneNode);
+    var udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
+    const pose_interface = udp_handler.interface();
 
     try server.start(pose_interface);
 
