@@ -12,7 +12,7 @@ const DECLINATION_ANGLE: f32 = -10;
 pub const SensorState = struct {
     previous_mag: f32 = 0,
     mag_updated: bool = false,
-    filter: ?MadgwickFilter = null,
+    filter: ?MadgwickFilter = undefined,
     initialized: bool = false,
     sample_count: u32 = 0,
     gyro_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },

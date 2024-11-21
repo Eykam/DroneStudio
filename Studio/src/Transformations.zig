@@ -92,12 +92,14 @@ pub const Quaternion = struct {
     }
 
     pub fn multiply(a: Quaternion, b: Quaternion) Quaternion {
-        return Quaternion{
+        const q = Quaternion{
             .w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
             .x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
             .y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
             .z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
         };
+
+        return q;
     }
 
     pub fn scale(self: Quaternion, scalar: f32) Quaternion {
@@ -106,6 +108,15 @@ pub const Quaternion = struct {
             .y = self.y * scalar,
             .z = self.z * scalar,
             .w = self.w * scalar,
+        };
+    }
+
+    pub fn conjugate(self: Quaternion) Quaternion {
+        return Quaternion{
+            .w = self.w,
+            .x = -self.x,
+            .y = -self.y,
+            .z = -self.z,
         };
     }
 
@@ -342,6 +353,7 @@ fn degrees(_radians: f32) f32 {
 pub const MadgwickFilter = struct {
     const Self = @This();
     q: Quaternion,
+    initial_orientation: ?Quaternion = null,
     err: [3]f32,
     beta: f32,
     zeta: f32,
@@ -353,13 +365,15 @@ pub const MadgwickFilter = struct {
 
     pub fn init() Self {
         // These gains significantly affect stability
-        const gyroMeasError = std.math.pi * (5.0 / 180.0); // increased from 5.0
-        const gyroMeasDrift = std.math.pi * (0.2 / 180.0); // kept same
+        // const gyroMeasError = std.math.pi * (0.001 / 180.0); // increased from 5.0
+        // const gyroMeasDrift = std.math.pi * (0.0001 / 180.0); // kept same
 
         return Self{
             .q = Quaternion.identity(),
-            .beta = std.math.sqrt(3.0 / 4.0) * gyroMeasError,
-            .zeta = std.math.sqrt(3.0 / 4.0) * gyroMeasDrift,
+            .beta = 0.0000828, // rad/s
+            .zeta = 0.0000,
+            // .beta = std.math.sqrt(3.0 / 4.0) * gyroMeasError,
+            // .zeta = std.math.sqrt(3.0 / 4.0) * gyroMeasDrift,
             .err = [_]f32{ 0.0, 0.0, 0.0 },
             .bx = 1.0,
             .bz = 0.0,
@@ -374,7 +388,7 @@ pub const MadgwickFilter = struct {
         delta_t: f32,
     ) void {
         // Pre-compute quantities used multiple times
-        var q_conj = Quaternion{ .w = self.q.w, .x = self.q.x, .y = self.q.y, .z = self.q.z };
+        var q_conj = self.q.conjugate();
 
         var q1 = self.q.w;
         var q2 = self.q.x;
@@ -427,35 +441,68 @@ pub const MadgwickFilter = struct {
 
         // Normalize step magnitude
 
-        var SEq_hat_dot = Quaternion{ .w = step[0], .x = step[1], .y = step[2], .z = step[3] };
-        SEq_hat_dot = SEq_hat_dot.normalize();
+        var step_vector = Vec3{
+            .x = step[1],
+            .y = step[2],
+            .z = step[3],
+        };
+        step_vector = step_vector.normalize();
 
-        const w_err_x = q_conj.multiply(SEq_hat_dot).scale(2);
+        var w_err = Vec3{
+            .x = q_conj.x,
+            .y = q_conj.y,
+            .z = q_conj.z,
+        };
+        w_err = w_err.cross(step_vector).scale(2.0);
 
         // **Gyroscope Bias Correction**
         // Update gyro biases based on step and zeta
-        self.w_bx += self.zeta * w_err_x.x * delta_t;
-        self.w_by += self.zeta * w_err_x.y * delta_t;
-        self.w_bz += self.zeta * w_err_x.z * delta_t;
+        self.w_bx += self.zeta * w_err.x * delta_t;
+        self.w_by += self.zeta * w_err.y * delta_t;
+        self.w_bz += self.zeta * w_err.z * delta_t;
 
-        // **Compute rate of change of quaternion with bias-corrected gyroscope data**
-        var q_omega = Quaternion{ .w = 0, .x = gyro.x, .y = gyro.y, .z = gyro.z };
-        q_omega = self.q.multiply(q_omega).scale(1.0 / 2.0);
-
-        // Integrate to yield quaternion
-        q1 = q_omega.w - (self.beta * SEq_hat_dot.w * delta_t);
-        q2 = q_omega.x - (self.beta * SEq_hat_dot.x * delta_t);
-        q3 = q_omega.y - (self.beta * SEq_hat_dot.y * delta_t);
-        q4 = q_omega.z - (self.beta * SEq_hat_dot.z * delta_t);
-
-        self.q = Quaternion{
-            .w = q1,
-            .x = q2,
-            .y = q3,
-            .z = q4,
+        const gyro_corrected = Vec3{
+            .x = gyro.x - self.w_bx,
+            .y = gyro.y - self.w_by,
+            .z = gyro.z - self.w_bz,
         };
 
+        // Compute quaternion derivative from gyroscope data
+        const q_dot_gyro = self.q.multiply(Quaternion{
+            .w = 0.0,
+            .x = gyro_corrected.x,
+            .y = gyro_corrected.y,
+            .z = gyro_corrected.z,
+        }).scale(0.5);
+
+        // Compute quaternion derivative from gradient step
+        const q_dot_step = Quaternion{
+            .w = 0.0, // No scalar component
+            .x = -self.beta * step_vector.x, // Derived from step_vector
+            .y = -self.beta * step_vector.y, // Derived from step_vector
+            .z = -self.beta * step_vector.z, // Derived from step_vector
+        };
+
+        // Combine derivatives
+        const q_dot = Quaternion{
+            .w = q_dot_gyro.w + q_dot_step.w,
+            .x = q_dot_gyro.x + q_dot_step.x,
+            .y = q_dot_gyro.y + q_dot_step.y,
+            .z = q_dot_gyro.z + q_dot_step.z,
+        };
+
+        // Integrate to yield new quaternion
+        self.q.w += q_dot.w * delta_t;
+        self.q.x += q_dot.x * delta_t;
+        self.q.y += q_dot.y * delta_t;
+        self.q.z += q_dot.z * delta_t;
+
         self.q = self.q.normalize();
+
+        q1 = self.q.w;
+        q2 = self.q.x;
+        q3 = self.q.y;
+        q4 = self.q.z;
 
         // Update reference direction of flux
         // Reference direction of Earth's magnetic field
@@ -469,10 +516,16 @@ pub const MadgwickFilter = struct {
         q3q4 = q3 * q4;
         q4q4 = q4 * q4;
 
-        const mag_q = Quaternion{ .w = 0.0, .x = m_norm.x, .y = m_norm.y, .z = m_norm.z };
-        q_conj = Quaternion{ .w = self.q.w, .x = self.q.x, .y = self.q.y, .z = self.q.z };
+        const mag_q = Quaternion{
+            .w = 0.0,
+            .x = m_norm.x,
+            .y = m_norm.y,
+            .z = m_norm.z,
+        };
 
-        const h = self.q.multiply(mag_q).multiply(q_conj);
+        q_conj = self.q.conjugate();
+
+        const h = self.q.multiply(mag_q).normalize().multiply(q_conj).normalize();
 
         const bx = std.math.sqrt(h.x * h.x + h.y * h.y);
         const bz = h.z;
@@ -491,9 +544,6 @@ pub fn updateModelMatrix(
     sensor_state: *SensorState,
 ) Quaternion {
     // Initialize Madgwick filter if not already done
-    if (sensor_state.filter == null) {
-        sensor_state.filter = MadgwickFilter.init();
-    }
 
     const accel_gl = Vec3{
         .x = accel.x, // Right
@@ -508,10 +558,14 @@ pub fn updateModelMatrix(
     };
 
     const mag_gl = Vec3{
-        .x = mag.x, // Right
-        .y = mag.y, // Up
-        .z = mag.z, // Back
+        .x = mag.y, // Right
+        .y = mag.x, // Up
+        .z = -mag.z, // Back
     };
+
+    if (sensor_state.filter == null) {
+        sensor_state.filter = MadgwickFilter.init();
+    }
 
     _ = declination;
 
@@ -522,29 +576,35 @@ pub fn updateModelMatrix(
         delta_time,
     );
 
-    std.debug.print("Gyro: {d:.2}, Accel: {d:.2}, Mag: {d:.2}, Quat: {d:.2}\n", .{
+    var q = Quaternion{
+        .w = sensor_state.filter.?.q.w,
+        .x = sensor_state.filter.?.q.x,
+        .y = sensor_state.filter.?.q.y,
+        .z = sensor_state.filter.?.q.z,
+    };
+
+    if (sensor_state.filter.?.initial_orientation == null) {
+        sensor_state.filter.?.initial_orientation = sensor_state.filter.?.q;
+    }
+
+    const initial_conj = sensor_state.filter.?.initial_orientation.?.conjugate();
+
+    q = initial_conj.multiply(q);
+    q = Quaternion{
+        .w = q.w,
+        .x = -q.x,
+        .y = -q.z,
+        .z = q.y,
+    };
+
+    std.debug.print("Q: {d:.5}\n", .{
         [_]f32{
-            gyro_gl.x,
-            gyro_gl.y,
-            gyro_gl.z,
-        },
-        [_]f32{
-            accel_gl.x,
-            accel_gl.y,
-            accel_gl.z,
-        },
-        [_]f32{
-            mag_gl.x,
-            mag_gl.y,
-            mag_gl.z,
-        },
-        [_]f32{
-            sensor_state.filter.?.q.w,
-            sensor_state.filter.?.q.x,
-            sensor_state.filter.?.q.y,
-            sensor_state.filter.?.q.z,
+            q.w,
+            q.x,
+            q.y,
+            q.z,
         },
     });
 
-    return sensor_state.filter.?.q;
+    return q;
 }
