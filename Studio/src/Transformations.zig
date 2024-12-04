@@ -370,8 +370,8 @@ pub const MadgwickFilter = struct {
 
         return Self{
             .q = Quaternion.identity(),
-            .beta = 0.0000828, // rad/s
-            .zeta = 0.0000,
+            .beta = 0.0000020, // rad/s
+            .zeta = 0.0000001,
             // .beta = std.math.sqrt(3.0 / 4.0) * gyroMeasError,
             // .zeta = std.math.sqrt(3.0 / 4.0) * gyroMeasDrift,
             .err = [_]f32{ 0.0, 0.0, 0.0 },
@@ -597,14 +597,37 @@ pub fn updateModelMatrix(
         .z = q.y,
     };
 
-    std.debug.print("Q: {d:.5}\n", .{
+    const rotation = q.toMatrix();
+    const accel_corrected = Vec3{
+        .x = accel_gl.x - (rotation[1] * 1),
+        .y = accel_gl.z - (rotation[5] * 1),
+        .z = accel_gl.y - (rotation[9] * 1),
+    };
+
+    sensor_state.velocity = accel_corrected.scale(delta_time).add(sensor_state.velocity);
+    sensor_state.position = sensor_state.velocity.scale(delta_time).add(sensor_state.position);
+
+    std.debug.print("Position: {d:.3} =>  Velocity: {d:.3}\n", .{
         [_]f32{
-            q.w,
-            q.x,
-            q.y,
-            q.z,
+            sensor_state.position.x,
+            @max(sensor_state.position.y, 0.0),
+            sensor_state.position.z,
+        },
+        [_]f32{
+            sensor_state.velocity.x,
+            sensor_state.velocity.y,
+            sensor_state.velocity.z,
         },
     });
+
+    // std.debug.print("Q: {d:.5}\n", .{
+    //     [_]f32{
+    //         q.w,
+    //         q.x,
+    //         q.y,
+    //         q.z,
+    //     },
+    // });
 
     return q;
 }

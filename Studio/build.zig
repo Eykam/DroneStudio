@@ -13,15 +13,96 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const name = switch (target.result.os.tag) {
+        .windows => "DroneStudio-x86_64-windows-gnu.exe",
+        .linux => "DroneStudio-x86_64-linux-gnu.exe",
+        .macos => "DroneStudio-x86_64-macos",
+        else => "DroneStudio-x86_64-unknown",
+    };
+
     const exe = b.addExecutable(.{
-        .name = "DroneStudio",
+        .name = name,
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
+    const zigimg_dependency = b.dependency("zigimg", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+
+    // FFmpeg library configuration
+    const ffmpeg_path = switch (target.result.os.tag) {
+        .windows => "lib/ffmpeg-windows",
+        .linux => "/usr/lib",
+        .macos => "/usr/local/opt/ffmpeg/lib",
+        else => @panic("Unsupported operating system"),
+    };
+
+    // FFmpeg include paths
+    const ffmpeg_include_paths = [_][]const u8{
+        b.pathJoin(&.{ ffmpeg_path, "include" }),
+    };
+
+    // Add FFmpeg include paths
+    for (ffmpeg_include_paths) |include_path| {
+        exe.addIncludePath(b.path(include_path));
+    }
+
+    // FFmpeg library names
+    const ffmpeg_libs = [_][]const u8{ "avcodec", "avformat", "avutil", "swscale" };
+
+    // Link FFmpeg libraries
+    switch (target.result.os.tag) {
+        .windows => {
+            // For Windows, use static libraries
+            exe.addLibraryPath(b.path(b.pathJoin(&.{ ffmpeg_path, "lib" })));
+
+            // Use the full library names
+            inline for (ffmpeg_libs) |lib| {
+                exe.linkSystemLibrary(lib);
+            }
+
+            // Windows-specific dependencies
+            const win_libs = [_][]const u8{
+                "bcrypt",
+                "secur32",
+                "ws2_32",
+                "gdi32",
+                "user32",
+                "kernel32",
+                "shell32",
+                "opengl32",
+                "comdlg32",
+                "winmm",
+                "ole32",
+                "uuid",
+            };
+
+            for (win_libs) |lib| {
+                exe.linkSystemLibrary(lib);
+            }
+        },
+        .linux => {
+            // For Linux, use dynamic libraries
+            for (ffmpeg_libs) |lib| {
+                exe.linkSystemLibrary(lib);
+            }
+        },
+        .macos => {
+            // For macOS, use dynamic libraries
+            for (ffmpeg_libs) |lib| {
+                exe.linkSystemLibrary(lib);
+            }
+        },
+        else => @panic("Unsupported operating system"),
+    }
+
     // GLAD configuration (same for all platforms)
-    const glad_path = "src/glad";
+    const glad_path = "lib/glad";
     const glad_include_path = b.path(b.pathJoin(&.{ glad_path, "include" }));
     const glad_src_path = b.path(b.pathJoin(&.{ glad_path, "src", "glad.c" }));
 

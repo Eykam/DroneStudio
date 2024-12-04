@@ -10,6 +10,7 @@ const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig wi
 const Secrets = _Secrets{};
 const UDP = @import("UDP.zig");
 const Sensors = @import("Sensors.zig");
+const Video = @import("Video.zig");
 
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
@@ -81,19 +82,33 @@ pub fn main() !void {
         scene.camera.position.z,
     }});
 
-    //Initialize UDP server
-    var server = UDP.init(
+    //Initialize UDP servers
+    var imu_server = UDP.init(
         Secrets.host_ip,
-        Secrets.host_port,
+        Secrets.host_port_imu,
         Secrets.client_ip,
-        Secrets.client_port,
+        Secrets.client_port_imu,
+    );
+
+    var video_server = UDP.init(
+        Secrets.host_ip,
+        Secrets.host_port_video,
+        Secrets.client_ip,
+        Secrets.client_port_video,
     );
 
     const pose_handler = Sensors.PoseHandler.init(&droneNode);
-    var udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
-    const pose_interface = udp_handler.interface();
+    var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
+    const pose_interface = pose_udp_handler.interface();
+    try imu_server.start(pose_interface);
 
-    try server.start(pose_interface);
+    var video_handler = try Video.VideoHandler.init(alloc);
+    defer video_handler.deinit();
+
+    //use UDP servers allocator instead??
+    var video_udp_handler = UDP.Handler(Video.VideoHandler).init(video_handler);
+    const video_interface = video_udp_handler.interface();
+    try video_server.start(video_interface);
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {

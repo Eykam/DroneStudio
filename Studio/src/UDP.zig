@@ -91,7 +91,7 @@ pub fn receive(self: *Self, handler: HandlerInterface) !void {
 
     var src_addr: std.posix.sockaddr = undefined;
     var src_addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
-    var recv_buf: [1024]u8 = undefined;
+    var recv_buf: [1514]u8 = undefined;
 
     while (true) {
         const bytes_received = try std.posix.recvfrom(

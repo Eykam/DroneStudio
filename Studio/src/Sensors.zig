@@ -1,6 +1,6 @@
 const std = @import("std");
 const Transformations = @import("Transformations.zig");
-const KalmanState = Transformations.KalmanState;
+// const KalmanState = Transformations.KalmanState;
 const Vec3 = Transformations.Vec3;
 const MadgwickFilter = Transformations.MadgwickFilter;
 const Node = @import("Node.zig");
@@ -10,13 +10,21 @@ const Instant = time.Instant;
 const DECLINATION_ANGLE: f32 = -10;
 
 pub const SensorState = struct {
-    previous_mag: f32 = 0,
-    mag_updated: bool = false,
     filter: ?MadgwickFilter = undefined,
     initialized: bool = false,
     sample_count: u32 = 0,
+    previous_mag: f32 = 0,
+    mag_updated: bool = false,
     gyro_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
     accel_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
+    velocity: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
+    position: Vec3,
+
+    pub fn init(node: *Node) SensorState {
+        return SensorState{
+            .position = Vec3{ .x = node.position[0], .y = node.position[1], .z = node.position[2] },
+        };
+    }
 };
 
 pub const Pose = struct {
@@ -30,7 +38,7 @@ pub const PoseHandler = struct {
     node: *Node,
     packet_count: usize = 0,
     prev_instant: time.Instant,
-    prev_timestamp: i64 = 0,
+    prev_timestamp: ?i64 = null,
     stale_count: usize = 0,
     sensor_state: SensorState,
 
@@ -38,7 +46,7 @@ pub const PoseHandler = struct {
         return .{
             .node = node,
             .prev_instant = time.Instant.now() catch unreachable,
-            .sensor_state = SensorState{},
+            .sensor_state = SensorState.init(node),
         };
     }
 
@@ -107,7 +115,11 @@ pub const PoseHandler = struct {
 
         const pose = try PoseHandler.parse(data);
 
-        const delta_time = @as(f32, @floatFromInt(pose.timestamp - self.prev_timestamp)) / 1e6;
+        if (self.prev_timestamp == null) {
+            self.prev_timestamp = pose.timestamp;
+        }
+
+        const delta_time = @as(f32, @floatFromInt(pose.timestamp - self.prev_timestamp.?)) / 1e6;
         if (delta_time < 0) {
             std.debug.print("Received stale packet, continuing...\n", .{});
             self.prev_timestamp = pose.timestamp;

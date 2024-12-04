@@ -5,3 +5,4 @@ zig-out
 sdkconfig
 sdkconfig.old
 Secrets.local.zig
+ffmpeg-windows
