@@ -1,4 +1,4 @@
-const Transformations = @import("Transformations.zig");
+const Math = @import("Math.zig");
 const Debug = @import("Debug.zig");
 const std = @import("std");
 

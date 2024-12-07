@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 // Helper function to determine the OpenGL library based on the target OS
 fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
@@ -12,6 +13,8 @@ fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration") orelse false;
 
     const name = switch (target.result.os.tag) {
         .windows => "DroneStudio-x86_64-windows-gnu.exe",
@@ -27,18 +30,77 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const zigimg_dependency = b.dependency("zigimg", .{
-        .target = target,
-        .optimize = optimize,
-    });
+    // const zigimg_dependency = b.dependency("zigimg", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
 
-    exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+    // exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+
+    if (use_cuda) {
+        // Determine CUDA paths based on target and cross-compilation
+        const cuda_path = switch (target.result.os.tag) {
+            .windows => blk: {
+                // Cross-compilation path from Linux
+                if (builtin.target.os.tag == .linux) {
+                    break :blk "lib/cuda-windows";
+                }
+                // Native Windows path
+                break :blk "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6";
+            },
+            .linux => "/usr/local/cuda",
+            .macos => "/Developer/NVIDIA/CUDA-12.3",
+            else => @panic("Unsupported OS for CUDA"),
+        };
+
+        // Add CUDA include and library paths
+        exe.addIncludePath(b.path(b.pathJoin(&.{ cuda_path, "include" })));
+
+        // Adjust library path based on target and cross-compilation
+        const cuda_lib_path = switch (target.result.os.tag) {
+            .windows => blk: {
+                if (builtin.target.os.tag == .linux) {
+                    break :blk b.path(b.pathJoin(&.{ cuda_path, "lib" }));
+                }
+                break :blk b.path(b.pathJoin(&.{ cuda_path, "lib", "x64" }));
+            },
+            .linux => b.path(b.pathJoin(&.{ cuda_path, "lib64" })),
+            .macos => b.path(b.pathJoin(&.{ cuda_path, "lib" })),
+            else => @panic("Unsupported OS for CUDA"),
+        };
+        exe.addLibraryPath(cuda_lib_path);
+
+        // CUDA libraries to link
+        const cuda_libs_to_link = [_][]const u8{
+            "cuda",
+            "cudart",
+            "nppig",
+            "npps",
+        };
+
+        // Link CUDA libraries
+        inline for (cuda_libs_to_link) |lib| {
+            exe.linkSystemLibrary(lib);
+        }
+
+        // Extend FFmpeg libraries to include CUDA-related libraries
+
+        // Add CUDA configuration module
+        exe.root_module.addAnonymousImport("cuda_config", .{
+            .root_source_file = b.addWriteFiles().add("cuda_config.zig", "pub const CUDA_ENABLED = true;\n"),
+        });
+    } else {
+        // Provide a default CUDA configuration module if not enabled
+        exe.root_module.addAnonymousImport("cuda_config", .{
+            .root_source_file = b.addWriteFiles().add("cuda_config.zig", "pub const CUDA_ENABLED = false;\n"),
+        });
+    }
 
     // FFmpeg library configuration
     const ffmpeg_path = switch (target.result.os.tag) {
         .windows => "lib/ffmpeg-windows",
-        .linux => "/usr/lib",
-        .macos => "/usr/local/opt/ffmpeg/lib",
+        .linux => "lib/ffmpeg-linux",
+        .macos => "lib/ffmpeg-macos",
         else => @panic("Unsupported operating system"),
     };
 
@@ -53,7 +115,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // FFmpeg library names
-    const ffmpeg_libs = [_][]const u8{ "avcodec", "avformat", "avutil", "swscale" };
+    const ffmpeg_libs = [_][]const u8{ "avfilter", "avcodec", "avformat", "avutil", "swscale", "avdevice", "postproc", "swresample" };
 
     // Link FFmpeg libraries
     switch (target.result.os.tag) {

@@ -1,6 +1,6 @@
 const std = @import("std");
-const Transformations = @import("Transformations.zig");
-const Vec3 = Transformations.Vec3;
+const Math = @import("Math.zig");
+const Vec3 = Math.Vec3;
 const Pipeline = @import("Pipeline.zig");
 const Scene = Pipeline.Scene;
 const Shape = @import("Shape.zig");
@@ -56,6 +56,17 @@ pub fn main() !void {
     var droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
     var boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
+    var canvasNode = try Node.init(alloc, null);
+
+    var canvasNodeLeft = try Shape.Plane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    var canvasNodeRight = try Shape.Plane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
+    canvasNodeLeft.setPosition(-6.45, 3.6, -5);
+    canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
+    canvasNodeRight.setPosition(6.45, 3.6, -5);
+    try canvasNode.addChild(&canvasNodeLeft);
+    try canvasNode.addChild(&canvasNodeRight);
+
     //Initializing drone node group (axis & box rotated by PoseHandler)
     var droneNode = try Node.init(alloc, null);
     droneNode.setPosition(0, 0.5, 0);
@@ -68,6 +79,7 @@ pub fn main() !void {
     try environment.addChild(&axisNode);
     try environment.addChild(&triangleNode);
     try environment.addChild(&droneNode);
+    try environment.addChild(&canvasNode);
 
     //Adding environment to scene
     try scene.addNode("Environment", &environment);
@@ -102,7 +114,11 @@ pub fn main() !void {
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
-    var video_handler = try Video.VideoHandler.init(alloc);
+    var video_handler = try Video.VideoHandler.init(
+        alloc,
+        null,
+        Video.frameCallback,
+    );
     defer video_handler.deinit();
 
     //use UDP servers allocator instead??

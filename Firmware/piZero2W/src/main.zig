@@ -3,7 +3,8 @@ const net = std.net;
 
 const CLIENT_IP: []const u8 = "192.168.1.171";
 const CLIENT_PORT: u16 = 8888;
-const MAX_PACKET_SIZE = 1500 - 28 - 16;
+const VIDEO_OFFSET = 16 + 4;
+const MAX_PACKET_SIZE = 1500 - 28 - VIDEO_OFFSET;
 
 // Helper function to convert integer to big-endian byte array
 fn intToBytesBE(value: i128) [16]u8 {
@@ -31,6 +32,8 @@ pub fn main() !void {
         "-n",
         "-t",
         "0",
+        "--level",
+        "4.2",
         "--framerate",
         "120",
         "--codec",
@@ -59,9 +62,10 @@ pub fn main() !void {
     // Get the stdout pipe reader
     const stdout_pipe = proc.stdout orelse return error.StdoutPipeError;
 
-    var packet = try allocator.alloc(u8, 16 + MAX_PACKET_SIZE);
+    var packet = try allocator.alloc(u8, VIDEO_OFFSET + MAX_PACKET_SIZE);
     defer allocator.free(packet);
 
+    var frame_id: u32 = 0;
     var frame_bytes_received: usize = 0;
 
     while (true) {
@@ -78,7 +82,7 @@ pub fn main() !void {
             const bytes_to_copy = @min(remaining_frame_bytes, bytes_available);
 
             // Append bytes to the frame buffer
-            @memcpy(packet[16 + frame_bytes_received .. 16 + frame_bytes_received + bytes_to_copy], read_buffer[offset .. offset + bytes_to_copy]);
+            @memcpy(packet[VIDEO_OFFSET + frame_bytes_received .. VIDEO_OFFSET + frame_bytes_received + bytes_to_copy], read_buffer[offset .. offset + bytes_to_copy]);
             frame_bytes_received += bytes_to_copy;
             offset += bytes_to_copy;
 
@@ -88,15 +92,17 @@ pub fn main() !void {
                 const timestamp = std.time.nanoTimestamp(); // better to define here or when frame buffer is full??
 
                 // Encode timestamp as big endian
-                @memcpy(packet[0..16], intToBytesBE(@intCast(timestamp))[0..]);
+                std.mem.writeInt(u32, packet[0..4], frame_id, .big);
+                @memcpy(packet[4..20], intToBytesBE(@intCast(timestamp))[0..]);
 
                 _ = try std.posix.sendto(socket, packet, 0, &dest_addr, dest_addr_len);
 
                 std.debug.print("Sent packet: {} bytes, Timestamp: {d}\n", .{
-                    frame_bytes_received + 8, timestamp,
+                    frame_bytes_received, timestamp,
                 });
 
                 frame_bytes_received = 0;
+                frame_id += 1;
             }
         }
     }

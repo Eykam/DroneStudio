@@ -3,8 +3,8 @@ const std = @import("std");
 const time = std.time;
 const Instant = time.Instant;
 const Mesh = @import("Shape.zig").Mesh;
-const Transformations = @import("Transformations.zig");
-const Vec3 = Transformations.Vec3;
+const Math = @import("Math.zig");
+const Vec3 = Math.Vec3;
 
 const Self = @This();
 

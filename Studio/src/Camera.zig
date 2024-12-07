@@ -1,6 +1,6 @@
 const std = @import("std");
-const Transformations = @import("Transformations.zig");
-const Vec3 = Transformations.Vec3;
+const Math = @import("Math.zig");
+const Vec3 = Math.Vec3;
 
 const Self = @This();
 
@@ -170,5 +170,5 @@ pub fn process_mouse_movement(self: *Self, xoffset: f64, yoffset: f64, aspectRat
 
 // Generate the view matrix using the lookAt function
 pub fn get_view_matrix(self: *Self) [16]f32 {
-    return Transformations.lookAt(self.position, Vec3.add(self.position, self.front), self.up);
+    return Math.lookAt(self.position, Vec3.add(self.position, self.front), self.up);
 }

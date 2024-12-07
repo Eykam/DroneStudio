@@ -1,8 +1,8 @@
 const std = @import("std");
-const Transformations = @import("Transformations.zig");
+const Math = @import("Math.zig");
 // const KalmanState = Transformations.KalmanState;
-const Vec3 = Transformations.Vec3;
-const MadgwickFilter = Transformations.MadgwickFilter;
+const Vec3 = Math.Vec3;
+const MadgwickFilter = Math.MadgwickFilter;
 const Node = @import("Node.zig");
 const time = std.time;
 const Instant = time.Instant;
@@ -58,9 +58,9 @@ pub const PoseHandler = struct {
         };
 
         const gyro = Vec3{
-            .x = Transformations.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
-            .y = Transformations.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
-            .z = Transformations.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
+            .x = Math.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
+            .y = Math.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
+            .z = Math.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
         };
 
         const mag = Vec3{
@@ -149,7 +149,7 @@ pub const PoseHandler = struct {
         const accel_calibrated = pose.accel.sub(self.sensor_state.accel_offset);
         const gyro_calibrated = pose.gyro.sub(self.sensor_state.gyro_offset);
 
-        const rotation = Transformations.updateModelMatrix(accel_calibrated, gyro_calibrated, pose.mag, DECLINATION_ANGLE, delta_time, &self.sensor_state);
+        const rotation = Math.updateModelMatrix(accel_calibrated, gyro_calibrated, pose.mag, DECLINATION_ANGLE, delta_time, &self.sensor_state);
         self.node.setRotation(rotation);
         self.packet_count += 1;
     }

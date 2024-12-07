@@ -1,10 +1,10 @@
 // src/Shapes.zig
 const std = @import("std");
-const Transformations = @import("Transformations.zig");
+const Math = @import("Math.zig");
 const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const Vertex = Mesh.Vertex;
-const Vec3 = Transformations.Vec3;
+const Vec3 = Math.Vec3;
 
 const c = @cImport({
     @cInclude("glad/glad.h");
@@ -469,5 +469,112 @@ pub const Grid = struct {
         }
 
         return vertices;
+    }
+};
+
+pub const Plane = struct {
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, length: ?f32) !Node {
+        var vertices: []Vertex = undefined;
+        var indices: []u32 = undefined;
+
+        if (pos != null and width != null and length != null) {
+            const result = try Self.generatePlaneVertices(allocator, pos.?, width.?, length.?);
+            vertices = result.vertices;
+            indices = result.indices;
+        } else {
+            const result = try Self.generatePlaneVertices(allocator, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, 1.0);
+            vertices = result.vertices;
+            indices = result.indices;
+        }
+
+        // For textured rendering, you'll want to add texture coordinate generation
+        // This is a placeholder for your YUV444P texture mapping
+        const mesh = try Mesh.init(vertices, indices, Self.draw);
+        const node = try Node.init(allocator, mesh);
+
+        return node;
+    }
+
+    pub fn generatePlaneVertices(allocator: std.mem.Allocator, position: Vec3, width: f32, length: f32) !struct { vertices: []Vertex, indices: []u32 } {
+        const halfWidth: f32 = width / 2.0;
+        const halflength: f32 = length / 2.0;
+
+        var vertices: []Vertex = try allocator.alloc(Vertex, 4);
+        vertices[0] = .{
+            .position = .{ position.x - halfWidth, position.y, position.z - halflength },
+            .color = .{ 0.8, 0.8, 0.8 },
+        };
+        vertices[1] = .{
+            .position = .{ position.x + halfWidth, position.y, position.z - halflength },
+            .color = .{ 0.8, 0.8, 0.8 },
+        };
+        vertices[2] = .{
+            .position = .{ position.x + halfWidth, position.y, position.z + halflength },
+            .color = .{ 0.8, 0.8, 0.8 },
+        };
+        vertices[3] = .{
+            .position = .{ position.x - halfWidth, position.y, position.z + halflength },
+            .color = .{ 0.8, 0.8, 0.8 },
+        };
+
+        var indices: []u32 = try allocator.alloc(u32, 6);
+        indices = @constCast(&[_]u32{
+            0, 1, 2, // First triangle
+            2, 3, 0, // Second triangle
+        });
+
+        return .{
+            .vertices = vertices,
+            .indices = indices,
+        };
+    }
+
+    pub fn draw(mesh: *Mesh) void {
+        // Configure depth testing
+        c.glEnable(c.GL_DEPTH_TEST);
+        c.glDepthFunc(c.GL_LEQUAL);
+
+        c.glBindVertexArray(mesh.meta.VAO);
+        c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+
+        // Position attribute (location = 0)
+        c.glVertexAttribPointer(
+            0, // location
+            3, // (vec3)
+            c.GL_FLOAT,
+            c.GL_FALSE,
+            @sizeOf(Vertex), // stride
+            null,
+        );
+        c.glEnableVertexAttribArray(0);
+
+        // Color attribute (location = 1)
+        const color_offset = @offsetOf(Vertex, "color");
+        c.glVertexAttribPointer(
+            1, // location
+            3, // (vec3)
+            c.GL_FLOAT,
+            c.GL_FALSE,
+            @sizeOf(Vertex), // stride
+            @ptrFromInt(color_offset),
+        );
+        c.glEnableVertexAttribArray(1);
+
+        // Optional: Texture coordinate handling for YUV444P mapping
+        // This would require modifying the Vertex struct and shader
+        // const tex_coord_offset = @offsetOf(Vertex, "texCoords");
+        // c.glVertexAttribPointer(...);
+
+        // Draw the plane
+        c.glDrawElements(c.GL_TRIANGLES, @intCast(mesh.indices.?.len), c.GL_UNSIGNED_INT, null);
+
+        // Disable vertex attributes
+        c.glDisableVertexAttribArray(0);
+        c.glDisableVertexAttribArray(1);
+
+        // Unbind the VAO
+        c.glBindVertexArray(0);
     }
 };

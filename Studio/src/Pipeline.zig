@@ -1,15 +1,15 @@
 // src/Scene.zig
 const std = @import("std");
 const Shape = @import("Shape.zig");
-const Transformations = @import("Transformations.zig");
+const Math = @import("Math.zig");
 const Node = @import("Node.zig");
-const Vec3 = Transformations.Vec3;
+const Vec3 = Math.Vec3;
 const File = std.fs.File;
 const Camera = @import("Camera.zig");
 
 const c = @cImport({
     @cDefine("GLFW_INCLUDE_NONE", "1");
-    @cInclude("glad/glad.h"); // Ensure GLAD is included
+    @cInclude("glad/glad.h");
     @cInclude("GLFW/glfw3.h");
 });
 
@@ -174,7 +174,7 @@ pub const Scene = struct {
     }
 
     pub fn updateProjection(self: *Self) [16]f32 {
-        return Transformations.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
+        return Math.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
     }
 
     pub fn getSceneGraph(self: Self) void {
