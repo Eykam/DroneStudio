@@ -24,3 +24,10 @@ pub fn printVertexShader(vbo: u32, size: usize) !void {
         }
     }
 }
+
+pub fn glCheckError(string: []const u8) void {
+    const err = c.glGetError();
+    if (err != c.GL_NO_ERROR) {
+        std.debug.print("OpenGL Error at {s}: {}\n", .{ string, err });
+    }
+}

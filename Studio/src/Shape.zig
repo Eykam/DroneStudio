@@ -5,6 +5,7 @@ const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
+const glCheckError = @import("Debug.zig").glCheckError;
 
 const c = @cImport({
     @cInclude("glad/glad.h");
@@ -15,7 +16,7 @@ const DrawErrors = error{FailedToDraw};
 pub const Triangle = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, newVertices: ?[]Vertex) !Node {
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, newVertices: ?[]Vertex) !*Node {
         var vertices: []Vertex = undefined;
 
         if (newVertices) |verts| {
@@ -45,16 +46,16 @@ pub const Triangle = struct {
 
         var vertices = [_]Vertex{
             Vertex{
-                .position = [_]f32{ 0.0 + pos.x, 0.5 + pos.y, 0.0 + pos.z },
-                .color = [_]f32{ 1.0, 0.0, 0.0 },
+                .position = .{ 0.0 + pos.x, 0.5 + pos.y, 0.0 + pos.z },
+                .color = .{ 1.0, 0.0, 0.0 },
             },
             Vertex{
-                .position = [_]f32{ -0.5 + pos.x, -0.5 + pos.y, 0.0 + pos.z },
-                .color = [_]f32{ 0.0, 1.0, 0.0 },
+                .position = .{ -0.5 + pos.x, -0.5 + pos.y, 0.0 + pos.z },
+                .color = .{ 0.0, 1.0, 0.0 },
             },
             Vertex{
-                .position = [_]f32{ 0.5 + pos.x, -0.5 + pos.y, 0.0 + pos.z },
-                .color = [_]f32{ 0.0, 0.0, 1.0 },
+                .position = .{ 0.5 + pos.x, -0.5 + pos.y, 0.0 + pos.z },
+                .color = .{ 0.0, 0.0, 1.0 },
             },
         };
 
@@ -65,7 +66,7 @@ pub const Triangle = struct {
 pub const Box = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, height: ?f32, width: ?f32, depth: ?f32) !Node {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, height: ?f32, width: ?f32, depth: ?f32) !*Node {
         _ = pos;
         _ = height;
         _ = width;
@@ -165,7 +166,7 @@ pub const Box = struct {
 pub const Axis = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !Node {
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !*Node {
         var vertices: []Vertex = undefined;
 
         if (position != null and length != null) {
@@ -177,7 +178,7 @@ pub const Axis = struct {
         } else {
             vertices = try generateVertices(
                 allocator,
-                Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
+                .{ .x = 0.0, .y = 0.0, .z = 0.0 },
                 5.0,
             );
         }
@@ -261,19 +262,19 @@ pub const Axis = struct {
             // check whether current loop is plotting x, y, or z and color appropriately
             switch (index % 3) {
                 0 => {
-                    color = [_]f32{ 1.0, 0.0, 0.0 };
+                    color = .{ 1.0, 0.0, 0.0 };
                 },
                 1 => {
-                    color = [_]f32{ 0.0, 1.0, 0.0 };
+                    color = .{ 0.0, 1.0, 0.0 };
                 },
                 2 => {
-                    color = [_]f32{ 0.0, 0.0, 1.0 };
+                    color = .{ 0.0, 0.0, 1.0 };
                 },
                 else => unreachable,
             }
 
             vertices[index] = Vertex{
-                .position = [_]f32{
+                .position = .{
                     position.x,
                     position.y,
                     position.z,
@@ -284,7 +285,7 @@ pub const Axis = struct {
 
             switch ((index - 1) % 3) {
                 0 => vertices[index] = Vertex{
-                    .position = [_]f32{
+                    .position = .{
                         position.x + length,
                         position.y,
                         position.z,
@@ -292,7 +293,7 @@ pub const Axis = struct {
                     .color = color,
                 },
                 1 => vertices[index] = Vertex{
-                    .position = [_]f32{
+                    .position = .{
                         position.x,
                         position.y + length,
                         position.z,
@@ -300,7 +301,7 @@ pub const Axis = struct {
                     .color = color,
                 },
                 2 => vertices[index] = Vertex{
-                    .position = [_]f32{
+                    .position = .{
                         position.x,
                         position.y,
                         position.z + length,
@@ -319,7 +320,7 @@ pub const Axis = struct {
 pub const Grid = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, gridSize: ?usize, spacing: ?f32) !Node {
+    pub fn init(allocator: std.mem.Allocator, gridSize: ?usize, spacing: ?f32) !*Node {
         // Generate grid vertices
         var vertices: []Vertex = undefined;
 
@@ -423,7 +424,7 @@ pub const Grid = struct {
         var i: f32 = -halfSize;
         while (i <= halfSize) : (i += spacing) {
             vertices[index] = Vertex{
-                .position = [_]f32{
+                .position = .{
                     -halfSize * 0.05,
                     y_coord,
                     i * 0.05,
@@ -433,7 +434,7 @@ pub const Grid = struct {
             index += 1;
 
             vertices[index] = Vertex{
-                .position = [_]f32{
+                .position = .{
                     halfSize * 0.05,
                     y_coord,
                     i * 0.05,
@@ -448,7 +449,7 @@ pub const Grid = struct {
         i = -halfSize;
         while (i <= halfSize) : (i += spacing) {
             vertices[index] = Vertex{
-                .position = [_]f32{
+                .position = .{
                     i * 0.05,
                     y_coord,
                     -halfSize * 0.05,
@@ -458,7 +459,7 @@ pub const Grid = struct {
             index += 1;
 
             vertices[index] = Vertex{
-                .position = [_]f32{
+                .position = .{
                     i * 0.05,
                     y_coord,
                     halfSize * 0.05,
@@ -475,7 +476,7 @@ pub const Grid = struct {
 pub const Plane = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, length: ?f32) !Node {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, length: ?f32) !*Node {
         var vertices: []Vertex = undefined;
         var indices: []u32 = undefined;
 
@@ -505,18 +506,22 @@ pub const Plane = struct {
         vertices[0] = .{
             .position = .{ position.x - halfWidth, position.y, position.z - halflength },
             .color = .{ 0.8, 0.8, 0.8 },
+            .texture = [_]f32{ 0.0, 0.0 },
         };
         vertices[1] = .{
             .position = .{ position.x + halfWidth, position.y, position.z - halflength },
             .color = .{ 0.8, 0.8, 0.8 },
+            .texture = [_]f32{ 1.0, 0.0 },
         };
         vertices[2] = .{
             .position = .{ position.x + halfWidth, position.y, position.z + halflength },
             .color = .{ 0.8, 0.8, 0.8 },
+            .texture = [_]f32{ 1.0, 1.0 },
         };
         vertices[3] = .{
             .position = .{ position.x - halfWidth, position.y, position.z + halflength },
             .color = .{ 0.8, 0.8, 0.8 },
+            .texture = [_]f32{ 0.0, 1.0 },
         };
 
         var indices: []u32 = try allocator.alloc(u32, 6);
@@ -538,6 +543,12 @@ pub const Plane = struct {
 
         c.glBindVertexArray(mesh.meta.VAO);
         c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+
+        if (mesh.node) |node| {
+            if (node.scene) |scene| {
+                c.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
+            }
+        }
 
         // Position attribute (location = 0)
         c.glVertexAttribPointer(
@@ -562,19 +573,33 @@ pub const Plane = struct {
         );
         c.glEnableVertexAttribArray(1);
 
-        // Optional: Texture coordinate handling for YUV444P mapping
-        // This would require modifying the Vertex struct and shader
-        // const tex_coord_offset = @offsetOf(Vertex, "texCoords");
-        // c.glVertexAttribPointer(...);
+        // Texture coordinate attribute (location = 2)
+        const tex_coord_offset = @offsetOf(Vertex, "texture");
+
+        c.glVertexAttribPointer(
+            2, // location
+            2, // (vec2)
+            c.GL_FLOAT,
+            c.GL_FALSE,
+            @sizeOf(Vertex), // stride
+            @ptrFromInt(tex_coord_offset),
+        );
+        c.glEnableVertexAttribArray(2);
 
         // Draw the plane
         c.glDrawElements(c.GL_TRIANGLES, @intCast(mesh.indices.?.len), c.GL_UNSIGNED_INT, null);
 
+        if (mesh.node) |node| {
+            if (node.scene) |scene| {
+                c.glUniform1i(scene.useTextureLoc, @as(c_int, 0));
+            }
+        }
+
         // Disable vertex attributes
         c.glDisableVertexAttribArray(0);
         c.glDisableVertexAttribArray(1);
+        c.glDisableVertexAttribArray(2);
 
-        // Unbind the VAO
         c.glBindVertexArray(0);
     }
 };

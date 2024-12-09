@@ -13,6 +13,7 @@ const c = @cImport({
     @cInclude("libavfilter/buffersrc.h");
     @cInclude("libavutil/opt.h");
 });
+const Node = @import("Node.zig");
 
 const mem = std.mem;
 const fs = std.fs;
@@ -45,12 +46,13 @@ const errors = enum {
 const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(c.EAGAIN));
 const AVERROR_EOF = -1 * @as(c_int, @intCast(c.EOF));
 
-const DecodedFrameCallback = *const fn (*c.struct_AVFrame) void;
+const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *c.struct_AVFrame) error{OutOfMemory}!void;
 
 pub const VideoHandler = struct {
     const Self = @This();
 
     allocator: mem.Allocator,
+    node: *Node,
 
     buffer: std.ArrayList(u8),
     current_timestamp: u128 = 0,
@@ -68,7 +70,6 @@ pub const VideoHandler = struct {
     hw_frame: *c.AVFrame,
 
     hw_device_ctx: ?*c.AVBufferRef = null,
-    hw_frames_ctx: ?*c.AVBufferRef = null,
 
     filter_graph: ?*c.AVFilterGraph = null,
     buffersrc: ?*c.AVFilterContext = null,
@@ -77,7 +78,7 @@ pub const VideoHandler = struct {
     // Callback for decoded RGB frames
     onDecodedFrame: DecodedFrameCallback,
 
-    pub fn init(allocator: mem.Allocator, hw_type: ?c_uint, onDecodedFrame: DecodedFrameCallback) !Self {
+    pub fn init(allocator: mem.Allocator, node: *Node, hw_type: ?c_uint, onDecodedFrame: DecodedFrameCallback) !Self {
         // Create images directory if it doesn't exist
         var cwd = fs.cwd();
         cwd.makeDir("images") catch |err| switch (err) {
@@ -150,6 +151,7 @@ pub const VideoHandler = struct {
         // Create a new instance without defers
         var self = Self{
             .allocator = allocator,
+            .node = node,
             .buffer = std.ArrayList(u8).init(allocator),
             .image_dir = image_dir,
             .parser_context = parser_context,
@@ -171,24 +173,24 @@ pub const VideoHandler = struct {
         errdefer c.avfilter_graph_free(@ptrCast(@constCast(&filter_graph)));
 
         // Create a new hardware frames context if not already present
-        if (self.codec_context.*.hw_device_ctx == null) {
+        if (self.codec_context.hw_device_ctx == null) {
             std.debug.print("No hardware device context available.\n", .{});
             return error.NoHardwareDeviceContext;
         }
 
         // Create a new hardware frames context if not already present
-        const hw_frames_ctx = c.av_hwframe_ctx_alloc(self.codec_context.*.hw_device_ctx) orelse {
+        const hw_frames_ctx = c.av_hwframe_ctx_alloc(self.codec_context.hw_device_ctx) orelse {
             std.debug.print("Failed to allocate hardware frames context.\n", .{});
             return error.HardwareFramesContextAllocationFailed;
         };
 
         // Configure the hardware frames context
         const frames_ctx = @as(*c.AVHWFramesContext, @ptrCast(@alignCast(hw_frames_ctx.*.data)));
-        frames_ctx.*.format = c.AV_PIX_FMT_CUDA; // Adjust based on your hardware type
-        frames_ctx.*.sw_format = c.AV_PIX_FMT_NV12;
-        frames_ctx.*.width = self.codec_context.*.width;
-        frames_ctx.*.height = self.codec_context.*.height;
-        frames_ctx.*.initial_pool_size = 4; // Preallocate frames
+        frames_ctx.format = c.AV_PIX_FMT_CUDA; // Adjust based on your hardware type
+        frames_ctx.sw_format = c.AV_PIX_FMT_NV12;
+        frames_ctx.width = self.codec_context.width;
+        frames_ctx.height = self.codec_context.height;
+        frames_ctx.initial_pool_size = 4; // Preallocate frames
 
         if (c.av_hwframe_ctx_init(hw_frames_ctx) < 0) {
             std.debug.print("Failed to initialize hardware frames context.\n", .{});
@@ -211,9 +213,9 @@ pub const VideoHandler = struct {
 
         const params = c.av_buffersrc_parameters_alloc();
         params.*.hw_frames_ctx = hw_frames_ctx;
-        params.*.format = self.codec_context.*.pix_fmt;
-        params.*.height = self.codec_context.*.height;
-        params.*.width = self.codec_context.*.width;
+        params.*.format = self.codec_context.pix_fmt;
+        params.*.height = self.codec_context.height;
+        params.*.width = self.codec_context.width;
         params.*.time_base = .{
             .num = 1,
             .den = 1,
@@ -234,39 +236,6 @@ pub const VideoHandler = struct {
             return error.FilterGraphAllocationFailed;
         }
 
-        const hwupload = c.avfilter_graph_alloc_filter(
-            filter_graph,
-            c.avfilter_get_by_name("hwupload"),
-            "hwupload",
-        );
-        if (hwupload == null) {
-            std.debug.print("Failed to create hwupload filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
-        }
-        errdefer c.avfilter_free(@ptrCast(@constCast(hwupload)));
-
-        hwupload.*.hw_device_ctx = c.av_buffer_ref(self.codec_context.*.hw_device_ctx);
-        // Initialize hwupload filter
-        if (c.avfilter_init_str(hwupload, "extra_hw_frames=4") < 0) {
-            std.debug.print("Failed to initialize hwupload filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
-        }
-
-        const scale_filter = c.avfilter_graph_alloc_filter(filter_graph, c.avfilter_get_by_name("scale_cuda"), "scale_cuda");
-        if (scale_filter == null) {
-            std.debug.print("Failed to create scale_cuda filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
-        }
-        errdefer c.avfilter_free(@ptrCast(@constCast(scale_filter)));
-
-        // For example, to convert to an RGB format on GPU, use something like:
-        const scale_filter_args = "w=1280:h=720:format=yuv444p";
-
-        if (c.avfilter_init_str(scale_filter, scale_filter_args) < 0) {
-            std.debug.print("Failed to initialize scale_cuda filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
-        }
-
         // Create hardware buffer sink
         const buffersink = c.avfilter_graph_alloc_filter(
             filter_graph,
@@ -284,18 +253,8 @@ pub const VideoHandler = struct {
             return error.FilterGraphAllocationFailed;
         }
 
-        if (c.avfilter_link(buffersrc, 0, hwupload, 0) < 0) {
+        if (c.avfilter_link(buffersrc, 0, buffersink, 0) < 0) {
             std.debug.print("Failed to link buffer to hwupload filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
-        }
-
-        if (c.avfilter_link(hwupload, 0, scale_filter, 0) < 0) {
-            std.debug.print("Failed to link hwupload to format filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
-        }
-
-        if (c.avfilter_link(scale_filter, 0, buffersink, 0) < 0) {
-            std.debug.print("Failed to link format to buffer sink filter.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
 
@@ -309,7 +268,6 @@ pub const VideoHandler = struct {
         self.filter_graph = filter_graph;
         self.buffersrc = buffersrc;
         self.buffersink = buffersink;
-        self.hw_frames_ctx = hw_frames_ctx;
 
         if (self.buffersrc == null or self.buffersink == null) {
             std.debug.print("Failed to retrieve filter contexts.\n", .{});
@@ -359,10 +317,10 @@ pub const VideoHandler = struct {
         } else {
             self.prev_frame_id.? += 1;
             if (frame_id != self.prev_frame_id.?) {
-                std.debug.print("Non-sequential Frames detected: Found => {}, Expected => {}\n", .{
-                    frame_id,
-                    self.prev_frame_id.?,
-                });
+                // std.debug.print("Non-sequential Frames detected: Found => {}, Expected => {}\n", .{
+                //     frame_id,
+                //     self.prev_frame_id.?,
+                // });
             }
         }
 
@@ -417,17 +375,27 @@ pub const VideoHandler = struct {
             return null;
         }
 
+        // std.debug.print("Start Index: {?}\n", .{start_index});
+        // std.debug.print("End Index: {?}\n", .{end_index});
+
         // Find next start code
-        for (start_index.? + 4..self.buffer.items.len - 3) |i| { // Corrected to -3
-            if (mem.eql(u8, self.buffer.items[i .. i + 4], &self.nalu_start_codes)) {
-                end_index = i;
-                break;
+        // std.debug.print("Buffer Length: {d} => {d}\n", .{ self.buffer.items.len, self.buffer.items.len - 3 });
+        if (start_index.? + 4 < self.buffer.items.len - 3) {
+            for (start_index.? + 4..self.buffer.items.len - 3) |i| { // Corrected to -3
+                if (mem.eql(u8, self.buffer.items[i .. i + 4], &self.nalu_start_codes)) {
+                    end_index = i;
+                    break;
+                }
             }
         }
 
         if (end_index == null) {
-            // No end start code found yet; wait for more data
-            // Optionally, set a limit to prevent buffer overflow
+            // Implement maximum buffer size check
+            const MAX_BUFFER_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+            if (self.buffer.items.len > MAX_BUFFER_SIZE) {
+                std.debug.print("Buffer exceeded maximum size. Clearing buffer.\n", .{});
+                self.buffer.clearRetainingCapacity();
+            }
             return null;
         }
 
@@ -438,12 +406,23 @@ pub const VideoHandler = struct {
             return null;
         }
 
+        const frame_size = end_index.? - start_index.?;
+        const MAX_FRAME_SIZE: usize = 5 * 1024 * 1024; // 10 MB
+        if (frame_size > MAX_FRAME_SIZE) {
+            std.debug.print("Frame size ({}) exceeds maximum limit. Skipping frame.\n", .{frame_size});
+            self.buffer.clearRetainingCapacity();
+            return null;
+        }
+
         // Extract frame data
         const frame_data = try self.allocator.dupe(u8, self.buffer.items[start_index.?..end_index.?]);
 
         // Remove processed data from buffer
         const remaining_start = end_index.?;
         const remaining_len = self.buffer.items.len - remaining_start;
+
+        std.debug.print("Remaining Length: {any}\n", .{remaining_len});
+
         if (remaining_len > 0) {
             // Use mem.copyForward for overlapping regions
             std.mem.copyForwards(u8, self.buffer.items[0..remaining_len], self.buffer.items[remaining_start..]);
@@ -456,11 +435,12 @@ pub const VideoHandler = struct {
         };
     }
 
-    pub fn convertToPng(self: *Self, input: []const u8) !void {
+    pub fn pipeline(self: *Self, input: []const u8) !void {
         // Reset packet
         c.av_packet_unref(self.packet);
 
         const start = try std.time.Instant.now();
+
         // Parse input data
         var parsed_data: *u8 = undefined;
         var parsed_size: c_int = 0;
@@ -500,34 +480,27 @@ pub const VideoHandler = struct {
             return error.FrameReceiveFailed;
         }
 
-        if (c.av_buffersrc_add_frame_flags(
-            self.buffersrc,
-            self.hw_frame,
-            c.AV_BUFFERSRC_FLAG_KEEP_REF,
-        ) < 0) {
-            std.debug.print("Error adding frame to filter graph\n", .{});
-            return error.FilterGraphProcessingFailed;
+        const transferred_frame = c.av_frame_alloc();
+        if (transferred_frame == null) {
+            std.debug.print("Failed to allocate transferred frame\n", .{});
+            return error.FailedAllocation;
         }
+        defer c.av_frame_free(@ptrCast(@constCast(&transferred_frame)));
 
-        var filt_frame: *c.AVFrame = c.av_frame_alloc() orelse return error.FrameAllocationFailed;
-        defer c.av_frame_free(@ptrCast(@constCast(&filt_frame)));
-
-        const receive_filtered_result = c.av_buffersink_get_frame(self.buffersink, filt_frame);
-        if (receive_filtered_result < 0) {
-            if (receive_filtered_result == AVERROR_EAGAIN or receive_filtered_result == AVERROR_EOF) {
-                return;
-            }
-            std.debug.print("Failed to get filtered frame\n", .{});
-            return error.FilterGraphProcessingFailed;
+        if (c.av_hwframe_transfer_data(transferred_frame, self.hw_frame, 0) < 0) {
+            c.av_frame_free(@ptrCast(@constCast(transferred_frame)));
+            std.debug.print("Failed to transfer data from HW frame\n", .{});
+            return error.FailedHwTransfer;
         }
 
         // Invoke the callback with the RGB frame
-        self.onDecodedFrame(filt_frame);
-
         const end = try std.time.Instant.now();
-        std.debug.print("Decoded Frame Pixel Format: {d} ({s})\n", .{ filt_frame.*.format, pix_fmt_to_str(filt_frame.*.format) });
-        std.debug.print("Decoded Frame Dimensions: {}x{}\n", .{ filt_frame.*.width, filt_frame.*.height });
-        std.debug.print("Decoding Time: {d}\n", .{@as(f64, @floatFromInt(std.time.Instant.since(end, start))) / 1e9});
+        _ = start;
+        _ = end;
+
+        // std.debug.print("Decoded Frame Pixel Format: {d} ({s})\n", .{ filt_frame.*.format, pix_fmt_to_str(filt_frame.*.format) });
+        // std.debug.print("Decoded Frame Dimensions: {}x{}\n", .{ filt_frame.*.width, filt_frame.*.height });
+        // std.debug.print("Decoding Time: {d}\n", .{@as(f64, @floatFromInt(std.time.Instant.since(end, start))) / 1e9});
 
         if (self.frame_delta == -1) {
             self.frame_delta = std.time.nanoTimestamp();
@@ -538,11 +511,13 @@ pub const VideoHandler = struct {
             std.debug.print("Delta: {d}\n", .{@as(f128, @floatFromInt(delta)) / 1e9});
             self.frame_delta = now;
         }
+
+        try self.onDecodedFrame(self.allocator, self.node, transferred_frame);
     }
 
     pub fn captureFrame(self: *Self, frame: []const u8) !void {
         // Determine if this is a keyframe and convert to PNG
-        try self.convertToPng(frame);
+        try self.pipeline(frame);
     }
 };
 
@@ -589,9 +564,39 @@ fn pix_fmt_to_str(pix_fmt: c.AVPixelFormat) []const u8 {
     return std.mem.span(name_ptr);
 }
 
-pub fn frameCallback(frame: *c.AVFrame) void {
-    _ = frame;
+pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *c.AVFrame) error{OutOfMemory}!void {
+    // std.debug.print("Pixel Format: {s}\n", .{c.av_get_pix_fmt_name(frame.format)});
+    // std.debug.print("Width: {d}\n", .{frame.width});
+    // std.debug.print("Height: {d}\n", .{frame.height});
+    // std.debug.print("Linesize: {d}\n", .{frame.linesize});
 
-    std.debug.print("Frame Callback initiated\n", .{});
-    std.debug.print("Converted Frame to RGB...\n", .{});
+    // // Debug data pointers and line sizes
+    // std.debug.print("Data[0] ptr: {*}\n", .{frame.data[0]});
+    // std.debug.print("Data[1] ptr: {*}\n", .{frame.data[1]});
+
+    // std.debug.print("Linesize[0]: {}\n", .{frame.linesize[0]});
+    // std.debug.print("Linesize[1]: {}\n", .{frame.linesize[1]});
+
+    const frame_width = @as(usize, @intCast(frame.width));
+    const frame_height = @as(usize, @intCast(frame.height));
+
+    const y_plane = frame.data[0][0 .. @as(usize, @intCast(frame.linesize[0])) * frame_height];
+    const uv_plane = frame.data[1][0 .. @as(usize, @intCast(frame.linesize[1])) * (frame_height / 2)];
+
+    // Copy rows, skipping the padding
+    for (0..frame_height) |i| {
+        const src_row = y_plane[i * @as(usize, @intCast(frame.linesize[0])) ..][0..frame_width];
+        @memcpy(node.y[i * frame_width ..][0..frame_width], src_row);
+    }
+
+    // // Similar for UV plane
+    for (0..(frame_height / 2)) |i| {
+        const src_row = uv_plane[i * @as(usize, @intCast(frame.linesize[1])) ..][0..frame_width];
+        @memcpy(node.uv[i * frame_width ..][0..frame_width], src_row);
+    }
+    _ = allocator;
+
+    node.width = @intCast(frame_width);
+    node.height = @intCast(frame_height);
+    node.texture_updated = true;
 }

@@ -1,6 +1,7 @@
+const std = @import("std");
 const Math = @import("Math.zig");
 const Debug = @import("Debug.zig");
-const std = @import("std");
+const Node = @import("Node.zig");
 
 const c = @cImport({
     @cInclude("glad/glad.h");
@@ -8,6 +9,8 @@ const c = @cImport({
 
 const Self = @This();
 
+node: ?*Node = null,
+textureID: TextureID = TextureID{},
 vertices: []Vertex,
 indices: ?[]u32 = null,
 meta: Metadata,
@@ -19,12 +22,18 @@ const draw = *const fn (mesh: *Self) void;
 pub const Vertex = struct {
     position: [3]f32,
     color: [3]f32,
+    texture: ?[2]f32 = null,
 };
 
 pub const Metadata = struct {
     VAO: u32 = 0,
     VBO: u32 = 0,
     IBO: u32 = 0,
+};
+
+pub const TextureID = struct {
+    y: c_uint = 0,
+    uv: c_uint = 0,
 };
 
 pub fn default_draw(mesh: *Self) void {

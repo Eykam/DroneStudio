@@ -50,11 +50,11 @@ pub fn main() !void {
     scene.setupCallbacks(window);
 
     //Initializing Entities
-    var gridNode = try Shape.Grid.init(alloc, 1000, 5);
-    var axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
-    var triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    var droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
-    var boxNode = try Shape.Box.init(alloc, null, null, null, null);
+    const gridNode = try Shape.Grid.init(alloc, 1000, 5);
+    const axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
+    const triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
+    const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
+    const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
     var canvasNode = try Node.init(alloc, null);
 
@@ -64,26 +64,25 @@ pub fn main() !void {
     canvasNodeLeft.setPosition(-6.45, 3.6, -5);
     canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeRight.setPosition(6.45, 3.6, -5);
-    try canvasNode.addChild(&canvasNodeLeft);
-    try canvasNode.addChild(&canvasNodeRight);
+    try canvasNode.addChild(canvasNodeLeft);
+    try canvasNode.addChild(canvasNodeRight);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
     var droneNode = try Node.init(alloc, null);
     droneNode.setPosition(0, 0.5, 0);
-    try droneNode.addChild(&boxNode);
-    try droneNode.addChild(&droneAxis);
+    try droneNode.addChild(boxNode);
+    try droneNode.addChild(droneAxis);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null);
-    try environment.addChild(&gridNode);
-    try environment.addChild(&axisNode);
-    try environment.addChild(&triangleNode);
-    try environment.addChild(&droneNode);
-    try environment.addChild(&canvasNode);
+    try environment.addChild(gridNode);
+    try environment.addChild(axisNode);
+    try environment.addChild(triangleNode);
+    try environment.addChild(droneNode);
+    try environment.addChild(canvasNode);
 
     //Adding environment to scene
-    try scene.addNode("Environment", &environment);
-    // try scene.addNode("Drone", &droneNode);
+    try scene.addNode("Environment", environment);
 
     //Debugging Entities
     scene.getSceneGraph();
@@ -109,13 +108,14 @@ pub fn main() !void {
         Secrets.client_port_video,
     );
 
-    const pose_handler = Sensors.PoseHandler.init(&droneNode);
+    const pose_handler = Sensors.PoseHandler.init(droneNode);
     var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
     var video_handler = try Video.VideoHandler.init(
         alloc,
+        canvasNodeLeft,
         null,
         Video.frameCallback,
     );
@@ -128,7 +128,9 @@ pub fn main() !void {
 
     //Render loop
     while (c.glfwWindowShouldClose(window) == 0) {
-        if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) == c.GLFW_FALSE) {
+        c.glfwPollEvents();
+
+        if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) == c.GLFW_FALSE or scene.width == 0 or scene.height == 0) {
             continue; // Skip frame if window is not focused
         }
 

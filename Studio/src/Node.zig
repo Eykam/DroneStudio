@@ -1,8 +1,10 @@
 const std = @import("std");
 const Mesh = @import("Mesh.zig");
 const Math = @import("Math.zig");
+const Scene = @import("Pipeline.zig").Scene;
 const Vec3 = Math.Vec3;
 const Quaternion = Math.Quaternion;
+const glCheckError = @import("Debug.zig").glCheckError;
 
 const c = @cImport({
     @cInclude("glad/glad.h");
@@ -10,11 +12,18 @@ const c = @cImport({
 
 const Self = @This();
 
+scene: ?*Scene = null,
 mesh: ?*Mesh,
 _update: ?*const fn (*Mesh) void,
 allocator: std.mem.Allocator,
 children: std.ArrayList(*Self),
 parent: ?*Self = null,
+
+y: []u8,
+uv: []u8,
+width: ?c_int = null,
+height: ?c_int = null,
+texture_updated: bool = false,
 
 // Add transformation properties
 position: [3]f32 = .{ 0, 0, 0 },
@@ -23,7 +32,7 @@ scale: [3]f32 = .{ 1, 1, 1 },
 local_transform: [16]f32 = Math.identity(),
 world_transform: [16]f32 = Math.identity(),
 
-pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !Self {
+pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !*Self {
 
     // If a mesh was provided, allocate space for it
     var mesh_ptr: ?*Mesh = null;
@@ -36,14 +45,22 @@ pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !Self {
         _update = mesh_val.draw;
     }
 
-    const node = Self{
+    const node_ptr = try allocator.create(Self);
+
+    node_ptr.* = Self{
         .allocator = allocator,
         .mesh = mesh_ptr,
         ._update = _update,
         .children = try std.ArrayList(*Self).initCapacity(allocator, 0),
+        .y = try allocator.alloc(u8, 1280 * 720),
+        .uv = try allocator.alloc(u8, 1280 * (720 / 2)),
     };
 
-    return node;
+    if (mesh_ptr) |mesh| {
+        mesh.node = node_ptr;
+    }
+
+    return node_ptr;
 }
 
 pub fn deinit(self: *Self) void {
@@ -84,7 +101,20 @@ pub fn setScale(self: *Self, x: f32, y: f32, z: f32) void {
 
 pub fn addChild(self: *Self, child: *Self) !void {
     child.parent = self;
+
+    if (self.scene) |scene| {
+        child.addSceneRecursively(scene);
+    }
+
     try self.children.append(child);
+}
+
+pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
+    self.scene = scene;
+
+    for (self.children.items) |child| {
+        child.addSceneRecursively(scene);
+    }
 }
 
 fn updateLocalTransform(self: *Self) void {
@@ -129,12 +159,45 @@ pub fn update(self: *Self, uModelLoc: c.GLint) void {
         }
 
         if (self._update) |_update| {
+            try self.bindTexture();
             _update(mesh);
         }
     }
 
     for (self.children.items) |child| {
         child.update(uModelLoc);
+    }
+}
+
+pub fn bindTexture(self: *Self) !void {
+    // Generate texture objects if not already created
+    if (self.texture_updated) {
+        c.glGenTextures(1, &self.*.mesh.?.textureID.y);
+        c.glGenTextures(1, &self.*.mesh.?.textureID.uv); // Now using for combined UV
+
+        // c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+        // glCheckError("Pixel Store");
+
+        // Bind and configure Y plane texture
+        c.glActiveTexture(c.GL_TEXTURE0);
+        c.glBindTexture(c.GL_TEXTURE_2D, self.*.mesh.?.textureID.y);
+        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_R8, self.width.?, self.height.?, 0, c.GL_RED, c.GL_UNSIGNED_BYTE, self.y.ptr);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+
+        // Bind and configure interleaved UV plane texture
+        c.glActiveTexture(c.GL_TEXTURE1);
+        c.glBindTexture(c.GL_TEXTURE_2D, self.*.mesh.?.textureID.uv);
+        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, c.GL_RG, c.GL_UNSIGNED_BYTE, self.uv.ptr);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
+        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+
+        if (self.scene) |scene| {
+            c.glUniform1i(scene.yTextureLoc, 0);
+            c.glUniform1i(scene.uvTextureLoc, 1);
+        }
+
+        self.texture_updated = false;
     }
 }
 

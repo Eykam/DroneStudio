@@ -39,6 +39,9 @@ pub const Scene = struct {
     uModelLoc: c.GLint,
     uViewLoc: c.GLint,
     uProjectionLoc: c.GLint,
+    useTextureLoc: c.GLint,
+    yTextureLoc: c.GLint,
+    uvTextureLoc: c.GLint,
 
     pub fn init(allocator: std.mem.Allocator, window: ?*c.struct_GLFWwindow) !Self {
         if (window == null) {
@@ -107,6 +110,9 @@ pub const Scene = struct {
         const uModelLoc = c.glGetUniformLocation(shaderProgram, "uModel");
         const uViewLoc = c.glGetUniformLocation(shaderProgram, "uView");
         const uProjectionLoc = c.glGetUniformLocation(shaderProgram, "uProjection");
+        const useTextureLoc = c.glGetUniformLocation(shaderProgram, "useTexture");
+        const yTextureLoc = c.glGetUniformLocation(shaderProgram, "yTexture");
+        const uvTextureLoc = c.glGetUniformLocation(shaderProgram, "uvTexture");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
@@ -124,6 +130,9 @@ pub const Scene = struct {
             .uModelLoc = uModelLoc,
             .uViewLoc = uViewLoc,
             .uProjectionLoc = uProjectionLoc,
+            .useTextureLoc = useTextureLoc,
+            .yTextureLoc = yTextureLoc,
+            .uvTextureLoc = uvTextureLoc,
         };
     }
 
@@ -191,6 +200,7 @@ pub const Scene = struct {
     }
 
     pub fn addNode(self: *Self, name: []const u8, node: *Node) !void {
+        node.addSceneRecursively(self);
         try self.nodes.put(name, node);
     }
 
