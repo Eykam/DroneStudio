@@ -56,7 +56,6 @@ pub fn default_draw(mesh: *Self) void {
         @ptrFromInt(color_offset));
     c.glEnableVertexAttribArray(1);
 
-    // Draw the mesh
     if (mesh.indices) |indices| {
         c.glDrawElements(mesh.drawType, @intCast(indices.len), c.GL_UNSIGNED_INT, null);
     } else {
@@ -122,7 +121,6 @@ pub fn setFaceColor(self: *Self, face_index: usize, color: [3]f32) void {
         self.vertices[vertex_idx].color = color;
     }
 
-    // Update vertex buffer
     c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
     c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, c.GL_STATIC_DRAW);
 }
@@ -132,7 +130,6 @@ pub fn setColor(self: *Self, color: [3]f32) void {
         vertex.color = color;
     }
 
-    // Update vertex buffer
     c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
     c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, c.GL_STATIC_DRAW);
 }

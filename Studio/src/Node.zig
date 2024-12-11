@@ -25,7 +25,7 @@ width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
 
-// Add transformation properties
+// Transformation properties
 position: [3]f32 = .{ 0, 0, 0 },
 rotation: Quaternion = Quaternion.identity(),
 scale: [3]f32 = .{ 1, 1, 1 },
@@ -73,7 +73,6 @@ pub fn deinit(self: *Self) void {
         self.allocator.destroy(mesh);
     }
 
-    // Finally free ourselves
     self.allocator.destroy(self);
 }
 
@@ -115,8 +114,8 @@ pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
     }
 }
 
+// (Scale -> Rotate -> Translate)
 fn updateLocalTransform(self: *Self) void {
-    // (Scale -> Rotate -> Translate)
     var transform = Math.identity();
 
     const center_transform = Math.translate(transform, -self.position[0], -self.position[1], -self.position[2]);

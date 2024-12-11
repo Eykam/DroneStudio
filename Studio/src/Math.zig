@@ -4,6 +4,7 @@ const SensorState = Sensors.SensorState;
 
 pub const Mat4 = [16]f32;
 
+// Todo: Use @Vector instead for SIMD
 pub const Quaternion = struct {
     x: f32,
     y: f32,
@@ -15,7 +16,6 @@ pub const Quaternion = struct {
     }
 
     pub fn fromAxisAngle(axis: Vec3, angle: f32) Quaternion {
-        // First normalize the axis vector
         const normalized_axis = axis.normalize();
 
         // Calculate the sine and cosine of half the angle
@@ -23,7 +23,6 @@ pub const Quaternion = struct {
         const sin_half = @sin(half_angle);
         const cos_half = @cos(half_angle);
 
-        // Calculate the quaternion components
         return Quaternion{
             .x = normalized_axis.x * sin_half,
             .y = normalized_axis.y * sin_half,
@@ -120,7 +119,6 @@ pub const Quaternion = struct {
         };
     }
 
-    // Optional: Implement slerp for smooth interpolation
     pub fn slerp(a: Quaternion, b: Quaternion, t: f32) Quaternion {
         var cos_half_theta = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
 
@@ -153,6 +151,7 @@ pub const Quaternion = struct {
     }
 };
 
+//Todo: Use @Vector for SIMD
 pub const Vec3 = struct {
     x: f32,
     y: f32,
@@ -405,10 +404,8 @@ pub const MadgwickFilter = struct {
         var q3q4 = q3 * q4;
         var q4q4 = q4 * q4;
 
-        // Normalize accelerometer measurement
         const a_norm = accel.normalize();
 
-        // Normalize magnetometer measurement
         const m_norm = mag.normalize();
 
         // Gradient decent algorithm corrective step
@@ -440,7 +437,6 @@ pub const MadgwickFilter = struct {
         }
 
         // Normalize step magnitude
-
         var step_vector = Vec3{
             .x = step[1],
             .y = step[2],
@@ -543,8 +539,6 @@ pub fn updateModelMatrix(
     delta_time: f32,
     sensor_state: *SensorState,
 ) Quaternion {
-    // Initialize Madgwick filter if not already done
-
     const accel_gl = Vec3{
         .x = accel.x, // Right
         .y = accel.y, // Up

@@ -35,6 +35,8 @@ pub fn update_vectors(self: *Self) void {
     self.right = Vec3.normalize(Vec3.cross(self.front, self.up));
 }
 
+//Todo: Move function that takes direction instead of separate functions for each direction
+
 // Move the camera forward
 pub fn move_forward(self: *Self, delta_time: f32, sprinting: bool, debug: bool) void {
     var multiplier: f32 = 1;
@@ -151,6 +153,7 @@ pub fn move_left(self: *Self, delta_time: f32, sprinting: bool, debug: bool) voi
     }});
 }
 
+//Todo: Use Quaternions instead? Removes the need for constraining Euler angles
 // Process mouse movement to update yaw and pitch
 pub fn process_mouse_movement(self: *Self, xoffset: f64, yoffset: f64, aspectRatio: f32, constrain_pitch: bool) void {
     self.yaw += @as(f32, @floatCast(xoffset)) * self.sensitivity * aspectRatio;
