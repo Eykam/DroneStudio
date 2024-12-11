@@ -113,10 +113,14 @@ pub fn main() !void {
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
+    const width: usize = 1280;
+    const height: usize = 1080;
     var video_handler = try Video.VideoHandler.init(
         alloc,
         canvasNodeLeft,
         null,
+        width,
+        height,
         Video.frameCallback,
     );
     defer video_handler.deinit();

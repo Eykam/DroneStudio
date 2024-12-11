@@ -35,14 +35,18 @@ pub fn main() !void {
         "--level",
         "4.2",
         "--framerate",
-        "120",
-        "--codec",
-        "h264",
+        "75",
         "--width",
         "1280",
         "--height",
         "720",
         "--inline",
+        "--denoise",
+        "cdn_off",
+        "-g",
+        "1",
+        // "--keyframe-period",
+        // "60", //
         "-o",
         "-",
     };
@@ -96,6 +100,10 @@ pub fn main() !void {
                 @memcpy(packet[4..20], intToBytesBE(@intCast(timestamp))[0..]);
 
                 _ = try std.posix.sendto(socket, packet, 0, &dest_addr, dest_addr_len);
+
+                // const N = 10;
+                // var parity_packet = computeParity(packets[N - 10 .. N]);
+                // try std.posix.sendto(socket, parity_packet, 0, &dest_addr, dest_addr_len);
 
                 std.debug.print("Sent packet: {} bytes, Timestamp: {d}\n", .{
                     frame_bytes_received, timestamp,

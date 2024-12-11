@@ -19,8 +19,8 @@ allocator: std.mem.Allocator,
 children: std.ArrayList(*Self),
 parent: ?*Self = null,
 
-y: []u8,
-uv: []u8,
+y: ?[]u8 = null,
+uv: ?[]u8 = null,
 width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
@@ -52,8 +52,6 @@ pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !*Self {
         .mesh = mesh_ptr,
         ._update = _update,
         .children = try std.ArrayList(*Self).initCapacity(allocator, 0),
-        .y = try allocator.alloc(u8, 1280 * 720),
-        .uv = try allocator.alloc(u8, 1280 * (720 / 2)),
     };
 
     if (mesh_ptr) |mesh| {
@@ -181,14 +179,14 @@ pub fn bindTexture(self: *Self) !void {
         // Bind and configure Y plane texture
         c.glActiveTexture(c.GL_TEXTURE0);
         c.glBindTexture(c.GL_TEXTURE_2D, self.*.mesh.?.textureID.y);
-        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_R8, self.width.?, self.height.?, 0, c.GL_RED, c.GL_UNSIGNED_BYTE, self.y.ptr);
+        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_R8, self.width.?, self.height.?, 0, c.GL_RED, c.GL_UNSIGNED_BYTE, self.y.?.ptr);
         c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
         c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
 
         // Bind and configure interleaved UV plane texture
         c.glActiveTexture(c.GL_TEXTURE1);
         c.glBindTexture(c.GL_TEXTURE_2D, self.*.mesh.?.textureID.uv);
-        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, c.GL_RG, c.GL_UNSIGNED_BYTE, self.uv.ptr);
+        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, c.GL_RG, c.GL_UNSIGNED_BYTE, self.uv.?.ptr);
         c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
         c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
 

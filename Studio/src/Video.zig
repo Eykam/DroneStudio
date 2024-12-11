@@ -48,6 +48,44 @@ const AVERROR_EOF = -1 * @as(c_int, @intCast(c.EOF));
 
 const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *c.struct_AVFrame) error{OutOfMemory}!void;
 
+const NALUType = enum(u5) {
+    Unspecified = 0,
+    NonIDRSlice = 1, // P and B frames
+    IDRSlice = 5, // Keyframe
+    // Add other relevant types
+};
+
+fn getNALUType(nalu_byte: u8) NALUType {
+    return @enumFromInt(nalu_byte & 0x1F);
+}
+
+// const FrameBuffer = struct {
+//     reference_frame: ?[]u8 = null,
+//     last_keyframe: ?[]u8 = null,
+
+//     pub fn updateFrameBuffer(self: *FrameBuffer, current_frame: []u8, nalu_type: NALUType) !void {
+//         switch (nalu_type) {
+//             .IDRSlice => {
+//                 // Keyframe - reset reference and last keyframe
+//                 if (self.last_keyframe) |kf| self.allocator.free(kf);
+//                 if (self.reference_frame) |rf| self.allocator.free(rf);
+
+//                 self.last_keyframe = try self.allocator.dupe(u8, current_frame);
+//                 self.reference_frame = try self.allocator.dupe(u8, current_frame);
+//             },
+//             .NonIDRSlice => {
+//                 // P or B frame - update using reference frame
+//                 if (self.reference_frame) |ref_frame| {
+//                     // Implement motion compensation logic here
+//                     // This would typically involve block-based motion estimation
+//                     // and prediction from the reference frame
+//                 }
+//             },
+//             else => {},
+//         }
+//     }
+// };
+
 pub const VideoHandler = struct {
     const Self = @This();
 
@@ -78,7 +116,14 @@ pub const VideoHandler = struct {
     // Callback for decoded RGB frames
     onDecodedFrame: DecodedFrameCallback,
 
-    pub fn init(allocator: mem.Allocator, node: *Node, hw_type: ?c_uint, onDecodedFrame: DecodedFrameCallback) !Self {
+    pub fn init(
+        allocator: mem.Allocator,
+        node: *Node,
+        hw_type: ?c_uint,
+        width: usize,
+        height: usize,
+        onDecodedFrame: DecodedFrameCallback,
+    ) !Self {
         // Create images directory if it doesn't exist
         var cwd = fs.cwd();
         cwd.makeDir("images") catch |err| switch (err) {
@@ -122,8 +167,8 @@ pub const VideoHandler = struct {
         errdefer c.avcodec_free_context(@ptrCast(@constCast(&codec_context))); // Ensure codec_context is freed on error
 
         codec_context.*.hw_device_ctx = hw_device_ctx;
-        codec_context.*.width = 1280;
-        codec_context.*.height = 720;
+        codec_context.*.width = @intCast(width);
+        codec_context.*.height = @intCast(height);
 
         codec_context.*.pix_fmt = switch (hw_device_type) {
             c.AV_HWDEVICE_TYPE_CUDA => c.AV_PIX_FMT_CUDA,
@@ -375,11 +420,7 @@ pub const VideoHandler = struct {
             return null;
         }
 
-        // std.debug.print("Start Index: {?}\n", .{start_index});
-        // std.debug.print("End Index: {?}\n", .{end_index});
-
         // Find next start code
-        // std.debug.print("Buffer Length: {d} => {d}\n", .{ self.buffer.items.len, self.buffer.items.len - 3 });
         if (start_index.? + 4 < self.buffer.items.len - 3) {
             for (start_index.? + 4..self.buffer.items.len - 3) |i| { // Corrected to -3
                 if (mem.eql(u8, self.buffer.items[i .. i + 4], &self.nalu_start_codes)) {
@@ -495,12 +536,12 @@ pub const VideoHandler = struct {
 
         // Invoke the callback with the RGB frame
         const end = try std.time.Instant.now();
-        _ = start;
-        _ = end;
+        // _ = start;
+        // _ = end;
 
         // std.debug.print("Decoded Frame Pixel Format: {d} ({s})\n", .{ filt_frame.*.format, pix_fmt_to_str(filt_frame.*.format) });
         // std.debug.print("Decoded Frame Dimensions: {}x{}\n", .{ filt_frame.*.width, filt_frame.*.height });
-        // std.debug.print("Decoding Time: {d}\n", .{@as(f64, @floatFromInt(std.time.Instant.since(end, start))) / 1e9});
+        std.debug.print("Decoding Time: {d}\n", .{@as(f64, @floatFromInt(std.time.Instant.since(end, start))) / 1e9});
 
         if (self.frame_delta == -1) {
             self.frame_delta = std.time.nanoTimestamp();
@@ -583,18 +624,24 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *c.AVFram
     const y_plane = frame.data[0][0 .. @as(usize, @intCast(frame.linesize[0])) * frame_height];
     const uv_plane = frame.data[1][0 .. @as(usize, @intCast(frame.linesize[1])) * (frame_height / 2)];
 
+    if (node.y == null) {
+        node.y = try allocator.alloc(u8, frame_width * frame_height);
+    }
+    if (node.uv == null) {
+        node.uv = try allocator.alloc(u8, frame_width * (frame_height / 2));
+    }
+
     // Copy rows, skipping the padding
     for (0..frame_height) |i| {
         const src_row = y_plane[i * @as(usize, @intCast(frame.linesize[0])) ..][0..frame_width];
-        @memcpy(node.y[i * frame_width ..][0..frame_width], src_row);
+        @memcpy(node.y.?[i * frame_width ..][0..frame_width], src_row);
     }
 
     // // Similar for UV plane
     for (0..(frame_height / 2)) |i| {
         const src_row = uv_plane[i * @as(usize, @intCast(frame.linesize[1])) ..][0..frame_width];
-        @memcpy(node.uv[i * frame_width ..][0..frame_width], src_row);
+        @memcpy(node.uv.?[i * frame_width ..][0..frame_width], src_row);
     }
-    _ = allocator;
 
     node.width = @intCast(frame_width);
     node.height = @intCast(frame_height);
