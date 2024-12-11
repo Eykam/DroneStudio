@@ -31,7 +31,7 @@ To determine the **UDP transmission speed** required for various streaming confi
 4. **Account for Network Overhead (1.3x):**
     $$\ \text{Throughput with Overhead} = \text{Data Rate (Mbps)} \times 1.3$$
 
-5. **Incorporate Forward Error Correction (FEC) Overhead (20% if enabled):**
+5. **Incorporate Forward Error Correction (FEC) Overhead (assuming 20% Parity):**
    - **Without FEC:**  
         $$\ \text{Total Throughput} = \text{Throughput with Overhead}$$
    - **With FEC:**  
