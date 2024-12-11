@@ -15,41 +15,27 @@ To determine the **UDP transmission speed** required for various streaming confi
 
 1. **Frame Distribution:**
    - **I-Frames per Second (I_fps):** 
-     \[
-     I_{\text{fps}} = \frac{\text{Frame Rate (fps)}}{\text{I-frame Interval}}
-     \]
+        $$\I_{\text{fps}} = \frac{\text{Frame Rate (fps)}}{\text{I-frame Interval}}$$
    - **P-Frames per Second (P_fps):** 
-     \[
-     P_{\text{fps}} = \text{Frame Rate} - I_{\text{fps}}
-     \]
+        $$\P_{\text{fps}} = \text{Frame Rate} - I_{\text{fps}}$$
 
 2. **Data Rate Calculation:**
    - **I-Frame Size (S_I):** Size of each I-frame in Bytes.
    - **P-Frame Size (S_P):** Size of each P-frame in Bytes (range: lower to upper bound).
    - **Total Data per Second (D):**  
-     \[
-     D = (I_{\text{fps}} \times S_I) + (P_{\text{fps}} \times S_P)
-     \]
+        $$\D = (I_{\text{fps}} \times S_I) + (P_{\text{fps}} \times S_P)$$
 
 3. **Convert to Megabits per Second (Mbps):**
-   - \[
-     \text{Data Rate (Mbps)} = \frac{D \times 8}{1,000}
-     \]
+    $$\text{Data Rate (Mbps)} = \frac{D \times 8}{1,000}$$
 
 4. **Account for Network Overhead (1.3x):**
-   - \[
-     \text{Throughput with Overhead} = \text{Data Rate (Mbps)} \times 1.3
-     \]
+    $$\text{Throughput with Overhead} = \text{Data Rate (Mbps)} \times 1.3$$
 
 5. **Incorporate Forward Error Correction (FEC) Overhead (20% if enabled):**
    - **Without FEC:**  
-     \[
-     \text{Total Throughput} = \text{Throughput with Overhead}
-     \]
+        $$\text{Total Throughput} = \text{Throughput with Overhead}$$
    - **With FEC:**  
-     \[
-     \text{Total Throughput} = \text{Throughput with Overhead} \times 1.2
-     \]
+        $$\text{Total Throughput} = \text{Throughput with Overhead} \times 1.2$$
 
 6. **Determine Raspberry Pi Zero 2 W Support:**
    - **Supported:** If **Total Throughput ≤ 100 Mbps**
