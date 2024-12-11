@@ -14,34 +14,51 @@ The **Raspberry Pi Zero 2 W** has the following network capabilities:
 To determine the **UDP transmission speed** required for various streaming configurations, follow these steps:
 
 1. **Frame Distribution:**
-   - **I-Frames per Second (I_fps):** \( \frac{\text{Frame Rate (fps)}}{\text{I-frame Interval}} \)
-   - **P-Frames per Second (P_fps):** \( \text{Frame Rate} - \text{I_fps} \)
+   - **I-Frames per Second (I_fps):** 
+     \[
+     I_{\text{fps}} = \frac{\text{Frame Rate (fps)}}{\text{I-frame Interval}}
+     \]
+   - **P-Frames per Second (P_fps):** 
+     \[
+     P_{\text{fps}} = \text{Frame Rate} - I_{\text{fps}}
+     \]
 
 2. **Data Rate Calculation:**
-   - **I-Frame Size:** 200 KB
-   - **P-Frame Size:** 
-     - **Lower Bound:** 5 KB
-     - **Upper Bound:** 50 KB
-   - **Total Data per Second (KB/sec):**  
-     \( (\text{I_fps} \times 200) + (\text{P_fps} \times \text{P-Frame Size}) \)
+   - **I-Frame Size (S_I):** Size of each I-frame in Bytes.
+   - **P-Frame Size (S_P):** Size of each P-frame in Bytes (range: lower to upper bound).
+   - **Total Data per Second (D):**  
+     \[
+     D = (I_{\text{fps}} \times S_I) + (P_{\text{fps}} \times S_P)
+     \]
 
 3. **Convert to Megabits per Second (Mbps):**
-   - \( \text{Data (KB/sec)} \times 8 / 1000 = \text{Mbps} \)
+   - \[
+     \text{Data Rate (Mbps)} = \frac{D \times 8}{1,000}
+     \]
 
 4. **Account for Network Overhead (1.3x):**
-   - \( \text{Mbps} \times 1.3 = \text{Throughput with Overhead} \)
+   - \[
+     \text{Throughput with Overhead} = \text{Data Rate (Mbps)} \times 1.3
+     \]
 
 5. **Incorporate Forward Error Correction (FEC) Overhead (20% if enabled):**
    - **Without FEC:**  
-     \( \text{Throughput with Overhead} \)
+     \[
+     \text{Total Throughput} = \text{Throughput with Overhead}
+     \]
    - **With FEC:**  
-     \( \text{Throughput with Overhead} \times 1.2 = \text{Total Throughput} \)
+     \[
+     \text{Total Throughput} = \text{Throughput with Overhead} \times 1.2
+     \]
 
 6. **Determine Raspberry Pi Zero 2 W Support:**
    - **Supported:** If **Total Throughput ≤ 100 Mbps**
    - **Not Supported:** If **Total Throughput > 100 Mbps**
 
 ---
+
+## Frame Size Estimates for H.264 Level 4.2
+
 | **Resolution** | **Frame Type**  | **Lower Bound Frame Size (Bytes)** | **Upper Bound Frame Size (Bytes)** |
 |----------------|-----------------|------------------------------------|------------------------------------|
 | **360p**       | **I-Frame**     | 30 KB                              | 102 KB                             |
