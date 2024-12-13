@@ -59,33 +59,6 @@ fn getNALUType(nalu_byte: u8) NALUType {
     return @enumFromInt(nalu_byte & 0x1F);
 }
 
-// const FrameBuffer = struct {
-//     reference_frame: ?[]u8 = null,
-//     last_keyframe: ?[]u8 = null,
-
-//     pub fn updateFrameBuffer(self: *FrameBuffer, current_frame: []u8, nalu_type: NALUType) !void {
-//         switch (nalu_type) {
-//             .IDRSlice => {
-//                 // Keyframe - reset reference and last keyframe
-//                 if (self.last_keyframe) |kf| self.allocator.free(kf);
-//                 if (self.reference_frame) |rf| self.allocator.free(rf);
-
-//                 self.last_keyframe = try self.allocator.dupe(u8, current_frame);
-//                 self.reference_frame = try self.allocator.dupe(u8, current_frame);
-//             },
-//             .NonIDRSlice => {
-//                 // P or B frame - update using reference frame
-//                 if (self.reference_frame) |ref_frame| {
-//                     // Implement motion compensation logic here
-//                     // This would typically involve block-based motion estimation
-//                     // and prediction from the reference frame
-//                 }
-//             },
-//             else => {},
-//         }
-//     }
-// };
-
 pub const VideoHandler = struct {
     const Self = @This();
 
@@ -606,18 +579,6 @@ fn pix_fmt_to_str(pix_fmt: c.AVPixelFormat) []const u8 {
 }
 
 pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *c.AVFrame) error{OutOfMemory}!void {
-    // std.debug.print("Pixel Format: {s}\n", .{c.av_get_pix_fmt_name(frame.format)});
-    // std.debug.print("Width: {d}\n", .{frame.width});
-    // std.debug.print("Height: {d}\n", .{frame.height});
-    // std.debug.print("Linesize: {d}\n", .{frame.linesize});
-
-    // // Debug data pointers and line sizes
-    // std.debug.print("Data[0] ptr: {*}\n", .{frame.data[0]});
-    // std.debug.print("Data[1] ptr: {*}\n", .{frame.data[1]});
-
-    // std.debug.print("Linesize[0]: {}\n", .{frame.linesize[0]});
-    // std.debug.print("Linesize[1]: {}\n", .{frame.linesize[1]});
-
     const frame_width = @as(usize, @intCast(frame.width));
     const frame_height = @as(usize, @intCast(frame.height));
 

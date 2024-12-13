@@ -1,12 +1,13 @@
 const std = @import("std");
 const net = std.net;
 
+//Move to Config.zig
 const CLIENT_IP: []const u8 = "192.168.1.171";
 const CLIENT_PORT: u16 = 8888;
 const VIDEO_OFFSET = 16 + 4;
 const MAX_PACKET_SIZE = 1500 - 28 - VIDEO_OFFSET;
 
-// Helper function to convert integer to big-endian byte array
+// Convert integer to big-endian byte array
 fn intToBytesBE(value: i128) [16]u8 {
     var bytes: [16]u8 = undefined;
     std.mem.writeInt(i128, &bytes, value, .big);
@@ -24,9 +25,7 @@ pub fn main() !void {
     const dest_addr: std.posix.sockaddr = (try std.net.Address.parseIp4(CLIENT_IP, CLIENT_PORT)).any;
     const dest_addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
 
-    // Define the frame parameters
-
-    // Define the command and its arguments
+    //Configure to take CLI arguments or receive params when compiled
     const args = &[_][]const u8{
         "libcamera-vid",
         "-n",
@@ -35,7 +34,7 @@ pub fn main() !void {
         "--level",
         "4.2",
         "--framerate",
-        "105",
+        "80",
         "--width",
         "480",
         "--height",
@@ -45,13 +44,10 @@ pub fn main() !void {
         "cdn_off",
         "-g",
         "1",
-        // "--keyframe-period",
-        // "60", //
         "-o",
         "-",
     };
 
-    // Spawn the libcamera-vid process
     var proc = std.process.Child.init(args, allocator);
     proc.stdout_behavior = .Pipe;
     proc.stderr_behavior = .Pipe;
@@ -92,10 +88,8 @@ pub fn main() !void {
 
             // Check if the frame buffer is full
             if (frame_bytes_received == MAX_PACKET_SIZE) {
-                // Capture the timestamp
                 const timestamp = std.time.nanoTimestamp(); // better to define here or when frame buffer is full??
 
-                // Encode timestamp as big endian
                 std.mem.writeInt(u32, packet[0..4], frame_id, .big);
                 @memcpy(packet[4..20], intToBytesBE(@intCast(timestamp))[0..]);
 
@@ -115,7 +109,6 @@ pub fn main() !void {
         }
     }
 
-    // Wait for the libcamera-vid process to exit
     _ = try proc.wait();
 
     std.debug.print("libcamera-vid process terminated.\n", .{});
