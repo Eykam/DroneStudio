@@ -1,6 +1,6 @@
 //zig build -Dtarget="aarch64-linux-gnu" -Dcpu="cortex_a53" -Doptimize=ReleaseFast
 //scp ./zig-out/bin/VideoStreamer ekamil@vision:~/VideoStreamer
-
+//libcamera-vid -n -t 0 --level 4.2 --framerate 75 --width 1280 --height 720 --inline --denoise cdn_off -g 1  --flush -o - | ffmpeg -i - -c:v copy -f rtp rtp://192.168.1.171:8888
 const std = @import("std");
 
 // Although this function looks imperative, note that its job is to

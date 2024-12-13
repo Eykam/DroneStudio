@@ -16,7 +16,7 @@ client_port: u16,
 
 spawn_config: std.Thread.SpawnConfig = std.Thread.SpawnConfig{
     .allocator = std.heap.page_allocator,
-    .stack_size = 16 * 1024 * 1024, // You can adjust the stack size as needed
+    .stack_size = 16 * 1024 * 1024, // Adjust the stack size as needed
 },
 
 const HandlerError = error{FailedToParse};
@@ -76,6 +76,7 @@ pub fn start(self: *Self, handler: HandlerInterface) !void {
     // _ = udp_transmitting_thread.join();
 }
 
+//Todo: Default to 0.0.0.0 if host_ip not defined in Secrets, otherwise use host_ip
 pub fn receive(self: *Self, handler: HandlerInterface) !void {
     std.debug.print("\nUDP Rx server started\n", .{});
     const parsed_address = try std.net.Address.parseIp4("0.0.0.0", self.host_port);

@@ -1,90 +1,20 @@
 const std = @import("std");
-const c = @cImport({
-    @cInclude("libavfilter/avfilter.h");
-    @cInclude("libavcodec/avcodec.h");
-    @cInclude("libavformat/avformat.h");
-    @cInclude("libavutil/frame.h");
-    @cInclude("libavutil/hwcontext.h");
-    @cInclude("libavutil/hwcontext_cuda.h");
-    @cInclude("libavutil/imgutils.h");
-    @cInclude("libavutil/pixdesc.h");
-    @cInclude("libswscale/swscale.h");
-    @cInclude("libavfilter/buffersink.h");
-    @cInclude("libavfilter/buffersrc.h");
-    @cInclude("libavutil/opt.h");
-});
+const libav = @import("libav.zig");
+const video = libav.video;
 const Node = @import("Node.zig");
 
 const mem = std.mem;
 const fs = std.fs;
 
-// Define custom errors
-const errors = enum {
-    CodecNotFound,
-    ParserInitFailed,
-    CodecContextAllocationFailed,
-    CodecOpenFailed,
-    FrameAllocationFailed,
-    PacketAllocationFailed,
-    PNGCodecNotFound,
-    PNGCodecContextAllocationFailed,
-    PNGCodecOpenFailed,
-    PNGFrameAllocationFailed,
-    PNGFrameBufferAllocationFailed,
-    PNGPacketAllocationFailed,
-    SwsContextAllocationFailed,
-    ParsingFailed,
-    DecodeFailed,
-    FrameReceiveFailed,
-    SwsScaleFailed,
-    PNGFrameSendFailed,
-    PNGFrameReceiveFailed,
-    BufferResizeFailed,
-    BufferOverflow,
+const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(video.EAGAIN));
+const AVERROR_EOF = -1 * @as(c_int, @intCast(video.EOF));
+
+const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *video.struct_AVFrame) error{OutOfMemory}!void;
+pub const StreamPollingConfig = struct {
+    max_retry_attempts: u32 = 1000,
+    retry_delay_ms: u64 = 2000, // 2 seconds between retries
+    timeout_ms: u64 = 60000, // 1 minute total timeout
 };
-
-const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(c.EAGAIN));
-const AVERROR_EOF = -1 * @as(c_int, @intCast(c.EOF));
-
-const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *c.struct_AVFrame) error{OutOfMemory}!void;
-
-const NALUType = enum(u5) {
-    Unspecified = 0,
-    NonIDRSlice = 1, // P and B frames
-    IDRSlice = 5, // Keyframe
-    // Add other relevant types
-};
-
-fn getNALUType(nalu_byte: u8) NALUType {
-    return @enumFromInt(nalu_byte & 0x1F);
-}
-
-// const FrameBuffer = struct {
-//     reference_frame: ?[]u8 = null,
-//     last_keyframe: ?[]u8 = null,
-
-//     pub fn updateFrameBuffer(self: *FrameBuffer, current_frame: []u8, nalu_type: NALUType) !void {
-//         switch (nalu_type) {
-//             .IDRSlice => {
-//                 // Keyframe - reset reference and last keyframe
-//                 if (self.last_keyframe) |kf| self.allocator.free(kf);
-//                 if (self.reference_frame) |rf| self.allocator.free(rf);
-
-//                 self.last_keyframe = try self.allocator.dupe(u8, current_frame);
-//                 self.reference_frame = try self.allocator.dupe(u8, current_frame);
-//             },
-//             .NonIDRSlice => {
-//                 // P or B frame - update using reference frame
-//                 if (self.reference_frame) |ref_frame| {
-//                     // Implement motion compensation logic here
-//                     // This would typically involve block-based motion estimation
-//                     // and prediction from the reference frame
-//                 }
-//             },
-//             else => {},
-//         }
-//     }
-// };
 
 pub const VideoHandler = struct {
     const Self = @This();
@@ -92,130 +22,197 @@ pub const VideoHandler = struct {
     allocator: mem.Allocator,
     node: *Node,
 
-    buffer: std.ArrayList(u8),
-    current_timestamp: u128 = 0,
-    nalu_start_codes: [4]u8 = [_]u8{ 0, 0, 0, 1 },
-    image_dir: fs.Dir,
-    stale_count: u8 = 0,
-    last_valid_timestamp: u128 = 0,
-    prev_frame_id: ?u32 = null,
-    frame_delta: i128 = 0,
-    packet: *c.AVPacket,
+    format_context: *video.AVFormatContext,
+    stream_index: c_int = -1,
 
     // FFmpeg Decoder Fields
-    parser_context: *c.AVCodecParserContext,
-    codec_context: *c.AVCodecContext,
-    hw_frame: *c.AVFrame,
+    hw_device_ctx: ?*video.AVBufferRef = null,
+    codec_context: *video.AVCodecContext,
+    hw_frame: *video.AVFrame,
 
-    hw_device_ctx: ?*c.AVBufferRef = null,
-
-    filter_graph: ?*c.AVFilterGraph = null,
-    buffersrc: ?*c.AVFilterContext = null,
-    buffersink: ?*c.AVFilterContext = null,
+    filter_graph: ?*video.AVFilterGraph = null,
+    buffersrc: ?*video.AVFilterContext = null,
+    buffersink: ?*video.AVFilterContext = null,
 
     // Callback for decoded RGB frames
     onDecodedFrame: DecodedFrameCallback,
 
+    polling_config: StreamPollingConfig,
+    is_stream_ready: bool = false,
+
+    const sdp_content =
+        "v=0\r\n" ++
+        "o=- 0 0 IN IP4 192.168.1.226\r\n" ++
+        "s=No Name\r\n" ++
+        "c=IN IP4 192.168.1.226\r\n" ++
+        "t=0 0\r\n" ++
+        "a=tool:libavformat LIBAVFORMAT_VERSION\r\n" ++
+        "m=video 8888 RTP/AVP 96\r\n" ++
+        "a=rtpmap:96 H264/90000\r\n" ++
+        "a=fmtp:96 packetization-mode=1; sprop-parameter-sets=J2QAKqwrQCgC3QgAAAMACAAABLc2AAExLAADua973APEiag=,KO4CXLAA; profile-level-id=64002A\r\n";
+
     pub fn init(
         allocator: mem.Allocator,
         node: *Node,
+        rtp_url: []const u8,
         hw_type: ?c_uint,
-        width: usize,
-        height: usize,
         onDecodedFrame: DecodedFrameCallback,
+        polling_config: ?StreamPollingConfig,
     ) !Self {
-        // Create images directory if it doesn't exist
-        var cwd = fs.cwd();
-        cwd.makeDir("images") catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        _ = rtp_url;
 
-        const image_dir = try cwd.openDir("images", .{});
+        const config = polling_config orelse StreamPollingConfig{};
+
+        // video.av_log_set_level(video.AV_LOG_DEBUG);
+
+        // Initialize network
+        if (video.avformat_network_init() < 0) {
+            std.debug.print("Failed to initialize RTP Server", .{});
+            return error.RTPInitializationFailed;
+        }
+
+        const start_time = std.time.milliTimestamp();
+        var attempts: u32 = 0;
+        var format_context_ptr: *video.AVFormatContext = undefined;
+
+        // Create a unique temporary directory
+        const tmp_dir_name = try mkdtemp(allocator, "rtp_stream_XXXXXX");
+
+        std.debug.print("Dir successfully created!: {s}\n", .{tmp_dir_name});
+
+        // Construct the SDP file path
+        const sdp_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_name, "rtp_stream.sdp" });
+        defer allocator.free(sdp_file_path);
+
+        std.debug.print("Temp File path: {s}\n", .{sdp_file_path});
+
+        const tmp_file = try fs.cwd().createFile(sdp_file_path, .{});
+        defer {
+            defer tmp_file.close();
+            fs.cwd().deleteTree(tmp_dir_name) catch |err| {
+                std.debug.print("Failed to delete temp dir! => {any}\n", .{err});
+            };
+            allocator.free(tmp_dir_name);
+        }
+        try tmp_file.writeAll(sdp_content);
+
+        while (attempts < config.max_retry_attempts) : (attempts += 1) {
+            std.debug.print("Attempt {d} to establish connection to Video Stream...\n", .{attempts + 1});
+            format_context_ptr = initRTPStreamWithSDP(sdp_file_path) catch {
+                // Wait before retrying
+                std.time.sleep(config.retry_delay_ms * std.time.ns_per_ms);
+                continue;
+            };
+            std.debug.print("Successfully established connection to Video Stream\n", .{});
+            break;
+        }
+
+        // If we exhausted retry attempts
+        if (attempts >= config.max_retry_attempts) {
+            std.debug.print("Failed to open input stream after {} attempts\n", .{attempts});
+            return error.MaxRetriesExceeded;
+        }
+
+        // Retrieve stream information with polling
+        attempts = 0;
+        while (attempts < config.max_retry_attempts) : (attempts += 1) {
+            std.debug.print("Attempt {d} to extract stream info...\n", .{attempts + 1});
+            const stream_info_result = video.avformat_find_stream_info(format_context_ptr, null);
+
+            if (stream_info_result >= 0) {
+                std.debug.print("Successfully extracted stream info\n", .{});
+                break;
+            }
+
+            // Check if total timeout exceeded
+            if (std.time.milliTimestamp() - start_time > config.timeout_ms) {
+                std.debug.print("Stream info retrieval timed out after {} ms\n", .{config.timeout_ms});
+                return error.StreamInfoRetrievalTimeout;
+            }
+
+            std.time.sleep(config.retry_delay_ms * std.time.ns_per_ms);
+        }
+
+        // Find video stream
+        var stream_index: c_int = -1;
+        std.debug.print("Number of streams found: {d}\n", .{format_context_ptr.*.nb_streams});
+        for (0..format_context_ptr.*.nb_streams) |i| {
+            const curr_codec = format_context_ptr.*.streams[i].*.codecpar.*.codec_type;
+            if (curr_codec == video.AVMEDIA_TYPE_VIDEO) {
+                std.debug.print("Current Codec: {d}\n", .{curr_codec});
+                stream_index = @intCast(i);
+                break;
+            }
+        }
+
+        if (stream_index == -1) {
+            std.debug.print("No video stream found\n", .{});
+            return error.NoVideoStream;
+        }
+
+        // Find and open codec
+        const stream = format_context_ptr.*.streams[@intCast(stream_index)];
+        const codec = video.avcodec_find_decoder(stream.*.codecpar.*.codec_id);
+        if (codec == null) {
+            std.debug.print("Codec not found\n", .{});
+            return error.CodecNotFound;
+        }
+
+        // Allocate codec context
+        const codec_context = video.avcodec_alloc_context3(codec) orelse return error.CodecContextAllocationFailed;
+        if (codec_context == null) return error.CodecContextAllocationFailed;
+        errdefer video.avcodec_free_context(@ptrCast(@constCast(&codec_context)));
+
+        // Copy codec parameters
+        if (video.avcodec_parameters_to_context(codec_context, stream.*.codecpar) < 0) {
+            std.debug.print("Could not copy codec parameters\n", .{});
+            return error.CodecParametersCopyFailed;
+        }
 
         const selected_hw_type = hw_type orelse detectBestHardwareDevice();
+        var hw_device_ctx: ?*video.AVBufferRef = null;
 
-        var hw_device_ctx: ?*c.AVBufferRef = null;
-        const hw_device_type: c.AVHWDeviceType = selected_hw_type;
-
-        if (hw_device_type == c.AV_HWDEVICE_TYPE_NONE) {
-            std.debug.print("No hardware decoding device found. Falling back to software decoding.\n", .{});
-            return error.NoHardwareDevice;
+        if (selected_hw_type != video.AV_HWDEVICE_TYPE_NONE) {
+            if (video.av_hwdevice_ctx_create(&hw_device_ctx, selected_hw_type, null, null, 0) < 0) {
+                std.debug.print("Could not create hardware device context\n", .{});
+                return error.HardwareDeviceContextCreationFailed;
+            }
+            codec_context.*.hw_device_ctx = hw_device_ctx;
         }
 
-        const hw_device_type_name = c.av_hwdevice_get_type_name(hw_device_type);
-        std.debug.print("Hardware Device Name: {s}\n", .{hw_device_type_name});
-
-        // Create hardware device context
-        if (c.av_hwdevice_ctx_create(&hw_device_ctx, hw_device_type, null, null, 0) < 0) {
-            std.debug.print("Failed to create hardware device context\n", .{});
-            return error.HardwareDeviceContextCreationFailed;
-        }
-
-        // Find hardware-accelerated H264 decoder
-        const codec = c.avcodec_find_decoder(c.AV_CODEC_ID_H264);
-        if (codec == null) {
-            std.debug.print("Hardware H264 decoder not found\n", .{});
-            return error.HardwareDecoderNotFound;
-        }
-
-        const parser_context = c.av_parser_init(@intCast(codec.*.id)) orelse return error.ParserInitFailed;
-        errdefer c.av_parser_close(parser_context); // Ensure parser_context is closed on error
-
-        const codec_context = c.avcodec_alloc_context3(codec);
-        if (codec_context == null) return error.CodecContextAllocationFailed;
-        errdefer c.avcodec_free_context(@ptrCast(@constCast(&codec_context))); // Ensure codec_context is freed on error
-
-        codec_context.*.hw_device_ctx = hw_device_ctx;
-        codec_context.*.width = @intCast(width);
-        codec_context.*.height = @intCast(height);
-
-        codec_context.*.pix_fmt = switch (hw_device_type) {
-            c.AV_HWDEVICE_TYPE_CUDA => c.AV_PIX_FMT_CUDA,
-            c.AV_HWDEVICE_TYPE_VAAPI => c.AV_PIX_FMT_VAAPI,
-            c.AV_HWDEVICE_TYPE_D3D11VA => c.AV_PIX_FMT_D3D11,
-            c.AV_HWDEVICE_TYPE_VIDEOTOOLBOX => c.AV_PIX_FMT_VIDEOTOOLBOX,
-            else => c.AV_PIX_FMT_YUV420P,
-        };
-        codec_context.*.flags |= c.AV_CODEC_FLAG_LOW_DELAY; // Reduce latency
-        codec_context.*.max_b_frames = 0; // Minimize B-frame processing overhead
-
-        if (hw_device_type == c.AV_HWDEVICE_TYPE_CUDA) {
-            codec_context.*.extra_hw_frames = 4; // Preallocate some frames
-        }
-
-        if (c.avcodec_open2(codec_context, codec, null) < 0) {
+        // Open codec
+        if (video.avcodec_open2(codec_context, codec, null) < 0) {
+            std.debug.print("Could not open codec\n", .{});
             return error.CodecOpenFailed;
         }
 
-        const hw_frame = c.av_frame_alloc() orelse return error.FrameAllocationFailed;
+        const hw_frame = video.av_frame_alloc() orelse return error.FrameAllocationFailed;
 
-        const packet = c.av_packet_alloc() orelse return error.PacketAllocationFailed;
-        errdefer c.av_packet_free(@ptrCast(@constCast(&packet))); // Ensure packet is freed on error
-
-        // Create a new instance without defers
+        // Create VideoHandler instance
         var self = Self{
             .allocator = allocator,
             .node = node,
-            .buffer = std.ArrayList(u8).init(allocator),
-            .image_dir = image_dir,
-            .parser_context = parser_context,
+            .format_context = format_context_ptr,
+            .stream_index = stream_index,
+            .hw_device_ctx = hw_device_ctx,
             .codec_context = codec_context,
             .hw_frame = hw_frame,
-            .packet = packet,
             .onDecodedFrame = onDecodedFrame,
+            .polling_config = config,
+            .is_stream_ready = true,
         };
+
         try self.initHardwareFilterGraph();
         return self;
     }
 
     pub fn initHardwareFilterGraph(self: *Self) !void {
-        const filter_graph = c.avfilter_graph_alloc();
+        const filter_graph = video.avfilter_graph_alloc();
         if (filter_graph == null) {
             std.debug.print("Failed to allocate filter graph.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
-        errdefer c.avfilter_graph_free(@ptrCast(@constCast(&filter_graph)));
+        errdefer video.avfilter_graph_free(@ptrCast(@constCast(&filter_graph)));
 
         // Create a new hardware frames context if not already present
         if (self.codec_context.hw_device_ctx == null) {
@@ -224,22 +221,22 @@ pub const VideoHandler = struct {
         }
 
         // Create a new hardware frames context if not already present
-        const hw_frames_ctx = c.av_hwframe_ctx_alloc(self.codec_context.hw_device_ctx) orelse {
+        const hw_frames_ctx = video.av_hwframe_ctx_alloc(self.codec_context.hw_device_ctx) orelse {
             std.debug.print("Failed to allocate hardware frames context.\n", .{});
             return error.HardwareFramesContextAllocationFailed;
         };
 
         // Configure the hardware frames context
-        const frames_ctx = @as(*c.AVHWFramesContext, @ptrCast(@alignCast(hw_frames_ctx.*.data)));
-        frames_ctx.format = c.AV_PIX_FMT_CUDA; // Adjust based on your hardware type
-        frames_ctx.sw_format = c.AV_PIX_FMT_NV12;
+        const frames_ctx = @as(*video.AVHWFramesContext, @ptrCast(@alignCast(hw_frames_ctx.*.data)));
+        frames_ctx.format = video.AV_PIX_FMT_CUDA; // Adjust based on your hardware type
+        frames_ctx.sw_format = video.AV_PIX_FMT_NV12;
         frames_ctx.width = self.codec_context.width;
         frames_ctx.height = self.codec_context.height;
         frames_ctx.initial_pool_size = 4; // Preallocate frames
 
-        if (c.av_hwframe_ctx_init(hw_frames_ctx) < 0) {
+        if (video.av_hwframe_ctx_init(hw_frames_ctx) < 0) {
             std.debug.print("Failed to initialize hardware frames context.\n", .{});
-            c.av_buffer_unref(@constCast(&hw_frames_ctx));
+            video.av_buffer_unref(@constCast(&hw_frames_ctx));
             return error.HardwareFramesContextInitFailed;
         }
 
@@ -249,14 +246,14 @@ pub const VideoHandler = struct {
         }
 
         // Create hwupload buffer source with explicit frames context
-        const buffersrc = c.avfilter_graph_alloc_filter(filter_graph, c.avfilter_get_by_name("buffer"), "in");
+        const buffersrc = video.avfilter_graph_alloc_filter(filter_graph, video.avfilter_get_by_name("buffer"), "in");
         if (buffersrc == null) {
             std.debug.print("Failed to create buffer source filter.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
-        errdefer c.avfilter_free(@ptrCast(@constCast(buffersrc)));
+        errdefer video.avfilter_free(@ptrCast(@constCast(buffersrc)));
 
-        const params = c.av_buffersrc_parameters_alloc();
+        const params = video.av_buffersrc_parameters_alloc();
         params.*.hw_frames_ctx = hw_frames_ctx;
         params.*.format = self.codec_context.pix_fmt;
         params.*.height = self.codec_context.height;
@@ -272,39 +269,39 @@ pub const VideoHandler = struct {
 
         // Initialize buffer source with hardware context details
 
-        if (c.av_buffersrc_parameters_set(buffersrc, params) < 0) {
+        if (video.av_buffersrc_parameters_set(buffersrc, params) < 0) {
             std.debug.print("Failed to set buffersrc params.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
-        if (c.avfilter_init_str(buffersrc, null) < 0) {
+        if (video.avfilter_init_str(buffersrc, null) < 0) {
             std.debug.print("Failed to initialize buffer source filter.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
 
         // Create hardware buffer sink
-        const buffersink = c.avfilter_graph_alloc_filter(
+        const buffersink = video.avfilter_graph_alloc_filter(
             filter_graph,
-            c.avfilter_get_by_name("buffersink"),
+            video.avfilter_get_by_name("buffersink"),
             "out",
         );
         if (buffersink == null) {
             std.debug.print("Failed to create buffer sink filter.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
-        errdefer c.avfilter_free(buffersink);
+        errdefer video.avfilter_free(buffersink);
 
-        if (c.avfilter_init_str(buffersink, null) < 0) {
+        if (video.avfilter_init_str(buffersink, null) < 0) {
             std.debug.print("Failed to initialize buffer sink filter.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
 
-        if (c.avfilter_link(buffersrc, 0, buffersink, 0) < 0) {
+        if (video.avfilter_link(buffersrc, 0, buffersink, 0) < 0) {
             std.debug.print("Failed to link buffer to hwupload filter.\n", .{});
             return error.FilterGraphAllocationFailed;
         }
 
         // Configure the filter graph
-        if (c.avfilter_graph_config(filter_graph, null) < 0) {
+        if (video.avfilter_graph_config(filter_graph, null) < 0) {
             std.debug.print("Failed to configure filter graph.\n", .{});
             return error.FilterGraphConfigurationFailed;
         }
@@ -321,303 +318,251 @@ pub const VideoHandler = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.buffer.deinit();
-        self.image_dir.close();
+        video.avformat_close_input(@ptrCast(@constCast(&self.format_context)));
 
         if (self.hw_device_ctx) |ctx| {
-            c.av_buffer_unref(@ptrCast(@constCast(&ctx)));
+            video.av_buffer_unref(@ptrCast(@constCast(&ctx)));
         }
 
-        if (self.filter_graph) |fg| {
-            c.avfilter_graph_free(@ptrCast(@constCast(&fg)));
-        }
-
-        // Free FFmpeg Decoder Resources
-        c.av_parser_close(self.parser_context);
-        c.avcodec_free_context(@ptrCast(@constCast(&self.codec_context)));
-        c.av_frame_free(@ptrCast(@constCast(&self.hw_frame)));
-        c.av_packet_free(@ptrCast(@constCast(&self.packet)));
+        video.avcodec_free_context(@ptrCast(@constCast(&self.codec_context)));
+        video.av_frame_free(@ptrCast(@constCast(&self.hw_frame)));
+        _ = video.avformat_network_deinit();
     }
 
-    pub fn update(self: *Self, data: []const u8) !void {
-        if (data.len <= 16) return;
+    pub fn start(self: *Self) !std.Thread {
+        const spwn_config = std.Thread.SpawnConfig{
+            .allocator = std.heap.page_allocator,
+            .stack_size = 16 * 1024 * 1024, // Adjust the stack size as needed
+        };
 
-        const frame_id: u32 = @bitCast(std.mem.readInt(u32, data[0..4], .big));
-        const timestamp: u128 = @bitCast(std.mem.readInt(i128, data[4..20], .big));
-
-        // Check for packet sequence and detect skipped or stale packets
-        if (timestamp < self.last_valid_timestamp) {
-            self.stale_count += 1;
-            std.debug.print("Stale/Out-of-order Packet: {d}, Last Valid: {d}, Stale Count: {d}\n", .{ timestamp, self.last_valid_timestamp, self.stale_count });
-            // Optional: Reset buffer on excessive stale packets
-            if (self.stale_count > 10) {
-                self.buffer.clearRetainingCapacity();
-                self.stale_count = 0;
-            }
-            return;
-        }
-
-        if (self.prev_frame_id == null) {
-            self.prev_frame_id = frame_id;
-        } else {
-            self.prev_frame_id.? += 1;
-            if (frame_id != self.prev_frame_id.?) {
-                // std.debug.print("Non-sequential Frames detected: Found => {}, Expected => {}\n", .{
-                //     frame_id,
-                //     self.prev_frame_id.?,
-                // });
-            }
-        }
-
-        self.last_valid_timestamp = timestamp;
-        self.current_timestamp = timestamp;
-        self.stale_count = 0;
-
-        const video_data = data[20..];
-        try self.buffer.appendSlice(video_data);
-
-        try self.extractAndCaptureFrames();
+        return std.Thread.spawn(spwn_config, VideoHandler.consumer, .{self});
     }
 
-    fn extractAndCaptureFrames(self: *Self) !void {
-        while (true) {
-            const frame_result = try self.extractFrame();
-            if (frame_result) |frame| {
-                defer self.allocator.free(frame.data);
-                try self.captureFrame(frame.data);
+    pub fn consumer(self: *Self) !void {
+        if (!self.is_stream_ready) {
+            std.debug.print("Stream is not ready\n", .{});
+            return error.StreamNotReady;
+        }
+
+        var retry_count: u32 = 0;
+        const max_consecutive_errors = self.polling_config.max_retry_attempts;
+
+        while (retry_count < max_consecutive_errors) {
+            const packet_result = try self.processNextPacket();
+
+            if (packet_result) {
+                // Successful packet processing resets retry count
+                retry_count = 0;
             } else {
-                break;
-            }
-        }
-    }
+                retry_count += 1;
 
-    const FrameResult = struct {
-        data: []const u8,
-        is_keyframe: bool,
-    };
-
-    fn extractFrame(self: *Self) !?FrameResult {
-        if (self.buffer.items.len < 5) return null;
-
-        var start_index: ?usize = null;
-        var end_index: ?usize = null;
-        var is_keyframe = false;
-
-        // Find first NALU start code
-        for (0..self.buffer.items.len - 3) |i| { // Corrected to -3 to prevent out-of-bounds
-            if (mem.eql(u8, self.buffer.items[i .. i + 4], &self.nalu_start_codes)) {
-                start_index = i;
-                // Check NALU type (first byte after start code)
-                const nalu_type = self.buffer.items[i + 4] & 0x1F;
-                is_keyframe = (nalu_type == 5); // Typically, 5 indicates an IDR frame (keyframe)
-                break;
-            }
-        }
-
-        if (start_index == null) {
-            // No start code found, clear buffer
-            self.buffer.clearRetainingCapacity();
-            return null;
-        }
-
-        // Find next start code
-        if (start_index.? + 4 < self.buffer.items.len - 3) {
-            for (start_index.? + 4..self.buffer.items.len - 3) |i| { // Corrected to -3
-                if (mem.eql(u8, self.buffer.items[i .. i + 4], &self.nalu_start_codes)) {
-                    end_index = i;
+                if (retry_count >= max_consecutive_errors) {
+                    std.debug.print("Exceeded maximum consecutive packet processing errors\n", .{});
                     break;
                 }
+
+                std.time.sleep(1 * std.time.ns_per_ms);
             }
         }
-
-        if (end_index == null) {
-            // Implement maximum buffer size check
-            const MAX_BUFFER_SIZE: usize = 10 * 1024 * 1024; // 10 MB
-            if (self.buffer.items.len > MAX_BUFFER_SIZE) {
-                std.debug.print("Buffer exceeded maximum size. Clearing buffer.\n", .{});
-                self.buffer.clearRetainingCapacity();
-            }
-            return null;
-        }
-
-        // Ensure start_index < end_index
-        if (start_index.? > end_index.?) {
-            std.debug.print("Error: start_index ({}) > end_index ({})\n", .{ start_index.?, end_index.? });
-            self.buffer.clearRetainingCapacity();
-            return null;
-        }
-
-        const frame_size = end_index.? - start_index.?;
-        const MAX_FRAME_SIZE: usize = 5 * 1024 * 1024; // 10 MB
-        if (frame_size > MAX_FRAME_SIZE) {
-            std.debug.print("Frame size ({}) exceeds maximum limit. Skipping frame.\n", .{frame_size});
-            self.buffer.clearRetainingCapacity();
-            return null;
-        }
-
-        // Extract frame data
-        const frame_data = try self.allocator.dupe(u8, self.buffer.items[start_index.?..end_index.?]);
-
-        // Remove processed data from buffer
-        const remaining_start = end_index.?;
-        const remaining_len = self.buffer.items.len - remaining_start;
-
-        std.debug.print("Remaining Length: {any}\n", .{remaining_len});
-
-        if (remaining_len > 0) {
-            // Use mem.copyForward for overlapping regions
-            std.mem.copyForwards(u8, self.buffer.items[0..remaining_len], self.buffer.items[remaining_start..]);
-        }
-        self.buffer.resize(remaining_len) catch return error.BufferResizeFailed;
-
-        return FrameResult{
-            .data = frame_data,
-            .is_keyframe = is_keyframe,
-        };
     }
 
-    pub fn pipeline(self: *Self, input: []const u8) !void {
-        // Reset packet
-        c.av_packet_unref(self.packet);
+    pub fn resetStream(self: *Self, rtp_url: []const u8) !void {
+        // Close existing connection
+        video.avformat_close_input(@ptrCast(@constCast(&self.format_context)));
 
-        const start = try std.time.Instant.now();
+        // Reinitialize with same parameters
+        const reinit_result = self.init(self.allocator, self.node, rtp_url, null, // Use default hardware type
+            self.onDecodedFrame, self.polling_config);
 
-        // Parse input data
-        var parsed_data: *u8 = undefined;
-        var parsed_size: c_int = 0;
-        const consumed = c.av_parser_parse2(
-            self.parser_context,
-            self.codec_context,
-            @ptrCast(&parsed_data),
-            &parsed_size,
-            input.ptr,
-            @intCast(input.len),
-            0,
-            0,
-            0,
-        );
+        switch (reinit_result) {
+            error.StreamConnectionTimeout, error.MaxRetriesExceeded, error.StreamInfoRetrievalTimeout => {
+                self.is_stream_ready = false;
+                return reinit_result;
+            },
+            else => |err| return err,
+        }
+    }
 
-        if (consumed < 0) return error.ParsingFailed;
-        if (parsed_size == 0) return;
+    pub fn processNextPacket(self: *Self) !bool {
+        const packet = video.av_packet_alloc() orelse return error.PacketAllocationFailed;
+        defer video.av_packet_free(@ptrCast(@constCast(&packet)));
 
-        // Prepare packet
-        self.packet.data = parsed_data;
-        self.packet.size = parsed_size;
+        // Read packet from stream
+        const read_result = video.av_read_frame(self.format_context, packet);
+        if (read_result < 0) {
+            if (read_result == AVERROR_EOF) {
+                std.debug.print("End of stream\n", .{});
+                return false;
+            }
+            std.debug.print("Error reading frame\n", .{});
+            return false;
+        }
+
+        // Ensure packet is from video stream
+        if (packet.*.stream_index != self.stream_index) {
+            return true;
+        }
 
         // Send packet to decoder
-        const send_result = c.avcodec_send_packet(self.codec_context, self.packet);
+        const send_result = video.avcodec_send_packet(self.codec_context, packet);
         if (send_result < 0) {
-            std.debug.print("Failed to send packet to decoder\n", .{});
-            return error.DecodeFailed;
+            std.debug.print("Error sending packet to decoder\n", .{});
+            return false;
         }
 
-        // Receive decoded frame
-        const receive_result = c.avcodec_receive_frame(self.codec_context, self.hw_frame);
-        if (receive_result < 0) {
-            if (receive_result == AVERROR_EAGAIN or receive_result == AVERROR_EOF) {
-                return;
+        // Receive and process frames
+        while (true) {
+            const receive_result = video.avcodec_receive_frame(self.codec_context, self.hw_frame);
+            if (receive_result < 0) {
+                if (receive_result == AVERROR_EAGAIN or receive_result == AVERROR_EOF) {
+                    break;
+                }
+                std.debug.print("Error receiving frame\n", .{});
+                return false;
             }
-            std.debug.print("Failed to receive frame\n", .{});
-            return error.FrameReceiveFailed;
+
+            // Transfer frame if using hardware decoding
+            const transferred_frame = video.av_frame_alloc() orelse {
+                std.debug.print("Failed to allocate transferred frame\n", .{});
+                return false;
+            };
+            defer video.av_frame_free(@ptrCast(@constCast(&transferred_frame)));
+
+            if (video.av_hwframe_transfer_data(transferred_frame, self.hw_frame, 0) < 0) {
+                std.debug.print("Failed to transfer frame data\n", .{});
+                continue;
+            }
+
+            // Invoke callback
+            try self.onDecodedFrame(self.allocator, self.node, transferred_frame);
         }
 
-        const transferred_frame = c.av_frame_alloc();
-        if (transferred_frame == null) {
-            std.debug.print("Failed to allocate transferred frame\n", .{});
-            return error.FailedAllocation;
-        }
-        defer c.av_frame_free(@ptrCast(@constCast(&transferred_frame)));
-
-        if (c.av_hwframe_transfer_data(transferred_frame, self.hw_frame, 0) < 0) {
-            c.av_frame_free(@ptrCast(@constCast(transferred_frame)));
-            std.debug.print("Failed to transfer data from HW frame\n", .{});
-            return error.FailedHwTransfer;
-        }
-
-        // Invoke the callback with the RGB frame
-        const end = try std.time.Instant.now();
-        // _ = start;
-        // _ = end;
-
-        // std.debug.print("Decoded Frame Pixel Format: {d} ({s})\n", .{ filt_frame.*.format, pix_fmt_to_str(filt_frame.*.format) });
-        // std.debug.print("Decoded Frame Dimensions: {}x{}\n", .{ filt_frame.*.width, filt_frame.*.height });
-        std.debug.print("Decoding Time: {d}\n", .{@as(f64, @floatFromInt(std.time.Instant.since(end, start))) / 1e9});
-
-        if (self.frame_delta == -1) {
-            self.frame_delta = std.time.nanoTimestamp();
-        } else {
-            const now = std.time.nanoTimestamp();
-            const delta = now - self.frame_delta;
-
-            std.debug.print("Delta: {d}\n", .{@as(f128, @floatFromInt(delta)) / 1e9});
-            self.frame_delta = now;
-        }
-
-        try self.onDecodedFrame(self.allocator, self.node, transferred_frame);
-    }
-
-    pub fn captureFrame(self: *Self, frame: []const u8) !void {
-        // Determine if this is a keyframe and convert to PNG
-        try self.pipeline(frame);
+        return true;
     }
 };
 
 pub fn detectBestHardwareDevice() c_uint {
     std.debug.print("Detecting hardware devices...\n", .{});
-    var device_type = c.av_hwdevice_iterate_types(c.AV_HWDEVICE_TYPE_NONE);
+    var device_type = video.av_hwdevice_iterate_types(video.AV_HWDEVICE_TYPE_NONE);
 
-    while (device_type != c.AV_HWDEVICE_TYPE_NONE) {
-        const device_name = c.av_hwdevice_get_type_name(device_type);
+    while (device_type != video.AV_HWDEVICE_TYPE_NONE) {
+        const device_name = video.av_hwdevice_get_type_name(device_type);
         std.debug.print("Found device type: {s}\n", .{device_name});
 
         switch (device_type) {
-            c.AV_HWDEVICE_TYPE_CUDA => {
+            video.AV_HWDEVICE_TYPE_CUDA => {
                 std.debug.print("Selecting CUDA for hardware decoding\n", .{});
-                return c.AV_HWDEVICE_TYPE_CUDA;
+                return video.AV_HWDEVICE_TYPE_CUDA;
             },
-            c.AV_HWDEVICE_TYPE_VAAPI => {
+            video.AV_HWDEVICE_TYPE_VAAPI => {
                 std.debug.print("Selecting VAAPI for hardware decoding\n", .{});
-                return c.AV_HWDEVICE_TYPE_VAAPI;
+                return video.AV_HWDEVICE_TYPE_VAAPI;
             },
-            c.AV_HWDEVICE_TYPE_D3D11VA => {
+            video.AV_HWDEVICE_TYPE_D3D11VA => {
                 std.debug.print("Selecting D3D11VA for hardware decoding\n", .{});
-                return c.AV_HWDEVICE_TYPE_D3D11VA;
+                return video.AV_HWDEVICE_TYPE_D3D11VA;
             },
-            c.AV_HWDEVICE_TYPE_VIDEOTOOLBOX => {
+            video.AV_HWDEVICE_TYPE_VIDEOTOOLBOX => {
                 std.debug.print("Selecting VideoToolbox for hardware decoding\n", .{});
-                return c.AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
+                return video.AV_HWDEVICE_TYPE_VIDEOTOOLBOX;
             },
-            else => device_type = c.av_hwdevice_iterate_types(device_type),
+            else => device_type = video.av_hwdevice_iterate_types(device_type),
         }
     }
 
     std.debug.print("No suitable hardware decoding device found\n", .{});
-    return c.AV_HWDEVICE_TYPE_NONE;
+    return video.AV_HWDEVICE_TYPE_NONE;
 }
 
-fn pix_fmt_to_str(pix_fmt: c.AVPixelFormat) []const u8 {
-    const name_ptr = c.av_get_pix_fmt_name(pix_fmt);
+pub fn mkdtemp(allocator: std.mem.Allocator, template: []const u8) ![]u8 {
 
-    if (name_ptr == null) {
-        return "yuv420p"; // Fallback to a default format
+    // Ensure the template has at least 6 'X's at the end
+    const suffix = "XXXXXX";
+    const suffix_len = suffix.len;
+    if (template.len < suffix_len) {
+        return error.InvalidTemplate;
     }
 
-    return std.mem.span(name_ptr);
+    var dir_template = try allocator.alloc(u8, template.len);
+    defer allocator.free(dir_template);
+
+    @memcpy(dir_template, template);
+
+    var rand = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
+
+    for (0..100) |_| { // Try up to 100 times
+        // Replace 'X's with random alphanumeric characters
+        for (dir_template.len - suffix_len..dir_template.len) |j| {
+            const r = rand.random().int(u8) % 62;
+            if (r < 10) {
+                dir_template[j] = '0' + r;
+            } else if (r < 36) {
+                dir_template[j] = 'A' + (r - 10);
+            } else {
+                dir_template[j] = 'a' + (r - 36);
+            }
+        }
+
+        // Attempt to create the directory
+        const exe_dir = try fs.selfExeDirPathAlloc(allocator);
+        defer allocator.free(exe_dir);
+
+        const dir_name = try fs.path.join(allocator, &.{ exe_dir, dir_template });
+
+        _ = fs.cwd().makePath(dir_name) catch |err| {
+            if (err == fs.Dir.MakeError.PathAlreadyExists) {
+                // Retry with a new name
+                continue;
+            }
+            std.debug.print("Error trying to create Dir => {any}", .{err});
+            return err;
+        };
+
+        return dir_name;
+    }
+
+    return error.TempDirCreationFailed;
 }
 
-pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *c.AVFrame) error{OutOfMemory}!void {
-    // std.debug.print("Pixel Format: {s}\n", .{c.av_get_pix_fmt_name(frame.format)});
-    // std.debug.print("Width: {d}\n", .{frame.width});
-    // std.debug.print("Height: {d}\n", .{frame.height});
-    // std.debug.print("Linesize: {d}\n", .{frame.linesize});
+pub fn initRTPStreamWithSDP(sdp_path: []const u8) !*video.AVFormatContext {
+    // Initialize network
+    if (video.avformat_network_init() < 0) {
+        std.debug.print("Failed to initialize network\n", .{});
+        return error.NetworkInitFailed;
+    }
 
-    // // Debug data pointers and line sizes
-    // std.debug.print("Data[0] ptr: {*}\n", .{frame.data[0]});
-    // std.debug.print("Data[1] ptr: {*}\n", .{frame.data[1]});
+    // Allocate format context
+    const format_context = video.avformat_alloc_context() orelse
+        return error.FormatContextAllocationFailed;
+    errdefer video.avformat_free_context(format_context);
 
-    // std.debug.print("Linesize[0]: {}\n", .{frame.linesize[0]});
-    // std.debug.print("Linesize[1]: {}\n", .{frame.linesize[1]});
+    // Prepare options dictionary
+    var options: ?*video.AVDictionary = null;
+    defer video.av_dict_free(&options);
 
+    _ = video.av_dict_set(&options, "protocol_whitelist", "file,crypto,data,rtp,udp,tcp,http,https", 0);
+    const infmt = video.av_find_input_format("sdp");
+
+    // Attempt to open input
+    var format_context_ptr: *video.AVFormatContext = format_context;
+    const open_result = video.avformat_open_input(
+        @ptrCast(&format_context_ptr),
+        sdp_path.ptr,
+        infmt,
+        @ptrCast(&options),
+    );
+
+    if (open_result < 0) {
+        var error_buf: [256]u8 = undefined;
+        _ = video.av_strerror(open_result, &error_buf, error_buf.len);
+        std.debug.print("Failed to open RTP stream. Error: {s}\n", .{error_buf});
+        return error.InputOpenFailed;
+    }
+
+    return format_context_ptr;
+}
+
+pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *video.AVFrame) error{OutOfMemory}!void {
     const frame_width = @as(usize, @intCast(frame.width));
     const frame_height = @as(usize, @intCast(frame.height));
 

@@ -3,13 +3,12 @@ const std = @import("std");
 const Math = @import("Math.zig");
 const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
+const gl = @import("gl.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
-const glCheckError = @import("Debug.zig").glCheckError;
+const glad = gl.glad;
 
-const c = @cImport({
-    @cInclude("glad/glad.h");
-});
+const glCheckError = @import("Debug.zig").glCheckError;
 
 const DrawErrors = error{FailedToDraw};
 
@@ -184,7 +183,7 @@ pub const Axis = struct {
         }
 
         var mesh = try Mesh.init(vertices, null, Self.draw);
-        mesh.drawType = c.GL_LINES;
+        mesh.drawType = glad.GL_LINES;
 
         const node = try Node.init(allocator, mesh);
 
@@ -194,61 +193,61 @@ pub const Axis = struct {
     pub fn draw(mesh: *Mesh) void {
 
         // Configure depth testing
-        c.glEnable(c.GL_DEPTH_TEST);
-        c.glDepthFunc(c.GL_LEQUAL);
+        glad.glEnable(glad.GL_DEPTH_TEST);
+        glad.glDepthFunc(glad.GL_LEQUAL);
 
         // Enable line smoothing
-        c.glEnable(c.GL_LINE_SMOOTH);
-        c.glHint(c.GL_LINE_SMOOTH_HINT, c.GL_NICEST);
+        glad.glEnable(glad.GL_LINE_SMOOTH);
+        glad.glHint(glad.GL_LINE_SMOOTH_HINT, glad.GL_NICEST);
 
         // Enable blending for smooth lines
-        c.glEnable(c.GL_BLEND);
-        c.glBlendFunc(c.GL_SRC_ALPHA, c.GL_ONE_MINUS_SRC_ALPHA);
+        glad.glEnable(glad.GL_BLEND);
+        glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
 
         // Set line width
-        c.glLineWidth(1.0);
+        glad.glLineWidth(1.0);
 
         // Small offset to prevent z-fighting
-        c.glEnable(c.GL_POLYGON_OFFSET_LINE);
-        c.glPolygonOffset(-1.0, -1.0);
+        glad.glEnable(glad.GL_POLYGON_OFFSET_LINE);
+        glad.glPolygonOffset(-1.0, -1.0);
 
-        c.glBindVertexArray(mesh.meta.VAO);
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+        glad.glBindVertexArray(mesh.meta.VAO);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
         // Position attribute (location = 0)
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             0, // location
             3, //(vec3)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride (size of entire vertex struct)
             null, //
         );
-        c.glEnableVertexAttribArray(0);
+        glad.glEnableVertexAttribArray(0);
 
         // Color attribute (location = 1)
         const color_offset = @offsetOf(Vertex, "color");
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             1, // location
             3, // (vec3)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride (size of entire vertex struct)
             @ptrFromInt(color_offset),
         );
-        c.glEnableVertexAttribArray(1);
-        c.glDrawArrays(c.GL_LINES, 0, @intCast(mesh.vertices.len));
+        glad.glEnableVertexAttribArray(1);
+        glad.glDrawArrays(glad.GL_LINES, 0, @intCast(mesh.vertices.len));
 
         // Disable vertex attributes
-        c.glDisableVertexAttribArray(0);
-        c.glDisableVertexAttribArray(1);
+        glad.glDisableVertexAttribArray(0);
+        glad.glDisableVertexAttribArray(1);
 
-        c.glBindVertexArray(0);
+        glad.glBindVertexArray(0);
 
         // Reset states
-        c.glDisable(c.GL_POLYGON_OFFSET_LINE);
-        c.glDisable(c.GL_BLEND);
-        c.glDisable(c.GL_LINE_SMOOTH);
+        glad.glDisable(glad.GL_POLYGON_OFFSET_LINE);
+        glad.glDisable(glad.GL_BLEND);
+        glad.glDisable(glad.GL_LINE_SMOOTH);
     }
 
     pub fn generateVertices(allocator: std.mem.Allocator, position: Vec3, length: f32) ![]Vertex {
@@ -331,7 +330,7 @@ pub const Grid = struct {
         }
 
         var mesh: Mesh = try Mesh.init(vertices, null, Self.draw);
-        mesh.drawType = c.GL_LINES;
+        mesh.drawType = glad.GL_LINES;
 
         const node = try Node.init(allocator, mesh);
         return node;
@@ -340,62 +339,62 @@ pub const Grid = struct {
     pub fn draw(mesh: *Mesh) void {
 
         // Configure depth testing
-        c.glEnable(c.GL_DEPTH_TEST);
-        c.glDepthFunc(c.GL_LEQUAL);
+        glad.glEnable(glad.GL_DEPTH_TEST);
+        glad.glDepthFunc(glad.GL_LEQUAL);
 
         // Enable line smoothing
-        c.glEnable(c.GL_LINE_SMOOTH);
-        c.glHint(c.GL_LINE_SMOOTH_HINT, c.GL_NICEST);
+        glad.glEnable(glad.GL_LINE_SMOOTH);
+        glad.glHint(glad.GL_LINE_SMOOTH_HINT, glad.GL_NICEST);
 
         // Enable blending for smooth lines
-        c.glEnable(c.GL_BLEND);
-        c.glBlendFunc(c.GL_SRC_ALPHA, c.GL_ONE_MINUS_SRC_ALPHA);
+        glad.glEnable(glad.GL_BLEND);
+        glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
 
         // Set line width
-        c.glLineWidth(1.0);
+        glad.glLineWidth(1.0);
 
         // Small offset to prevent z-fighting
-        c.glEnable(c.GL_POLYGON_OFFSET_LINE);
-        c.glPolygonOffset(-1.0, -1.0);
+        glad.glEnable(glad.GL_POLYGON_OFFSET_LINE);
+        glad.glPolygonOffset(-1.0, -1.0);
 
-        c.glBindVertexArray(mesh.meta.VAO);
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+        glad.glBindVertexArray(mesh.meta.VAO);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
         // Position attribute (location = 0)
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             0, // location
             3, // (vec3)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride (size of entire vertex struct)
             null,
         );
-        c.glEnableVertexAttribArray(0);
+        glad.glEnableVertexAttribArray(0);
 
         // Color attribute (location = 1)
         const color_offset = @offsetOf(Vertex, "color");
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             1, // location
             3, //(vec3)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride (size of entire vertex struct)
             @ptrFromInt(color_offset),
         );
 
-        c.glEnableVertexAttribArray(1);
-        c.glDrawArrays(c.GL_LINES, 0, @intCast(mesh.vertices.len));
+        glad.glEnableVertexAttribArray(1);
+        glad.glDrawArrays(glad.GL_LINES, 0, @intCast(mesh.vertices.len));
 
         // Disable vertex attributes
-        c.glDisableVertexAttribArray(0);
-        c.glDisableVertexAttribArray(1);
+        glad.glDisableVertexAttribArray(0);
+        glad.glDisableVertexAttribArray(1);
 
-        c.glBindVertexArray(0);
+        glad.glBindVertexArray(0);
 
         // Reset states
-        c.glDisable(c.GL_POLYGON_OFFSET_LINE);
-        c.glDisable(c.GL_BLEND);
-        c.glDisable(c.GL_LINE_SMOOTH);
+        glad.glDisable(glad.GL_POLYGON_OFFSET_LINE);
+        glad.glDisable(glad.GL_BLEND);
+        glad.glDisable(glad.GL_LINE_SMOOTH);
     }
 
     pub fn generateGridVertices(allocator: std.mem.Allocator, gridSize: usize, spacing: f32) ![]Vertex {
@@ -538,68 +537,68 @@ pub const Plane = struct {
 
     pub fn draw(mesh: *Mesh) void {
         // Configure depth testing
-        c.glEnable(c.GL_DEPTH_TEST);
-        c.glDepthFunc(c.GL_LEQUAL);
+        glad.glEnable(glad.GL_DEPTH_TEST);
+        glad.glDepthFunc(glad.GL_LEQUAL);
 
-        c.glBindVertexArray(mesh.meta.VAO);
-        c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+        glad.glBindVertexArray(mesh.meta.VAO);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
         if (mesh.node) |node| {
             if (node.scene) |scene| {
-                c.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
+                glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
             }
         }
 
         // Position attribute (location = 0)
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             0, // location
             3, // (vec3)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride
             null,
         );
-        c.glEnableVertexAttribArray(0);
+        glad.glEnableVertexAttribArray(0);
 
         // Color attribute (location = 1)
         const color_offset = @offsetOf(Vertex, "color");
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             1, // location
             3, // (vec3)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride
             @ptrFromInt(color_offset),
         );
-        c.glEnableVertexAttribArray(1);
+        glad.glEnableVertexAttribArray(1);
 
         // Texture coordinate attribute (location = 2)
         const tex_coord_offset = @offsetOf(Vertex, "texture");
 
-        c.glVertexAttribPointer(
+        glad.glVertexAttribPointer(
             2, // location
             2, // (vec2)
-            c.GL_FLOAT,
-            c.GL_FALSE,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
             @sizeOf(Vertex), // stride
             @ptrFromInt(tex_coord_offset),
         );
-        c.glEnableVertexAttribArray(2);
+        glad.glEnableVertexAttribArray(2);
 
         // Draw the plane
-        c.glDrawElements(c.GL_TRIANGLES, @intCast(mesh.indices.?.len), c.GL_UNSIGNED_INT, null);
+        glad.glDrawElements(glad.GL_TRIANGLES, @intCast(mesh.indices.?.len), glad.GL_UNSIGNED_INT, null);
 
         if (mesh.node) |node| {
             if (node.scene) |scene| {
-                c.glUniform1i(scene.useTextureLoc, @as(c_int, 0));
+                glad.glUniform1i(scene.useTextureLoc, @as(c_int, 0));
             }
         }
 
         // Disable vertex attributes
-        c.glDisableVertexAttribArray(0);
-        c.glDisableVertexAttribArray(1);
-        c.glDisableVertexAttribArray(2);
+        glad.glDisableVertexAttribArray(0);
+        glad.glDisableVertexAttribArray(1);
+        glad.glDisableVertexAttribArray(2);
 
-        c.glBindVertexArray(0);
+        glad.glBindVertexArray(0);
     }
 };
