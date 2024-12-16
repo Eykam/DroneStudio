@@ -13,7 +13,7 @@ const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *video.struct_AVFr
 pub const StreamPollingConfig = struct {
     max_retry_attempts: u32 = 100,
     retry_delay_ms: u64 = 2000, // 2 seconds between retries
-    timeout_ms: u64 = 60000, // 1 minute total timeout
+    timeout_ms: u64 = 10000, // 1 minute total timeout
 };
 
 const InitializationError = error{
@@ -94,6 +94,19 @@ pub const VideoHandler = struct {
         const start_time = std.time.milliTimestamp();
         var attempts: u32 = 0;
         var format_context_ptr: *video.AVFormatContext = undefined;
+
+        // Create a unique temporary directory
+        const tmp_dir_name = try mkdtemp(allocator, "rtp_stream");
+        std.debug.print("Dir successfully created!: {s}\n", .{tmp_dir_name});
+        // Construct the SDP file path
+        const sdp_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_name, "rtp_stream.sdp" });
+        std.debug.print("Temp File path: {s}\n", .{sdp_file_path});
+        const tmp_file = try fs.cwd().createFile(sdp_file_path, .{});
+        defer {
+            tmp_file.close();
+            allocator.free(sdp_file_path);
+            allocator.free(tmp_dir_name);
+        }
         errdefer {
             if (format_context_ptr != undefined) {
                 video.avformat_close_input(@ptrCast(@constCast(&format_context_ptr)));
@@ -101,25 +114,6 @@ pub const VideoHandler = struct {
             }
         }
 
-        // Create a unique temporary directory
-        const tmp_dir_name = try mkdtemp(allocator, "rtp_stream_XXXXXX");
-
-        std.debug.print("Dir successfully created!: {s}\n", .{tmp_dir_name});
-
-        // Construct the SDP file path
-        const sdp_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_name, "rtp_stream.sdp" });
-        defer allocator.free(sdp_file_path);
-
-        std.debug.print("Temp File path: {s}\n", .{sdp_file_path});
-
-        const tmp_file = try fs.cwd().createFile(sdp_file_path, .{});
-        defer {
-            tmp_file.close();
-            fs.cwd().deleteTree(tmp_dir_name) catch |err| {
-                std.debug.print("Failed to delete temp dir! => {any}\n", .{err});
-            };
-            allocator.free(tmp_dir_name);
-        }
         try tmp_file.writeAll(sdp_content);
 
         while (attempts < config.max_retry_attempts) : (attempts += 1) {
@@ -358,15 +352,40 @@ pub const VideoHandler = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        video.avformat_close_input(@ptrCast(@constCast(&self.format_context)));
+        std.debug.print("Destroying VideoHandler...\n", .{});
 
+        // Cleanup filter graph and related contexts first
+        std.debug.print("Cleaning up filter graph...\n", .{});
+        if (self.filter_graph) |graph| {
+            video.avfilter_graph_free(@ptrCast(@constCast(&graph)));
+            self.filter_graph = null;
+        }
+        self.buffersrc = null;
+        self.buffersink = null;
+
+        // Close and free format context
+        std.debug.print("Closing and freeing avformat...\n", .{});
+        video.avformat_close_input(@ptrCast(@constCast(&self.format_context)));
+        video.avformat_free_context(@ptrCast(self.format_context));
+
+        // Free hardware device context
+        std.debug.print("Freeing hw_device_ctx...\n", .{});
         if (self.hw_device_ctx) |ctx| {
             video.av_buffer_unref(@ptrCast(@constCast(&ctx)));
         }
 
-        video.avcodec_free_context(@ptrCast(@constCast(&self.codec_context)));
+        std.debug.print("Flushing buffers on codec context...\n", .{});
+        video.avcodec_flush_buffers(self.codec_context);
+
+        // Free hardware frame
+        std.debug.print("Freeing hw_frame...\n", .{});
         video.av_frame_free(@ptrCast(@constCast(&self.hw_frame)));
+
+        // Deinitialize network only once
+        std.debug.print("Deinitializing avformat_network...\n", .{});
         _ = video.avformat_network_deinit();
+
+        std.debug.print("Successfully Destroyed VideoHandler\n", .{});
     }
 
     pub fn start(
@@ -418,9 +437,10 @@ pub const VideoHandler = struct {
             }
 
             var handler = videoHandler.?;
+            defer handler.deinit();
+
             if (!handler.is_stream_ready) {
                 std.debug.print("Stream is not ready\n", .{});
-                handler.deinit();
                 continue;
             }
 
@@ -449,8 +469,6 @@ pub const VideoHandler = struct {
                     std.time.sleep(1 * std.time.ns_per_ms);
                 }
             }
-
-            handler.deinit();
         }
     }
 
@@ -545,54 +563,24 @@ pub fn detectBestHardwareDevice() c_uint {
     return video.AV_HWDEVICE_TYPE_NONE;
 }
 
-pub fn mkdtemp(allocator: std.mem.Allocator, template: []const u8) ![]u8 {
+pub fn mkdtemp(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
 
-    // Ensure the template has at least 6 'X's at the end
-    const suffix = "XXXXXX";
-    const suffix_len = suffix.len;
-    if (template.len < suffix_len) {
-        return error.InvalidTemplate;
-    }
+    // Attempt to create the directory
+    const exe_dir = try fs.selfExeDirPathAlloc(allocator);
+    defer allocator.free(exe_dir);
 
-    var dir_template = try allocator.alloc(u8, template.len);
-    defer allocator.free(dir_template);
+    const dir_name = try fs.path.join(allocator, &.{ exe_dir, path });
 
-    @memcpy(dir_template, template);
-
-    var rand = std.Random.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
-
-    for (0..100) |_| { // Try up to 100 times
-        // Replace 'X's with random alphanumeric characters
-        for (dir_template.len - suffix_len..dir_template.len) |j| {
-            const r = rand.random().int(u8) % 62;
-            if (r < 10) {
-                dir_template[j] = '0' + r;
-            } else if (r < 36) {
-                dir_template[j] = 'A' + (r - 10);
-            } else {
-                dir_template[j] = 'a' + (r - 36);
-            }
+    _ = fs.cwd().makePath(dir_name) catch |err| {
+        if (err == fs.Dir.MakeError.PathAlreadyExists) {
+            std.debug.print("Temp folder already exists! => {s}", .{dir_name});
+            return dir_name;
         }
 
-        // Attempt to create the directory
-        const exe_dir = try fs.selfExeDirPathAlloc(allocator);
-        defer allocator.free(exe_dir);
+        return err;
+    };
 
-        const dir_name = try fs.path.join(allocator, &.{ exe_dir, dir_template });
-
-        _ = fs.cwd().makePath(dir_name) catch |err| {
-            if (err == fs.Dir.MakeError.PathAlreadyExists) {
-                // Retry with a new name
-                continue;
-            }
-            std.debug.print("Error trying to create Dir => {any}", .{err});
-            return err;
-        };
-
-        return dir_name;
-    }
-
-    return error.TempDirCreationFailed;
+    return dir_name;
 }
 
 pub fn initRTPStreamWithSDP(sdp_path: []const u8) !*video.AVFormatContext {

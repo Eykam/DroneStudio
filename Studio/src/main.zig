@@ -54,8 +54,8 @@ pub fn main() !void {
 
     var canvasNode = try Node.init(alloc, null);
 
-    var canvasNodeLeft = try Shape.Plane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    var canvasNodeRight = try Shape.Plane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
     canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeLeft.setPosition(-6.45, 3.6, -5);
     canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });

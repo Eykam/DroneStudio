@@ -39,6 +39,7 @@ pub const Scene = struct {
     useTextureLoc: glad.GLint,
     yTextureLoc: glad.GLint,
     uvTextureLoc: glad.GLint,
+    texGen: TextureGenerator = TextureGenerator{},
 
     pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !Self {
         if (window == null) {
@@ -539,3 +540,13 @@ fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) 
     std.debug.print("yOffset: {d}\n", .{yoffset});
     std.debug.print("Zoom Level: {d}\n", .{newZoom});
 }
+
+pub const TextureGenerator = struct {
+    const Self = @This();
+    count: c_int = 0,
+
+    pub fn generateID(self: *Self) c_int {
+        defer self.count += 1;
+        return self.count;
+    }
+};

@@ -472,7 +472,7 @@ pub const Grid = struct {
     }
 };
 
-pub const Plane = struct {
+pub const TexturedPlane = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, length: ?f32) !*Node {
@@ -505,22 +505,22 @@ pub const Plane = struct {
         vertices[0] = .{
             .position = .{ position.x - halfWidth, position.y, position.z - halflength },
             .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 0.0, 0.0 },
+            .texture = [_]f32{ 0.0, 1.0 },
         };
         vertices[1] = .{
             .position = .{ position.x + halfWidth, position.y, position.z - halflength },
             .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 1.0, 0.0 },
+            .texture = [_]f32{ 1.0, 1.0 },
         };
         vertices[2] = .{
             .position = .{ position.x + halfWidth, position.y, position.z + halflength },
             .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 1.0, 1.0 },
+            .texture = [_]f32{ 1.0, 0.0 },
         };
         vertices[3] = .{
             .position = .{ position.x - halfWidth, position.y, position.z + halflength },
             .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 0.0, 1.0 },
+            .texture = [_]f32{ 0.0, 0.0 },
         };
 
         var indices: []u32 = try allocator.alloc(u32, 6);
@@ -544,8 +544,10 @@ pub const Plane = struct {
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
         if (mesh.node) |node| {
-            if (node.scene) |scene| {
-                glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
+            if (node.y != null and node.uv != null) {
+                if (node.scene) |scene| {
+                    glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
+                }
             }
         }
 
