@@ -11,9 +11,28 @@ const AVERROR_EOF = -1 * @as(c_int, @intCast(video.EOF));
 
 const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *video.struct_AVFrame) error{OutOfMemory}!void;
 pub const StreamPollingConfig = struct {
-    max_retry_attempts: u32 = 1000,
+    max_retry_attempts: u32 = 100,
     retry_delay_ms: u64 = 2000, // 2 seconds between retries
     timeout_ms: u64 = 60000, // 1 minute total timeout
+};
+
+const InitializationError = error{
+    RTPInitializationFailed,
+    MaxRetriesExceeded,
+    StreamInfoRetrievalTimeout,
+    NoVideoStream,
+    CodecNotFound,
+    CodecContextAllocationFailed,
+    CodecParametersCopyFailed,
+    HardwareDeviceContextCreationFailed,
+    HardwareFramesContextInitFailed,
+    CodecOpenFailed,
+    FrameAllocationFailed,
+    FilterGraphAllocationFailed,
+    NoHardwareDeviceContext,
+    HardwareFramesContextAllocationFailed,
+    FilterGraphConfigurationFailed,
+    InvalidFrameDimensions,
 };
 
 pub const VideoHandler = struct {
@@ -42,9 +61,9 @@ pub const VideoHandler = struct {
 
     const sdp_content =
         "v=0\r\n" ++
-        "o=- 0 0 IN IP4 192.168.1.226\r\n" ++
+        "o=- 0 0 IN IP4 192.168.137.145\r\n" ++
         "s=No Name\r\n" ++
-        "c=IN IP4 192.168.1.226\r\n" ++
+        "c=IN IP4 192.168.137.145\r\n" ++
         "t=0 0\r\n" ++
         "a=tool:libavformat LIBAVFORMAT_VERSION\r\n" ++
         "m=video 8888 RTP/AVP 96\r\n" ++
@@ -63,17 +82,24 @@ pub const VideoHandler = struct {
 
         const config = polling_config orelse StreamPollingConfig{};
 
-        // video.av_log_set_level(video.AV_LOG_DEBUG);
+        video.av_log_set_level(video.AV_LOG_DEBUG);
 
         // Initialize network
         if (video.avformat_network_init() < 0) {
             std.debug.print("Failed to initialize RTP Server", .{});
-            return error.RTPInitializationFailed;
+            return InitializationError.RTPInitializationFailed;
         }
+        errdefer _ = video.avformat_network_deinit();
 
         const start_time = std.time.milliTimestamp();
         var attempts: u32 = 0;
         var format_context_ptr: *video.AVFormatContext = undefined;
+        errdefer {
+            if (format_context_ptr != undefined) {
+                video.avformat_close_input(@ptrCast(@constCast(&format_context_ptr)));
+                video.avformat_free_context(@ptrCast(format_context_ptr));
+            }
+        }
 
         // Create a unique temporary directory
         const tmp_dir_name = try mkdtemp(allocator, "rtp_stream_XXXXXX");
@@ -88,7 +114,7 @@ pub const VideoHandler = struct {
 
         const tmp_file = try fs.cwd().createFile(sdp_file_path, .{});
         defer {
-            defer tmp_file.close();
+            tmp_file.close();
             fs.cwd().deleteTree(tmp_dir_name) catch |err| {
                 std.debug.print("Failed to delete temp dir! => {any}\n", .{err});
             };
@@ -103,6 +129,7 @@ pub const VideoHandler = struct {
                 std.time.sleep(config.retry_delay_ms * std.time.ns_per_ms);
                 continue;
             };
+
             std.debug.print("Successfully established connection to Video Stream\n", .{});
             break;
         }
@@ -110,7 +137,7 @@ pub const VideoHandler = struct {
         // If we exhausted retry attempts
         if (attempts >= config.max_retry_attempts) {
             std.debug.print("Failed to open input stream after {} attempts\n", .{attempts});
-            return error.MaxRetriesExceeded;
+            return InitializationError.MaxRetriesExceeded;
         }
 
         // Retrieve stream information with polling
@@ -127,7 +154,7 @@ pub const VideoHandler = struct {
             // Check if total timeout exceeded
             if (std.time.milliTimestamp() - start_time > config.timeout_ms) {
                 std.debug.print("Stream info retrieval timed out after {} ms\n", .{config.timeout_ms});
-                return error.StreamInfoRetrievalTimeout;
+                return InitializationError.StreamInfoRetrievalTimeout;
             }
 
             std.time.sleep(config.retry_delay_ms * std.time.ns_per_ms);
@@ -147,7 +174,7 @@ pub const VideoHandler = struct {
 
         if (stream_index == -1) {
             std.debug.print("No video stream found\n", .{});
-            return error.NoVideoStream;
+            return InitializationError.NoVideoStream;
         }
 
         // Find and open codec
@@ -155,27 +182,36 @@ pub const VideoHandler = struct {
         const codec = video.avcodec_find_decoder(stream.*.codecpar.*.codec_id);
         if (codec == null) {
             std.debug.print("Codec not found\n", .{});
-            return error.CodecNotFound;
+            return InitializationError.CodecNotFound;
         }
 
         // Allocate codec context
-        const codec_context = video.avcodec_alloc_context3(codec) orelse return error.CodecContextAllocationFailed;
-        if (codec_context == null) return error.CodecContextAllocationFailed;
+        const codec_context = video.avcodec_alloc_context3(codec) orelse return InitializationError.CodecContextAllocationFailed;
         errdefer video.avcodec_free_context(@ptrCast(@constCast(&codec_context)));
 
         // Copy codec parameters
         if (video.avcodec_parameters_to_context(codec_context, stream.*.codecpar) < 0) {
             std.debug.print("Could not copy codec parameters\n", .{});
-            return error.CodecParametersCopyFailed;
+            return InitializationError.CodecParametersCopyFailed;
+        }
+
+        std.debug.print("Codec width: {d}, height: {d}\n", .{ codec_context.*.width, codec_context.*.height });
+        if (codec_context.*.width == 0 or codec_context.*.height == 0) {
+            return InitializationError.InvalidFrameDimensions;
         }
 
         const selected_hw_type = hw_type orelse detectBestHardwareDevice();
         var hw_device_ctx: ?*video.AVBufferRef = null;
+        errdefer {
+            if (hw_device_ctx) |ctx| {
+                video.av_buffer_unref(@ptrCast(@constCast(&ctx)));
+            }
+        }
 
         if (selected_hw_type != video.AV_HWDEVICE_TYPE_NONE) {
             if (video.av_hwdevice_ctx_create(&hw_device_ctx, selected_hw_type, null, null, 0) < 0) {
                 std.debug.print("Could not create hardware device context\n", .{});
-                return error.HardwareDeviceContextCreationFailed;
+                return InitializationError.HardwareDeviceContextCreationFailed;
             }
             codec_context.*.hw_device_ctx = hw_device_ctx;
         }
@@ -183,10 +219,11 @@ pub const VideoHandler = struct {
         // Open codec
         if (video.avcodec_open2(codec_context, codec, null) < 0) {
             std.debug.print("Could not open codec\n", .{});
-            return error.CodecOpenFailed;
+            return InitializationError.CodecOpenFailed;
         }
 
-        const hw_frame = video.av_frame_alloc() orelse return error.FrameAllocationFailed;
+        const hw_frame = video.av_frame_alloc() orelse return InitializationError.FrameAllocationFailed;
+        errdefer video.av_frame_free(@ptrCast(@constCast(&hw_frame)));
 
         // Create VideoHandler instance
         var self = Self{
@@ -210,20 +247,20 @@ pub const VideoHandler = struct {
         const filter_graph = video.avfilter_graph_alloc();
         if (filter_graph == null) {
             std.debug.print("Failed to allocate filter graph.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
         errdefer video.avfilter_graph_free(@ptrCast(@constCast(&filter_graph)));
 
         // Create a new hardware frames context if not already present
         if (self.codec_context.hw_device_ctx == null) {
             std.debug.print("No hardware device context available.\n", .{});
-            return error.NoHardwareDeviceContext;
+            return InitializationError.NoHardwareDeviceContext;
         }
 
         // Create a new hardware frames context if not already present
         const hw_frames_ctx = video.av_hwframe_ctx_alloc(self.codec_context.hw_device_ctx) orelse {
             std.debug.print("Failed to allocate hardware frames context.\n", .{});
-            return error.HardwareFramesContextAllocationFailed;
+            return InitializationError.HardwareFramesContextAllocationFailed;
         };
 
         // Configure the hardware frames context
@@ -236,22 +273,25 @@ pub const VideoHandler = struct {
 
         if (video.av_hwframe_ctx_init(hw_frames_ctx) < 0) {
             std.debug.print("Failed to initialize hardware frames context.\n", .{});
-            video.av_buffer_unref(@constCast(&hw_frames_ctx));
-            return error.HardwareFramesContextInitFailed;
+            video.av_buffer_unref(@ptrCast(@constCast(&hw_frames_ctx)));
+            return InitializationError.HardwareFramesContextInitFailed;
         }
 
         if (hw_frames_ctx == null) {
             std.debug.print("Hardware frames context is null after initialization\n", .{});
-            return error.HardwareFramesContextAllocationFailed;
+            return InitializationError.HardwareFramesContextAllocationFailed;
         }
 
         // Create hwupload buffer source with explicit frames context
         const buffersrc = video.avfilter_graph_alloc_filter(filter_graph, video.avfilter_get_by_name("buffer"), "in");
         if (buffersrc == null) {
             std.debug.print("Failed to create buffer source filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
-        errdefer video.avfilter_free(@ptrCast(@constCast(buffersrc)));
+        errdefer {
+            std.debug.print("Error detected, freeing buffersrc", .{});
+            video.avfilter_free(@ptrCast(@constCast(buffersrc)));
+        }
 
         const params = video.av_buffersrc_parameters_alloc();
         params.*.hw_frames_ctx = hw_frames_ctx;
@@ -271,11 +311,11 @@ pub const VideoHandler = struct {
 
         if (video.av_buffersrc_parameters_set(buffersrc, params) < 0) {
             std.debug.print("Failed to set buffersrc params.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
         if (video.avfilter_init_str(buffersrc, null) < 0) {
             std.debug.print("Failed to initialize buffer source filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
 
         // Create hardware buffer sink
@@ -286,24 +326,24 @@ pub const VideoHandler = struct {
         );
         if (buffersink == null) {
             std.debug.print("Failed to create buffer sink filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
         errdefer video.avfilter_free(buffersink);
 
         if (video.avfilter_init_str(buffersink, null) < 0) {
             std.debug.print("Failed to initialize buffer sink filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
 
         if (video.avfilter_link(buffersrc, 0, buffersink, 0) < 0) {
             std.debug.print("Failed to link buffer to hwupload filter.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
 
         // Configure the filter graph
         if (video.avfilter_graph_config(filter_graph, null) < 0) {
             std.debug.print("Failed to configure filter graph.\n", .{});
-            return error.FilterGraphConfigurationFailed;
+            return InitializationError.FilterGraphConfigurationFailed;
         }
 
         // Store filter contexts
@@ -313,7 +353,7 @@ pub const VideoHandler = struct {
 
         if (self.buffersrc == null or self.buffersink == null) {
             std.debug.print("Failed to retrieve filter contexts.\n", .{});
-            return error.FilterGraphAllocationFailed;
+            return InitializationError.FilterGraphAllocationFailed;
         }
     }
 
@@ -329,57 +369,88 @@ pub const VideoHandler = struct {
         _ = video.avformat_network_deinit();
     }
 
-    pub fn start(self: *Self) !std.Thread {
+    pub fn start(
+        allocator: mem.Allocator,
+        node: *Node,
+        rtp_url: []const u8,
+        hw_type: ?c_uint,
+        onDecodedFrame: DecodedFrameCallback,
+        polling_config: ?StreamPollingConfig,
+    ) !std.Thread {
         const spwn_config = std.Thread.SpawnConfig{
             .allocator = std.heap.page_allocator,
             .stack_size = 16 * 1024 * 1024, // Adjust the stack size as needed
         };
 
-        return std.Thread.spawn(spwn_config, VideoHandler.consumer, .{self});
+        return std.Thread.spawn(spwn_config, VideoHandler.consumer, .{
+            allocator,
+            node,
+            rtp_url,
+            hw_type,
+            onDecodedFrame,
+            polling_config,
+        });
     }
 
-    pub fn consumer(self: *Self) !void {
-        if (!self.is_stream_ready) {
-            std.debug.print("Stream is not ready\n", .{});
-            return error.StreamNotReady;
-        }
-
-        var retry_count: u32 = 0;
-        const max_consecutive_errors = self.polling_config.max_retry_attempts;
-
-        while (retry_count < max_consecutive_errors) {
-            const packet_result = try self.processNextPacket();
-
-            if (packet_result) {
-                // Successful packet processing resets retry count
-                retry_count = 0;
-            } else {
-                retry_count += 1;
-
-                if (retry_count >= max_consecutive_errors) {
-                    std.debug.print("Exceeded maximum consecutive packet processing errors\n", .{});
-                    break;
-                }
-
-                std.time.sleep(1 * std.time.ns_per_ms);
+    pub fn consumer(
+        allocator: std.mem.Allocator,
+        node: *Node,
+        rtp_url: []const u8,
+        hw_type: ?c_uint,
+        onDecodedFrame: DecodedFrameCallback,
+        polling_config: ?StreamPollingConfig,
+    ) void {
+        while (true) {
+            var videoHandler: ?Self = null;
+            while (videoHandler == null) {
+                videoHandler = Self.init(
+                    allocator,
+                    node,
+                    rtp_url,
+                    hw_type,
+                    onDecodedFrame,
+                    polling_config,
+                ) catch |err| {
+                    std.debug.print("Error initializing Video Handler: {any}\n", .{err});
+                    std.time.sleep(2 * std.time.ns_per_s); // Wait 2 seconds before retrying
+                    continue;
+                };
             }
-        }
-    }
 
-    pub fn resetStream(self: *Self, rtp_url: []const u8) !void {
-        // Close existing connection
-        video.avformat_close_input(@ptrCast(@constCast(&self.format_context)));
+            var handler = videoHandler.?;
+            if (!handler.is_stream_ready) {
+                std.debug.print("Stream is not ready\n", .{});
+                handler.deinit();
+                continue;
+            }
 
-        // Reinitialize with same parameters
-        const reinit_result = self.init(self.allocator, self.node, rtp_url, null, // Use default hardware type
-            self.onDecodedFrame, self.polling_config);
+            var retry_count: u32 = 0;
+            const max_consecutive_errors = handler.polling_config.max_retry_attempts;
 
-        switch (reinit_result) {
-            error.StreamConnectionTimeout, error.MaxRetriesExceeded, error.StreamInfoRetrievalTimeout => {
-                self.is_stream_ready = false;
-                return reinit_result;
-            },
-            else => |err| return err,
+            while (retry_count < max_consecutive_errors) {
+                const packet_result = handler.processNextPacket() catch |err| {
+                    std.debug.print("Packet processing error: {any}\n", .{err});
+                    retry_count += 1;
+                    std.time.sleep(1 * std.time.ns_per_ms);
+                    continue;
+                };
+
+                if (packet_result) {
+                    // Successful packet processing resets retry count
+                    retry_count = 0;
+                } else {
+                    retry_count += 1;
+
+                    if (retry_count >= max_consecutive_errors) {
+                        std.debug.print("Exceeded maximum consecutive packet processing errors\n", .{});
+                        break;
+                    }
+
+                    std.time.sleep(1 * std.time.ns_per_ms);
+                }
+            }
+
+            handler.deinit();
         }
     }
 
@@ -526,15 +597,10 @@ pub fn mkdtemp(allocator: std.mem.Allocator, template: []const u8) ![]u8 {
 
 pub fn initRTPStreamWithSDP(sdp_path: []const u8) !*video.AVFormatContext {
     // Initialize network
-    if (video.avformat_network_init() < 0) {
-        std.debug.print("Failed to initialize network\n", .{});
-        return error.NetworkInitFailed;
-    }
 
     // Allocate format context
     const format_context = video.avformat_alloc_context() orelse
         return error.FormatContextAllocationFailed;
-    errdefer video.avformat_free_context(format_context);
 
     // Prepare options dictionary
     var options: ?*video.AVDictionary = null;
@@ -556,6 +622,8 @@ pub fn initRTPStreamWithSDP(sdp_path: []const u8) !*video.AVFormatContext {
         var error_buf: [256]u8 = undefined;
         _ = video.av_strerror(open_result, &error_buf, error_buf.len);
         std.debug.print("Failed to open RTP stream. Error: {s}\n", .{error_buf});
+        video.avformat_close_input(@ptrCast(&format_context_ptr));
+        video.avformat_free_context(@ptrCast(format_context_ptr));
         return error.InputOpenFailed;
     }
 

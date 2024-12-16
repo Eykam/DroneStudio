@@ -102,7 +102,7 @@ pub fn main() !void {
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
-    var video_handler = try Video.VideoHandler.init(
+    var video_handler = try Video.VideoHandler.start(
         alloc,
         canvasNodeLeft,
         "rtp://0.0.0.0:8888",
@@ -110,9 +110,6 @@ pub fn main() !void {
         Video.frameCallback,
         null,
     );
-    defer video_handler.deinit();
-
-    const video_consumer = try video_handler.start();
 
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -132,5 +129,5 @@ pub fn main() !void {
         scene.render(window);
     }
 
-    video_consumer.join();
+    video_handler.join();
 }
