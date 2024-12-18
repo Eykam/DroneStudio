@@ -59,44 +59,27 @@ pub const VideoHandler = struct {
     polling_config: StreamPollingConfig,
     is_stream_ready: bool = false,
 
-    const sdp_content =
-        "v=0\r\n" ++
-        "o=- 0 0 IN IP4 192.168.137.145\r\n" ++
-        "s=No Name\r\n" ++
-        "c=IN IP4 192.168.137.145\r\n" ++
-        "t=0 0\r\n" ++
-        "a=tool:libavformat LIBAVFORMAT_VERSION\r\n" ++
-        "m=video 8888 RTP/AVP 96\r\n" ++
-        "a=rtpmap:96 H264/90000\r\n" ++
-        "a=fmtp:96 packetization-mode=1; sprop-parameter-sets=J2QAKqwrQCgC3QgAAAMACAAABLc2AAExLAADua973APEiag=,KO4CXLAA; profile-level-id=64002A\r\n";
-
     pub fn init(
         allocator: mem.Allocator,
         node: *Node,
-        rtp_url: []const u8,
+        sdp_content: []const u8,
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
     ) !Self {
-        _ = rtp_url;
-
         const config = polling_config orelse StreamPollingConfig{};
 
-        video.av_log_set_level(video.AV_LOG_DEBUG);
-
-        // Initialize network
-        if (video.avformat_network_init() < 0) {
-            std.debug.print("Failed to initialize RTP Server", .{});
-            return InitializationError.RTPInitializationFailed;
-        }
-        errdefer _ = video.avformat_network_deinit();
+        // video.av_log_set_level(video.AV_LOG_DEBUG);
 
         const start_time = std.time.milliTimestamp();
         var attempts: u32 = 0;
         var format_context_ptr: *video.AVFormatContext = undefined;
 
+        const temp_dir = try std.fmt.allocPrint(allocator, "rtp_stream_{d}", .{node.yTextureUnit});
+        defer allocator.free(temp_dir);
+
         // Create a unique temporary directory
-        const tmp_dir_name = try mkdtemp(allocator, "rtp_stream");
+        const tmp_dir_name = try mkdtemp(allocator, temp_dir);
         std.debug.print("Dir successfully created!: {s}\n", .{tmp_dir_name});
         // Construct the SDP file path
         const sdp_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_name, "rtp_stream.sdp" });
@@ -118,7 +101,10 @@ pub const VideoHandler = struct {
 
         while (attempts < config.max_retry_attempts) : (attempts += 1) {
             std.debug.print("Attempt {d} to establish connection to Video Stream...\n", .{attempts + 1});
-            format_context_ptr = initRTPStreamWithSDP(sdp_file_path) catch {
+            const c_string = try allocator.dupeZ(u8, sdp_file_path);
+            defer allocator.free(c_string);
+
+            format_context_ptr = initRTPStreamWithSDP(c_string) catch {
                 // Wait before retrying
                 std.time.sleep(config.retry_delay_ms * std.time.ns_per_ms);
                 continue;
@@ -382,8 +368,8 @@ pub const VideoHandler = struct {
         video.av_frame_free(@ptrCast(@constCast(&self.hw_frame)));
 
         // Deinitialize network only once
-        std.debug.print("Deinitializing avformat_network...\n", .{});
-        _ = video.avformat_network_deinit();
+        // std.debug.print("Deinitializing avformat_network...\n", .{});
+        // _ = video.avformat_network_deinit();
 
         std.debug.print("Successfully Destroyed VideoHandler\n", .{});
     }
@@ -391,7 +377,7 @@ pub const VideoHandler = struct {
     pub fn start(
         allocator: mem.Allocator,
         node: *Node,
-        rtp_url: []const u8,
+        sdp_content: []const u8,
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
@@ -404,7 +390,7 @@ pub const VideoHandler = struct {
         return std.Thread.spawn(spwn_config, VideoHandler.consumer, .{
             allocator,
             node,
-            rtp_url,
+            sdp_content,
             hw_type,
             onDecodedFrame,
             polling_config,
@@ -414,7 +400,7 @@ pub const VideoHandler = struct {
     pub fn consumer(
         allocator: std.mem.Allocator,
         node: *Node,
-        rtp_url: []const u8,
+        sdp_content: []const u8,
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
@@ -425,7 +411,7 @@ pub const VideoHandler = struct {
                 videoHandler = Self.init(
                     allocator,
                     node,
-                    rtp_url,
+                    sdp_content,
                     hw_type,
                     onDecodedFrame,
                     polling_config,
@@ -583,7 +569,17 @@ pub fn mkdtemp(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return dir_name;
 }
 
-pub fn initRTPStreamWithSDP(sdp_path: []const u8) !*video.AVFormatContext {
+pub fn initializeFFmpegNetwork() !void {
+    if (video.avformat_network_init() < 0) {
+        return InitializationError.RTPInitializationFailed;
+    }
+}
+
+pub fn deinitFFmpegNetwork() void {
+    _ = video.avformat_network_deinit();
+}
+
+pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
     // Initialize network
 
     // Allocate format context
@@ -596,6 +592,8 @@ pub fn initRTPStreamWithSDP(sdp_path: []const u8) !*video.AVFormatContext {
 
     _ = video.av_dict_set(&options, "protocol_whitelist", "file,crypto,data,rtp,udp,tcp,http,https", 0);
     const infmt = video.av_find_input_format("sdp");
+
+    std.debug.print("Attempting to open input at path => {s}\n", .{sdp_path});
 
     // Attempt to open input
     var format_context_ptr: *video.AVFormatContext = format_context;

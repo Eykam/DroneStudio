@@ -102,10 +102,21 @@ pub fn main() !void {
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
-    var video_handler = try Video.VideoHandler.start(
+    try Video.initializeFFmpegNetwork();
+
+    var video_handler_right = try Video.VideoHandler.start(
+        alloc,
+        canvasNodeRight,
+        Secrets.sdp_content_right,
+        null,
+        Video.frameCallback,
+        null,
+    );
+
+    var video_handler_left = try Video.VideoHandler.start(
         alloc,
         canvasNodeLeft,
-        "rtp://0.0.0.0:8888",
+        Secrets.sdp_content_left,
         null,
         Video.frameCallback,
         null,
@@ -129,5 +140,7 @@ pub fn main() !void {
         scene.render(window);
     }
 
-    video_handler.join();
+    video_handler_right.join();
+    video_handler_left.join();
+    Video.deinitFFmpegNetwork();
 }

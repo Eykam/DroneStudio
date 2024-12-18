@@ -1,0 +1,1 @@
+# Script to configure a fresh rasperry pi with libraries needed for streaming video
