@@ -6,12 +6,9 @@ const Node = @import("Node.zig");
 const Vec3 = Math.Vec3;
 const File = std.fs.File;
 const Camera = @import("Camera.zig");
-
-const c = @cImport({
-    @cDefine("GLFW_INCLUDE_NONE", "1");
-    @cInclude("glad/glad.h");
-    @cInclude("GLFW/glfw3.h");
-});
+const gl = @import("gl.zig");
+const glfw = gl.glfw;
+const glad = gl.glad;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
@@ -36,14 +33,15 @@ pub const Scene = struct {
     height: f32,
     appState: AppState,
     camera: Camera,
-    uModelLoc: c.GLint,
-    uViewLoc: c.GLint,
-    uProjectionLoc: c.GLint,
-    useTextureLoc: c.GLint,
-    yTextureLoc: c.GLint,
-    uvTextureLoc: c.GLint,
+    uModelLoc: glad.GLint,
+    uViewLoc: glad.GLint,
+    uProjectionLoc: glad.GLint,
+    useTextureLoc: glad.GLint,
+    yTextureLoc: glad.GLint,
+    uvTextureLoc: glad.GLint,
+    texGen: TextureGenerator = TextureGenerator{},
 
-    pub fn init(allocator: std.mem.Allocator, window: ?*c.struct_GLFWwindow) !Self {
+    pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !Self {
         if (window == null) {
             std.debug.print("Failed to create GLFW window\n", .{});
             return GSLWError.FailedToCreateWindow;
@@ -51,28 +49,28 @@ pub const Scene = struct {
 
         var width: i32 = undefined;
         var height: i32 = undefined;
-        c.glfwGetWindowSize(window.?, &width, &height);
+        glfw.glfwGetWindowSize(window.?, &width, &height);
 
         // Make the window's context current
-        c.glfwMakeContextCurrent(window);
-        c.glfwSwapInterval(1);
+        glfw.glfwMakeContextCurrent(window);
+        glfw.glfwSwapInterval(1);
 
         // Initialize OpenGL Loader
         std.debug.print("Loading Glad...\n", .{});
-        if (c.gladLoadGLLoader(@ptrCast(&c.glfwGetProcAddress)) == 0) {
+        if (glad.gladLoadGLLoader(@ptrCast(&glfw.glfwGetProcAddress)) == 0) {
             std.debug.print("Failed to initialize GLAD\n", .{});
             return GSLWError.FailedToInitialize;
         }
 
         std.debug.print("Initializing viewport...\n\n", .{});
-        c.glViewport(0, 0, width, height);
-        c.glEnable(c.GL_DEPTH_TEST);
+        glad.glViewport(0, 0, width, height);
+        glad.glEnable(glad.GL_DEPTH_TEST);
 
         const shaderProgram = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
-        c.glUseProgram(shaderProgram);
+        glad.glUseProgram(shaderProgram);
 
         var currentProgram: u32 = 0;
-        c.glGetIntegerv(c.GL_CURRENT_PROGRAM, @ptrCast(&currentProgram));
+        glad.glGetIntegerv(glad.GL_CURRENT_PROGRAM, @ptrCast(&currentProgram));
         if (currentProgram != shaderProgram) {
             std.debug.print("Shader program not active!\n", .{});
         }
@@ -80,7 +78,7 @@ pub const Scene = struct {
         checkOpenGLError("Uniform Setup");
 
         var numActiveAttributes: c_int = 0;
-        c.glGetProgramiv(shaderProgram, c.GL_ACTIVE_ATTRIBUTES, &numActiveAttributes);
+        glad.glGetProgramiv(shaderProgram, glad.GL_ACTIVE_ATTRIBUTES, &numActiveAttributes);
 
         std.debug.print("\nGetting Attributes\n", .{});
         std.debug.print("Number of active vertex attributes: {}\n", .{numActiveAttributes});
@@ -91,7 +89,7 @@ pub const Scene = struct {
             var size: c_int = 0;
             var var_type: c_uint = 0;
 
-            c.glGetActiveAttrib(
+            glad.glGetActiveAttrib(
                 shaderProgram,
                 @intCast(i),
                 nameBuffer.len,
@@ -104,15 +102,15 @@ pub const Scene = struct {
             std.debug.print(" - Attribute {d}: {s} == Size: {d} == Type: {x}\n", .{ i, nameBuffer[0..@as(u32, @intCast(length))], size, var_type });
         }
 
-        c.glDepthFunc(c.GL_LESS);
+        glad.glDepthFunc(glad.GL_LESS);
 
         // Cache uniform locations
-        const uModelLoc = c.glGetUniformLocation(shaderProgram, "uModel");
-        const uViewLoc = c.glGetUniformLocation(shaderProgram, "uView");
-        const uProjectionLoc = c.glGetUniformLocation(shaderProgram, "uProjection");
-        const useTextureLoc = c.glGetUniformLocation(shaderProgram, "useTexture");
-        const yTextureLoc = c.glGetUniformLocation(shaderProgram, "yTexture");
-        const uvTextureLoc = c.glGetUniformLocation(shaderProgram, "uvTexture");
+        const uModelLoc = glad.glGetUniformLocation(shaderProgram, "uModel");
+        const uViewLoc = glad.glGetUniformLocation(shaderProgram, "uView");
+        const uProjectionLoc = glad.glGetUniformLocation(shaderProgram, "uProjection");
+        const useTextureLoc = glad.glGetUniformLocation(shaderProgram, "useTexture");
+        const yTextureLoc = glad.glGetUniformLocation(shaderProgram, "yTexture");
+        const uvTextureLoc = glad.glGetUniformLocation(shaderProgram, "uvTexture");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
@@ -141,42 +139,42 @@ pub const Scene = struct {
         while (it.next()) |entry| {
             const curr_mesh = entry.value_ptr.*.mesh;
             if (curr_mesh) |mesh| {
-                c.glDeleteVertexArrays(1, mesh.meta.VAO);
-                c.glDeleteBuffers(1, mesh.meta.VBO);
+                glad.glDeleteVertexArrays(1, mesh.meta.VAO);
+                glad.glDeleteBuffers(1, mesh.meta.VBO);
 
                 if (mesh.indices) |indices| {
                     _ = indices;
-                    c.glDeleteBuffers(1, mesh.meta.IBO);
+                    glad.glDeleteBuffers(1, mesh.meta.IBO);
                 }
             }
         }
 
         self.nodes.deinit();
-        c.glDeleteProgram(self.shaderProgram);
+        glad.glDeleteProgram(self.shaderProgram);
     }
 
-    pub fn setupCallbacks(self: *Self, window: ?*c.struct_GLFWwindow) void {
+    pub fn setupCallbacks(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
         if (window == null) return;
 
-        c.glfwSetWindowUserPointer(window, @ptrCast(self));
+        glfw.glfwSetWindowUserPointer(window, @ptrCast(self));
 
-        const ptr = c.glfwGetWindowUserPointer(window);
+        const ptr = glfw.glfwGetWindowUserPointer(window);
         if (ptr == null) {
             std.debug.print("Failed to set window user pointer\n", .{});
             return;
         }
 
-        _ = c.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
-        _ = c.glfwSetCursorPosCallback(window, mouseCallback);
-        _ = c.glfwSetKeyCallback(window, keyCallback);
-        _ = c.glfwSetScrollCallback(window, scrollCallback);
+        _ = glfw.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
+        _ = glfw.glfwSetCursorPosCallback(window, mouseCallback);
+        _ = glfw.glfwSetKeyCallback(window, keyCallback);
+        _ = glfw.glfwSetScrollCallback(window, scrollCallback);
 
-        const current_mode = c.glfwGetInputMode(window, c.GLFW_CURSOR);
-        if (current_mode != c.GLFW_CURSOR_DISABLED) {
-            c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
+        const current_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+        if (current_mode != glfw.GLFW_CURSOR_DISABLED) {
+            glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
 
-            const new_mode = c.glfwGetInputMode(window, c.GLFW_CURSOR);
-            if (new_mode != c.GLFW_CURSOR_DISABLED) {
+            const new_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+            if (new_mode != glfw.GLFW_CURSOR_DISABLED) {
                 std.debug.print("Failed to disable cursor in setupCallbacks\n", .{});
             }
         }
@@ -204,11 +202,11 @@ pub const Scene = struct {
         try self.nodes.put(name, node);
     }
 
-    pub fn render(self: *Self, window: ?*c.struct_GLFWwindow) void {
-        c.glClearColor(0.15, 0.15, 0.15, 1.0);
-        c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
+    pub fn render(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
+        glad.glClearColor(0.15, 0.15, 0.15, 1.0);
+        glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
 
-        c.glUseProgram(self.shaderProgram);
+        glad.glUseProgram(self.shaderProgram);
 
         var view = self.camera.get_view_matrix();
 
@@ -216,10 +214,10 @@ pub const Scene = struct {
         const currentProjection = self.updateProjection();
 
         if (self.uViewLoc != -1) {
-            c.glUniformMatrix4fv(self.uViewLoc, 1, c.GL_FALSE, &view);
+            glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view);
         }
         if (self.uProjectionLoc != -1) {
-            c.glUniformMatrix4fv(self.uProjectionLoc, 1, c.GL_FALSE, &currentProjection);
+            glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &currentProjection);
         }
 
         // Iterate through all nodes in the hash map
@@ -228,30 +226,30 @@ pub const Scene = struct {
             entry.value_ptr.*.update(self.uModelLoc);
         }
 
-        c.glfwSwapBuffers(window);
-        c.glfwPollEvents();
+        glfw.glfwSwapBuffers(window);
+        glfw.glfwPollEvents();
     }
 
     pub fn processInput(self: *Self, debug: bool) void {
-        const sprinting = self.appState.keys[@as(usize, c.GLFW_KEY_LEFT_SHIFT)];
+        const sprinting = self.appState.keys[@as(usize, glfw.GLFW_KEY_LEFT_SHIFT)];
 
         // Forward
-        if (self.appState.keys[@as(usize, c.GLFW_KEY_W)]) {
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
             self.camera.move_forward(self.appState.delta_time, sprinting, debug);
         }
 
         // Left
-        if (self.appState.keys[@as(usize, c.GLFW_KEY_A)]) {
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
             self.camera.move_left(self.appState.delta_time, sprinting, debug);
         }
 
         // Backward
-        if (self.appState.keys[@as(usize, c.GLFW_KEY_S)]) {
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_S)]) {
             self.camera.move_backward(self.appState.delta_time, sprinting, debug);
         }
 
         // Right
-        if (self.appState.keys[@as(usize, c.GLFW_KEY_D)]) {
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
             self.camera.move_right(self.appState.delta_time, sprinting, debug);
         }
 
@@ -266,7 +264,7 @@ inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
 }
 
 fn compileShader(shaderType: u32, source: []const u8) !u32 {
-    const shader = c.glCreateShader(shaderType);
+    const shader = glad.glCreateShader(shaderType);
     if (shader == 0) {
         std.debug.print("Failed to compile shader\n", .{});
         return ShaderError.UnableToCreateShader;
@@ -276,15 +274,15 @@ fn compileShader(shaderType: u32, source: []const u8) !u32 {
     const src_len = source.len;
 
     std.debug.print("Compiling Shader...\n", .{});
-    c.glShaderSource(shader, 1, @ptrCast(&src_ptr), @ptrCast(&src_len));
-    c.glCompileShader(shader);
+    glad.glShaderSource(shader, 1, @ptrCast(&src_ptr), @ptrCast(&src_len));
+    glad.glCompileShader(shader);
 
     // Check for compilation errors
     var success: u32 = 0;
-    c.glGetShaderiv(shader, c.GL_COMPILE_STATUS, @alignCast(@ptrCast(&success)));
+    glad.glGetShaderiv(shader, glad.GL_COMPILE_STATUS, @alignCast(@ptrCast(&success)));
     if (success == 0) {
         var infoLog: [512]u8 = undefined;
-        c.glGetShaderInfoLog(shader, 512, null, &infoLog);
+        glad.glGetShaderInfoLog(shader, 512, null, &infoLog);
         std.debug.print("ERROR::SHADER::COMPILATION_FAILED\n{any}\n", .{infoLog});
         return ShaderError.ShaderCompilationFailed;
     }
@@ -296,7 +294,7 @@ pub fn createShaderProgram(comptime vertexPath: []const u8, comptime fragmentPat
     std.debug.print("Initializing Vertex Shader...\n", .{});
     std.debug.print("Reading Vertex Shader from Source...\n", .{});
     const vertexSource = try readShaderSource(vertexPath);
-    const vertexShader = compileShader(c.GL_VERTEX_SHADER, vertexSource) catch |err| {
+    const vertexShader = compileShader(glad.GL_VERTEX_SHADER, vertexSource) catch |err| {
         std.debug.print("Failed to read vertex shader '{s}': {any}\n", .{ vertexPath, err });
         return ShaderError.ShaderCompilationFailed;
     };
@@ -305,67 +303,67 @@ pub fn createShaderProgram(comptime vertexPath: []const u8, comptime fragmentPat
     std.debug.print("Initializing Fragment Shader...\n", .{});
     std.debug.print("Reading Fragment Shader from Source...\n", .{});
     const fragmentSource = try readShaderSource(fragmentPath);
-    const fragmentShader = compileShader(c.GL_FRAGMENT_SHADER, fragmentSource) catch |err| {
+    const fragmentShader = compileShader(glad.GL_FRAGMENT_SHADER, fragmentSource) catch |err| {
         std.debug.print("Failed to read fragment shader '{s}': {any}\n", .{ fragmentPath, err });
         return ShaderError.ShaderCompilationFailed;
     };
     std.debug.print("\n", .{});
 
     std.debug.print("Creating ShaderProgram...\n", .{});
-    const shaderProgram = c.glCreateProgram();
+    const shaderProgram = glad.glCreateProgram();
     if (shaderProgram == 0) {
         std.debug.print("Failed to create Shader Program\n", .{});
         return ShaderError.UnableToCreateProgram;
     }
 
     std.debug.print("Attaching ShaderProgram to openGL...\n", .{});
-    c.glAttachShader(shaderProgram, vertexShader);
-    c.glAttachShader(shaderProgram, fragmentShader);
-    c.glLinkProgram(shaderProgram);
+    glad.glAttachShader(shaderProgram, vertexShader);
+    glad.glAttachShader(shaderProgram, fragmentShader);
+    glad.glLinkProgram(shaderProgram);
 
     // Check for linking errors
     var success: u32 = 0;
-    c.glGetProgramiv(shaderProgram, c.GL_LINK_STATUS, @ptrCast(@alignCast(&success)));
+    glad.glGetProgramiv(shaderProgram, glad.GL_LINK_STATUS, @ptrCast(@alignCast(&success)));
 
     if (success == 0) {
         var infoLog: [512]u8 = undefined;
-        c.glGetProgramInfoLog(shaderProgram, 512, null, &infoLog);
+        glad.glGetProgramInfoLog(shaderProgram, 512, null, &infoLog);
         std.debug.print("ERROR::PROGRAM::LINKING_FAILED\n{any}\n", .{infoLog});
         return ShaderError.ShaderLinkingFailed;
     }
 
     std.debug.print("Running cleanup on Shaders...\n", .{});
     // Shaders can be deleted after linking
-    c.glDeleteShader(vertexShader);
-    c.glDeleteShader(fragmentShader);
+    glad.glDeleteShader(vertexShader);
+    glad.glDeleteShader(fragmentShader);
 
     return shaderProgram;
 }
 
 fn checkOpenGLError(caller: []const u8) void {
-    var err: u32 = c.glGetError();
-    while (err != c.GL_NO_ERROR) {
+    var err: u32 = glad.glGetError();
+    while (err != glad.GL_NO_ERROR) {
         std.debug.print("OpenGL Error: {x} from Caller: {s}\n", .{ err, caller });
-        err = c.glGetError();
+        err = glad.glGetError();
     }
 }
 
-fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
+fn getCurrentMonitor(window: ?*glfw.struct_GLFWwindow) ?*glfw.GLFWmonitor {
     if (window == null) return null;
 
     var monitor_count: i32 = undefined;
-    const monitors = c.glfwGetMonitors(&monitor_count);
+    const monitors = glfw.glfwGetMonitors(&monitor_count);
     if (monitors == null or monitor_count == 0) return null;
 
     // Get window position
     var win_x: i32 = undefined;
     var win_y: i32 = undefined;
-    c.glfwGetWindowPos(window, &win_x, &win_y);
+    glfw.glfwGetWindowPos(window, &win_x, &win_y);
 
     // Get window size
     var win_width: i32 = undefined;
     var win_height: i32 = undefined;
-    c.glfwGetWindowSize(window, &win_width, &win_height);
+    glfw.glfwGetWindowSize(window, &win_width, &win_height);
 
     // Find the monitor that contains the window center
     const center_x = win_x + @divTrunc(win_width, 2);
@@ -378,7 +376,7 @@ fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
         var my: i32 = undefined;
         var mw: i32 = undefined;
         var mh: i32 = undefined;
-        c.glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh);
+        glfw.glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh);
 
         if (center_x >= mx and center_x < mx + mw and
             center_y >= my and center_y < my + mh)
@@ -388,28 +386,28 @@ fn getCurrentMonitor(window: ?*c.struct_GLFWwindow) ?*c.GLFWmonitor {
     }
 
     // Default to primary monitor if no match
-    return c.glfwGetPrimaryMonitor();
+    return glfw.glfwGetPrimaryMonitor();
 }
 
 // Window creation with proper monitor handling
-pub fn createWindow() ?*c.GLFWwindow {
-    c.glfwWindowHint(c.GLFW_FOCUSED, c.GLFW_TRUE);
-    c.glfwWindowHint(c.GLFW_FOCUS_ON_SHOW, c.GLFW_TRUE);
-    c.glfwWindowHint(c.GLFW_CLIENT_API, c.GLFW_OPENGL_API);
-    c.glfwWindowHint(c.GLFW_CONTEXT_CREATION_API, c.GLFW_NATIVE_CONTEXT_API);
+pub fn createWindow() ?*glfw.GLFWwindow {
+    glfw.glfwWindowHint(glfw.GLFW_FOCUSED, glfw.GLFW_TRUE);
+    glfw.glfwWindowHint(glfw.GLFW_FOCUS_ON_SHOW, glfw.GLFW_TRUE);
+    glfw.glfwWindowHint(glfw.GLFW_CLIENT_API, glfw.GLFW_OPENGL_API);
+    glfw.glfwWindowHint(glfw.GLFW_CONTEXT_CREATION_API, glfw.GLFW_NATIVE_CONTEXT_API);
 
     const width: i32 = @intFromFloat(1920 * 0.75);
     const height: i32 = @intFromFloat(1080 * 0.75);
 
-    const window = c.glfwCreateWindow(width, height, "Drone Studio", null, null) orelse return null;
+    const window = glfw.glfwCreateWindow(width, height, "Drone Studio", null, null) orelse return null;
 
     // Make context current immediately after window creation
-    c.glfwMakeContextCurrent(window);
+    glfw.glfwMakeContextCurrent(window);
 
     // Set up cursor mode BEFORE changing monitor settings
-    c.glfwSetInputMode(window, c.GLFW_CURSOR, c.GLFW_CURSOR_DISABLED);
-    if (c.glfwRawMouseMotionSupported() == c.GLFW_TRUE) {
-        c.glfwSetInputMode(window, c.GLFW_RAW_MOUSE_MOTION, c.GLFW_TRUE);
+    glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
+    if (glfw.glfwRawMouseMotionSupported() == glfw.GLFW_TRUE) {
+        glfw.glfwSetInputMode(window, glfw.GLFW_RAW_MOUSE_MOTION, glfw.GLFW_TRUE);
     }
 
     const monitor = getCurrentMonitor(window);
@@ -417,53 +415,53 @@ pub fn createWindow() ?*c.GLFWwindow {
         // Get monitor position and video mode
         var x: i32 = undefined;
         var y: i32 = undefined;
-        c.glfwGetMonitorPos(monitor, &x, &y);
+        glfw.glfwGetMonitorPos(monitor, &x, &y);
 
-        const video_mode = c.glfwGetVideoMode(monitor);
+        const video_mode = glfw.glfwGetVideoMode(monitor);
         if (video_mode != null) {
             // Correctly dereference the video mode pointer
             const mode_width = video_mode.*.width;
             const mode_height = video_mode.*.height;
             const mode_refresh = video_mode.*.refreshRate;
 
-            c.glfwSetWindowMonitor(window, monitor, 0, 0, mode_width, mode_height, mode_refresh);
+            glfw.glfwSetWindowMonitor(window, monitor, 0, 0, mode_width, mode_height, mode_refresh);
         }
     }
 
     // Force focus and raise window
-    c.glfwFocusWindow(window);
-    c.glfwShowWindow(window);
+    glfw.glfwFocusWindow(window);
+    glfw.glfwShowWindow(window);
 
     return window;
 }
 
-fn framebufferSizeCallback(window: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
+fn framebufferSizeCallback(window: ?*glfw.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
     if (window == null) return;
 
-    const user_ptr = c.glfwGetWindowUserPointer(window);
+    const user_ptr = glfw.glfwGetWindowUserPointer(window);
     if (user_ptr == null) {
         std.debug.print("Error: Window user pointer is null in framebufferSizeCallback\n", .{});
         return;
     }
 
-    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
 
-    c.glViewport(0, 0, width, height);
+    glad.glViewport(0, 0, width, height);
 
     // Update Scene's width and height
     scene.width = @floatFromInt(width);
     scene.height = @floatFromInt(height);
 }
 
-fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.C) void {
+fn mouseCallback(window: ?*glfw.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.C) void {
     if (window == null) return;
 
     // Only process mouse input if window is focused
-    if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) != c.GLFW_TRUE) {
+    if (glfw.glfwGetWindowAttrib(window, glfw.GLFW_FOCUSED) != glfw.GLFW_TRUE) {
         return;
     }
 
-    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
 
     if (scene.appState.first_mouse) {
         scene.appState.last_mouse_x = xpos;
@@ -483,33 +481,33 @@ fn mouseCallback(window: ?*c.struct_GLFWwindow, xpos: f64, ypos: f64) callconv(.
     scene.camera.process_mouse_movement(xoffset, yoffset, aspectRatio, false);
 }
 
-fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
+fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
     if (window == null) return;
 
     _ = scancode;
     _ = mods;
 
-    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
 
     if (key < 0 or key >= 1024) return;
 
-    if (action == c.GLFW_PRESS) {
+    if (action == glfw.GLFW_PRESS) {
         scene.appState.keys[@intCast(key)] = true;
-    } else if (action == c.GLFW_RELEASE) {
+    } else if (action == glfw.GLFW_RELEASE) {
         scene.appState.keys[@intCast(key)] = false;
     }
 
-    if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
+    if (action == glfw.GLFW_PRESS or action == glfw.GLFW_REPEAT) {
         switch (key) {
-            c.GLFW_KEY_ESCAPE => {
-                c.glfwSetWindowShouldClose(window, 1);
+            glfw.GLFW_KEY_ESCAPE => {
+                glfw.glfwSetWindowShouldClose(window, 1);
             },
-            c.GLFW_KEY_UP => {
+            glfw.GLFW_KEY_UP => {
                 // Zoom in (narrower FOV)
                 scene.appState.zoom -= 1.0;
                 if (scene.appState.zoom < 1.0) scene.appState.zoom = 1.0;
             },
-            c.GLFW_KEY_DOWN => {
+            glfw.GLFW_KEY_DOWN => {
                 // Zoom out (wider FOV)
                 scene.appState.zoom += 1.0;
             },
@@ -520,12 +518,12 @@ fn keyCallback(window: ?*c.struct_GLFWwindow, key: c_int, scancode: c_int, actio
     // Handle additional keys here
 }
 
-fn scrollCallback(window: ?*c.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
+fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
     if (window == null) return;
 
     _ = xoffset;
 
-    const scene = @as(*Scene, @ptrCast(@alignCast(c.glfwGetWindowUserPointer(window))));
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
 
     const zoomSensitivity: f32 = 0.1;
     const newZoom = scene.appState.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.appState.zoom;
@@ -542,3 +540,13 @@ fn scrollCallback(window: ?*c.struct_GLFWwindow, xoffset: f64, yoffset: f64) cal
     std.debug.print("yOffset: {d}\n", .{yoffset});
     std.debug.print("Zoom Level: {d}\n", .{newZoom});
 }
+
+pub const TextureGenerator = struct {
+    const Self = @This();
+    count: c_int = 0,
+
+    pub fn generateID(self: *Self) c_int {
+        defer self.count += 1;
+        return self.count;
+    }
+};

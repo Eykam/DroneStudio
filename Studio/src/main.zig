@@ -11,12 +11,8 @@ const Secrets = _Secrets{};
 const UDP = @import("UDP.zig");
 const Sensors = @import("Sensors.zig");
 const Video = @import("Video.zig");
-
-const c = @cImport({
-    @cDefine("GLFW_INCLUDE_NONE", "1");
-    @cInclude("glad/glad.h"); // Include GLAD
-    @cInclude("GLFW/glfw3.h");
-});
+const gl = @import("gl.zig");
+const glfw = gl.glfw;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -25,21 +21,21 @@ pub fn main() !void {
     const alloc = arena.allocator();
 
     // Initialize GLFW
-    if (c.glfwInit() == 0) {
+    if (glfw.glfwInit() == 0) {
         std.debug.print("Failed to initialize GLFW\n", .{});
         return;
     }
 
-    defer c.glfwTerminate();
+    defer glfw.glfwTerminate();
 
     const window = Pipeline.createWindow() orelse {
         std.debug.print("Failed to create window\n", .{});
         return;
     };
 
-    defer c.glfwDestroyWindow(window);
+    defer glfw.glfwDestroyWindow(window);
 
-    if (c.glfwGetInputMode(window, c.GLFW_CURSOR) != c.GLFW_CURSOR_DISABLED) {
+    if (glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR) != glfw.GLFW_CURSOR_DISABLED) {
         std.debug.print("Warning: Cursor not disabled as expected\n", .{});
     }
 
@@ -58,8 +54,8 @@ pub fn main() !void {
 
     var canvasNode = try Node.init(alloc, null);
 
-    var canvasNodeLeft = try Shape.Plane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    var canvasNodeRight = try Shape.Plane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
     canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeLeft.setPosition(-6.45, 3.6, -5);
     canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
@@ -101,44 +97,40 @@ pub fn main() !void {
         Secrets.client_port_imu,
     );
 
-    var video_server = UDP.init(
-        Secrets.host_ip,
-        Secrets.host_port_video,
-        Secrets.client_ip,
-        Secrets.client_port_video,
-    );
-
     const pose_handler = Sensors.PoseHandler.init(droneNode);
     var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
-    const width: usize = 1280;
-    const height: usize = 1080;
-    var video_handler = try Video.VideoHandler.init(
+    try Video.initializeFFmpegNetwork();
+
+    var video_handler_right = try Video.VideoHandler.start(
+        alloc,
+        canvasNodeRight,
+        Secrets.sdp_content_right,
+        null,
+        Video.frameCallback,
+        null,
+    );
+
+    var video_handler_left = try Video.VideoHandler.start(
         alloc,
         canvasNodeLeft,
+        Secrets.sdp_content_left,
         null,
-        width,
-        height,
         Video.frameCallback,
+        null,
     );
-    defer video_handler.deinit();
-
-    //use UDP servers allocator instead??
-    var video_udp_handler = UDP.Handler(Video.VideoHandler).init(video_handler);
-    const video_interface = video_udp_handler.interface();
-    try video_server.start(video_interface);
 
     //Render loop
-    while (c.glfwWindowShouldClose(window) == 0) {
-        c.glfwPollEvents();
+    while (glfw.glfwWindowShouldClose(window) == 0) {
+        glfw.glfwPollEvents();
 
-        if (c.glfwGetWindowAttrib(window, c.GLFW_FOCUSED) == c.GLFW_FALSE or scene.width == 0 or scene.height == 0) {
+        if (glfw.glfwGetWindowAttrib(window, glfw.GLFW_FOCUSED) == glfw.GLFW_FALSE or scene.width == 0 or scene.height == 0) {
             continue; // Skip frame if window is not focused
         }
 
-        const current_time = c.glfwGetTime();
+        const current_time = glfw.glfwGetTime();
 
         // Calculate delta time
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
@@ -147,4 +139,8 @@ pub fn main() !void {
         scene.processInput(false);
         scene.render(window);
     }
+
+    video_handler_right.join();
+    video_handler_left.join();
+    Video.deinitFFmpegNetwork();
 }

@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const Build = std.Build;
+const process = std.process;
 
 // Helper function to determine the OpenGL library based on the target OS
 fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
@@ -19,8 +21,8 @@ pub fn build(b: *std.Build) void {
     const name = switch (target.result.os.tag) {
         .windows => "DroneStudio-x86_64-windows-gnu.exe",
         .linux => "DroneStudio-x86_64-linux-gnu.exe",
-        .macos => "DroneStudio-x86_64-macos",
-        else => "DroneStudio-x86_64-unknown",
+        .macos => @panic("MacOS is currently not supported!"),
+        else => @panic("Unsupported OS!"),
     };
 
     const exe = b.addExecutable(.{
@@ -29,27 +31,21 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    // const zigimg_dependency = b.dependency("zigimg", .{
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-
-    // exe.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+    exe.addLibraryPath(Build.LazyPath{ .cwd_relative = "/usr/local/lib" });
 
     if (use_cuda) {
         // Determine CUDA paths based on target and cross-compilation
         const cuda_path = switch (target.result.os.tag) {
             .windows => blk: {
+                break :blk "lib/cuda-windows";
                 // Cross-compilation path from Linux
-                if (builtin.target.os.tag == .linux) {
-                    break :blk "lib/cuda-windows";
-                }
+                // if (builtin.target.os.tag == .linux) {
+                // }
                 // Native Windows path
-                break :blk "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6";
+                // break :blk "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6";
             },
-            .linux => "/usr/local/cuda",
-            .macos => "/Developer/NVIDIA/CUDA-12.3",
+            .linux => "cuda",
+            .macos => @panic("CUDA is currently not supported for MacOS"),
             else => @panic("Unsupported OS for CUDA"),
         };
 
@@ -65,7 +61,7 @@ pub fn build(b: *std.Build) void {
                 break :blk b.path(b.pathJoin(&.{ cuda_path, "lib", "x64" }));
             },
             .linux => b.path(b.pathJoin(&.{ cuda_path, "lib64" })),
-            .macos => b.path(b.pathJoin(&.{ cuda_path, "lib" })),
+            .macos => @panic("CUDA is currently not supported for MacOS"),
             else => @panic("Unsupported OS for CUDA"),
         };
         exe.addLibraryPath(cuda_lib_path);
@@ -96,11 +92,12 @@ pub fn build(b: *std.Build) void {
         });
     }
 
+    // const ffmpeg_path = Build.LazyPath{ .cwd_relative = b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg"} ;
     // FFmpeg library configuration
     const ffmpeg_path = switch (target.result.os.tag) {
         .windows => "lib/ffmpeg-windows",
-        .linux => "lib/ffmpeg-linux",
-        .macos => "lib/ffmpeg-macos",
+        .linux => b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg",
+        .macos => @panic("MacOS is currently not supported!"),
         else => @panic("Unsupported operating system"),
     };
 
@@ -111,7 +108,7 @@ pub fn build(b: *std.Build) void {
 
     // Add FFmpeg include paths
     for (ffmpeg_include_paths) |include_path| {
-        exe.addIncludePath(b.path(include_path));
+        exe.addIncludePath(Build.LazyPath{ .cwd_relative = include_path });
     }
 
     // FFmpeg library names
@@ -150,15 +147,16 @@ pub fn build(b: *std.Build) void {
         },
         .linux => {
             // For Linux, use dynamic libraries
-            for (ffmpeg_libs) |lib| {
+            inline for (ffmpeg_libs) |lib| {
                 exe.linkSystemLibrary(lib);
             }
         },
         .macos => {
+            @panic("MacOS is currently not supported!");
             // For macOS, use dynamic libraries
-            for (ffmpeg_libs) |lib| {
-                exe.linkSystemLibrary(lib);
-            }
+            // for (ffmpeg_libs) |lib| {
+            //     exe.linkSystemLibrary(lib);
+            // }
         },
         else => @panic("Unsupported operating system"),
     }

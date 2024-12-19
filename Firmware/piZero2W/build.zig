@@ -1,5 +1,7 @@
 //zig build -Dtarget="aarch64-linux-gnu" -Dcpu="cortex_a53" -Doptimize=ReleaseFast
 //scp ./zig-out/bin/VideoStreamer ekamil@vision:~/VideoStreamer
+//libcamera-vid -n -t 0 --level 4.2 --framerate 75 --width 1280 --height 720 --inline --denoise cdn_off -g 1  --flush -o - | ffmpeg -i - -c:v copy -f rtp rtp://192.168.1.171:8888
+//gst-launch-1.0 libcamerasrc ! capsfilter caps=video/x-raw,width=480,height=360,format=NV12 !  v4l2convert ! queue max-size-buffers=1 leaky=downstream ! v4l2h264enc extra-controls="controls,repeat_sequence_header=1,video_bitrate=60000000,h264_i_frame_period=1" ! 'video/x-h264,level=(string)4.2' ! h264parse ! rtph264pay config-interval=1 pt=96 !  queue max-size-buffers=1 leaky=downstream ! udpsink host=192.168.1.171 port=8888 sync=false async=false
 
 const std = @import("std");
 

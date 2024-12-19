@@ -13,6 +13,40 @@ Should be able to use pose from MPU (mpu-9250) along with distance data from a s
 
 Later goals are to add object avoidance, image detection and synchronization with other drones within the same network / swarm.
 
+## Setup
+
+### Raspberry Pi's
+
+To setup the raspberry pi's:
+- Flash with [Raspberry Pi OS Lite (64 bit)](https://downloads.raspberrypi.com/raspios_lite_arm64/images/) (make sure to configure wifi and ssh)
+- Replace config at `/boot/firmware/config.txt` with [this](https://github.com/Eykam/DroneStudio/blob/main/Firmware/piZero2W/config.txt)
+- Then run `sudo reboot`
+- You can now run the setup script [here](https://github.com/Eykam/DroneStudio/blob/main/Firmware/piZero2W/setup.sh)
+- After the setup is done, you can start the streamer using this [script](https://github.com/Eykam/DroneStudio/blob/main/Firmware/piZero2W/run.sh)
+
+You can ignore all the other code within [this library](https://github.com/Eykam/DroneStudio/blob/main/Firmware/piZero2W) for the moment. I'll likely build a binary to automate this process, along with other features I'm working on for the future.
+
+### Video processing & Rendering Server
+
+#### Configuring Secrets
+
+Assuming you have the hardware setup (2 raspberry pi's with a camera module 3 on each), copy the [Secrets](https://github.com/Eykam/DroneStudio/blob/main/Studio/src/Secrets.example.zig) to Secrets.local.zig and modify the IP's to match the raspberry pi's. You may need to modify the sdp content to match your stream params.
+
+#### Building from Source
+
+Dependencies:
+- libc
+- Cuda
+- openGL (GLAD and GLFW)
+- FFmpeg
+
+Currently working on creating statically compiled binaries to avoid needing to build from source. 
+For now take a look at the [Build Script](https://github.com/Eykam/DroneStudio/blob/main/Studio/build.zig) to see how the source code is compiled and where the libraries are expected.
+
+#### Running the Renderer
+
+Once the binary has been created, you can run it and automatically capture the streams from the raspberry pi's
+
 ## Part list
 Most of these parts can be found for cheaper from Aliexpress, etc.
 
@@ -64,8 +98,8 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Create hierarchy of nodes instead of flatmap of meshes
 - :white_check_mark: Find way to position children as offset to parents position (rotation & scale too)
 - :white_check_mark: Convert Euler rotations / transformations to Quaternions
-- :white_square_button: Profile rendering time / mem allocations. Check to see if llvm IC uses SIMD automatically
-- :white_square_button: Allow Vec and Matrix calculations to utilize SIMD
+- :white_square_button: Profile rendering time / mem allocations. Check to see if llvm IR uses SIMD automatically
+- :white_square_button: Use SIMD in Vec and Matrix calculations
 - :white_square_button: Change line rendering to quads
 - :white_square_button: Kill threads / end processes when program closed
 
@@ -105,14 +139,14 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Obtain Gyro data in renderer
 - :white_check_mark: Obtain Magnetometer in renderer
 - :white_check_mark: Kalman filter on gyro & accelerometer for estimating Pitch and Roll
-- :white_square_button: Kalman filter on gyro and magnetometer for estimating Yaw
-- :white_square_button: Convert Kalman filter to Madgwick filter
+- :white_check_mark: Kalman filter on gyro and magnetometer for estimating Yaw
 - :white_check_mark: Measure fps from MPU & incrementally update kalman filter delta time
 - :white_check_mark: Find out why varying dt on kalman filter results in janky movement (Delta time calculation wasnt being calculated correctly)
-- :white_square_button: Calibrate sensors
+- :white_check_mark: Convert Kalman filter to Madgwick filter
+- :white_check_mark: Calibrate sensors
     - :white_check_mark: Larger Accelerometer range (+- 8g's)
     - :white_check_mark: 0 values when not moving
-    - :white_square_button: Store calibration settings to disk, to avoid having to run on every start-up (also option to recalibrate)
+    - :white_check_mark: Store calibration settings to disk, to avoid having to run on every start-up (also option to recalibrate)
     - :white_square_button: Continuous magnetometer hard iron and soft iron calibration. (store max / min on renderer and update every x minutes)
 - :white_square_button: Add compass overlay
 - :white_square_button: Overlay avg of sensor data / Tx rate
@@ -121,18 +155,19 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 ### 5. Stereo Camera Integration
 
 - :white_check_mark: Capture video frames from Raspberry Pi Zero 2W in desired resolution
-- :white_square_button: Find lowest latency mode of transport (currently testing raw UDP and RTP)
-    - :white_square_button: Create WiFi access point on server to minimize network latency
+- :white_check_mark: Find lowest latency mode of transport (currently testing raw UDP and RTP)
+    - :white_check_mark: Create WiFi access point on server to minimize network latency
 - :white_check_mark: Receive video stream on processing server
 - :white_check_mark: Create pipeline to decode stream into frames using hardware acceleration
 - :white_check_mark: Parse frames (YUV420) into FBO for visualization in OpenGL
-- :white_square_button: Build and 3D-print STL for stereo camera housing (2x RPi Zero 2W, 2x RPi Camera Module 3, 6 cm apart)
+- :white_check_mark: Build and 3D-print STL for stereo camera housing (2x RPi Zero 2W, 2x RPi Camera Module 3, 6 cm apart)
     - :white_square_button: Explore adding rechargeable LiPo battery to power both Raspberry Pis
 - :white_square_button: Configure streams from each camera to be synced to server time using NTP
 - :white_square_button: Pair frames from each stream
 - :white_square_button: Derive distance and pose from paired frames
-- :white_square_button: Perform visual odometry using pose
 - :white_square_button: Fuse MPU pose data with visual odometry for more robust pose estimation
+- :white_square_button: Combine frame pair and project into scene based on pose and depth information  
+- :white_square_button: Visual odometry using pose
 
 
 ### 6. Drone & Motor Control

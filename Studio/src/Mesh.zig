@@ -2,10 +2,8 @@ const std = @import("std");
 const Math = @import("Math.zig");
 const Debug = @import("Debug.zig");
 const Node = @import("Node.zig");
-
-const c = @cImport({
-    @cInclude("glad/glad.h");
-});
+const gl = @import("gl.zig");
+const glad = gl.glad;
 
 const Self = @This();
 
@@ -15,7 +13,7 @@ vertices: []Vertex,
 indices: ?[]u32 = null,
 meta: Metadata,
 draw: draw,
-drawType: c.GLenum = c.GL_TRIANGLES,
+drawType: glad.GLenum = glad.GL_TRIANGLES,
 
 const draw = *const fn (mesh: *Self) void;
 
@@ -37,38 +35,38 @@ pub const TextureID = struct {
 };
 
 pub fn default_draw(mesh: *Self) void {
-    c.glBindVertexArray(mesh.meta.VAO);
-    c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
+    glad.glBindVertexArray(mesh.meta.VAO);
+    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
     // Position attribute (location = 0)
-    c.glVertexAttribPointer(0, // location
+    glad.glVertexAttribPointer(0, // location
         3, // (vec3)
-        c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), // stride (size of entire vertex struct)
+        glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), // stride (size of entire vertex struct)
         null // offset for position
     );
-    c.glEnableVertexAttribArray(0);
+    glad.glEnableVertexAttribArray(0);
 
     // Color attribute (location = 1)
     const color_offset = @offsetOf(Vertex, "color");
-    c.glVertexAttribPointer(1, // location
+    glad.glVertexAttribPointer(1, // location
         3, // (vec3)
-        c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), // stride (size of entire vertex struct)
+        glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), // stride (size of entire vertex struct)
         @ptrFromInt(color_offset));
-    c.glEnableVertexAttribArray(1);
+    glad.glEnableVertexAttribArray(1);
 
     if (mesh.indices) |indices| {
-        c.glDrawElements(mesh.drawType, @intCast(indices.len), c.GL_UNSIGNED_INT, null);
+        glad.glDrawElements(mesh.drawType, @intCast(indices.len), glad.GL_UNSIGNED_INT, null);
     } else {
         // When drawing without indices, we need to account for the full vertex struct size
-        c.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
+        glad.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
     }
 
     // Disable vertex attributes
-    c.glDisableVertexAttribArray(0);
-    c.glDisableVertexAttribArray(1);
+    glad.glDisableVertexAttribArray(0);
+    glad.glDisableVertexAttribArray(1);
 
     // Unbind the VAO
-    c.glBindVertexArray(0);
+    glad.glBindVertexArray(0);
 }
 
 pub fn init(vertices: []Vertex, indices: ?[]u32, draw_fn: ?draw) !Self {
@@ -80,33 +78,33 @@ pub fn init(vertices: []Vertex, indices: ?[]u32, draw_fn: ?draw) !Self {
     };
 
     // Initialize OpenGL buffers
-    c.glGenVertexArrays(1, &mesh.meta.VAO);
-    c.glGenBuffers(1, &mesh.meta.VBO);
-    c.glGenBuffers(1, &mesh.meta.IBO);
+    glad.glGenVertexArrays(1, &mesh.meta.VAO);
+    glad.glGenBuffers(1, &mesh.meta.VBO);
+    glad.glGenBuffers(1, &mesh.meta.IBO);
 
-    c.glBindVertexArray(mesh.meta.VAO);
+    glad.glBindVertexArray(mesh.meta.VAO);
 
     // Vertex Buffer
-    c.glBindBuffer(c.GL_ARRAY_BUFFER, mesh.meta.VBO);
-    c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(vertices.len * @sizeOf(Vertex)), vertices.ptr, c.GL_STATIC_DRAW);
+    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
+    glad.glBufferData(glad.GL_ARRAY_BUFFER, @intCast(vertices.len * @sizeOf(Vertex)), vertices.ptr, glad.GL_STATIC_DRAW);
 
     // Index Buffer
     if (indices) |ind| {
-        c.glBindBuffer(c.GL_ELEMENT_ARRAY_BUFFER, mesh.meta.IBO);
-        c.glBufferData(c.GL_ELEMENT_ARRAY_BUFFER, @intCast(ind.len * @sizeOf(u32)), ind.ptr, c.GL_STATIC_DRAW);
+        glad.glBindBuffer(glad.GL_ELEMENT_ARRAY_BUFFER, mesh.meta.IBO);
+        glad.glBufferData(glad.GL_ELEMENT_ARRAY_BUFFER, @intCast(ind.len * @sizeOf(u32)), ind.ptr, glad.GL_STATIC_DRAW);
     }
 
     // Position attribute
-    c.glVertexAttribPointer(0, 3, c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), null);
-    c.glEnableVertexAttribArray(0);
+    glad.glVertexAttribPointer(0, 3, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), null);
+    glad.glEnableVertexAttribArray(0);
 
     // Color attribute
     const color_offset = @offsetOf(Vertex, "color");
-    c.glVertexAttribPointer(1, 3, c.GL_FLOAT, c.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(color_offset));
-    c.glEnableVertexAttribArray(1);
+    glad.glVertexAttribPointer(1, 3, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(color_offset));
+    glad.glEnableVertexAttribArray(1);
 
-    c.glBindBuffer(c.GL_ARRAY_BUFFER, 0);
-    c.glBindVertexArray(0);
+    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    glad.glBindVertexArray(0);
 
     return mesh;
 }
@@ -121,8 +119,8 @@ pub fn setFaceColor(self: *Self, face_index: usize, color: [3]f32) void {
         self.vertices[vertex_idx].color = color;
     }
 
-    c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
-    c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, c.GL_STATIC_DRAW);
+    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
+    glad.glBufferData(glad.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, glad.GL_STATIC_DRAW);
 }
 
 pub fn setColor(self: *Self, color: [3]f32) void {
@@ -130,8 +128,8 @@ pub fn setColor(self: *Self, color: [3]f32) void {
         vertex.color = color;
     }
 
-    c.glBindBuffer(c.GL_ARRAY_BUFFER, self.meta.VBO);
-    c.glBufferData(c.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, c.GL_STATIC_DRAW);
+    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
+    glad.glBufferData(glad.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, glad.GL_STATIC_DRAW);
 }
 
 pub fn debug(self: Self) void {

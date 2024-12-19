@@ -2,13 +2,11 @@ const std = @import("std");
 const Mesh = @import("Mesh.zig");
 const Math = @import("Math.zig");
 const Scene = @import("Pipeline.zig").Scene;
-const Vec3 = Math.Vec3;
+const gl = @import("gl.zig");
 const Quaternion = Math.Quaternion;
+const Vec3 = Math.Vec3;
+const glad = gl.glad;
 const glCheckError = @import("Debug.zig").glCheckError;
-
-const c = @cImport({
-    @cInclude("glad/glad.h");
-});
 
 const Self = @This();
 
@@ -21,6 +19,8 @@ parent: ?*Self = null,
 
 y: ?[]u8 = null,
 uv: ?[]u8 = null,
+yTextureUnit: c_int = 0,
+uvTextureUnit: c_int = 0,
 width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
@@ -56,6 +56,8 @@ pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !*Self {
 
     if (mesh_ptr) |mesh| {
         mesh.node = node_ptr;
+        glad.glGenTextures(1, &mesh.textureID.y);
+        glad.glGenTextures(1, &mesh.textureID.uv);
     }
 
     return node_ptr;
@@ -109,6 +111,10 @@ pub fn addChild(self: *Self, child: *Self) !void {
 pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
     self.scene = scene;
 
+    self.yTextureUnit = scene.texGen.generateID();
+    self.uvTextureUnit = scene.texGen.generateID();
+    std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
+
     for (self.children.items) |child| {
         child.addSceneRecursively(scene);
     }
@@ -146,13 +152,13 @@ fn updateWorldTransform(self: *Self) void {
     }
 }
 
-pub fn update(self: *Self, uModelLoc: c.GLint) void {
+pub fn update(self: *Self, uModelLoc: glad.GLint) void {
     self.updateWorldTransform();
 
     if (self.mesh) |mesh| {
         // Set mesh-specific uniforms
         if (uModelLoc != -1) {
-            c.glUniformMatrix4fv(uModelLoc, 1, c.GL_FALSE, &self.world_transform);
+            glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &self.world_transform);
         }
 
         if (self._update) |_update| {
@@ -169,32 +175,26 @@ pub fn update(self: *Self, uModelLoc: c.GLint) void {
 pub fn bindTexture(self: *Self) !void {
     // Generate texture objects if not already created
     if (self.texture_updated) {
-        c.glGenTextures(1, &self.*.mesh.?.textureID.y);
-        c.glGenTextures(1, &self.*.mesh.?.textureID.uv); // Now using for combined UV
-
-        // c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
-        // glCheckError("Pixel Store");
+        const mesh = self.*.mesh.?;
 
         // Bind and configure Y plane texture
-        c.glActiveTexture(c.GL_TEXTURE0);
-        c.glBindTexture(c.GL_TEXTURE_2D, self.*.mesh.?.textureID.y);
-        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_R8, self.width.?, self.height.?, 0, c.GL_RED, c.GL_UNSIGNED_BYTE, self.y.?.ptr);
-        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
-        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+        glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
+        glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
+        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_R8, self.width.?, self.height.?, 0, glad.GL_RED, glad.GL_UNSIGNED_BYTE, self.y.?.ptr);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
 
         // Bind and configure interleaved UV plane texture
-        c.glActiveTexture(c.GL_TEXTURE1);
-        c.glBindTexture(c.GL_TEXTURE_2D, self.*.mesh.?.textureID.uv);
-        c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, c.GL_RG, c.GL_UNSIGNED_BYTE, self.uv.?.ptr);
-        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
-        c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+        glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
+        glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
+        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, glad.GL_RG, glad.GL_UNSIGNED_BYTE, self.uv.?.ptr);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
 
         if (self.scene) |scene| {
-            c.glUniform1i(scene.yTextureLoc, 0);
-            c.glUniform1i(scene.uvTextureLoc, 1);
+            glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
+            glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
         }
-
-        self.texture_updated = false;
     }
 }
 
