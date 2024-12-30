@@ -223,7 +223,7 @@ pub const Scene = struct {
         // Iterate through all nodes in the hash map
         var it = self.nodes.iterator();
         while (it.next()) |entry| {
-            entry.value_ptr.*.update(self.uModelLoc);
+            entry.value_ptr.*.update();
         }
 
         glfw.glfwSwapBuffers(window);
@@ -500,7 +500,10 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
     if (action == glfw.GLFW_PRESS or action == glfw.GLFW_REPEAT) {
         switch (key) {
             glfw.GLFW_KEY_ESCAPE => {
-                glfw.glfwSetWindowShouldClose(window, 1);
+                glfw.glfwIconifyWindow(window);
+            },
+            glfw.GLFW_KEY_RIGHT_BRACKET => {
+                glfw.glfwDestroyWindow(window);
             },
             glfw.GLFW_KEY_UP => {
                 // Zoom in (narrower FOV)

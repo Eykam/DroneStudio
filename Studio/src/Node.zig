@@ -13,9 +13,13 @@ const Self = @This();
 scene: ?*Scene = null,
 mesh: ?*Mesh,
 _update: ?*const fn (*Mesh) void,
+arena: *std.heap.ArenaAllocator,
+backing_allocator: std.mem.Allocator,
 allocator: std.mem.Allocator,
 children: std.ArrayList(*Self),
 parent: ?*Self = null,
+
+mutex: std.Thread.Mutex = std.Thread.Mutex{},
 
 y: ?[]u8 = null,
 uv: ?[]u8 = null,
@@ -32,26 +36,26 @@ scale: [3]f32 = .{ 1, 1, 1 },
 local_transform: [16]f32 = Math.identity(),
 world_transform: [16]f32 = Math.identity(),
 
-pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !*Self {
+pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indicies: ?[]u32, draw: ?Mesh.draw) !*Self {
+    var node_arena = try allocator.create(std.heap.ArenaAllocator);
+    node_arena.* = std.heap.ArenaAllocator.init(allocator);
+    const node_allocator = node_arena.allocator();
 
-    // If a mesh was provided, allocate space for it
     var mesh_ptr: ?*Mesh = null;
-    var _update: ?*const fn (*Mesh) void = null;
 
-    if (mesh_opt) |mesh_val| {
-        const mesh_storage = try allocator.create(Mesh);
-        mesh_storage.* = mesh_val;
-        mesh_ptr = mesh_storage;
-        _update = mesh_val.draw;
+    if (_vertices) |vertices| {
+        mesh_ptr = try Mesh.init(node_allocator, vertices, _indicies, draw);
     }
 
-    const node_ptr = try allocator.create(Self);
+    const node_ptr = try node_allocator.create(Self);
 
     node_ptr.* = Self{
-        .allocator = allocator,
+        .arena = node_arena,
+        .backing_allocator = allocator,
+        .allocator = node_allocator,
         .mesh = mesh_ptr,
-        ._update = _update,
-        .children = try std.ArrayList(*Self).initCapacity(allocator, 0),
+        ._update = draw,
+        .children = try std.ArrayList(*Self).initCapacity(node_allocator, 0),
     };
 
     if (mesh_ptr) |mesh| {
@@ -64,18 +68,25 @@ pub fn init(allocator: std.mem.Allocator, mesh_opt: ?Mesh) !*Self {
 }
 
 pub fn deinit(self: *Self) void {
-    // Free children recursively
+    const backing_allocator = self.backing_allocator;
+    const arena = self.arena;
+
+    self.mutex.lock();
+
     for (self.children.items) |child| {
         child.deinit();
     }
-    self.children.deinit();
 
-    // Free the mesh if it exists
     if (self.mesh) |mesh| {
-        self.allocator.destroy(mesh);
+        glad.glDeleteTextures(1, &mesh.textureID.y);
+        glad.glDeleteTextures(1, &mesh.textureID.uv);
+        mesh.deinit();
     }
 
-    self.allocator.destroy(self);
+    self.mutex.unlock();
+
+    arena.deinit();
+    backing_allocator.destroy(arena);
 }
 
 pub fn setPosition(self: *Self, x: f32, y: f32, z: f32) void {
@@ -99,6 +110,9 @@ pub fn setScale(self: *Self, x: f32, y: f32, z: f32) void {
 }
 
 pub fn addChild(self: *Self, child: *Self) !void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
     child.parent = self;
 
     if (self.scene) |scene| {
@@ -109,14 +123,19 @@ pub fn addChild(self: *Self, child: *Self) !void {
 }
 
 pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
     self.scene = scene;
 
     self.yTextureUnit = scene.texGen.generateID();
     self.uvTextureUnit = scene.texGen.generateID();
-    std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
+    // std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
 
-    for (self.children.items) |child| {
-        child.addSceneRecursively(scene);
+    if (self.children.items.len > 0) {
+        for (self.children.items) |child| {
+            child.addSceneRecursively(scene);
+        }
     }
 }
 
@@ -152,23 +171,28 @@ fn updateWorldTransform(self: *Self) void {
     }
 }
 
-pub fn update(self: *Self, uModelLoc: glad.GLint) void {
+pub fn update(self: *Self) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
     self.updateWorldTransform();
 
     if (self.mesh) |mesh| {
         // Set mesh-specific uniforms
-        if (uModelLoc != -1) {
-            glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &self.world_transform);
-        }
+        if (self.scene) |scene| {
+            if (scene.uModelLoc != -1) {
+                glad.glUniformMatrix4fv(scene.uModelLoc, 1, glad.GL_FALSE, &self.world_transform);
+            }
 
-        if (self._update) |_update| {
-            try self.bindTexture();
-            _update(mesh);
+            if (self._update) |_update| {
+                try self.bindTexture();
+                _update(mesh);
+            }
         }
     }
 
     for (self.children.items) |child| {
-        child.update(uModelLoc);
+        child.update();
     }
 }
 
@@ -177,23 +201,28 @@ pub fn bindTexture(self: *Self) !void {
     if (self.texture_updated) {
         const mesh = self.*.mesh.?;
 
-        // Bind and configure Y plane texture
-        glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
-        glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
-        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_R8, self.width.?, self.height.?, 0, glad.GL_RED, glad.GL_UNSIGNED_BYTE, self.y.?.ptr);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+        if (self.y) |y_data| {
+            // Bind and configure Y plane texture
+            glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
+            glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
+            glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_R8, self.width.?, self.height.?, 0, glad.GL_RED, glad.GL_UNSIGNED_BYTE, y_data.ptr);
+            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+            if (self.scene) |scene| {
+                glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
+            }
+        }
 
-        // Bind and configure interleaved UV plane texture
-        glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
-        glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
-        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, glad.GL_RG, glad.GL_UNSIGNED_BYTE, self.uv.?.ptr);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-
-        if (self.scene) |scene| {
-            glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
-            glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
+        if (self.uv) |uv_data| {
+            // Bind and configure interleaved UV plane texture
+            glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
+            glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
+            glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, glad.GL_RG, glad.GL_UNSIGNED_BYTE, uv_data.ptr);
+            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+            if (self.scene) |scene| {
+                glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
+            }
         }
     }
 }

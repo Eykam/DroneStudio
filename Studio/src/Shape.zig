@@ -15,18 +15,11 @@ const DrawErrors = error{FailedToDraw};
 pub const Triangle = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, newVertices: ?[]Vertex) !*Node {
-        var vertices: []Vertex = undefined;
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, _vertices: ?[]Vertex) !*Node {
+        const vertices: []Vertex = try allocator.dupe(Vertex, _vertices orelse Self.default(position));
+        defer allocator.free(vertices);
 
-        if (newVertices) |verts| {
-            vertices = try allocator.dupe(Vertex, verts);
-        } else {
-            vertices = Self.default(position);
-        }
-
-        const mesh = try Mesh.init(vertices, null, null);
-        const node = try Node.init(allocator, mesh);
-
+        const node = try Node.init(allocator, vertices, null, null);
         return node;
     }
 
@@ -71,17 +64,18 @@ pub const Box = struct {
         _ = width;
         _ = depth;
 
-        const defaults = try Self.default(allocator);
+        const defaults = try Self.default();
+        const vertices = try allocator.dupe(Vertex, defaults.vertices);
+        defer allocator.free(vertices);
+        const indices = try allocator.dupe(u32, defaults.indices);
+        defer allocator.free(indices);
 
-        const mesh = try Mesh.init(defaults.vertices, defaults.indices, null);
-        const node = try Node.init(allocator, mesh);
-
+        const node = try Node.init(allocator, vertices, indices, null);
         return node;
     }
 
-    pub fn default(allocator: std.mem.Allocator) !struct { vertices: []Vertex, indices: []u32 } {
+    pub fn default() !struct { vertices: []Vertex, indices: []u32 } {
         // (4 vertices per face * 6 faces)
-        var vertices: []Vertex = try allocator.alloc(Vertex, 24);
 
         const front_color = [3]f32{ 0.9, 0.9, 0.9 }; // Lightest gray (front)
         const right_color = [3]f32{ 0.8, 0.8, 0.8 }; // Slightly darker
@@ -90,7 +84,7 @@ pub const Box = struct {
         const bottom_color = [3]f32{ 0.7, 0.7, 0.7 }; // Darker for bottom
         const top_color = [3]f32{ 0.85, 0.85, 0.85 }; // Lighter for top
 
-        vertices = @constCast(&[_]Vertex{
+        const vertices: []Vertex = @constCast(&[_]Vertex{
             // Front face (0-3)
             .{ .position = .{ -0.5, -0.5, 0.5 }, .color = front_color },
             .{ .position = .{ 0.5, -0.5, 0.5 }, .color = front_color },
@@ -128,8 +122,9 @@ pub const Box = struct {
             .{ .position = .{ -0.5, 0.5, -0.5 }, .color = top_color },
         });
 
-        var indices: []u32 = try allocator.alloc(u32, 36); // 6 faces * 2 triangles * 3 vertices
-        indices = @constCast(&[_]u32{
+        // 6 faces * 2 triangles * 3 vertices
+        const indices: []u32 =
+            @constCast(&[_]u32{
             // Front face
             0,  1,  2,
             2,  3,  0,
@@ -166,26 +161,16 @@ pub const Axis = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !*Node {
-        var vertices: []Vertex = undefined;
+        const default_pos: Vec3 = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+        const vertices: []Vertex = try generateVertices(
+            allocator,
+            position orelse default_pos,
+            length orelse 5.0,
+        );
+        defer allocator.free(vertices);
 
-        if (position != null and length != null) {
-            vertices = try generateVertices(
-                allocator,
-                position.?,
-                length.?,
-            );
-        } else {
-            vertices = try generateVertices(
-                allocator,
-                .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-                5.0,
-            );
-        }
-
-        var mesh = try Mesh.init(vertices, null, Self.draw);
-        mesh.drawType = glad.GL_LINES;
-
-        const node = try Node.init(allocator, mesh);
+        var node = try Node.init(allocator, vertices, null, Self.draw);
+        node.mesh.?.drawType = glad.GL_LINES;
 
         return node;
     }
@@ -321,18 +306,16 @@ pub const Grid = struct {
 
     pub fn init(allocator: std.mem.Allocator, gridSize: ?usize, spacing: ?f32) !*Node {
         // Generate grid vertices
-        var vertices: []Vertex = undefined;
+        const vertices: []Vertex = try Grid.generateGridVertices(
+            allocator,
+            gridSize orelse 1000,
+            spacing orelse 1.0,
+        );
+        defer allocator.free(vertices);
 
-        if (gridSize != null and spacing != null) {
-            vertices = try Grid.generateGridVertices(allocator, gridSize.?, spacing.?);
-        } else {
-            vertices = try Grid.generateGridVertices(allocator, 1000, 1.0);
-        }
+        var node = try Node.init(allocator, vertices, null, Self.draw);
+        node.mesh.?.drawType = glad.GL_LINES;
 
-        var mesh: Mesh = try Mesh.init(vertices, null, Self.draw);
-        mesh.drawType = glad.GL_LINES;
-
-        const node = try Node.init(allocator, mesh);
         return node;
     }
 
@@ -476,58 +459,54 @@ pub const TexturedPlane = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, length: ?f32) !*Node {
-        var vertices: []Vertex = undefined;
-        var indices: []u32 = undefined;
+        const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
+        const plane_params = try Self.generatePlaneVertices(
+            pos orelse default_pos,
+            width orelse 1.0,
+            length orelse 1.0,
+        );
+        const vertices: []Vertex = try allocator.dupe(Vertex, &plane_params.vertices);
+        defer allocator.free(vertices);
+        const indices: []u32 = try allocator.dupe(u32, &plane_params.indices);
+        defer allocator.free(indices);
 
-        if (pos != null and width != null and length != null) {
-            const result = try Self.generatePlaneVertices(allocator, pos.?, width.?, length.?);
-            vertices = result.vertices;
-            indices = result.indices;
-        } else {
-            const result = try Self.generatePlaneVertices(allocator, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 1.0, 1.0);
-            vertices = result.vertices;
-            indices = result.indices;
-        }
-
-        // For textured rendering, you'll want to add texture coordinate generation
-        // This is a placeholder for your YUV444P texture mapping
-        const mesh = try Mesh.init(vertices, indices, Self.draw);
-        const node = try Node.init(allocator, mesh);
+        const node = try Node.init(allocator, vertices, indices, Self.draw);
 
         return node;
     }
 
-    pub fn generatePlaneVertices(allocator: std.mem.Allocator, position: Vec3, width: f32, length: f32) !struct { vertices: []Vertex, indices: []u32 } {
+    pub fn generatePlaneVertices(position: Vec3, width: f32, length: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
         const halfWidth: f32 = width / 2.0;
         const halflength: f32 = length / 2.0;
 
-        var vertices: []Vertex = try allocator.alloc(Vertex, 4);
-        vertices[0] = .{
-            .position = .{ position.x - halfWidth, position.y, position.z - halflength },
-            .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 0.0, 1.0 },
-        };
-        vertices[1] = .{
-            .position = .{ position.x + halfWidth, position.y, position.z - halflength },
-            .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 1.0, 1.0 },
-        };
-        vertices[2] = .{
-            .position = .{ position.x + halfWidth, position.y, position.z + halflength },
-            .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 1.0, 0.0 },
-        };
-        vertices[3] = .{
-            .position = .{ position.x - halfWidth, position.y, position.z + halflength },
-            .color = .{ 0.8, 0.8, 0.8 },
-            .texture = [_]f32{ 0.0, 0.0 },
+        const vertices: [4]Vertex = .{
+            .{
+                .position = .{ position.x - halfWidth, position.y, position.z - halflength },
+                .color = .{ 0.8, 0.8, 0.8 },
+                .texture = [_]f32{ 0.0, 1.0 },
+            },
+            .{
+                .position = .{ position.x + halfWidth, position.y, position.z - halflength },
+                .color = .{ 0.8, 0.8, 0.8 },
+                .texture = [_]f32{ 1.0, 1.0 },
+            },
+            .{
+                .position = .{ position.x + halfWidth, position.y, position.z + halflength },
+                .color = .{ 0.8, 0.8, 0.8 },
+                .texture = [_]f32{ 1.0, 0.0 },
+            },
+            .{
+                .position = .{ position.x - halfWidth, position.y, position.z + halflength },
+                .color = .{ 0.8, 0.8, 0.8 },
+                .texture = [_]f32{ 0.0, 0.0 },
+            },
         };
 
-        var indices: []u32 = try allocator.alloc(u32, 6);
-        indices = @constCast(&[_]u32{
+        const indices =
+            [6]u32{
             0, 1, 2, // First triangle
             2, 3, 0, // Second triangle
-        });
+        };
 
         return .{
             .vertices = vertices,
@@ -602,5 +581,108 @@ pub const TexturedPlane = struct {
         glad.glDisableVertexAttribArray(2);
 
         glad.glBindVertexArray(0);
+    }
+};
+
+pub const KeypointDebugger = struct {
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, pos: [3]f32, radius: ?f32, resolution: ?u32) !*Node {
+        const vertices = try Self.generateVertices(
+            allocator,
+            pos,
+            radius orelse 0.05,
+            @max(1, resolution orelse 1),
+        );
+
+        const node = try Node.init(allocator, vertices, null, Self.draw);
+        return node;
+    }
+
+    pub fn draw(mesh: *Mesh) void {
+        // Debug check mesh state
+        if (mesh.vertices.len == 0 or mesh.vertices.len > 10000) { // reasonable maximum
+            std.debug.print("Invalid vertex count: {}\n", .{mesh.vertices.len});
+            return;
+        }
+
+        // std.debug.print("Drawing keypoint with {} vertices\n", .{mesh.vertices.len});
+
+        // OpenGL state setup
+        glad.glEnable(glad.GL_DEPTH_TEST);
+        glad.glDepthFunc(glad.GL_LEQUAL);
+        glad.glEnable(glad.GL_LINE_SMOOTH);
+        glad.glHint(glad.GL_LINE_SMOOTH_HINT, glad.GL_NICEST);
+        glad.glEnable(glad.GL_BLEND);
+        glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
+        glad.glLineWidth(3.0);
+        glad.glEnable(glad.GL_POLYGON_OFFSET_LINE);
+        glad.glPolygonOffset(-1.0, -1.0);
+
+        // Verify VAO and VBO
+        if (mesh.meta.VAO == 0 or mesh.meta.VBO == 0) {
+            std.debug.print("Error: Invalid VAO or VBO\n", .{});
+            return;
+        }
+
+        // Bind buffers
+        glad.glBindVertexArray(mesh.meta.VAO);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
+
+        // Debug check buffer binding
+        // const current_vao = glad.glGetvb(glad.GL_VERTEX_ARRAY_BINDING);
+        // const current_vbo = glad.glGetInteger(glad.GL_ARRAY_BUFFER_BINDING);
+        // std.debug.print("Current VAO: {}, Current VBO: {}\n", .{ current_vao, current_vbo });
+
+        // Setup vertex attributes with error checking
+        glad.glVertexAttribPointer(0, 3, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), null);
+        glad.glEnableVertexAttribArray(0);
+
+        const color_offset = @offsetOf(Vertex, "color");
+        glad.glVertexAttribPointer(1, 3, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(color_offset));
+        glad.glEnableVertexAttribArray(1);
+
+        // Draw with explicit vertex count
+        const vertex_count: c_int = @intCast(mesh.vertices.len);
+        // std.debug.print("Drawing with {} vertices\n", .{vertex_count});
+        glad.glDrawArrays(glad.GL_LINE_LOOP, 0, vertex_count);
+
+        // Check for OpenGL errors
+        const err = glad.glGetError();
+        if (err != glad.GL_NO_ERROR) {
+            std.debug.print("OpenGL error in draw: 0x{x}\n", .{err});
+        }
+
+        // Cleanup
+        glad.glDisableVertexAttribArray(0);
+        glad.glDisableVertexAttribArray(1);
+        glad.glBindVertexArray(0);
+        glad.glDisable(glad.GL_POLYGON_OFFSET_LINE);
+        glad.glDisable(glad.GL_BLEND);
+        glad.glDisable(glad.GL_LINE_SMOOTH);
+    }
+
+    pub fn generateVertices(alloc: std.mem.Allocator, pos: [3]f32, radius: f32, resolution: u32) ![]Vertex {
+        const num_steps = 360 * resolution;
+        const step_size = 360.0 / @as(f32, @floatFromInt(num_steps));
+
+        const vertices = try alloc.alloc(Vertex, num_steps);
+
+        // std.debug.print("Generating {} vertices for keypoint at {d},{d},{d}\n", .{ num_steps, pos[0], pos[1], pos[2] });
+
+        for (1..num_steps + 1) |step| {
+            const theta_deg = @as(f32, @floatFromInt(step)) * step_size;
+            const theta_rad = theta_deg * (std.math.pi / 180.0);
+            vertices[step - 1] = Vertex{
+                .position = [_]f32{
+                    pos[0] + radius * @sin(theta_rad),
+                    pos[1],
+                    pos[2] + radius * @cos(theta_rad),
+                },
+                .color = [_]f32{ 255 / 255, 0 / 255, 0 / 255 },
+            };
+        }
+
+        return vertices;
     }
 };

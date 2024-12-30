@@ -13,12 +13,15 @@ const Sensors = @import("Sensors.zig");
 const Video = @import("Video.zig");
 const gl = @import("gl.zig");
 const glfw = gl.glfw;
+const KeypointManager = @import("ORB.zig").KeypointManager;
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const alloc = arena.allocator();
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // defer arena.deinit();
+    // const alloc = arena.allocator();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer if (gpa.deinit() == .leak) std.posix.exit(1);
+    const alloc = gpa.allocator();
 
     // Initialize GLFW
     if (glfw.glfwInit() == 0) {
@@ -52,25 +55,31 @@ pub fn main() !void {
     const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
     const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
-    var canvasNode = try Node.init(alloc, null);
+    var canvasNode = try Node.init(alloc, null, null, null);
 
-    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    // var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
     var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
-    canvasNodeLeft.setPosition(-6.45, 3.6, -5);
+    // canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
+    // canvasNodeLeft.setPosition(-6.45, 3.6, -5);
     canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeRight.setPosition(6.45, 3.6, -5);
-    try canvasNode.addChild(canvasNodeLeft);
+    // try canvasNode.addChild(canvasNodeLeft);
     try canvasNode.addChild(canvasNodeRight);
 
+    var keypoint_manager = KeypointManager.init(alloc, canvasNodeRight);
+    defer keypoint_manager.deinit();
+
     //Initializing drone node group (axis & box rotated by PoseHandler)
-    var droneNode = try Node.init(alloc, null);
+    var droneNode = try Node.init(alloc, null, null, null);
     droneNode.setPosition(0, 0.5, 0);
     try droneNode.addChild(boxNode);
     try droneNode.addChild(droneAxis);
 
+    const circleTest = try Shape.KeypointDebugger.init(alloc, [_]f32{ 0, 0, 0.501 }, null, null);
+    try droneNode.addChild(circleTest);
+
     //Adding Nodes to Environment (parent node)
-    var environment = try Node.init(alloc, null);
+    var environment = try Node.init(alloc, null, null, null);
     try environment.addChild(gridNode);
     try environment.addChild(axisNode);
     try environment.addChild(triangleNode);
@@ -111,16 +120,18 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
+        &keypoint_manager,
     );
 
-    var video_handler_left = try Video.VideoHandler.start(
-        alloc,
-        canvasNodeLeft,
-        Secrets.sdp_content_left,
-        null,
-        Video.frameCallback,
-        null,
-    );
+    // var video_handler_left = try Video.VideoHandler.start(
+    //     alloc,
+    //     canvasNodeLeft,
+    //     Secrets.sdp_content_left,
+    //     null,
+    //     Video.frameCallback,
+    //     null,
+    //     null,
+    // );
 
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -138,9 +149,12 @@ pub fn main() !void {
 
         scene.processInput(false);
         scene.render(window);
+        try keypoint_manager.update();
     }
 
     video_handler_right.join();
-    video_handler_left.join();
+    // video_handler_left.join();
     Video.deinitFFmpegNetwork();
 }
+
+test {}

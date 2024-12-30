@@ -12,74 +12,58 @@ fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
     };
 }
 
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration") orelse false;
-
-    const name = switch (target.result.os.tag) {
-        .windows => "DroneStudio-x86_64-windows-gnu.exe",
-        .linux => "DroneStudio-x86_64-linux-gnu.exe",
-        .macos => @panic("MacOS is currently not supported!"),
-        else => @panic("Unsupported OS!"),
-    };
-
-    const exe = b.addExecutable(.{
-        .name = name,
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
+// Helper function to configure library paths and link libraries
+fn configureLibs(
+    exe: *Build.Step.Compile,
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    use_cuda: bool,
+    ffmpeg_path: []const u8,
+) void {
+    // Add common library paths
     exe.addLibraryPath(Build.LazyPath{ .cwd_relative = "/usr/local/lib" });
 
+    // CUDA Configuration
     if (use_cuda) {
-        // Determine CUDA paths based on target and cross-compilation
+        // Determine CUDA paths based on target OS
         const cuda_path = switch (target.result.os.tag) {
-            .windows => blk: {
-                break :blk "lib/cuda-windows";
-                // Cross-compilation path from Linux
-                // if (builtin.target.os.tag == .linux) {
-                // }
-                // Native Windows path
-                // break :blk "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.6";
-            },
+            .windows => "lib/cuda-windows",
             .linux => "cuda",
             .macos => @panic("CUDA is currently not supported for MacOS"),
             else => @panic("Unsupported OS for CUDA"),
         };
 
-        // Add CUDA include and library paths
+        // Add CUDA include path
         exe.addIncludePath(b.path(b.pathJoin(&.{ cuda_path, "include" })));
 
-        // Adjust library path based on target and cross-compilation
-        const cuda_lib_path = switch (target.result.os.tag) {
+        // Determine CUDA library path
+        const cuda_lib_path: ?std.Build.LazyPath = switch (target.result.os.tag) {
             .windows => blk: {
+                // If cross-compiling from Linux to Windows, adjust the path accordingly
+                // Example placeholder logic; adjust as needed
                 if (builtin.target.os.tag == .linux) {
                     break :blk b.path(b.pathJoin(&.{ cuda_path, "lib" }));
                 }
                 break :blk b.path(b.pathJoin(&.{ cuda_path, "lib", "x64" }));
             },
-            .linux => b.path(b.pathJoin(&.{ cuda_path, "lib64" })),
+            .linux => null, // Adjust if needed
             .macos => @panic("CUDA is currently not supported for MacOS"),
             else => @panic("Unsupported OS for CUDA"),
         };
-        exe.addLibraryPath(cuda_lib_path);
+        if (cuda_lib_path) |cu_path| {
+            exe.addLibraryPath(cu_path);
+        }
 
-        // CUDA libraries to link
+        // Link CUDA libraries
         const cuda_libs_to_link = [_][]const u8{
             "cuda",
             "cudart",
             "nppig",
             "npps",
         };
-
-        // Link CUDA libraries
         inline for (cuda_libs_to_link) |lib| {
             exe.linkSystemLibrary(lib);
         }
-
-        // Extend FFmpeg libraries to include CUDA-related libraries
 
         // Add CUDA configuration module
         exe.root_module.addAnonymousImport("cuda_config", .{
@@ -92,76 +76,52 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    // const ffmpeg_path = Build.LazyPath{ .cwd_relative = b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg"} ;
-    // FFmpeg library configuration
-    const ffmpeg_path = switch (target.result.os.tag) {
-        .windows => "lib/ffmpeg-windows",
-        .linux => b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg",
-        .macos => @panic("MacOS is currently not supported!"),
-        else => @panic("Unsupported operating system"),
-    };
+    // FFmpeg Configuration
 
-    // FFmpeg include paths
+    // Add FFmpeg include paths
     const ffmpeg_include_paths = [_][]const u8{
         b.pathJoin(&.{ ffmpeg_path, "include" }),
     };
-
-    // Add FFmpeg include paths
     for (ffmpeg_include_paths) |include_path| {
         exe.addIncludePath(Build.LazyPath{ .cwd_relative = include_path });
     }
 
-    // FFmpeg library names
-    const ffmpeg_libs = [_][]const u8{ "avfilter", "avcodec", "avformat", "avutil", "swscale", "avdevice", "postproc", "swresample" };
+    // FFmpeg libraries to link
+    const ffmpeg_libs = [_][]const u8{
+        "avfilter", "avcodec",  "avformat", "avutil",
+        "swscale",  "avdevice", "postproc", "swresample",
+    };
 
-    // Link FFmpeg libraries
+    // Link FFmpeg libraries based on OS
     switch (target.result.os.tag) {
         .windows => {
-            // For Windows, use static libraries
             exe.addLibraryPath(b.path(b.pathJoin(&.{ ffmpeg_path, "lib" })));
-
-            // Use the full library names
             inline for (ffmpeg_libs) |lib| {
                 exe.linkSystemLibrary(lib);
             }
 
             // Windows-specific dependencies
             const win_libs = [_][]const u8{
-                "bcrypt",
-                "secur32",
-                "ws2_32",
-                "gdi32",
-                "user32",
-                "kernel32",
-                "shell32",
-                "opengl32",
-                "comdlg32",
-                "winmm",
-                "ole32",
-                "uuid",
+                "bcrypt",   "secur32",  "ws2_32",  "gdi32",
+                "user32",   "kernel32", "shell32", "opengl32",
+                "comdlg32", "winmm",    "ole32",   "uuid",
             };
-
             for (win_libs) |lib| {
                 exe.linkSystemLibrary(lib);
             }
         },
         .linux => {
-            // For Linux, use dynamic libraries
             inline for (ffmpeg_libs) |lib| {
                 exe.linkSystemLibrary(lib);
             }
         },
         .macos => {
             @panic("MacOS is currently not supported!");
-            // For macOS, use dynamic libraries
-            // for (ffmpeg_libs) |lib| {
-            //     exe.linkSystemLibrary(lib);
-            // }
         },
         else => @panic("Unsupported operating system"),
     }
 
-    // GLAD configuration (same for all platforms)
+    // GLAD Configuration
     const glad_path = "lib/glad";
     const glad_include_path = b.path(b.pathJoin(&.{ glad_path, "include" }));
     const glad_src_path = b.path(b.pathJoin(&.{ glad_path, "src", "glad.c" }));
@@ -172,10 +132,9 @@ pub fn build(b: *std.Build) void {
         .flags = &.{"-std=c99"},
     });
 
-    // Platform-specific configuration
+    // Platform-specific GLFW Configuration
     switch (target.result.os.tag) {
         .windows => {
-            // Windows-specific configuration
             const glfw_path = "lib/glfw";
             const glfw_include_path = b.pathJoin(&.{ glfw_path, "include" });
             const glfw_lib_path = b.pathJoin(&.{ glfw_path, "lib-mingw-w64" });
@@ -186,56 +145,68 @@ pub fn build(b: *std.Build) void {
 
             // Windows system libraries
             const win_libs = [_][]const u8{
-                "gdi32",
-                "user32",
-                "kernel32",
-                "shell32",
-                "opengl32",
-                "comdlg32",
-                "winmm",
-                "ole32",
+                "gdi32",    "user32",   "kernel32", "shell32",
+                "opengl32", "comdlg32", "winmm",    "ole32",
                 "uuid",
             };
-
             for (win_libs) |lib| {
                 exe.linkSystemLibrary(lib);
             }
         },
         .linux => {
-            // Linux configuration
             exe.linkSystemLibrary("glfw");
-            exe.linkSystemLibrary("GL");
+            exe.linkSystemLibrary(getOpenGLLib(target));
             // Optional: Add X11 dependencies if needed
             exe.linkSystemLibrary("X11");
             exe.linkSystemLibrary("dl");
             exe.linkSystemLibrary("pthread");
         },
         .macos => {
-            // macOS configuration
-            exe.linkSystemLibrary("glfw");
-            exe.linkSystemLibrary("OpenGL");
-
-            const frameworks = [_][]const u8{
-                "Cocoa",
-                "IOKit",
-                "CoreFoundation",
-            };
-
-            for (frameworks) |framework| {
-                exe.linkFramework(framework);
-            }
+            @panic("MacOS is currently not supported!");
         },
         else => {
             @panic("Unsupported operating system");
         },
     }
 
+    // Link the C standard library
     exe.linkLibC();
+}
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration") orelse false;
+    const ffmpeg_path = switch (target.result.os.tag) {
+        .windows => "lib/ffmpeg-windows",
+        .linux => b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg",
+        .macos => @panic("MacOS is currently not supported!"),
+        else => @panic("Unsupported operating system"),
+    };
+
+    const name = switch (target.result.os.tag) {
+        .windows => "DroneStudio-x86_64-windows-gnu.exe",
+        .linux => "DroneStudio-x86_64-linux-gnu.exe",
+        .macos => @panic("MacOS is currently not supported!"),
+        else => @panic("Unsupported OS!"),
+    };
+
+    // Add the main executable
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Configure libraries for the main executable
+    configureLibs(exe, b, target, use_cuda, ffmpeg_path);
 
     // Install the executable
     b.installArtifact(exe);
 
-    // Run command
+    // Run command for the main executable
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -245,13 +216,17 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Add test step
+    // Add the test executable
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/main.zig"), // Adjust if your tests are in a different file
         .target = target,
         .optimize = optimize,
     });
 
+    // Configure libraries for the test executable
+    configureLibs(exe_unit_tests, b, target, use_cuda, ffmpeg_path);
+
+    // Run command for the test executable
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);

@@ -2,6 +2,9 @@ const std = @import("std");
 const libav = @import("libav.zig");
 const video = libav.video;
 const Node = @import("Node.zig");
+const ORB = @import("ORB.zig");
+const KeypointManager = ORB.KeypointManager;
+const KeypointNode = @import("Shape.zig").KeypointDebugger;
 
 const mem = std.mem;
 const fs = std.fs;
@@ -9,7 +12,7 @@ const fs = std.fs;
 const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(video.EAGAIN));
 const AVERROR_EOF = -1 * @as(c_int, @intCast(video.EOF));
 
-const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *video.struct_AVFrame) error{OutOfMemory}!void;
+const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *ORB.KeypointManager, *video.struct_AVFrame) anyerror!void;
 pub const StreamPollingConfig = struct {
     max_retry_attempts: u32 = 100,
     retry_delay_ms: u64 = 2000, // 2 seconds between retries
@@ -40,6 +43,7 @@ pub const VideoHandler = struct {
 
     allocator: mem.Allocator,
     node: *Node,
+    keypointManager: ?*KeypointManager = null,
 
     format_context: *video.AVFormatContext,
     stream_index: c_int = -1,
@@ -90,12 +94,6 @@ pub const VideoHandler = struct {
             allocator.free(sdp_file_path);
             allocator.free(tmp_dir_name);
         }
-        errdefer {
-            if (format_context_ptr != undefined) {
-                video.avformat_close_input(@ptrCast(@constCast(&format_context_ptr)));
-                video.avformat_free_context(@ptrCast(format_context_ptr));
-            }
-        }
 
         try tmp_file.writeAll(sdp_content);
 
@@ -112,6 +110,10 @@ pub const VideoHandler = struct {
 
             std.debug.print("Successfully established connection to Video Stream\n", .{});
             break;
+        }
+        errdefer {
+            video.avformat_close_input(@ptrCast(@constCast(&format_context_ptr)));
+            video.avformat_free_context(@ptrCast(format_context_ptr));
         }
 
         // If we exhausted retry attempts
@@ -381,6 +383,7 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
+        keypoint_manager: ?*KeypointManager,
     ) !std.Thread {
         const spwn_config = std.Thread.SpawnConfig{
             .allocator = std.heap.page_allocator,
@@ -394,6 +397,7 @@ pub const VideoHandler = struct {
             hw_type,
             onDecodedFrame,
             polling_config,
+            keypoint_manager,
         });
     }
 
@@ -404,6 +408,7 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
+        keypoint_manager: ?*KeypointManager,
     ) void {
         while (true) {
             var videoHandler: ?Self = null;
@@ -423,6 +428,7 @@ pub const VideoHandler = struct {
             }
 
             var handler = videoHandler.?;
+            handler.keypointManager = keypoint_manager;
             defer handler.deinit();
 
             if (!handler.is_stream_ready) {
@@ -509,7 +515,7 @@ pub const VideoHandler = struct {
             }
 
             // Invoke callback
-            try self.onDecodedFrame(self.allocator, self.node, transferred_frame);
+            try self.onDecodedFrame(self.allocator, self.node, self.keypointManager.?, transferred_frame);
         }
 
         return true;
@@ -616,12 +622,22 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
     return format_context_ptr;
 }
 
-pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *video.AVFrame) error{OutOfMemory}!void {
+pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager: *KeypointManager, frame: *video.AVFrame) !void {
     const frame_width = @as(usize, @intCast(frame.width));
     const frame_height = @as(usize, @intCast(frame.height));
 
     const y_plane = frame.data[0][0 .. @as(usize, @intCast(frame.linesize[0])) * frame_height];
     const uv_plane = frame.data[1][0 .. @as(usize, @intCast(frame.linesize[1])) * (frame_height / 2)];
+
+    var keypoints = try ORB.detectFastKeypoints(allocator, frame.data[0][0 .. @as(usize, @intCast(frame.linesize[0])) * frame_height], frame_width, frame_height, frame.linesize[0], 10, 5);
+    defer allocator.free(keypoints.items);
+    defer keypoints.clearAndFree();
+
+    // Queue keypoints for processing in render thread
+    try keypoint_manager.queueKeypoints(frame_width, frame_height, keypoints.items);
+
+    node.mutex.lock();
+    defer node.mutex.unlock();
 
     if (node.y == null) {
         node.y = try allocator.alloc(u8, frame_width * frame_height);
@@ -629,6 +645,8 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, frame: *video.AV
     if (node.uv == null) {
         node.uv = try allocator.alloc(u8, frame_width * (frame_height / 2));
     }
+
+    // std.debug.print("Frame width: {d} : Frame_height: {d} => Linewidth[0]: {d} Linewidth[1]: {d}\n", .{ frame_width, frame_height, frame.linesize[0], frame.linesize[1] });
 
     // Copy rows, skipping the padding
     for (0..frame_height) |i| {
