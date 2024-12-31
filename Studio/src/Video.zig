@@ -1,9 +1,11 @@
 const std = @import("std");
-const libav = @import("libav.zig");
+const libav = @import("bindings/libav.zig");
 const video = libav.video;
 const Node = @import("Node.zig");
 const ORB = @import("ORB.zig");
 const KeypointManager = ORB.KeypointManager;
+const CudaBinds = @import("bindings/cuda.zig");
+const CudaDetector = CudaBinds.CudaKeypointDetector;
 const KeypointNode = @import("Shape.zig").KeypointDebugger;
 
 const mem = std.mem;
@@ -196,6 +198,12 @@ pub const VideoHandler = struct {
                 return InitializationError.HardwareDeviceContextCreationFailed;
             }
             codec_context.*.hw_device_ctx = hw_device_ctx;
+        } else if (selected_hw_type == video.AV_HWDEVICE_TYPE_CUDA) {
+            // Create hardware device context for CUDA
+            if (video.av_hwdevice_ctx_create(&hw_device_ctx, video.AV_HWDEVICE_TYPE_CUDA, null, null, 0) < 0) {
+                std.debug.print("Could not create CUDA hardware device context\n", .{});
+                return InitializationError.HardwareDeviceContextCreationFailed;
+            }
         }
 
         // Open codec
@@ -220,6 +228,7 @@ pub const VideoHandler = struct {
             .polling_config = config,
             .is_stream_ready = true,
         };
+        try CudaBinds.CudaKeypointDetector.init(codec_context.*.width, codec_context.*.height);
 
         try self.initHardwareFilterGraph();
         return self;
@@ -373,6 +382,8 @@ pub const VideoHandler = struct {
         // std.debug.print("Deinitializing avformat_network...\n", .{});
         // _ = video.avformat_network_deinit();
 
+        CudaBinds.CudaKeypointDetector.deinit();
+
         std.debug.print("Successfully Destroyed VideoHandler\n", .{});
     }
 
@@ -502,20 +513,13 @@ pub const VideoHandler = struct {
                 return false;
             }
 
-            // Transfer frame if using hardware decoding
-            const transferred_frame = video.av_frame_alloc() orelse {
-                std.debug.print("Failed to allocate transferred frame\n", .{});
-                return false;
-            };
-            defer video.av_frame_free(@ptrCast(@constCast(&transferred_frame)));
-
-            if (video.av_hwframe_transfer_data(transferred_frame, self.hw_frame, 0) < 0) {
-                std.debug.print("Failed to transfer frame data\n", .{});
+            const hw_frames_ctx = @as(*video.AVHWFramesContext, @ptrCast(@alignCast(self.hw_frame.hw_frames_ctx.*.data)));
+            if (hw_frames_ctx.format != video.AV_PIX_FMT_CUDA) {
+                std.debug.print("Unexpected hardware frame format\n", .{});
                 continue;
             }
 
-            // Invoke callback
-            try self.onDecodedFrame(self.allocator, self.node, self.keypointManager.?, transferred_frame);
+            try self.onDecodedFrame(self.allocator, self.node, self.keypointManager.?, self.hw_frame);
         }
 
         return true;
@@ -623,44 +627,74 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
 }
 
 pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager: *KeypointManager, frame: *video.AVFrame) !void {
-    const frame_width = @as(usize, @intCast(frame.width));
-    const frame_height = @as(usize, @intCast(frame.height));
+    const frame_width = @as(u32, @intCast(frame.width));
+    const frame_height = @as(u32, @intCast(frame.height));
 
-    const y_plane = frame.data[0][0 .. @as(usize, @intCast(frame.linesize[0])) * frame_height];
-    const uv_plane = frame.data[1][0 .. @as(usize, @intCast(frame.linesize[1])) * (frame_height / 2)];
+    var keypoints = try allocator.alloc(CudaBinds.KeyPoint, 250000);
+    defer allocator.free(keypoints);
 
-    var keypoints = try ORB.detectFastKeypoints(allocator, frame.data[0][0 .. @as(usize, @intCast(frame.linesize[0])) * frame_height], frame_width, frame_height, frame.linesize[0], 10, 5);
-    defer allocator.free(keypoints.items);
-    defer keypoints.clearAndFree();
+    const num_keypoints = try CudaDetector.detectKeypoints(
+        frame.data[0], // This is already a CUDA device pointer
+        frame.data[1],
+        frame_width,
+        frame_height,
+        @as(u32, @intCast(frame.linesize[0])),
+        @as(u32, @intCast(frame.linesize[1])),
+        10, // threshold
+        keypoints,
+    );
+
+    // _ = num_keypoints;
+    // _ = keypoint_manager;
 
     // Queue keypoints for processing in render thread
-    try keypoint_manager.queueKeypoints(frame_width, frame_height, keypoints.items);
+    try keypoint_manager.queueKeypoints(frame_width, frame_height, keypoints[0..num_keypoints]);
+
+    const sw_frame = video.av_frame_alloc() orelse {
+        std.debug.print("Failed to allocate transferred frame\n", .{});
+        return error.FrameAllocationFailed;
+    };
+    defer video.av_frame_free(@ptrCast(@constCast(&sw_frame)));
+
+    if (video.av_hwframe_transfer_data(sw_frame, frame, 0) < 0) {
+        std.debug.print("Failed to transfer frame data\n", .{});
+        return error.TransferFailed;
+    }
+
+    const sw_frame_width = @as(usize, @intCast(sw_frame.*.width));
+    const sw_frame_height = @as(usize, @intCast(sw_frame.*.height));
+
+    const y_plane = sw_frame.*.data[0][0 .. @as(usize, @intCast(sw_frame.*.linesize[0])) * sw_frame_height];
+    const uv_plane = sw_frame.*.data[1][0 .. @as(usize, @intCast(sw_frame.*.linesize[1])) * (sw_frame_height / 2)];
 
     node.mutex.lock();
     defer node.mutex.unlock();
 
+    std.debug.print("SW frame dim: {d}x{d}\n", .{ sw_frame_width, sw_frame_height });
+    std.debug.print("SW frame linesize: y: {d} uv:{d}\n", .{ sw_frame.*.linesize[0], sw_frame.*.linesize[1] });
+
     if (node.y == null) {
-        node.y = try allocator.alloc(u8, frame_width * frame_height);
+        node.y = try allocator.alloc(u8, sw_frame_width * sw_frame_height);
     }
     if (node.uv == null) {
-        node.uv = try allocator.alloc(u8, frame_width * (frame_height / 2));
+        node.uv = try allocator.alloc(u8, sw_frame_width * (sw_frame_height / 2));
     }
 
     // std.debug.print("Frame width: {d} : Frame_height: {d} => Linewidth[0]: {d} Linewidth[1]: {d}\n", .{ frame_width, frame_height, frame.linesize[0], frame.linesize[1] });
 
     // Copy rows, skipping the padding
-    for (0..frame_height) |i| {
-        const src_row = y_plane[i * @as(usize, @intCast(frame.linesize[0])) ..][0..frame_width];
-        @memcpy(node.y.?[i * frame_width ..][0..frame_width], src_row);
+    for (0..sw_frame_height) |i| {
+        const src_row = y_plane[i * @as(usize, @intCast(sw_frame.*.linesize[0])) ..][0..sw_frame_width];
+        @memcpy(node.y.?[i * sw_frame_width ..][0..sw_frame_width], src_row);
     }
 
     // // Similar for UV plane
-    for (0..(frame_height / 2)) |i| {
-        const src_row = uv_plane[i * @as(usize, @intCast(frame.linesize[1])) ..][0..frame_width];
-        @memcpy(node.uv.?[i * frame_width ..][0..frame_width], src_row);
+    for (0..(sw_frame_height / 2)) |i| {
+        const src_row = uv_plane[i * @as(usize, @intCast(sw_frame.*.linesize[1])) ..][0..sw_frame_width];
+        @memcpy(node.uv.?[i * sw_frame_width ..][0..sw_frame_width], src_row);
     }
 
-    node.width = @intCast(frame_width);
-    node.height = @intCast(frame_height);
+    node.width = @intCast(sw_frame_width);
+    node.height = @intCast(sw_frame_height);
     node.texture_updated = true;
 }

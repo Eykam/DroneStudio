@@ -17,6 +17,7 @@ fn configureLibs(
     exe: *Build.Step.Compile,
     b: *std.Build,
     target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
     use_cuda: bool,
     ffmpeg_path: []const u8,
 ) void {
@@ -64,6 +65,21 @@ fn configureLibs(
         inline for (cuda_libs_to_link) |lib| {
             exe.linkSystemLibrary(lib);
         }
+
+        const cuda_obj = b.addSystemCommand(&.{ "nvcc", "-O3", "--compiler-options", "'-fPIC'", "-c", "lib/kernels/cuda_keypoint_detector.cu", "-o", "cuda_keypoint_detector.o" });
+
+        // Create object file from CUDA compilation
+        const cuda_artifact = b.addObject(.{
+            .name = "cuda_keypoint_detector",
+            .root_source_file = null,
+            .target = target,
+            .optimize = optimize,
+        });
+        cuda_artifact.addObjectFile(b.path(b.pathJoin(&.{"cuda_keypoint_detector.o"})));
+        cuda_artifact.step.dependOn(&cuda_obj.step);
+
+        // Add CUDA paths and libraries to your executable
+        exe.addObjectFile(cuda_artifact.getEmittedBin());
 
         // Add CUDA configuration module
         exe.root_module.addAnonymousImport("cuda_config", .{
@@ -201,7 +217,7 @@ pub fn build(b: *std.Build) void {
     });
 
     // Configure libraries for the main executable
-    configureLibs(exe, b, target, use_cuda, ffmpeg_path);
+    configureLibs(exe, b, target, optimize, use_cuda, ffmpeg_path);
 
     // Install the executable
     b.installArtifact(exe);
@@ -224,7 +240,7 @@ pub fn build(b: *std.Build) void {
     });
 
     // Configure libraries for the test executable
-    configureLibs(exe_unit_tests, b, target, use_cuda, ffmpeg_path);
+    configureLibs(exe_unit_tests, b, target, optimize, use_cuda, ffmpeg_path);
 
     // Run command for the test executable
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);

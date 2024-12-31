@@ -1,6 +1,8 @@
 const std = @import("std");
 const Node = @import("Node.zig");
 const KeypointDebugger = @import("Shape.zig").KeypointDebugger;
+const CudaBinds = @import("bindings/cuda.zig");
+const KeyPoint = CudaBinds.KeyPoint;
 
 const Frame = struct {
     timestamp: u64,
@@ -14,29 +16,6 @@ const FramePair = struct {
     left: Frame,
     right: Frame,
 };
-
-const KeyPoint = struct {
-    x: f32,
-    y: f32,
-};
-
-// Step 1: Frame Synchronization
-// fn synchronizeFrames(leftFrames: []Frame, rightFrames: []Frame) ![]FramePair {
-//     // Implementation of frame synchronization
-// }
-
-// Step 2: Grayscale Conversion
-fn yuv420ToGrayscale(frame: Frame, allocator: *std.mem.Allocator) ![]u8 {
-    var grayscale = try allocator.alloc(u8, frame.width * frame.height);
-    var dest_offset: usize = 0;
-    for (0..frame.height) |row| {
-        const row_start = row * frame.linesize;
-        const row_end = row_start + frame.width;
-        std.mem.copy(u8, grayscale[dest_offset .. dest_offset + frame.width], frame.y[row_start..row_end]);
-        dest_offset += frame.width;
-    }
-    return grayscale;
-}
 
 // Step 3: ORB Implementation
 
@@ -60,72 +39,72 @@ const fast_offsets = [_]i32{
     3,  -1,
 };
 
-pub fn detectFastKeypoints(
-    allocator: std.mem.Allocator,
-    image: []const u8,
-    width: usize,
-    height: usize,
-    linesize: c_int,
-    threshold: u8,
-    min_consecutive: u8,
-) !std.ArrayListAligned(KeyPoint, null) {
-    var keypoints = std.ArrayList(KeyPoint).init(allocator);
+// pub fn detectFastKeypoints(
+//     allocator: std.mem.Allocator,
+//     image: []const u8,
+//     width: usize,
+//     height: usize,
+//     linesize: c_int,
+//     threshold: u8,
+//     min_consecutive: u8,
+// ) !std.ArrayListAligned(KeyPoint, null) {
+//     var keypoints = std.ArrayList(KeyPoint).init(allocator);
 
-    const y_start = 3;
-    for (y_start..(height - 3)) |y| {
-        const x_start = 3;
-        for (x_start..(width - 3)) |x| {
-            const I_c = image[y * @as(usize, @intCast(linesize)) + x];
-            var neighborhood = [_]u8{0} ** 16;
-            for (0..(fast_offsets.len / 2)) |i| {
-                const dx = fast_offsets[2 * i];
-                const dy = fast_offsets[2 * i + 1];
-                const nx = @as(usize, @intCast(@as(i32, @intCast(x)) + dx));
-                const ny = @as(usize, @intCast(@as(i32, @intCast(y)) + dy));
-                neighborhood[i] = image[ny * @as(usize, @intCast(linesize)) + nx];
-            }
-            if (hasConsecutivePixels(neighborhood, I_c, threshold, min_consecutive)) {
-                try keypoints.append(.{ .x = @floatFromInt(x), .y = @floatFromInt(y) });
-            }
-        }
-    }
+//     const y_start = 3;
+//     for (y_start..(height - 3)) |y| {
+//         const x_start = 3;
+//         for (x_start..(width - 3)) |x| {
+//             const I_c = image[y * @as(usize, @intCast(linesize)) + x];
+//             var neighborhood = [_]u8{0} ** 16;
+//             for (0..(fast_offsets.len / 2)) |i| {
+//                 const dx = fast_offsets[2 * i];
+//                 const dy = fast_offsets[2 * i + 1];
+//                 const nx = @as(usize, @intCast(@as(i32, @intCast(x)) + dx));
+//                 const ny = @as(usize, @intCast(@as(i32, @intCast(y)) + dy));
+//                 neighborhood[i] = image[ny * @as(usize, @intCast(linesize)) + nx];
+//             }
+//             if (hasConsecutivePixels(neighborhood, I_c, threshold, min_consecutive)) {
+//                 try keypoints.append(.{ .x = @floatFromInt(x), .y = @floatFromInt(y) });
+//             }
+//         }
+//     }
 
-    return keypoints;
-}
+//     return keypoints;
+// }
 
-fn hasConsecutivePixels(
-    neighborhood: [16]u8,
-    I_c: u8,
-    threshold: u8,
-    min_consecutive: u8,
-) bool {
-    const threshold_high: u8 = @intCast(@min(@as(u16, @intCast(I_c)) + @as(u16, @intCast(threshold)), 255));
-    const threshold_low: u8 = @intCast(@max(@as(i16, @intCast(I_c)) - @as(i16, @intCast(threshold)), 0));
+// fn hasConsecutivePixels(
+//     neighborhood: [16]u8,
+//     I_c: u8,
+//     threshold: u8,
+//     min_consecutive: u8,
+// ) bool {
+//     const threshold_high: u8 = @intCast(@min(@as(u16, @intCast(I_c)) + @as(u16, @intCast(threshold)), 255));
+//     const threshold_low: u8 = @intCast(@max(@as(i16, @intCast(I_c)) - @as(i16, @intCast(threshold)), 0));
 
-    var doubled_neighborhood = neighborhood ++ neighborhood;
-    var count_bright: u8 = 0;
-    var count_dark: u8 = 0;
+//     var doubled_neighborhood = neighborhood ++ neighborhood;
+//     var count_bright: u8 = 0;
+//     var count_dark: u8 = 0;
 
-    for (doubled_neighborhood[0..16]) |pixel| {
-        if (pixel > threshold_high) {
-            count_bright += 1;
-            count_dark = 0;
-            if (count_bright >= min_consecutive) {
-                return true;
-            }
-        } else if (pixel < threshold_low) {
-            count_dark += 1;
-            count_bright = 0;
-            if (count_dark >= min_consecutive) {
-                return true;
-            }
-        } else {
-            count_bright = 0;
-            count_dark = 0;
-        }
-    }
-    return false;
-}
+//     for (doubled_neighborhood[0..16]) |pixel| {
+//         if (pixel > threshold_high) {
+//             count_bright += 1;
+//             count_dark = 0;
+//             if (count_bright >= min_consecutive) {
+//                 return true;
+//             }
+//         } else if (pixel < threshold_low) {
+//             count_dark += 1;
+//             count_bright = 0;
+//             if (count_dark >= min_consecutive) {
+//                 return true;
+//             }
+//         } else {
+//             count_bright = 0;
+//             count_dark = 0;
+//         }
+//     }
+//     return false;
+// }
 
 // // Orientation Assignment
 // fn assignOrientations(image: []u8, keypoints: []KeyPoint) !void {
@@ -156,27 +135,32 @@ pub const KeypointManager = struct {
         resolution: u32,
     };
 
+    gpa: std.heap.GeneralPurposeAllocator(.{}),
     arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
     pending_keypoints: ?[]KeypointData,
     mutex: std.Thread.Mutex,
     target_node: *Node,
 
-    pub fn init(allocator: std.mem.Allocator, target_node: *Node) Self {
-        // var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
-        return Self{
-            .arena = std.heap.ArenaAllocator.init(allocator),
-            .allocator = allocator,
-            .pending_keypoints = null,
-            .mutex = std.Thread.Mutex{},
-            .target_node = target_node,
-        };
+    pub fn init(allocator: std.mem.Allocator, target_node: *Node) !*Self {
+        var self = try allocator.create(KeypointManager);
+
+        self.gpa = std.heap.GeneralPurposeAllocator(.{}).init;
+        self.allocator = self.gpa.allocator();
+        self.arena = std.heap.ArenaAllocator.init(self.allocator);
+        self.pending_keypoints = null;
+        self.mutex = std.Thread.Mutex{};
+        self.target_node = target_node;
+
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
         if (self.pending_keypoints) |keypoints| {
             self.allocator.free(keypoints);
         }
+
+        self.arena.deinit();
     }
 
     // Called from video thread
@@ -195,7 +179,7 @@ pub const KeypointManager = struct {
             const worldPos = convertImageToWorldCoords(kp.x, kp.y, @floatFromInt(frame_width), @floatFromInt(frame_height));
             new_keypoints[i] = KeypointData{
                 .pos = worldPos,
-                .radius = 0.05,
+                .radius = 0.025,
                 .resolution = 1,
             };
         }
@@ -217,6 +201,8 @@ pub const KeypointManager = struct {
             }
 
             _ = self.arena.reset(.free_all);
+            // self.arena = std.heap.ArenaAllocator.init(self.allocator);
+
             self.target_node.children.clearRetainingCapacity();
             std.debug.print("Children length after cleanup: {d} \n", .{self.target_node.children.items.len});
 

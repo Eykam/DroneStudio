@@ -6,7 +6,7 @@ const Node = @import("Node.zig");
 const Vec3 = Math.Vec3;
 const File = std.fs.File;
 const Camera = @import("Camera.zig");
-const gl = @import("gl.zig");
+const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const glad = gl.glad;
 

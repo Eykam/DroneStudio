@@ -11,17 +11,14 @@ const Secrets = _Secrets{};
 const UDP = @import("UDP.zig");
 const Sensors = @import("Sensors.zig");
 const Video = @import("Video.zig");
-const gl = @import("gl.zig");
+const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const KeypointManager = @import("ORB.zig").KeypointManager;
 
 pub fn main() !void {
-    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    // defer arena.deinit();
-    // const alloc = arena.allocator();
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer if (gpa.deinit() == .leak) std.posix.exit(1);
-    const alloc = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
 
     // Initialize GLFW
     if (glfw.glfwInit() == 0) {
@@ -66,7 +63,7 @@ pub fn main() !void {
     // try canvasNode.addChild(canvasNodeLeft);
     try canvasNode.addChild(canvasNodeRight);
 
-    var keypoint_manager = KeypointManager.init(alloc, canvasNodeRight);
+    var keypoint_manager = try KeypointManager.init(alloc, canvasNodeRight);
     defer keypoint_manager.deinit();
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
@@ -75,8 +72,8 @@ pub fn main() !void {
     try droneNode.addChild(boxNode);
     try droneNode.addChild(droneAxis);
 
-    const circleTest = try Shape.KeypointDebugger.init(alloc, [_]f32{ 0, 0, 0.501 }, null, null);
-    try droneNode.addChild(circleTest);
+    // const circleTest = try Shape.KeypointDebugger.init(alloc, [_]f32{ 0, 0, 0.501 }, null, null);
+    // try droneNode.addChild(circleTest);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null, null, null);
@@ -120,7 +117,7 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        &keypoint_manager,
+        keypoint_manager,
     );
 
     // var video_handler_left = try Video.VideoHandler.start(

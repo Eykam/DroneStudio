@@ -3,7 +3,7 @@ const std = @import("std");
 const Math = @import("Math.zig");
 const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
-const gl = @import("gl.zig");
+const gl = @import("bindings/gl.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
 const glad = gl.glad;
@@ -16,14 +16,14 @@ pub const Triangle = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, position: ?Vec3, _vertices: ?[]Vertex) !*Node {
-        const vertices: []Vertex = try allocator.dupe(Vertex, _vertices orelse Self.default(position));
-        defer allocator.free(vertices);
+        const vertices: []Vertex = try allocator.dupe(Vertex, _vertices orelse &Self.default(position));
 
-        const node = try Node.init(allocator, vertices, null, null);
+        const draw = Mesh.gen_draw(comptime glad.GL_TRIANGLES);
+        const node = try Node.init(allocator, vertices, null, draw);
         return node;
     }
 
-    pub inline fn default(origin: ?Vec3) []Vertex {
+    pub inline fn default(origin: ?Vec3) [3]Vertex {
         var pos: Vec3 = undefined;
 
         if (origin) |position| {
@@ -36,7 +36,7 @@ pub const Triangle = struct {
             };
         }
 
-        var vertices = [_]Vertex{
+        const vertices = [_]Vertex{
             Vertex{
                 .position = .{ 0.0 + pos.x, 0.5 + pos.y, 0.0 + pos.z },
                 .color = .{ 1.0, 0.0, 0.0 },
@@ -51,7 +51,7 @@ pub const Triangle = struct {
             },
         };
 
-        return &vertices;
+        return vertices;
     }
 };
 
@@ -65,16 +65,15 @@ pub const Box = struct {
         _ = depth;
 
         const defaults = try Self.default();
-        const vertices = try allocator.dupe(Vertex, defaults.vertices);
-        defer allocator.free(vertices);
-        const indices = try allocator.dupe(u32, defaults.indices);
-        defer allocator.free(indices);
+        const vertices = try allocator.dupe(Vertex, &defaults.vertices);
+        const indices = try allocator.dupe(u32, &defaults.indices);
 
-        const node = try Node.init(allocator, vertices, indices, null);
+        const draw = Mesh.gen_draw(comptime glad.GL_TRIANGLES);
+        const node = try Node.init(allocator, vertices, indices, draw);
         return node;
     }
 
-    pub fn default() !struct { vertices: []Vertex, indices: []u32 } {
+    pub fn default() !struct { vertices: [4 * 6]Vertex, indices: [6 * 2 * 3]u32 } {
         // (4 vertices per face * 6 faces)
 
         const front_color = [3]f32{ 0.9, 0.9, 0.9 }; // Lightest gray (front)
@@ -84,7 +83,7 @@ pub const Box = struct {
         const bottom_color = [3]f32{ 0.7, 0.7, 0.7 }; // Darker for bottom
         const top_color = [3]f32{ 0.85, 0.85, 0.85 }; // Lighter for top
 
-        const vertices: []Vertex = @constCast(&[_]Vertex{
+        const vertices = [_]Vertex{
             // Front face (0-3)
             .{ .position = .{ -0.5, -0.5, 0.5 }, .color = front_color },
             .{ .position = .{ 0.5, -0.5, 0.5 }, .color = front_color },
@@ -120,11 +119,11 @@ pub const Box = struct {
             .{ .position = .{ 0.5, 0.5, 0.5 }, .color = top_color },
             .{ .position = .{ 0.5, 0.5, -0.5 }, .color = top_color },
             .{ .position = .{ -0.5, 0.5, -0.5 }, .color = top_color },
-        });
+        };
 
         // 6 faces * 2 triangles * 3 vertices
-        const indices: []u32 =
-            @constCast(&[_]u32{
+        const indices =
+            [_]u32{
             // Front face
             0,  1,  2,
             2,  3,  0,
@@ -148,7 +147,7 @@ pub const Box = struct {
             // Top face
             20, 21, 22,
             22, 23, 20,
-        });
+        };
 
         return .{
             .vertices = vertices,
@@ -167,7 +166,6 @@ pub const Axis = struct {
             position orelse default_pos,
             length orelse 5.0,
         );
-        defer allocator.free(vertices);
 
         var node = try Node.init(allocator, vertices, null, Self.draw);
         node.mesh.?.drawType = glad.GL_LINES;
@@ -311,7 +309,6 @@ pub const Grid = struct {
             gridSize orelse 1000,
             spacing orelse 1.0,
         );
-        defer allocator.free(vertices);
 
         var node = try Node.init(allocator, vertices, null, Self.draw);
         node.mesh.?.drawType = glad.GL_LINES;
@@ -466,9 +463,7 @@ pub const TexturedPlane = struct {
             length orelse 1.0,
         );
         const vertices: []Vertex = try allocator.dupe(Vertex, &plane_params.vertices);
-        defer allocator.free(vertices);
         const indices: []u32 = try allocator.dupe(u32, &plane_params.indices);
-        defer allocator.free(indices);
 
         const node = try Node.init(allocator, vertices, indices, Self.draw);
 

@@ -2,7 +2,7 @@ const std = @import("std");
 const Mesh = @import("Mesh.zig");
 const Math = @import("Math.zig");
 const Scene = @import("Pipeline.zig").Scene;
-const gl = @import("gl.zig");
+const gl = @import("bindings/gl.zig");
 const Quaternion = Math.Quaternion;
 const Vec3 = Math.Vec3;
 const glad = gl.glad;
@@ -36,7 +36,7 @@ scale: [3]f32 = .{ 1, 1, 1 },
 local_transform: [16]f32 = Math.identity(),
 world_transform: [16]f32 = Math.identity(),
 
-pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indicies: ?[]u32, draw: ?Mesh.draw) !*Self {
+pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?[]u32, draw: ?Mesh.draw) !*Self {
     var node_arena = try allocator.create(std.heap.ArenaAllocator);
     node_arena.* = std.heap.ArenaAllocator.init(allocator);
     const node_allocator = node_arena.allocator();
@@ -44,7 +44,7 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indicies: 
     var mesh_ptr: ?*Mesh = null;
 
     if (_vertices) |vertices| {
-        mesh_ptr = try Mesh.init(node_allocator, vertices, _indicies, draw);
+        mesh_ptr = try Mesh.init(node_allocator, vertices, _indices, null);
     }
 
     const node_ptr = try node_allocator.create(Self);
