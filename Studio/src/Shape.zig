@@ -4,6 +4,7 @@ const Math = @import("Math.zig");
 const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const gl = @import("bindings/gl.zig");
+const Debug = @import("Debug.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
 const glad = gl.glad;
@@ -579,82 +580,147 @@ pub const TexturedPlane = struct {
     }
 };
 
-pub const KeypointDebugger = struct {
+pub const InstancedKeypointDebugger = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: [3]f32, radius: ?f32, resolution: ?u32) !*Node {
+    pub const Instance = struct {
+        position: [3]f32,
+        color: [3]f32 = .{ 1.0, 0.0, 0.0 }, // Default to red
+    };
+
+    pub fn init(allocator: std.mem.Allocator, radius: ?f32, resolution: ?u32, _instances: []const Instance) !*Node {
+        // Generate the shared circle mesh if it doesn't exist
+        const instances = try allocator.dupe(Instance, _instances);
+
         const vertices = try Self.generateVertices(
             allocator,
-            pos,
+            .{ 0, 0, 0 }, // Center position - will be offset by instance data
             radius orelse 0.05,
             @max(1, resolution orelse 1),
         );
 
         const node = try Node.init(allocator, vertices, null, Self.draw);
+        const mesh = node.mesh.?;
+
+        // Set up instance attributes in VAO
+        glad.glBindVertexArray(mesh.meta.VAO);
+
+        // Bind and set up regular vertex buffer (VBO)
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
+
+        // Position attribute (location = 0)
+        glad.glEnableVertexAttribArray(0);
+        glad.glVertexAttribPointer(
+            0,
+            3,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            @sizeOf(Vertex),
+            null,
+        );
+
+        // Color attribute (location = 1)
+        const vertex_color_offset = @offsetOf(Vertex, "color");
+        glad.glEnableVertexAttribArray(1);
+        glad.glVertexAttribPointer(
+            1,
+            3,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            @sizeOf(Vertex),
+            @ptrFromInt(vertex_color_offset),
+        );
+
+        // Create instance buffer
+        var instance_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &instance_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(instances.len * @sizeOf(Instance)),
+            instances.ptr,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        // Position offset (location = 3)
+        glad.glEnableVertexAttribArray(3);
+        glad.glVertexAttribPointer(
+            3,
+            3,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            @sizeOf(Instance),
+            null,
+        );
+        glad.glVertexAttribDivisor(3, 1); // Move to next instance position for each instance
+
+        // Color (location = 4)
+        const color_offset = @offsetOf(Instance, "color");
+        glad.glEnableVertexAttribArray(4);
+        glad.glVertexAttribPointer(
+            4,
+            3,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            @sizeOf(Instance),
+            @ptrFromInt(color_offset),
+        );
+        glad.glVertexAttribDivisor(4, 1);
+
+        node.instance_data = .{
+            .buffer = instance_buffer,
+            .count = instances.len,
+        };
+
         return node;
     }
 
     pub fn draw(mesh: *Mesh) void {
-        // Debug check mesh state
-        if (mesh.vertices.len == 0 or mesh.vertices.len > 10000) { // reasonable maximum
-            std.debug.print("Invalid vertex count: {}\n", .{mesh.vertices.len});
-            return;
+        std.debug.print("Calling keypoint draw\n", .{});
+        if (mesh.node) |node| {
+            // Debug checks
+            if (mesh.vertices.len == 0 or mesh.vertices.len > 10000) {
+                std.debug.print("Invalid vertex count: {}\n", .{mesh.vertices.len});
+                return;
+            }
+
+            std.debug.print("Checking keypoint scene\n", .{});
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 1));
+            }
+
+            std.debug.print("Keypoint draw call\n", .{});
+
+            // OpenGL state setup
+            glad.glEnable(glad.GL_DEPTH_TEST);
+            glad.glDepthFunc(glad.GL_LEQUAL);
+            glad.glEnable(glad.GL_LINE_SMOOTH);
+            glad.glHint(glad.GL_LINE_SMOOTH_HINT, glad.GL_NICEST);
+            glad.glEnable(glad.GL_BLEND);
+            glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
+            glad.glLineWidth(3.0);
+            Debug.glCheckError("Keypoint instance buffer");
+
+            // Bind VAO and VBO
+            glad.glBindVertexArray(mesh.meta.VAO);
+            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, node.instance_data.?.buffer);
+
+            // Draw instanced
+            const vertex_count: c_int = @intCast(mesh.vertices.len);
+            std.debug.print("Instance count {d}", .{node.instance_data.?.count});
+            std.debug.print("Rendering {} Instances of Keypoints\n", .{node.instance_data.?.count});
+            glad.glDrawArraysInstanced(glad.GL_LINE_LOOP, 0, vertex_count, @intCast(node.instance_data.?.count));
+
+            // Reset state
+            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+            glad.glBindVertexArray(0);
+            glad.glDisable(glad.GL_BLEND);
+            glad.glDisable(glad.GL_LINE_SMOOTH);
+
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 0));
+            }
         }
-
-        // std.debug.print("Drawing keypoint with {} vertices\n", .{mesh.vertices.len});
-
-        // OpenGL state setup
-        glad.glEnable(glad.GL_DEPTH_TEST);
-        glad.glDepthFunc(glad.GL_LEQUAL);
-        glad.glEnable(glad.GL_LINE_SMOOTH);
-        glad.glHint(glad.GL_LINE_SMOOTH_HINT, glad.GL_NICEST);
-        glad.glEnable(glad.GL_BLEND);
-        glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
-        glad.glLineWidth(3.0);
-        glad.glEnable(glad.GL_POLYGON_OFFSET_LINE);
-        glad.glPolygonOffset(-1.0, -1.0);
-
-        // Verify VAO and VBO
-        if (mesh.meta.VAO == 0 or mesh.meta.VBO == 0) {
-            std.debug.print("Error: Invalid VAO or VBO\n", .{});
-            return;
-        }
-
-        // Bind buffers
-        glad.glBindVertexArray(mesh.meta.VAO);
-        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
-
-        // Debug check buffer binding
-        // const current_vao = glad.glGetvb(glad.GL_VERTEX_ARRAY_BINDING);
-        // const current_vbo = glad.glGetInteger(glad.GL_ARRAY_BUFFER_BINDING);
-        // std.debug.print("Current VAO: {}, Current VBO: {}\n", .{ current_vao, current_vbo });
-
-        // Setup vertex attributes with error checking
-        glad.glVertexAttribPointer(0, 3, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), null);
-        glad.glEnableVertexAttribArray(0);
-
-        const color_offset = @offsetOf(Vertex, "color");
-        glad.glVertexAttribPointer(1, 3, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(color_offset));
-        glad.glEnableVertexAttribArray(1);
-
-        // Draw with explicit vertex count
-        const vertex_count: c_int = @intCast(mesh.vertices.len);
-        // std.debug.print("Drawing with {} vertices\n", .{vertex_count});
-        glad.glDrawArrays(glad.GL_LINE_LOOP, 0, vertex_count);
-
-        // Check for OpenGL errors
-        const err = glad.glGetError();
-        if (err != glad.GL_NO_ERROR) {
-            std.debug.print("OpenGL error in draw: 0x{x}\n", .{err});
-        }
-
-        // Cleanup
-        glad.glDisableVertexAttribArray(0);
-        glad.glDisableVertexAttribArray(1);
-        glad.glBindVertexArray(0);
-        glad.glDisable(glad.GL_POLYGON_OFFSET_LINE);
-        glad.glDisable(glad.GL_BLEND);
-        glad.glDisable(glad.GL_LINE_SMOOTH);
     }
 
     pub fn generateVertices(alloc: std.mem.Allocator, pos: [3]f32, radius: f32, resolution: u32) ![]Vertex {

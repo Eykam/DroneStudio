@@ -28,6 +28,10 @@ uvTextureUnit: c_int = 0,
 width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
+instance_data: ?struct {
+    buffer: u32,
+    count: usize,
+} = null,
 
 // Transformation properties
 position: [3]f32 = .{ 0, 0, 0 },
@@ -42,9 +46,11 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?
     const node_allocator = node_arena.allocator();
 
     var mesh_ptr: ?*Mesh = null;
+    var draw_fn: ?Mesh.draw = draw;
 
     if (_vertices) |vertices| {
-        mesh_ptr = try Mesh.init(node_allocator, vertices, _indices, null);
+        mesh_ptr = try Mesh.init(node_allocator, vertices, _indices, draw);
+        draw_fn = mesh_ptr.?._draw;
     }
 
     const node_ptr = try node_allocator.create(Self);
@@ -54,7 +60,7 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?
         .backing_allocator = allocator,
         .allocator = node_allocator,
         .mesh = mesh_ptr,
-        ._update = draw,
+        ._update = draw_fn,
         .children = try std.ArrayList(*Self).initCapacity(node_allocator, 0),
     };
 
@@ -132,10 +138,8 @@ pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
     self.uvTextureUnit = scene.texGen.generateID();
     // std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
 
-    if (self.children.items.len > 0) {
-        for (self.children.items) |child| {
-            child.addSceneRecursively(scene);
-        }
+    for (self.children.items) |child| {
+        child.addSceneRecursively(scene);
     }
 }
 

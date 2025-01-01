@@ -64,6 +64,7 @@ pub fn main() !void {
     try canvasNode.addChild(canvasNodeRight);
 
     var keypoint_manager = try KeypointManager.init(alloc, canvasNodeRight);
+
     defer keypoint_manager.deinit();
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
@@ -71,9 +72,6 @@ pub fn main() !void {
     droneNode.setPosition(0, 0.5, 0);
     try droneNode.addChild(boxNode);
     try droneNode.addChild(droneAxis);
-
-    // const circleTest = try Shape.KeypointDebugger.init(alloc, [_]f32{ 0, 0, 0.501 }, null, null);
-    // try droneNode.addChild(circleTest);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null, null, null);
@@ -109,6 +107,7 @@ pub fn main() !void {
     try imu_server.start(pose_interface);
 
     try Video.initializeFFmpegNetwork();
+    defer Video.deinitFFmpegNetwork();
 
     var video_handler_right = try Video.VideoHandler.start(
         alloc,
@@ -119,6 +118,7 @@ pub fn main() !void {
         null,
         keypoint_manager,
     );
+    defer video_handler_right.join();
 
     // var video_handler_left = try Video.VideoHandler.start(
     //     alloc,
@@ -129,6 +129,7 @@ pub fn main() !void {
     //     null,
     //     null,
     // );
+    //defer video_handler_left.join();
 
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -148,10 +149,6 @@ pub fn main() !void {
         scene.render(window);
         try keypoint_manager.update();
     }
-
-    video_handler_right.join();
-    // video_handler_left.join();
-    Video.deinitFFmpegNetwork();
 }
 
 test {}

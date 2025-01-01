@@ -75,7 +75,7 @@ pub const VideoHandler = struct {
     ) !Self {
         const config = polling_config orelse StreamPollingConfig{};
 
-        // video.av_log_set_level(video.AV_LOG_DEBUG);
+        video.av_log_set_level(video.AV_LOG_QUIET);
 
         const start_time = std.time.milliTimestamp();
         var attempts: u32 = 0;

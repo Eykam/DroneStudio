@@ -107,16 +107,26 @@ fn initGL(self: *Self) !void {
 
     // Setup vertex attributes
     // Position attribute
-    glad.glVertexAttribPointer(0, // location
+    glad.glVertexAttribPointer(
+        0, // location
         3, // size (vec3)
-        glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), null);
+        glad.GL_FLOAT,
+        glad.GL_FALSE,
+        @sizeOf(Vertex),
+        null,
+    );
     glad.glEnableVertexAttribArray(0);
 
     // Color attribute
     const color_offset = @offsetOf(Vertex, "color");
-    glad.glVertexAttribPointer(1, // location
+    glad.glVertexAttribPointer(
+        1, // location
         3, // size (vec3)
-        glad.GL_FLOAT, glad.GL_FALSE, @sizeOf(Vertex), @ptrFromInt(color_offset));
+        glad.GL_FLOAT,
+        glad.GL_FALSE,
+        @sizeOf(Vertex),
+        @ptrFromInt(color_offset),
+    );
     glad.glEnableVertexAttribArray(1);
 
     // Verify the attributes are enabled

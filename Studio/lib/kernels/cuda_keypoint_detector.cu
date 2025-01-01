@@ -43,10 +43,10 @@ __global__ void detectFASTKeypoints(
         if (pixel > center + threshold) brighter++;
         else if (pixel < center - threshold) darker++;
         
-        if (i >= 5 && brighter == 0 && darker == 0) return;
+        if (i >= 10 && brighter == 0 && darker == 0) return;
     }
     
-    if (brighter >= 12 || darker >= 12) {
+    if (brighter >= 7 || darker >= 7) {
         const int idx = atomicAdd(keypoint_count, 1);
         if (idx < max_keypoints) {
             keypoints[idx] = {static_cast<float>(x), static_cast<float>(y)};

@@ -39,9 +39,10 @@ pub const Scene = struct {
     useTextureLoc: glad.GLint,
     yTextureLoc: glad.GLint,
     uvTextureLoc: glad.GLint,
+    useInstancingLoc: glad.GLint,
     texGen: TextureGenerator = TextureGenerator{},
 
-    pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !Self {
+    pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !*Self {
         if (window == null) {
             std.debug.print("Failed to create GLFW window\n", .{});
             return GSLWError.FailedToCreateWindow;
@@ -111,13 +112,16 @@ pub const Scene = struct {
         const useTextureLoc = glad.glGetUniformLocation(shaderProgram, "useTexture");
         const yTextureLoc = glad.glGetUniformLocation(shaderProgram, "yTexture");
         const uvTextureLoc = glad.glGetUniformLocation(shaderProgram, "uvTexture");
+        const useInstancingLoc = glad.glGetUniformLocation(shaderProgram, "uUseInstancing");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
             // Handle error appropriately
         }
 
-        return Self{
+        const scene = try allocator.create(Scene);
+
+        scene.* = Self{
             .allocator = allocator,
             .nodes = std.StringHashMap(*Node).init(allocator),
             .shaderProgram = shaderProgram,
@@ -131,7 +135,10 @@ pub const Scene = struct {
             .useTextureLoc = useTextureLoc,
             .yTextureLoc = yTextureLoc,
             .uvTextureLoc = uvTextureLoc,
+            .useInstancingLoc = useInstancingLoc,
         };
+
+        return scene;
     }
 
     pub fn deinit(self: *Self) void {

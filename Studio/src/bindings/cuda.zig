@@ -42,7 +42,7 @@ pub const CudaKeypointDetector = struct {
         var num_keypoints: c_int = 0;
 
         std.debug.print(
-            "Calling CUDA detector with dims: {}x{}, linestride: {}\n",
+            "\n\nCalling CUDA detector with dims: {}x{}, linestride: {}\n",
             .{ width, height, y_linesize },
         );
 
