@@ -114,7 +114,6 @@ pub const KeypointManager = struct {
     mutex: std.Thread.Mutex,
     target_node: *Node,
 
-    //
     radius: f32 = 1.0,
     resolution: u32 = 1,
 
@@ -127,7 +126,7 @@ pub const KeypointManager = struct {
         self.pending_keypoints = null;
         self.mutex = std.Thread.Mutex{};
 
-        self.radius = 0.05;
+        self.radius = 0.025;
         self.resolution = 1;
 
         self.target_node = target_node;
@@ -174,19 +173,15 @@ pub const KeypointManager = struct {
 
         if (self.pending_keypoints) |keypoints| {
             std.debug.print("Pending keypoints: {d} \n", .{keypoints.len});
-            // // Clear existing children
             for (self.target_node.children.items) |child| {
                 child.deinit();
             }
+
             self.target_node.children.clearAndFree();
             std.debug.print("Children length after cleanup: {d} \n", .{self.target_node.children.items.len});
 
-            // self.arena = std.heap.ArenaAllocator.init(self.allocator);
-
             _ = self.arena.reset(.free_all);
             const temp_alloc = self.arena.allocator();
-
-            // Create new keypoint nodes
 
             const instancedKeypointNode = try KeypointDebugger.init(
                 temp_alloc,
@@ -209,9 +204,9 @@ pub const KeypointManager = struct {
         const normalizedX = (x / imageWidth) * 2.0 - 1.0;
         const normalizedY = -((y / imageHeight) * 2.0 - 1.0); // Flip Y axis
 
-        // Scale to your world coordinates (adjust these values based on your scene scale)
-        const worldX = normalizedX * 6.4; // Half of your canvas width (12.8/2)
-        const worldY = normalizedY * 3.6; // Half of your canvas height (7.2/2)
+        // Scale to world coordinates (TODO: use node dimensions in future instead)
+        const worldX = normalizedX * 6.4; // Half of canvas width (12.8/2)
+        const worldY = normalizedY * 3.6; // Half of canvas height (7.2/2)
 
         return [_]f32{ worldX, -0.01, worldY }; // Slight z-offset to avoid z-fighting
     }

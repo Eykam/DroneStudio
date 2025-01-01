@@ -87,9 +87,11 @@ pub const VideoHandler = struct {
         // Create a unique temporary directory
         const tmp_dir_name = try mkdtemp(allocator, temp_dir);
         std.debug.print("Dir successfully created!: {s}\n", .{tmp_dir_name});
+
         // Construct the SDP file path
         const sdp_file_path = try std.fs.path.join(allocator, &.{ tmp_dir_name, "rtp_stream.sdp" });
         std.debug.print("Temp File path: {s}\n", .{sdp_file_path});
+
         const tmp_file = try fs.cwd().createFile(sdp_file_path, .{});
         defer {
             tmp_file.close();
@@ -378,10 +380,6 @@ pub const VideoHandler = struct {
         std.debug.print("Freeing hw_frame...\n", .{});
         video.av_frame_free(@ptrCast(@constCast(&self.hw_frame)));
 
-        // Deinitialize network only once
-        // std.debug.print("Deinitializing avformat_network...\n", .{});
-        // _ = video.avformat_network_deinit();
-
         CudaBinds.CudaKeypointDetector.deinit();
 
         std.debug.print("Successfully Destroyed VideoHandler\n", .{});
@@ -490,7 +488,6 @@ pub const VideoHandler = struct {
             return false;
         }
 
-        // Ensure packet is from video stream
         if (packet.*.stream_index != self.stream_index) {
             return true;
         }
@@ -560,8 +557,6 @@ pub fn detectBestHardwareDevice() c_uint {
 }
 
 pub fn mkdtemp(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-
-    // Attempt to create the directory
     const exe_dir = try fs.selfExeDirPathAlloc(allocator);
     defer allocator.free(exe_dir);
 
@@ -590,13 +585,9 @@ pub fn deinitFFmpegNetwork() void {
 }
 
 pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
-    // Initialize network
-
-    // Allocate format context
     const format_context = video.avformat_alloc_context() orelse
         return error.FormatContextAllocationFailed;
 
-    // Prepare options dictionary
     var options: ?*video.AVDictionary = null;
     defer video.av_dict_free(&options);
 
@@ -644,9 +635,6 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager
         keypoints,
     );
 
-    // _ = num_keypoints;
-    // _ = keypoint_manager;
-
     // Queue keypoints for processing in render thread
     try keypoint_manager.queueKeypoints(frame_width, frame_height, keypoints[0..num_keypoints]);
 
@@ -679,8 +667,6 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager
     if (node.uv == null) {
         node.uv = try allocator.alloc(u8, sw_frame_width * (sw_frame_height / 2));
     }
-
-    // std.debug.print("Frame width: {d} : Frame_height: {d} => Linewidth[0]: {d} Linewidth[1]: {d}\n", .{ frame_width, frame_height, frame.linesize[0], frame.linesize[1] });
 
     // Copy rows, skipping the padding
     for (0..sw_frame_height) |i| {
