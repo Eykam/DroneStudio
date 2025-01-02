@@ -145,9 +145,10 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
+        try keypoint_manager.update();
+
         scene.processInput(false);
         scene.render(window);
-        try keypoint_manager.update();
     }
 }
 

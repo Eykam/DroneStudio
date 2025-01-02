@@ -3,6 +3,8 @@ const Node = @import("Node.zig");
 const KeypointDebugger = @import("Shape.zig").InstancedKeypointDebugger;
 const CudaBinds = @import("bindings/cuda.zig");
 const KeyPoint = CudaBinds.KeyPoint;
+const gl = @import("bindings/gl.zig");
+const glad = gl.glad;
 
 const Frame = struct {
     timestamp: u64,
@@ -111,20 +113,30 @@ pub const KeypointManager = struct {
     arena: std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
     pending_keypoints: ?[]KeypointDebugger.Instance,
+    pending_count: usize,
     mutex: std.Thread.Mutex,
     target_node: *Node,
 
-    radius: f32 = 1.0,
-    resolution: u32 = 1,
+    max_keypoints: usize,
+    threshold: u8,
+    instance_buffer: ?u32 = null,
+    radius: f32,
+    resolution: u32,
 
     pub fn init(allocator: std.mem.Allocator, target_node: *Node) !*Self {
         var self = try allocator.create(KeypointManager);
 
-        self.gpa = std.heap.GeneralPurposeAllocator(.{}).init;
-        self.allocator = self.gpa.allocator();
+        self.allocator = std.heap.c_allocator;
         self.arena = std.heap.ArenaAllocator.init(self.allocator);
-        self.pending_keypoints = null;
+
         self.mutex = std.Thread.Mutex{};
+
+        self.instance_buffer = null;
+        self.max_keypoints = 750000;
+        self.threshold = 25;
+
+        self.pending_count = 0;
+        self.pending_keypoints = try allocator.alloc(KeypointDebugger.Instance, self.max_keypoints);
 
         self.radius = 0.025;
         self.resolution = 1;
@@ -147,23 +159,22 @@ pub const KeypointManager = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        // Free any existing pending keypoints
-        if (self.pending_keypoints) |old_keypoints| {
-            std.debug.print("Old Keypoints detected, clearing array!\n", .{});
-            self.allocator.free(old_keypoints);
-        }
+        const count = @min(keypoints.len, self.max_keypoints);
+        for (keypoints[0..count], 0..) |kp, i| {
+            const worldPos = convertImageToWorldCoords(
+                kp.x,
+                kp.y,
+                @floatFromInt(frame_width),
+                @floatFromInt(frame_height),
+            );
 
-        // Allocate and fill new keypoints
-        var new_keypoints = try self.allocator.alloc(KeypointDebugger.Instance, keypoints.len);
-        for (keypoints, 0..) |kp, i| {
-            const worldPos = convertImageToWorldCoords(kp.x, kp.y, @floatFromInt(frame_width), @floatFromInt(frame_height));
-            new_keypoints[i] = KeypointDebugger.Instance{
+            self.pending_keypoints.?[i] = KeypointDebugger.Instance{
                 .position = worldPos,
-                .color = .{ 1.0, 0.0, 0.0 }, // Default to red
+                .color = .{ 1.0, 0.0, 0.0 },
             };
         }
 
-        self.pending_keypoints = new_keypoints;
+        self.pending_count = count; // Add this field to track count
     }
 
     // Called from render thread
@@ -171,31 +182,26 @@ pub const KeypointManager = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.pending_keypoints) |keypoints| {
-            std.debug.print("Pending keypoints: {d} \n", .{keypoints.len});
-            for (self.target_node.children.items) |child| {
-                child.deinit();
+        if (self.pending_count > 0) {
+            if (self.target_node.children.items.len > 0) {
+                // Update existing node's instance data
+                KeypointDebugger.updateInstanceData(
+                    self.pending_keypoints.?[0..self.pending_count],
+                    self.target_node.children.items[0].instance_data.?.buffer,
+                );
+                for (self.target_node.children.items) |child| {
+                    child.instance_data.?.count = self.pending_count;
+                }
+            } else {
+                // Create initial node
+                const node = try KeypointDebugger.init(
+                    self.arena.allocator(),
+                    self.pending_keypoints.?[0..self.pending_count],
+                );
+                try self.target_node.addChild(node);
             }
 
-            self.target_node.children.clearAndFree();
-            std.debug.print("Children length after cleanup: {d} \n", .{self.target_node.children.items.len});
-
-            _ = self.arena.reset(.free_all);
-            const temp_alloc = self.arena.allocator();
-
-            const instancedKeypointNode = try KeypointDebugger.init(
-                temp_alloc,
-                self.radius,
-                self.resolution,
-                keypoints,
-            );
-
-            try self.target_node.addChild(instancedKeypointNode);
-            std.debug.print("Children length: {d} \n", .{self.target_node.children.items.len});
-
-            // Free the processed keypoints
-            self.allocator.free(keypoints);
-            self.pending_keypoints = null;
+            self.pending_count = 0;
         }
     }
 

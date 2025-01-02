@@ -45,7 +45,7 @@ pub const VideoHandler = struct {
 
     allocator: mem.Allocator,
     node: *Node,
-    keypointManager: ?*KeypointManager = null,
+    keypoint_manager: ?*KeypointManager = null,
 
     format_context: *video.AVFormatContext,
     stream_index: c_int = -1,
@@ -72,6 +72,7 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
+        keypoint_manager: ?*KeypointManager,
     ) !Self {
         const config = polling_config orelse StreamPollingConfig{};
 
@@ -229,10 +230,15 @@ pub const VideoHandler = struct {
             .onDecodedFrame = onDecodedFrame,
             .polling_config = config,
             .is_stream_ready = true,
+            .keypoint_manager = keypoint_manager,
         };
-        try CudaBinds.CudaKeypointDetector.init(codec_context.*.width, codec_context.*.height);
 
         try self.initHardwareFilterGraph();
+        try CudaBinds.CudaKeypointDetector.init(
+            codec_context.*.width,
+            codec_context.*.height,
+            @intCast(if (keypoint_manager) |km| km.max_keypoints else 250000),
+        );
         return self;
     }
 
@@ -429,6 +435,7 @@ pub const VideoHandler = struct {
                     hw_type,
                     onDecodedFrame,
                     polling_config,
+                    keypoint_manager,
                 ) catch |err| {
                     std.debug.print("Error initializing Video Handler: {any}\n", .{err});
                     std.time.sleep(2 * std.time.ns_per_s); // Wait 2 seconds before retrying
@@ -437,7 +444,6 @@ pub const VideoHandler = struct {
             }
 
             var handler = videoHandler.?;
-            handler.keypointManager = keypoint_manager;
             defer handler.deinit();
 
             if (!handler.is_stream_ready) {
@@ -516,7 +522,7 @@ pub const VideoHandler = struct {
                 continue;
             }
 
-            try self.onDecodedFrame(self.allocator, self.node, self.keypointManager.?, self.hw_frame);
+            try self.onDecodedFrame(self.allocator, self.node, self.keypoint_manager.?, self.hw_frame);
         }
 
         return true;
@@ -621,7 +627,7 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager
     const frame_width = @as(u32, @intCast(frame.width));
     const frame_height = @as(u32, @intCast(frame.height));
 
-    var keypoints = try allocator.alloc(CudaBinds.KeyPoint, 250000);
+    var keypoints = try allocator.alloc(CudaBinds.KeyPoint, keypoint_manager.max_keypoints);
     defer allocator.free(keypoints);
 
     const num_keypoints = try CudaDetector.detectKeypoints(
@@ -631,12 +637,16 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager
         frame_height,
         @as(u32, @intCast(frame.linesize[0])),
         @as(u32, @intCast(frame.linesize[1])),
-        10, // threshold
+        keypoint_manager.threshold, // threshold
         keypoints,
     );
 
     // Queue keypoints for processing in render thread
-    try keypoint_manager.queueKeypoints(frame_width, frame_height, keypoints[0..num_keypoints]);
+    try keypoint_manager.queueKeypoints(
+        frame_width,
+        frame_height,
+        keypoints[0..num_keypoints],
+    );
 
     const sw_frame = video.av_frame_alloc() orelse {
         std.debug.print("Failed to allocate transferred frame\n", .{});
@@ -655,11 +665,11 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager
     const y_plane = sw_frame.*.data[0][0 .. @as(usize, @intCast(sw_frame.*.linesize[0])) * sw_frame_height];
     const uv_plane = sw_frame.*.data[1][0 .. @as(usize, @intCast(sw_frame.*.linesize[1])) * (sw_frame_height / 2)];
 
-    node.mutex.lock();
-    defer node.mutex.unlock();
-
     std.debug.print("SW frame dim: {d}x{d}\n", .{ sw_frame_width, sw_frame_height });
     std.debug.print("SW frame linesize: y: {d} uv:{d}\n", .{ sw_frame.*.linesize[0], sw_frame.*.linesize[1] });
+
+    node.mutex.lock();
+    defer node.mutex.unlock();
 
     if (node.y == null) {
         node.y = try allocator.alloc(u8, sw_frame_width * sw_frame_height);

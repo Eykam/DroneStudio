@@ -25,38 +25,55 @@ __global__ void detectFASTKeypoints(
     int* keypoint_count,
     int max_keypoints
 ) {
+    __shared__ int block_counter;
+    __shared__ KeyPoint block_keypoints[256]; // Adjust size based on block size
+
+    if (threadIdx.x == 0) {
+        block_counter = 0;
+    }
+    __syncthreads();
+
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    
+
     if (x < 3 || y < 3 || x >= width - 3 || y >= height - 3) return;
-    
+
     const uint8_t center = y_plane[y * linesize + x];
-    
+
     int brighter = 0;
     int darker = 0;
-    
-    #pragma unroll
+
     for (int i = 0; i < 16; i++) {
         const int2 offset = fast_offsets[i];
         const uint8_t pixel = y_plane[(y + offset.y) * linesize + (x + offset.x)];
-        
+
         if (pixel > center + threshold) brighter++;
         else if (pixel < center - threshold) darker++;
-        
-        if (i >= 8 && brighter == 0 && darker == 0) return;
     }
-    
-    if (brighter >= 9 || darker >= 9) {
-        const int idx = atomicAdd(keypoint_count, 1);
-        if (idx < max_keypoints) {
-            keypoints[idx] = {static_cast<float>(x), static_cast<float>(y)};
+
+    bool is_keypoint = (brighter >= 9 || darker >= 9);
+
+    if (is_keypoint) {
+        int local_idx = atomicAdd(&block_counter, 1);
+        if (local_idx < 256) { // Ensure local storage doesn't overflow
+            block_keypoints[local_idx] = {static_cast<float>(x), static_cast<float>(y)};
+        }
+    }
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        int global_idx = atomicAdd(keypoint_count, block_counter);
+        if (global_idx + block_counter < max_keypoints) {
+            for (int i = 0; i < block_counter; i++) {
+                keypoints[global_idx + i] = block_keypoints[i];
+            }
         }
     }
 }
 
 extern "C" {
 
-int cuda_init_detector(int max_width, int max_height) {
+int cuda_init_detector(int max_width, int max_height, int max_keypoints) {
     max_frame_width = max_width;
     max_frame_height = max_height;
     
@@ -64,7 +81,7 @@ int cuda_init_detector(int max_width, int max_height) {
    if (cudaMalloc(&d_keypoint_count, sizeof(int)) != cudaSuccess) {
         return -1;
     }
-    if (cudaMalloc(&d_keypoints, 250000 * sizeof(KeyPoint)) != cudaSuccess) {
+    if (cudaMalloc(&d_keypoints, max_keypoints * sizeof(KeyPoint)) != cudaSuccess) {
         cudaFree(d_keypoint_count);
         return -1;
     }

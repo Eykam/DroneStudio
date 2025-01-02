@@ -5,7 +5,7 @@ pub const KeyPoint = extern struct {
     y: f32,
 };
 
-extern "cuda_keypoint_detector" fn cuda_init_detector(max_width: c_int, max_height: c_int) c_int;
+extern "cuda_keypoint_detector" fn cuda_init_detector(max_width: c_int, max_height: c_int, max_keypoints: c_int) c_int;
 extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     y_plane: [*]const u8,
     uv_plane: [*]const u8,
@@ -23,8 +23,8 @@ extern "cuda_keypoint_detector" fn cuda_cleanup_detector() void;
 pub const CudaKeypointDetector = struct {
     const Self = @This();
 
-    pub fn init(max_width: c_int, max_height: c_int) !void {
-        if (cuda_init_detector(max_width, max_height) != 0) {
+    pub fn init(max_width: c_int, max_height: c_int, max_keypoints: c_int) !void {
+        if (cuda_init_detector(max_width, max_height, max_keypoints) != 0) {
             return error.CudaInitFailed;
         }
     }

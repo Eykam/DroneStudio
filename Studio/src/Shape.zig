@@ -588,17 +588,13 @@ pub const InstancedKeypointDebugger = struct {
         color: [3]f32 = .{ 1.0, 0.0, 0.0 }, // Default to red
     };
 
-    pub fn init(allocator: std.mem.Allocator, radius: ?f32, resolution: ?u32, _instances: []const Instance) !*Node {
+    pub fn init(allocator: std.mem.Allocator, instances: []const Instance) !*Node {
         // Generate the shared circle mesh if it doesn't exist
-        const instances = try allocator.dupe(Instance, _instances);
-
-        const vertices = try Self.generateVertices(
-            allocator,
-            .{ 0, 0, 0 }, // Center position - will be offset by instance data
-            radius orelse 0.05,
-            @max(1, resolution orelse 1),
-        );
-
+        const vertices = try allocator.alloc(Vertex, 1);
+        vertices[0] = Vertex{
+            .position = .{ 0, 0, 0 },
+            .color = .{ 1.0, 0.0, 0.0 },
+        };
         const node = try Node.init(allocator, vertices, null, Self.draw);
         const mesh = node.mesh.?;
 
@@ -607,8 +603,6 @@ pub const InstancedKeypointDebugger = struct {
 
         // Bind and set up regular vertex buffer (VBO)
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
-
-        // Position attribute (location = 0)
         glad.glEnableVertexAttribArray(0);
         glad.glVertexAttribPointer(
             0,
@@ -619,21 +613,17 @@ pub const InstancedKeypointDebugger = struct {
             null,
         );
 
-        // Color attribute (location = 1)
-        const vertex_color_offset = @offsetOf(Vertex, "color");
-        glad.glEnableVertexAttribArray(1);
-        glad.glVertexAttribPointer(
-            1,
-            3,
-            glad.GL_FLOAT,
-            glad.GL_FALSE,
-            @sizeOf(Vertex),
-            @ptrFromInt(vertex_color_offset),
-        );
-
         // Create instance buffer
         var instance_buffer: u32 = undefined;
         glad.glGenBuffers(1, &instance_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(instances.len * @sizeOf(Instance)),
+            instances.ptr,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
         glad.glBufferData(
             glad.GL_ARRAY_BUFFER,
@@ -667,6 +657,15 @@ pub const InstancedKeypointDebugger = struct {
         );
         glad.glVertexAttribDivisor(4, 1);
 
+        if (instances.len > 0) {
+            glad.glBufferSubData(
+                glad.GL_ARRAY_BUFFER,
+                0,
+                @intCast(instances.len * @sizeOf(Instance)),
+                instances.ptr,
+            );
+        }
+
         node.instance_data = .{
             .buffer = instance_buffer,
             .count = instances.len,
@@ -675,47 +674,43 @@ pub const InstancedKeypointDebugger = struct {
         return node;
     }
 
+    pub fn updateInstanceData(instances: []const Instance, instance_buffer: u32) void {
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
+        glad.glBufferSubData(
+            glad.GL_ARRAY_BUFFER,
+            0,
+            @intCast(instances.len * @sizeOf(Instance)),
+            instances.ptr,
+        );
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
     pub fn draw(mesh: *Mesh) void {
         std.debug.print("Calling keypoint draw\n", .{});
         if (mesh.node) |node| {
             // Debug checks
-            if (mesh.vertices.len == 0 or mesh.vertices.len > 10000) {
-                std.debug.print("Invalid vertex count: {}\n", .{mesh.vertices.len});
-                return;
+            if (node.instance_data == null or node.instance_data.?.count == 0) {
+                return; // Skip drawing if no instances
             }
 
-            std.debug.print("Checking keypoint scene\n", .{});
             if (node.scene) |scene| {
                 glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 1));
             }
 
-            std.debug.print("Keypoint draw call\n", .{});
-
             // OpenGL state setup
-            glad.glEnable(glad.GL_DEPTH_TEST);
-            glad.glDepthFunc(glad.GL_LEQUAL);
-            glad.glEnable(glad.GL_LINE_SMOOTH);
-            glad.glHint(glad.GL_LINE_SMOOTH_HINT, glad.GL_NICEST);
+            glad.glEnable(glad.GL_POINT_SPRITE);
+            glad.glEnable(glad.GL_PROGRAM_POINT_SIZE); // Allow setting point size in shader
             glad.glEnable(glad.GL_BLEND);
             glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
-            glad.glLineWidth(3.0);
-            Debug.glCheckError("Keypoint instance buffer");
 
-            // Bind VAO and VBO
             glad.glBindVertexArray(mesh.meta.VAO);
-            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, node.instance_data.?.buffer);
 
-            // Draw instanced
-            const vertex_count: c_int = @intCast(mesh.vertices.len);
-            std.debug.print("Instance count {d}", .{node.instance_data.?.count});
-            std.debug.print("Rendering {} Instances of Keypoints\n", .{node.instance_data.?.count});
-            glad.glDrawArraysInstanced(glad.GL_LINE_LOOP, 0, vertex_count, @intCast(node.instance_data.?.count));
+            // Draw points instead of line loop
+            glad.glDrawArraysInstanced(glad.GL_POINTS, 0, 1, @intCast(node.instance_data.?.count));
 
-            // Reset state
-            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
-            glad.glBindVertexArray(0);
+            glad.glDisable(glad.GL_POINT_SPRITE);
+            glad.glDisable(glad.GL_PROGRAM_POINT_SIZE);
             glad.glDisable(glad.GL_BLEND);
-            glad.glDisable(glad.GL_LINE_SMOOTH);
 
             if (node.scene) |scene| {
                 glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 0));

@@ -14,7 +14,7 @@ typedef struct {
 } KeyPoint;
 
 // Initialize CUDA resources
-int cuda_init_detector(int max_width, int max_height);
+int cuda_init_detector(int max_width, int max_height, int max_keypoints);
 
 // Process frame and detect keypoints
 int cuda_detect_keypoints(
