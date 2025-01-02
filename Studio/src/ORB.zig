@@ -2,22 +2,11 @@ const std = @import("std");
 const Node = @import("Node.zig");
 const KeypointDebugger = @import("Shape.zig").InstancedKeypointDebugger;
 const CudaBinds = @import("bindings/cuda.zig");
-const KeyPoint = CudaBinds.KeyPoint;
+const libav = @import("bindings/libav.zig");
 const gl = @import("bindings/gl.zig");
+const KeyPoint = CudaBinds.KeyPoint;
+const video = libav.video;
 const glad = gl.glad;
-
-const Frame = struct {
-    timestamp: u64,
-    width: usize,
-    height: usize,
-    y: []const u8,
-    linesize: usize,
-};
-
-const FramePair = struct {
-    left: Frame,
-    right: Frame,
-};
 
 // FAST Keypoint Detection
 const fast_offsets = [_]i32{
@@ -109,19 +98,21 @@ fn hasConsecutivePixels(
 pub const KeypointManager = struct {
     const Self = @This();
 
+    allocator: std.mem.Allocator,
+    mutex: std.Thread.Mutex,
     gpa: std.heap.GeneralPurposeAllocator(.{}),
     arena: std.heap.ArenaAllocator,
-    allocator: std.mem.Allocator,
-    pending_keypoints: ?[]KeypointDebugger.Instance,
-    pending_count: usize,
-    mutex: std.Thread.Mutex,
+
     target_node: *Node,
 
-    max_keypoints: usize,
+    keypoint_detector: ?CudaBinds.CudaKeypointDetector,
+
     threshold: u8,
-    instance_buffer: ?u32 = null,
-    radius: f32,
-    resolution: u32,
+    max_keypoints: u32,
+    frame_width: u32,
+    frame_height: u32,
+
+    frame: ?*video.AVFrame,
 
     pub fn init(allocator: std.mem.Allocator, target_node: *Node) !*Self {
         var self = try allocator.create(KeypointManager);
@@ -131,77 +122,83 @@ pub const KeypointManager = struct {
 
         self.mutex = std.Thread.Mutex{};
 
-        self.instance_buffer = null;
-        self.max_keypoints = 750000;
-        self.threshold = 25;
-
-        self.pending_count = 0;
-        self.pending_keypoints = try allocator.alloc(KeypointDebugger.Instance, self.max_keypoints);
-
-        self.radius = 0.025;
-        self.resolution = 1;
+        self.max_keypoints = 5000000;
+        self.threshold = 10;
 
         self.target_node = target_node;
+        self.frame = null;
+
+        const node = try KeypointDebugger.init(
+            self.arena.allocator(),
+            self.max_keypoints,
+        );
+        try self.target_node.addChild(node);
+
+        var detector = try CudaBinds.CudaKeypointDetector.init();
+
+        std.debug.print("Node instance_data {any}\n", .{node.instance_data});
+        if (glad.glGetError() != glad.GL_NO_ERROR) {
+            std.debug.print("GL error before registration\n", .{});
+            return error.GLError;
+        }
+        std.debug.print("Current openGL rendering device => {s} {s}\n", .{ std.mem.span(glad.glGetString(glad.GL_VENDOR)), std.mem.span(glad.glGetString(glad.GL_RENDERER)) });
+
+        // Ensure buffers are valid
+        if (glad.glIsBuffer(node.instance_data.?.position_buffer) != 1 or glad.glIsBuffer(node.instance_data.?.color_buffer) != 1) {
+            return error.InvalidBuffer;
+        }
+
+        try detector.enableGLInterop(
+            node.instance_data.?.position_buffer,
+            node.instance_data.?.color_buffer,
+            self.max_keypoints,
+        );
+
+        self.keypoint_detector = detector;
 
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.pending_keypoints) |keypoints| {
-            self.allocator.free(keypoints);
-        }
-
+        self.keypoint_detector.?.deinit();
         self.arena.deinit();
     }
 
     // Called from video thread
-    pub fn queueKeypoints(self: *Self, frame_width: usize, frame_height: usize, keypoints: []KeyPoint) !void {
+    pub fn queueFrame(self: *Self, frame: *video.AVFrame) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        const count = @min(keypoints.len, self.max_keypoints);
-        for (keypoints[0..count], 0..) |kp, i| {
-            const worldPos = convertImageToWorldCoords(
-                kp.x,
-                kp.y,
-                @floatFromInt(frame_width),
-                @floatFromInt(frame_height),
-            );
-
-            self.pending_keypoints.?[i] = KeypointDebugger.Instance{
-                .position = worldPos,
-                .color = .{ 1.0, 0.0, 0.0 },
-            };
-        }
-
-        self.pending_count = count; // Add this field to track count
+        self.frame = video.av_frame_clone(frame);
     }
 
     // Called from render thread
-    pub fn update(self: *Self) !void {
+    pub fn processFrame(self: *Self) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.pending_count > 0) {
-            if (self.target_node.children.items.len > 0) {
-                // Update existing node's instance data
-                KeypointDebugger.updateInstanceData(
-                    self.pending_keypoints.?[0..self.pending_count],
-                    self.target_node.children.items[0].instance_data.?.buffer,
-                );
-                for (self.target_node.children.items) |child| {
-                    child.instance_data.?.count = self.pending_count;
-                }
-            } else {
-                // Create initial node
-                const node = try KeypointDebugger.init(
-                    self.arena.allocator(),
-                    self.pending_keypoints.?[0..self.pending_count],
-                );
-                try self.target_node.addChild(node);
+        if (self.frame) |frame| {
+            const frame_width: u32 = @intCast(frame.width);
+            const frame_height: u32 = @intCast(frame.height);
+
+            const num_keypoints = try self.keypoint_detector.?.detectKeypoints(
+                frame.data[0],
+                frame.data[1],
+                frame_width,
+                frame_height,
+                @as(u32, @intCast(frame.linesize[0])),
+                @as(u32, @intCast(frame.linesize[1])),
+                self.threshold,
+            );
+
+            // Just update the count
+            std.debug.print("Detected Keypoint => {}\n", .{num_keypoints});
+
+            for (self.target_node.children.items) |child| {
+                child.instance_data.?.count = num_keypoints;
             }
 
-            self.pending_count = 0;
+            defer video.av_frame_free(@ptrCast(&self.frame));
         }
     }
 

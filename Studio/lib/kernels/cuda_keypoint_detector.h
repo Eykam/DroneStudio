@@ -3,6 +3,14 @@
 
 #include <stdint.h>
 
+struct CUDAGLResources {
+    cudaGraphicsResource_t position_resource;
+    cudaGraphicsResource_t color_resource;
+    float4* d_positions;
+    float4* d_colors;
+    size_t buffer_size;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,24 +22,23 @@ typedef struct {
 } KeyPoint;
 
 // Initialize CUDA resources
-int cuda_init_detector(int max_width, int max_height, int max_keypoints);
-
-// Process frame and detect keypoints
-int cuda_detect_keypoints(
-    const uint8_t* y_plane,      // Y plane data
-    const uint8_t* uv_plane,     // UV plane data
-    int width,                   // Frame width
-    int height,                  // Frame height
-    int y_linesize,             // Y plane linesize
-    int uv_linesize,            // UV plane linesize
-    uint8_t threshold,          // FAST detection threshold
-    KeyPoint* keypoints,        // Output buffer for keypoints
-    int max_keypoints,          // Maximum number of keypoints to detect
-    int* num_keypoints          // Actual number of keypoints detected
+int cuda_init_detector();
+int cuda_register_gl_buffers(unsigned int position_buffer, unsigned int color_buffer, int max_keypoints);
+int cuda_detect_keypoints_gl(
+    const uint8_t* y_plane,
+    const uint8_t* uv_plane,
+    int width,
+    int height,
+    int y_linesize,
+    int uv_linesize,
+    uint8_t threshold,
+    int* num_keypoints,
+    float image_width,
+    float image_height
 );
-
-// Clean up CUDA resources
+void cuda_unregister_gl_buffers(void);
 void cuda_cleanup_detector(void);
+
 
 #ifdef __cplusplus
 }

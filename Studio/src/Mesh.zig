@@ -88,7 +88,12 @@ fn initGL(self: *Self) !void {
 
     // Setup VBO
     glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
-    glad.glBufferData(glad.GL_ARRAY_BUFFER, @intCast(self.vertices.len * @sizeOf(Vertex)), self.vertices.ptr, glad.GL_STATIC_DRAW);
+    glad.glBufferData(
+        glad.GL_ARRAY_BUFFER,
+        @intCast(self.vertices.len * @sizeOf(Vertex)),
+        self.vertices.ptr,
+        glad.GL_STATIC_DRAW,
+    );
 
     // Check for errors after buffer data
     const err = glad.glGetError();
@@ -102,7 +107,12 @@ fn initGL(self: *Self) !void {
     // Setup IBO if present
     if (self.indices) |ind| {
         glad.glBindBuffer(glad.GL_ELEMENT_ARRAY_BUFFER, self.meta.IBO);
-        glad.glBufferData(glad.GL_ELEMENT_ARRAY_BUFFER, @intCast(ind.len * @sizeOf(u32)), ind.ptr, glad.GL_STATIC_DRAW);
+        glad.glBufferData(
+            glad.GL_ELEMENT_ARRAY_BUFFER,
+            @intCast(ind.len * @sizeOf(u32)),
+            ind.ptr,
+            glad.GL_STATIC_DRAW,
+        );
     }
 
     // Setup vertex attributes

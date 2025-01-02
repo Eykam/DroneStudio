@@ -20,6 +20,9 @@ pub fn main() !void {
     defer arena.deinit();
     const alloc = arena.allocator();
 
+    // try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
+    // try std.process.setEnvVar("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+
     // Initialize GLFW
     if (glfw.glfwInit() == 0) {
         std.debug.print("Failed to initialize GLFW\n", .{});
@@ -32,7 +35,6 @@ pub fn main() !void {
         std.debug.print("Failed to create window\n", .{});
         return;
     };
-
     defer glfw.glfwDestroyWindow(window);
 
     if (glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR) != glfw.GLFW_CURSOR_DISABLED) {
@@ -54,18 +56,14 @@ pub fn main() !void {
 
     var canvasNode = try Node.init(alloc, null, null, null);
 
-    // var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
+    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
     var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    // canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
-    // canvasNodeLeft.setPosition(-6.45, 3.6, -5);
+    canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
+    canvasNodeLeft.setPosition(-6.45, 3.6, -5);
     canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeRight.setPosition(6.45, 3.6, -5);
-    // try canvasNode.addChild(canvasNodeLeft);
+    try canvasNode.addChild(canvasNodeLeft);
     try canvasNode.addChild(canvasNodeRight);
-
-    var keypoint_manager = try KeypointManager.init(alloc, canvasNodeRight);
-
-    defer keypoint_manager.deinit();
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
     var droneNode = try Node.init(alloc, null, null, null);
@@ -109,6 +107,9 @@ pub fn main() !void {
     try Video.initializeFFmpegNetwork();
     defer Video.deinitFFmpegNetwork();
 
+    var keypoint_manager_right_canvas = try KeypointManager.init(alloc, canvasNodeRight);
+    defer keypoint_manager_right_canvas.deinit();
+
     var video_handler_right = try Video.VideoHandler.start(
         alloc,
         canvasNodeRight,
@@ -116,20 +117,23 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        keypoint_manager,
+        keypoint_manager_right_canvas,
     );
     defer video_handler_right.join();
 
-    // var video_handler_left = try Video.VideoHandler.start(
-    //     alloc,
-    //     canvasNodeLeft,
-    //     Secrets.sdp_content_left,
-    //     null,
-    //     Video.frameCallback,
-    //     null,
-    //     null,
-    // );
-    //defer video_handler_left.join();
+    var keypoint_manager_left_canvas = try KeypointManager.init(alloc, canvasNodeLeft);
+    defer keypoint_manager_left_canvas.deinit();
+
+    var video_handler_left = try Video.VideoHandler.start(
+        alloc,
+        canvasNodeLeft,
+        Secrets.sdp_content_left,
+        null,
+        Video.frameCallback,
+        null,
+        keypoint_manager_left_canvas,
+    );
+    defer video_handler_left.join();
 
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -145,7 +149,8 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
-        try keypoint_manager.update();
+        try keypoint_manager_right_canvas.processFrame();
+        try keypoint_manager_left_canvas.processFrame();
 
         scene.processInput(false);
         scene.render(window);

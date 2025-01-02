@@ -5,6 +5,7 @@ const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const gl = @import("bindings/gl.zig");
 const Debug = @import("Debug.zig");
+const CudaBinds = @import("bindings/cuda.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
 const glad = gl.glad;
@@ -588,7 +589,7 @@ pub const InstancedKeypointDebugger = struct {
         color: [3]f32 = .{ 1.0, 0.0, 0.0 }, // Default to red
     };
 
-    pub fn init(allocator: std.mem.Allocator, instances: []const Instance) !*Node {
+    pub fn init(allocator: std.mem.Allocator, max_keypoints: usize) !*Node {
         // Generate the shared circle mesh if it doesn't exist
         const vertices = try allocator.alloc(Vertex, 1);
         vertices[0] = Vertex{
@@ -601,92 +602,59 @@ pub const InstancedKeypointDebugger = struct {
         // Set up instance attributes in VAO
         glad.glBindVertexArray(mesh.meta.VAO);
 
-        // Bind and set up regular vertex buffer (VBO)
-        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
-        glad.glEnableVertexAttribArray(0);
-        glad.glVertexAttribPointer(
-            0,
-            3,
-            glad.GL_FLOAT,
-            glad.GL_FALSE,
-            @sizeOf(Vertex),
+        var position_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &position_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, position_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_keypoints * @sizeOf([4]f32)), // vec4 for alignment
             null,
-        );
-
-        // Create instance buffer
-        var instance_buffer: u32 = undefined;
-        glad.glGenBuffers(1, &instance_buffer);
-        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
-        glad.glBufferData(
-            glad.GL_ARRAY_BUFFER,
-            @intCast(instances.len * @sizeOf(Instance)),
-            instances.ptr,
-            glad.GL_DYNAMIC_DRAW,
-        );
-
-        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
-        glad.glBufferData(
-            glad.GL_ARRAY_BUFFER,
-            @intCast(instances.len * @sizeOf(Instance)),
-            instances.ptr,
-            glad.GL_DYNAMIC_DRAW,
+            glad.GL_DYNAMIC_COPY,
         );
 
         // Position offset (location = 3)
         glad.glEnableVertexAttribArray(3);
         glad.glVertexAttribPointer(
             3,
-            3,
+            4,
             glad.GL_FLOAT,
             glad.GL_FALSE,
-            @sizeOf(Instance),
+            @sizeOf([4]f32),
             null,
         );
-        glad.glVertexAttribDivisor(3, 1); // Move to next instance position for each instance
+        glad.glVertexAttribDivisor(3, 1);
 
+        var color_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &color_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, color_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_keypoints * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_COPY,
+        );
         // Color (location = 4)
-        const color_offset = @offsetOf(Instance, "color");
         glad.glEnableVertexAttribArray(4);
         glad.glVertexAttribPointer(
             4,
-            3,
+            4,
             glad.GL_FLOAT,
             glad.GL_FALSE,
-            @sizeOf(Instance),
-            @ptrFromInt(color_offset),
+            @sizeOf([4]f32),
+            null,
         );
         glad.glVertexAttribDivisor(4, 1);
 
-        if (instances.len > 0) {
-            glad.glBufferSubData(
-                glad.GL_ARRAY_BUFFER,
-                0,
-                @intCast(instances.len * @sizeOf(Instance)),
-                instances.ptr,
-            );
-        }
-
         node.instance_data = .{
-            .buffer = instance_buffer,
-            .count = instances.len,
+            .position_buffer = position_buffer,
+            .color_buffer = color_buffer,
+            .count = 0,
         };
 
         return node;
     }
 
-    pub fn updateInstanceData(instances: []const Instance, instance_buffer: u32) void {
-        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, instance_buffer);
-        glad.glBufferSubData(
-            glad.GL_ARRAY_BUFFER,
-            0,
-            @intCast(instances.len * @sizeOf(Instance)),
-            instances.ptr,
-        );
-        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
-    }
-
     pub fn draw(mesh: *Mesh) void {
-        std.debug.print("Calling keypoint draw\n", .{});
         if (mesh.node) |node| {
             // Debug checks
             if (node.instance_data == null or node.instance_data.?.count == 0) {

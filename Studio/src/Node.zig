@@ -29,7 +29,8 @@ width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
 instance_data: ?struct {
-    buffer: u32,
+    position_buffer: u32,
+    color_buffer: u32,
     count: usize,
 } = null,
 

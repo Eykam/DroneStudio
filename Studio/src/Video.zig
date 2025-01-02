@@ -45,7 +45,6 @@ pub const VideoHandler = struct {
 
     allocator: mem.Allocator,
     node: *Node,
-    keypoint_manager: ?*KeypointManager = null,
 
     format_context: *video.AVFormatContext,
     stream_index: c_int = -1,
@@ -60,6 +59,7 @@ pub const VideoHandler = struct {
     buffersink: ?*video.AVFilterContext = null,
 
     // Callback for decoded RGB frames
+    keypoint_manager: ?*KeypointManager = null,
     onDecodedFrame: DecodedFrameCallback,
 
     polling_config: StreamPollingConfig,
@@ -234,11 +234,6 @@ pub const VideoHandler = struct {
         };
 
         try self.initHardwareFilterGraph();
-        try CudaBinds.CudaKeypointDetector.init(
-            codec_context.*.width,
-            codec_context.*.height,
-            @intCast(if (keypoint_manager) |km| km.max_keypoints else 250000),
-        );
         return self;
     }
 
@@ -385,8 +380,6 @@ pub const VideoHandler = struct {
         // Free hardware frame
         std.debug.print("Freeing hw_frame...\n", .{});
         video.av_frame_free(@ptrCast(@constCast(&self.hw_frame)));
-
-        CudaBinds.CudaKeypointDetector.deinit();
 
         std.debug.print("Successfully Destroyed VideoHandler\n", .{});
     }
@@ -624,29 +617,9 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
 }
 
 pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager: *KeypointManager, frame: *video.AVFrame) !void {
-    const frame_width = @as(u32, @intCast(frame.width));
-    const frame_height = @as(u32, @intCast(frame.height));
 
-    var keypoints = try allocator.alloc(CudaBinds.KeyPoint, keypoint_manager.max_keypoints);
-    defer allocator.free(keypoints);
-
-    const num_keypoints = try CudaDetector.detectKeypoints(
-        frame.data[0], // This is already a CUDA device pointer
-        frame.data[1],
-        frame_width,
-        frame_height,
-        @as(u32, @intCast(frame.linesize[0])),
-        @as(u32, @intCast(frame.linesize[1])),
-        keypoint_manager.threshold, // threshold
-        keypoints,
-    );
-
-    // Queue keypoints for processing in render thread
-    try keypoint_manager.queueKeypoints(
-        frame_width,
-        frame_height,
-        keypoints[0..num_keypoints],
-    );
+    // Queue keypoints for keypoint extraction
+    try keypoint_manager.queueFrame(frame);
 
     const sw_frame = video.av_frame_alloc() orelse {
         std.debug.print("Failed to allocate transferred frame\n", .{});
