@@ -14,14 +14,16 @@ const Video = @import("Video.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const KeypointManager = @import("ORB.zig").KeypointManager;
+const ORB = @import("ORB.zig");
+
+// TODO: Look for a way to set these env variables in build script on linux
+// try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
+// try std.process.setEnvVar("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
-
-    // try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
-    // try std.process.setEnvVar("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
 
     // Initialize GLFW
     if (glfw.glfwInit() == 0) {
@@ -57,12 +59,13 @@ pub fn main() !void {
     var canvasNode = try Node.init(alloc, null, null, null);
 
     var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
     canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeLeft.setPosition(-6.45, 3.6, -5);
+    try canvasNode.addChild(canvasNodeLeft);
+
+    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
     canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
     canvasNodeRight.setPosition(6.45, 3.6, -5);
-    try canvasNode.addChild(canvasNodeLeft);
     try canvasNode.addChild(canvasNodeRight);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
@@ -107,8 +110,8 @@ pub fn main() !void {
     try Video.initializeFFmpegNetwork();
     defer Video.deinitFFmpegNetwork();
 
-    var keypoint_manager_right_canvas = try KeypointManager.init(alloc, canvasNodeRight);
-    defer keypoint_manager_right_canvas.deinit();
+    var right_keypoint_manager = try KeypointManager.init(alloc, canvasNodeRight);
+    defer right_keypoint_manager.deinit();
 
     var video_handler_right = try Video.VideoHandler.start(
         alloc,
@@ -117,12 +120,12 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        keypoint_manager_right_canvas,
+        right_keypoint_manager,
     );
     defer video_handler_right.join();
 
-    var keypoint_manager_left_canvas = try KeypointManager.init(alloc, canvasNodeLeft);
-    defer keypoint_manager_left_canvas.deinit();
+    var left_keypoint_manager = try KeypointManager.init(alloc, canvasNodeLeft);
+    defer left_keypoint_manager.deinit();
 
     var video_handler_left = try Video.VideoHandler.start(
         alloc,
@@ -131,9 +134,12 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        keypoint_manager_left_canvas,
+        left_keypoint_manager,
     );
     defer video_handler_left.join();
+
+    const StereoMatcher = try ORB.StereoMatcher.init(alloc, left_keypoint_manager, right_keypoint_manager);
+    defer StereoMatcher.deinit();
 
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
@@ -149,8 +155,7 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
-        try keypoint_manager_right_canvas.processFrame();
-        try keypoint_manager_left_canvas.processFrame();
+        try StereoMatcher.match();
 
         scene.processInput(false);
         scene.render(window);

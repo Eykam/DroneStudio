@@ -66,20 +66,32 @@ fn configureLibs(
             exe.linkSystemLibrary(lib);
         }
 
-        const cuda_obj = b.addSystemCommand(&.{ "nvcc", "-O3", "--compiler-options", "'-fPIC'", "-c", "lib/kernels/cuda_keypoint_detector.cu", "-o", "cuda_keypoint_detector.o" });
+        const cuda_detector_obj = b.addSystemCommand(&.{ "nvcc", "-O3", "--compiler-options", "'-fPIC'", "-c", "lib/kernels/keypoint_detector.cu", "-o", "keypoint_detector.o" });
 
         // Create object file from CUDA compilation
-        const cuda_artifact = b.addObject(.{
+        const cuda_detector_artifact = b.addObject(.{
             .name = "cuda_keypoint_detector",
             .root_source_file = null,
             .target = target,
             .optimize = optimize,
         });
-        cuda_artifact.addObjectFile(b.path(b.pathJoin(&.{"cuda_keypoint_detector.o"})));
-        cuda_artifact.step.dependOn(&cuda_obj.step);
+        cuda_detector_artifact.addObjectFile(b.path(b.pathJoin(&.{"keypoint_detector.o"})));
+        cuda_detector_artifact.step.dependOn(&cuda_detector_obj.step);
+        exe.addObjectFile(cuda_detector_artifact.getEmittedBin());
+
+        exe.addIncludePath(b.path("lib/kernels"));
+
+        // const cuda_matcher_obj = b.addSystemCommand(&.{ "nvcc", "-O3", "--compiler-options", "'-fPIC'", "-c", "lib/kernels/keypoint_matcher.cu", "-o", "keypoint_matcher.o" });
+        // const cuda_matcher_artifact = b.addObject(.{
+        //     .name = "cuda_keypoint_matcher",
+        //     .root_source_file = null,
+        //     .target = target,
+        //     .optimize = optimize,
+        // });
+        // cuda_matcher_artifact.addObjectFile(b.path(b.pathJoin(&.{"keypoint_matcher.o"})));
+        // cuda_matcher_artifact.step.dependOn(&cuda_detector_obj.step);
 
         // Add CUDA paths and libraries to your executable
-        exe.addObjectFile(cuda_artifact.getEmittedBin());
 
         // Add CUDA configuration module
         exe.root_module.addAnonymousImport("cuda_config", .{
