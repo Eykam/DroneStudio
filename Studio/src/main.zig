@@ -25,6 +25,8 @@ pub fn main() !void {
     defer arena.deinit();
     const alloc = arena.allocator();
 
+    // ====================================================== Window Setup ======================================================
+
     // Initialize GLFW
     if (glfw.glfwInit() == 0) {
         std.debug.print("Failed to initialize GLFW\n", .{});
@@ -43,10 +45,9 @@ pub fn main() !void {
         std.debug.print("Warning: Cursor not disabled as expected\n", .{});
     }
 
-    //Initializing Scene
+    // =============================================== Scene Graph Initialization ===============================================
     var scene = try Scene.init(alloc, window);
     defer scene.deinit();
-
     scene.setupCallbacks(window);
 
     //Initializing Entities
@@ -56,17 +57,24 @@ pub fn main() !void {
     const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
     const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
-    var canvasNode = try Node.init(alloc, null, null, null);
+    const canvas_width = 12.8;
+    const canvas_height = 7.2;
 
-    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    canvasNodeLeft.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
-    canvasNodeLeft.setPosition(-6.45, 3.6, -5);
+    var canvasNode = try Node.init(alloc, null, null, null);
+    canvasNode.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
+
+    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    canvasNodeLeft.setPosition(-canvas_width, canvas_height / 2.0, -5);
     try canvasNode.addChild(canvasNodeLeft);
 
-    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 12.8, 7.2);
-    canvasNodeRight.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
-    canvasNodeRight.setPosition(6.45, 3.6, -5);
+    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    canvasNodeRight.setPosition(canvas_width, canvas_height / 2.0, -5);
     try canvasNode.addChild(canvasNodeRight);
+
+    var canvasNodeCombined = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
+    canvasNodeCombined.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
+    try canvasNode.addChild(canvasNodeCombined);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
     var droneNode = try Node.init(alloc, null, null, null);
@@ -94,6 +102,8 @@ pub fn main() !void {
         scene.camera.position.z,
     }});
 
+    // ======================================================= IMU Setup =======================================================
+
     //Initialize UDP servers
     var imu_server = UDP.init(
         Secrets.host_ip,
@@ -107,11 +117,38 @@ pub fn main() !void {
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
+    // ================================================= Stereo Matching Setup =================================================
+
+    var right_keypoint_manager = try KeypointManager.init(
+        alloc,
+        canvasNodeRight,
+    );
+    defer right_keypoint_manager.deinit();
+
+    var left_keypoint_manager = try KeypointManager.init(
+        alloc,
+        canvasNodeLeft,
+    );
+    defer left_keypoint_manager.deinit();
+
+    const combined_keypoint_manager = try KeypointManager.init(
+        alloc,
+        canvasNodeCombined,
+    );
+    defer combined_keypoint_manager.deinit();
+
+    const StereoMatcher = try ORB.StereoMatcher.init(
+        alloc,
+        left_keypoint_manager,
+        right_keypoint_manager,
+        combined_keypoint_manager,
+    );
+    defer StereoMatcher.deinit();
+
+    // ============================================= FFMPEG Video Processing Setup =============================================
+
     try Video.initializeFFmpegNetwork();
     defer Video.deinitFFmpegNetwork();
-
-    var right_keypoint_manager = try KeypointManager.init(alloc, canvasNodeRight);
-    defer right_keypoint_manager.deinit();
 
     var video_handler_right = try Video.VideoHandler.start(
         alloc,
@@ -124,9 +161,6 @@ pub fn main() !void {
     );
     defer video_handler_right.join();
 
-    var left_keypoint_manager = try KeypointManager.init(alloc, canvasNodeLeft);
-    defer left_keypoint_manager.deinit();
-
     var video_handler_left = try Video.VideoHandler.start(
         alloc,
         canvasNodeLeft,
@@ -138,9 +172,7 @@ pub fn main() !void {
     );
     defer video_handler_left.join();
 
-    const StereoMatcher = try ORB.StereoMatcher.init(alloc, left_keypoint_manager, right_keypoint_manager);
-    defer StereoMatcher.deinit();
-
+    // ====================================================== Render Loop ======================================================
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();

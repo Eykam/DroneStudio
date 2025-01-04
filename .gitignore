@@ -7,7 +7,7 @@ sdkconfig.old
 Secrets.local.zig
 ffmpeg-windows
 cuda-windows
-cuda_keypoint_detector.o
+*keypoint_detector.o
 gprof2dot.py
 out.dot
 callgrind*

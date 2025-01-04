@@ -124,6 +124,9 @@ struct MatchingParams {
     float focal_length;
     float max_disparity;
     float epipolar_threshold;
+    float sensor_width_mm;
+    float sensor_width_pixels;
+    float sensor_height_pixels;
 };
 
 // Structure to hold matched keypoint data
@@ -133,6 +136,48 @@ struct MatchedKeypoint {
     float3 world_pos;
     float disparity;
 };
+
+struct MatchedPoint {
+    float3 position;    // Position in OpenGL world coordinates
+    float disparity;    // Pixel disparity between left and right views
+};
+
+__device__ MatchedPoint calculateMatchedWorldPosition(
+    float3 leftWorldPos,   // Already transformed by convertImageToWorldCoords
+    float3 rightWorldPos,  // Already transformed by convertImageToWorldCoords
+    float baseline,        // Distance between cameras in world units
+    float canvas_width     // Width of the canvas in world units
+) {
+    // Calculate disparity in world units
+    float worldDisparity = leftWorldPos.x - rightWorldPos.x;
+    
+    // Since the positions are already in world coordinates, we can use them directly
+    // But we need to account for the baseline shift and calculate the midpoint
+    MatchedPoint result;
+    
+    // Calculate the matched point position as the midpoint between left and right points,
+    // but adjusted for depth based on disparity
+    float depthFactor = baseline / worldDisparity;
+    
+    // X position: average of left and right X coordinates
+    float worldX = (leftWorldPos.x + rightWorldPos.x) / 2.0f;
+    
+    // Y position: keep consistent with your original function
+    float worldY = -0.01f;
+    
+    // Z position: average of left and right Z coordinates, scaled by depth factor
+    float worldZ = (leftWorldPos.z + rightWorldPos.z) / 2.0f;
+    worldZ *= depthFactor;
+    
+    // Ensure the position stays within the canvas bounds
+    worldX = fmax(fmin(worldX, canvas_width/2), -canvas_width/2);
+    worldZ = fmax(fmin(worldZ, canvas_width/2), -canvas_width/2);
+    
+    result.position = make_float3(worldX, worldY, worldZ);
+    result.disparity = worldDisparity;
+    
+    return result;
+}
 
 __global__ void matchKeypointsKernel(
     const float4* __restrict__ left_positions,
@@ -147,8 +192,8 @@ __global__ void matchKeypointsKernel(
     const int left_idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (left_idx >= left_count) return;
 
-    __shared__ float min_costs[256]; 
-    __shared__ int best_matches[256];
+    __shared__ float min_costs[512]; 
+    __shared__ int best_matches[512];
 
     min_costs[threadIdx.x] = INFINITY;
     best_matches[threadIdx.x] = -1;
@@ -190,27 +235,24 @@ __global__ void matchKeypointsKernel(
     if (best_matches[threadIdx.x] >= 0 && min_costs[threadIdx.x] < params.epipolar_threshold) {
         int match_idx = atomicAdd(match_count, 1);
         if (match_idx < max_matches) {
-            float3 right_pos = make_float3(
+           float3 right_pos = make_float3(
                 right_positions[best_matches[threadIdx.x]].x,
                 right_positions[best_matches[threadIdx.x]].y,
                 right_positions[best_matches[threadIdx.x]].z
             );
-            
-            float disparity = left_pos.x - right_pos.x;
-            float depth = (params.baseline * params.focal_length) / disparity;
-            
-            // Calculate world position (using left camera as reference)
-            float3 world_pos = make_float3(
-                left_pos.x * depth / params.focal_length,
-                left_pos.y * depth / params.focal_length,
-                depth
+
+            MatchedPoint matchedPoint = calculateMatchedWorldPosition(
+                left_pos,
+                right_pos,
+                params.baseline,  // This should be baseline converted to world units
+                6.4f                    // Canvas width in world units
             );
 
             matches[match_idx] = {
                 left_pos,
                 right_pos,
-                world_pos,
-                disparity
+                matchedPoint.position,
+                matchedPoint.disparity
             };
         }
     }
@@ -221,27 +263,25 @@ __global__ void generateVisualizationKernel(
     const MatchedKeypoint* matches,
     const int match_count,
     float4* positions,
-    float4* colors,
-    const float canvas_width,
-    const float canvas_height
+    float4* colors
 ) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= match_count) return;
 
     const MatchedKeypoint match = matches[idx];
-    const int base_idx = idx * 3; // 3 vertices per match (triangle strip)
+    const int base_idx = idx; // 3 vertices per match (triangle strip)
 
     // Center point (world position)
     positions[base_idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 1.0f);
     colors[base_idx] = make_float4(0.0f, 1.0f, 0.0f, 1.0f); // Green for center
 
     // Left keypoint
-    positions[base_idx + 1] = make_float4(match.left_pos.x, match.left_pos.y, match.left_pos.z, 1.0f);
-    colors[base_idx + 1] = make_float4(1.0f, 0.0f, 0.0f, 1.0f); // Red for left
+    // positions[base_idx + 1] = make_float4(match.left_pos.x, match.left_pos.y, match.left_pos.z, 1.0f);
+    // colors[base_idx + 1] = make_float4(1.0f, 0.0f, 0.0f, 1.0f); // Red for left
 
-    // Right keypoint
-    positions[base_idx + 2] = make_float4(match.right_pos.x, match.right_pos.y, match.right_pos.z, 1.0f);
-    colors[base_idx + 2] = make_float4(0.0f, 0.0f, 1.0f, 1.0f); // Blue for right
+    // // Right keypoint
+    // positions[base_idx + 2] = make_float4(match.right_pos.x, match.right_pos.y, match.right_pos.z, 1.0f);
+    // colors[base_idx + 2] = make_float4(0.0f, 0.0f, 1.0f, 1.0f); // Blue for right
 }
 
 
@@ -329,47 +369,11 @@ int cuda_detect_keypoints(
     dim3 block(16, 16);
     dim3 grid((image->width + block.x - 1) / block.x, (image->height + block.y - 1) / block.y);
 
-    // Map GL buffers for CUDA access
-    error = cudaGraphicsMapResources(1, &detector->gl_resources.position_resource);
-    if (error != cudaSuccess) {
-        printf("Failed to Map Position Resources: %d\n", error);
-        return -1;
-    };
-
-    error = cudaGraphicsMapResources(1, &detector->gl_resources.color_resource);
-    if (error != cudaSuccess) {
-        printf("Failed to Map Color Resources: %d\n", error);
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.position_resource);
-        return -1;
-    }
-        
-    size_t bytes;
-    error = cudaGraphicsResourceGetMappedPointer(
-        (void**)&detector->gl_resources.d_positions,
-        &bytes,
-        detector->gl_resources.position_resource
-    );
-    if (error != cudaSuccess) {
-        printf("Failed to get Positions Mapped Pointer: %d\n", error);
-        goto cleanup;
-    }
-
-    error = cudaGraphicsResourceGetMappedPointer(
-        (void**)&detector->gl_resources.d_colors,
-        &bytes,
-        detector->gl_resources.color_resource
-    );
-    if (error != cudaSuccess) {
-        printf("Failed to get Colors Mapped Pointer: %d\n", error);
-        goto cleanup;
-    }
-
-
     // Reset keypoint counter
     error = cudaMemset(detector->d_keypoint_count, 0, sizeof(int));
     if (error != cudaSuccess) {
         printf("Failed to reset keypoint count: %d\n", error);
-        goto cleanup;
+        return -1;
     }
 
     // Launch kernel
@@ -391,30 +395,20 @@ int cuda_detect_keypoints(
     error = cudaGetLastError();
     if (error != cudaSuccess) {
         printf("Keypoint Detection Kernel failed: %d\n", error);
-        goto cleanup;
+        return -1;
     }
 
-
-    printf("Copying keypoints for detector %d from %p to %p\n", 
-    detector_id, 
-    (void*)detector->d_keypoint_count,
-    (void*)image->num_keypoints);
 
     // Get keypoint count
     error = cudaMemcpy(image->num_keypoints, detector->d_keypoint_count, sizeof(int), cudaMemcpyDeviceToHost);
     if (error != cudaSuccess) {
         printf("Failed to copy keypoint count: %d\n", error);
-        goto cleanup;
+        return -1;
     }
-
-    printf("After copy: num_keypoints = %d\n", *image->num_keypoints);
-
-    cleanup:
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.position_resource);
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.color_resource);
     
     return error == cudaSuccess ? 0 : -1;
 }
+
 
 void cuda_unregister_gl_buffers(int detector_id) {
     DetectorInstance* detector = get_detector_instance(detector_id);
@@ -439,9 +433,62 @@ void cuda_cleanup_detector(int detector_id) {
 }
 
 
+int cuda_map_gl_resources(int detector_id) {
+    DetectorInstance* detector = get_detector_instance(detector_id);
+    if (!detector) return -1;
+
+    // Map GL buffers for CUDA access
+    cudaError_t error = cudaGraphicsMapResources(1, &detector->gl_resources.position_resource);
+    if (error != cudaSuccess) {
+        printf("Failed to Map Position Resources: %d\n", error);
+        return -1;
+    };
+
+    error = cudaGraphicsMapResources(1, &detector->gl_resources.color_resource);
+    if (error != cudaSuccess) {
+        printf("Failed to Map Color Resources: %d\n", error);
+        cudaGraphicsUnmapResources(1, &detector->gl_resources.position_resource);
+        return -1;
+    }
+        
+    size_t bytes;
+    error = cudaGraphicsResourceGetMappedPointer(
+        (void**)&detector->gl_resources.d_positions,
+        &bytes,
+        detector->gl_resources.position_resource
+    );
+
+    if (error != cudaSuccess) {
+        printf("Failed to get Positions Mapped Pointer: %d\n", error);
+        cuda_unmap_gl_resources(detector_id);
+    }
+
+    error = cudaGraphicsResourceGetMappedPointer(
+        (void**)&detector->gl_resources.d_colors,
+        &bytes,
+        detector->gl_resources.color_resource
+    );
+
+    if (error != cudaSuccess) {
+        printf("Failed to get Colors Mapped Pointer: %d\n", error);
+        cuda_unmap_gl_resources(detector_id);
+    }
+
+    return error == cudaSuccess ? 0 : -1;
+}
+
+void cuda_unmap_gl_resources(int detector_id) {
+    DetectorInstance* detector = get_detector_instance(detector_id);
+    if (!detector) return;
+
+    cudaGraphicsUnmapResources(1, &detector->gl_resources.position_resource);
+    cudaGraphicsUnmapResources(1, &detector->gl_resources.color_resource);
+}
+
 int cuda_match_keypoints(
     int detector_id_left,
     int detector_id_right,
+    int detector_id_combined,
     float baseline,
     float focal_length,
     int* num_matches,
@@ -452,8 +499,16 @@ int cuda_match_keypoints(
 ) {
     DetectorInstance* left_detector = get_detector_instance(detector_id_left);
     DetectorInstance* right_detector = get_detector_instance(detector_id_right);
-    if (!left_detector || !right_detector) return -1;
-  
+    DetectorInstance* combined_detector = get_detector_instance(detector_id_combined);
+
+    if (!left_detector || !right_detector || !combined_detector) return -1;
+    
+    
+    if (cuda_map_gl_resources(detector_id_left) < 0){
+        printf("Failed to map GL Resources for Left Detector!\n");
+        return -1;
+    }
+
     printf("Getting keypoints from left...\n");
     int result = cuda_detect_keypoints(
         detector_id_left,
@@ -462,8 +517,16 @@ int cuda_match_keypoints(
     );
 
     if (result < 0){
-        printf("Failed to detect keypoints from left image");
+        printf("Failed to detect keypoints from left image\n");
+        cuda_unmap_gl_resources(detector_id_left);
+        return -1;
     };
+
+    if (cuda_map_gl_resources(detector_id_right) < 0){
+        printf("Failed to map GL Resources for Right Detector!\n");
+        cuda_unmap_gl_resources(detector_id_left);
+        return -1;
+    }
 
     printf("Getting keypoints from right...\n");
     result = cuda_detect_keypoints(
@@ -473,15 +536,20 @@ int cuda_match_keypoints(
     );
 
     if (result < 0){
-        printf("Failed to detect keypoints from right image");
+        printf("Failed to detect keypoints from right image\n");
+        cuda_unmap_gl_resources(detector_id_left);
+        cuda_unmap_gl_resources(detector_id_right);
+        return -1;
     };
 
     cudaDeviceSynchronize();
     
-
     //Use left_detector as the basis for matching
-    const int max_matches = (*left->num_keypoints);
-    printf("Max matches allowed %d\n", max_matches);
+    const int max_matches = min(*right->num_keypoints, *left->num_keypoints);
+
+    printf("Left keypoints: %d\n", *left->num_keypoints);
+    printf("Right Keypoints: %d\n", *right->num_keypoints);
+    printf("Max matches allowed: %d\n", max_matches);
    
     // Allocate device memory for matches
     MatchedKeypoint* d_matches;
@@ -492,56 +560,26 @@ int cuda_match_keypoints(
     cudaMemset(d_match_count, 0, sizeof(int));
 
     // Set up matching parameters
+    float sensor_width_mm = 6.4f;
+    float baseline_world = (76.3f / sensor_width_mm) * 6.4f;
+
     MatchingParams params = {
-        .baseline = baseline,
-        .focal_length = focal_length,
-        .max_disparity = 100.0f,
-        .epipolar_threshold = 2.0f
+        .baseline = baseline_world,  // mm
+        .focal_length = 3.2f,        // mm
+        .max_disparity = 100.0f,     // pixels
+        .epipolar_threshold = 2.0f,  // pixels
+        .sensor_width_mm = sensor_width_mm,     // mm
+        .sensor_width_pixels = 4608.0f,  // pixels
+        .sensor_height_pixels = 2592.0f  // pixels
     };
 
     // Launch matching kernel
-    dim3 block(256);
-    dim3 grid((max_matches + block.x - 1) / block.x);
-    
-    // cudaError_t error;
-    // error = cudaGraphicsMapResources(1, &left_detector->gl_resources.position_resource);
-    // if (error != cudaSuccess) {
-    //     printf("Failed to Map Position Resources: %d\n", error);
-    //     return -1;
-    // };
-        
-    // size_t bytes;
-    // error = cudaGraphicsResourceGetMappedPointer(
-    //     (void**)&left_detector->gl_resources.d_positions,
-    //     &bytes,
-    //     left_detector->gl_resources.position_resource
-    // );
-    // if (error != cudaSuccess) {
-    //     printf("Failed to get Positions Mapped Pointer: %d\n", error);
-    //     goto cleanup;
-    // }
+    dim3 blockA(512);
+    dim3 gridA((max_matches + blockA.x - 1) / blockA.x); 
 
+    printf("Matching Dims: Thread per Block: %d : Blocks: %d => Total Threads: %d\n", blockA.x, gridA.x, blockA.x * gridA.x);
 
-    // error = cudaGraphicsMapResources(1, &right_detector->gl_resources.position_resource);
-    // if (error != cudaSuccess) {
-    //     printf("Failed to Map Position Resources: %d\n", error);
-    //     return -1;
-    // };
-
-    
-    // error = cudaGraphicsResourceGetMappedPointer(
-    //     (void**)&right_detector->gl_resources.d_positions,
-    //     &bytes,
-    //     right_detector->gl_resources.position_resource
-    // );
-    // if (error != cudaSuccess) {
-    //     printf("Failed to get Positions Mapped Pointer: %d\n", error);
-    //     goto cleanup;
-    // }
-
- 
-
-    matchKeypointsKernel<<<grid, block>>>(
+    matchKeypointsKernel<<<blockA, gridA>>>(
         left_detector->gl_resources.d_positions,
         right_detector->gl_resources.d_positions,
         *left->num_keypoints,
@@ -552,28 +590,53 @@ int cuda_match_keypoints(
         max_matches
     );
 
+    cudaDeviceSynchronize();
+
+    cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("Matching Kernel failed: %s\n", cudaGetErrorString(error));
+        return -1;
+    }
+
     // Get match count
     cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
+    printf("Detected Matches: %d\n", *num_matches);
+    
+    if (cuda_map_gl_resources(detector_id_combined) < 0){
+        printf("Failed to map GL Resources for Combined Detector!\n");
+        cuda_unmap_gl_resources(detector_id_left);
+        cuda_unmap_gl_resources(detector_id_right);
+        return -1;
+    }
+    
+    dim3 blockB(1024);
+    dim3 gridB(((*num_matches) + blockB.x - 1) / blockB.x); 
+    
+    // Generate visualization
+    generateVisualizationKernel<<<blockB, gridB>>>(
+        d_matches,
+        *num_matches,
+        combined_detector->gl_resources.d_positions,
+        combined_detector->gl_resources.d_colors
+    );
 
-    // // Generate visualization
-    // generateVisualizationKernel<<<grid, block>>>(
-    //     d_matches,
-    //     *num_matches,
-    //     detector->gl_resources.d_positions,
-    //     detector->gl_resources.d_colors,
-    //     detector->gl_resources.buffer_size,
-    //     detector->gl_resources.buffer_size
-    // );
+    cudaDeviceSynchronize();
+
+    error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("Visualization Kernel failed: %s\n", cudaGetErrorString(error));
+    }
+
 
     cudaFree(d_matches);
     cudaFree(d_match_count);
 
-    // cleanup:
-    //     cudaGraphicsUnmapResources(1, &left_detector->gl_resources.position_resource);
-    //     cudaGraphicsUnmapResources(1, &right_detector->gl_resources.position_resource);
     
-    // return error == cudaSuccess ? 0 : -1;
-    return 0;
+    cuda_unmap_gl_resources(detector_id_left);
+    cuda_unmap_gl_resources(detector_id_right);
+    cuda_unmap_gl_resources(detector_id_combined);
+
+    return error == cudaSuccess ? 0 : -1;
 }
 
 }

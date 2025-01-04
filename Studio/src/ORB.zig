@@ -21,7 +21,9 @@ pub const StereoMatcher = struct {
     left: *KeypointManager,
     right: *KeypointManager,
 
-    pub fn init(allocator: std.mem.Allocator, left: *KeypointManager, right: *KeypointManager) !*Self {
+    combined: *KeypointManager,
+
+    pub fn init(allocator: std.mem.Allocator, left: *KeypointManager, right: *KeypointManager, combined: *KeypointManager) !*Self {
         var matcher = try allocator.create(Self);
 
         matcher.allocator = allocator;
@@ -35,6 +37,8 @@ pub const StereoMatcher = struct {
 
         matcher.left = left;
         matcher.right = right;
+
+        matcher.combined = combined;
 
         return matcher;
     }
@@ -125,6 +129,7 @@ pub const StereoMatcher = struct {
         try CudaBinds.CudaKeypointDetector.match_keypoints(
             self.left.keypoint_detector.?.detector_id,
             self.right.keypoint_detector.?.detector_id,
+            self.combined.keypoint_detector.?.detector_id,
             self.baseline,
             self.focal_length,
             self.num_matches,
@@ -134,9 +139,9 @@ pub const StereoMatcher = struct {
         );
 
         // Just update the count
-        std.debug.print("Left keypoints: {}\n", .{self.left.num_keypoints.*});
-        std.debug.print("Right keypoints: {}\n", .{self.right.num_keypoints.*});
-        std.debug.print("Detected Matches: {}\n", .{self.num_matches.*});
+        // std.debug.print("Left keypoints: {}\n", .{self.left.num_keypoints.*});
+        // std.debug.print("Right keypoints: {}\n", .{self.right.num_keypoints.*});
+        // std.debug.print("Detected Matches: {}\n", .{self.num_matches.*});
 
         for (self.left.target_node.children.items) |child| {
             child.instance_data.?.count = @intCast(self.left.num_keypoints.*);
@@ -144,6 +149,10 @@ pub const StereoMatcher = struct {
 
         for (self.right.target_node.children.items) |child| {
             child.instance_data.?.count = @intCast(self.right.num_keypoints.*);
+        }
+
+        for (self.combined.target_node.children.items) |child| {
+            child.instance_data.?.count = @intCast(self.num_matches.*);
         }
     }
 };
@@ -178,8 +187,8 @@ pub const KeypointManager = struct {
 
         self.num_keypoints = try allocator.create(c_int);
         self.num_keypoints.* = 0;
-        self.max_keypoints = 5000000;
-        self.threshold = 10;
+        self.max_keypoints = 500000;
+        self.threshold = 15;
 
         self.target_node = target_node;
         self.frame = null;

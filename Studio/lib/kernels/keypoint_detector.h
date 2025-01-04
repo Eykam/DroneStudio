@@ -54,6 +54,7 @@ void cuda_cleanup_detector(int detector_id);
 int cuda_match_keypoints(
     int detector_id_left,
     int detector_id_right,
+    int detector_id_combined,
     float baseline,
     float focal_length,
     int* num_matches,
@@ -62,6 +63,9 @@ int cuda_match_keypoints(
     ImageParams* left,
     ImageParams* right
 );
+
+int cuda_map_gl_resources(int detector_id);
+void cuda_unmap_gl_resources(int detector_id);
 
 
 #ifdef __cplusplus

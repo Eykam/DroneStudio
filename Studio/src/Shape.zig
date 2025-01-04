@@ -457,12 +457,12 @@ pub const Grid = struct {
 pub const TexturedPlane = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, length: ?f32) !*Node {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32) !*Node {
         const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
         const plane_params = try Self.generatePlaneVertices(
             pos orelse default_pos,
             width orelse 1.0,
-            length orelse 1.0,
+            height orelse 1.0,
         );
         const vertices: []Vertex = try allocator.dupe(Vertex, &plane_params.vertices);
         const indices: []u32 = try allocator.dupe(u32, &plane_params.indices);
@@ -472,28 +472,28 @@ pub const TexturedPlane = struct {
         return node;
     }
 
-    pub fn generatePlaneVertices(position: Vec3, width: f32, length: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
+    pub fn generatePlaneVertices(position: Vec3, width: f32, height: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
         const halfWidth: f32 = width / 2.0;
-        const halflength: f32 = length / 2.0;
+        const halfHeight: f32 = height / 2.0;
 
         const vertices: [4]Vertex = .{
             .{
-                .position = .{ position.x - halfWidth, position.y, position.z - halflength },
+                .position = .{ position.x - halfWidth, position.y, position.z - halfHeight },
                 .color = .{ 0.8, 0.8, 0.8 },
                 .texture = [_]f32{ 0.0, 1.0 },
             },
             .{
-                .position = .{ position.x + halfWidth, position.y, position.z - halflength },
+                .position = .{ position.x + halfWidth, position.y, position.z - halfHeight },
                 .color = .{ 0.8, 0.8, 0.8 },
                 .texture = [_]f32{ 1.0, 1.0 },
             },
             .{
-                .position = .{ position.x + halfWidth, position.y, position.z + halflength },
+                .position = .{ position.x + halfWidth, position.y, position.z + halfHeight },
                 .color = .{ 0.8, 0.8, 0.8 },
                 .texture = [_]f32{ 1.0, 0.0 },
             },
             .{
-                .position = .{ position.x - halfWidth, position.y, position.z + halflength },
+                .position = .{ position.x - halfWidth, position.y, position.z + halfHeight },
                 .color = .{ 0.8, 0.8, 0.8 },
                 .texture = [_]f32{ 0.0, 0.0 },
             },

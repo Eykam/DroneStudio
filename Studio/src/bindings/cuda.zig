@@ -34,6 +34,7 @@ extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
 extern "cuda_keypoint_detector" fn cuda_match_keypoints(
     detector_id_left: c_int,
     detector_id_right: c_int,
+    detector_id_combined: c_int,
     baseline: f32,
     focal_length: f32,
     num_matches: *c_int,
@@ -43,6 +44,8 @@ extern "cuda_keypoint_detector" fn cuda_match_keypoints(
 ) c_int;
 extern "cuda_keypoint_detector" fn cuda_unregister_gl_buffers(detector_id: c_int) void;
 extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) void;
+extern "cuda_keypoint_detector" fn cuda_map_gl_resources(detector_id: c_int) c_int;
+extern "cuda_keypoint_detector" fn cuda_unmap_gl_resources(detector_id: c_int) void;
 
 pub const CudaKeypointDetector = struct {
     const Self = @This();
@@ -97,6 +100,11 @@ pub const CudaKeypointDetector = struct {
             .{ image.width, image.height, image.y_linesize },
         );
 
+        if (cuda_map_gl_resources(self.detector_id) < 0) {
+            return;
+        }
+        defer cuda_unmap_gl_resources(self.detector_id);
+
         // Use GL interop path
         const result = cuda_detect_keypoints(
             self.detector_id,
@@ -115,6 +123,7 @@ pub const CudaKeypointDetector = struct {
     pub fn match_keypoints(
         detector_id_left: c_int,
         detector_id_right: c_int,
+        detector_id_combined: c_int,
         baseline: f32,
         focal_length: f32,
         num_matches: *c_int,
@@ -125,6 +134,7 @@ pub const CudaKeypointDetector = struct {
         const result = cuda_match_keypoints(
             detector_id_left,
             detector_id_right,
+            detector_id_combined,
             baseline,
             focal_length,
             num_matches,
