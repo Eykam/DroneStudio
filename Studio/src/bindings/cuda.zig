@@ -19,7 +19,7 @@ pub const ImageParams = extern struct {
 };
 
 // External CUDA function declarations
-extern "cuda_keypoint_detector" fn cuda_create_detector() c_int;
+extern "cuda_keypoint_detector" fn cuda_create_detector(max_keypoints: c_int) c_int;
 extern "cuda_keypoint_detector" fn cuda_register_gl_buffers(
     detector_id: c_int,
     position_buffer: c_uint,
@@ -30,7 +30,7 @@ extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     detector_id: c_int,
     threshold: u8,
     image: *ImageParams,
-) c_int;
+) f32;
 extern "cuda_keypoint_detector" fn cuda_match_keypoints(
     detector_id_left: c_int,
     detector_id_right: c_int,
@@ -54,8 +54,8 @@ pub const CudaKeypointDetector = struct {
     detector_id: c_int,
     gl_interop_enabled: bool,
 
-    pub fn init() !Self {
-        const id = cuda_create_detector();
+    pub fn init(max_keypoints: u32) !Self {
+        const id = cuda_create_detector(@intCast(max_keypoints));
         if (id < 0) {
             return error.CudaInitFailed;
         }
@@ -112,11 +112,12 @@ pub const CudaKeypointDetector = struct {
             image,
         );
 
-        if (result != 0) {
+        if (result < 0) {
             std.debug.print("CUDA-GL keypoint detection failed with error: {}\n", .{result});
             return error.KeypointDetectionFailed;
         }
 
+        std.debug.print("Keypoint Detection Exection TIMe: {d:.5}\n", .{result});
         std.debug.print("Found {} keypoints\n", .{image.num_keypoints.*});
     }
 
@@ -143,7 +144,7 @@ pub const CudaKeypointDetector = struct {
             right,
         );
 
-        if (result != 0) {
+        if (result < 0) {
             std.debug.print("CUDA-GL keypoint matcher failed with error: {}\n", .{result});
             return error.KeypointMatchFailed;
         }

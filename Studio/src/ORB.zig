@@ -12,8 +12,8 @@ pub const StereoMatcher = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    baseline: f32, // in millimeters
-    focal_length: f32, // in pixels
+    baseline: f32, // in mm
+    focal_length: f32, // in mm
     max_disparity: f32,
     epipolar_threshold: f32,
     num_matches: *c_int,
@@ -187,8 +187,8 @@ pub const KeypointManager = struct {
 
         self.num_keypoints = try allocator.create(c_int);
         self.num_keypoints.* = 0;
-        self.max_keypoints = 500000;
-        self.threshold = 15;
+        self.max_keypoints = 50000;
+        self.threshold = 20;
 
         self.target_node = target_node;
         self.frame = null;
@@ -199,7 +199,7 @@ pub const KeypointManager = struct {
         );
         try self.target_node.addChild(node);
 
-        var detector = try CudaBinds.CudaKeypointDetector.init();
+        var detector = try CudaBinds.CudaKeypointDetector.init(self.max_keypoints);
 
         std.debug.print("Node instance_data {any}\n", .{node.instance_data});
         if (glad.glGetError() != glad.GL_NO_ERROR) {

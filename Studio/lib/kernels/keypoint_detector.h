@@ -3,6 +3,12 @@
 
 #include <stdint.h>
 
+
+struct BRIEFDescriptor {
+    uint64_t descriptor[8];  // 512-bit descriptor (can be adjusted)
+};
+
+
 struct CUDAGLResources {
     cudaGraphicsResource_t position_resource;
     cudaGraphicsResource_t color_resource;
@@ -15,7 +21,6 @@ struct CUDAGLResources {
 extern "C" {
 #endif
 
-// Match your Zig struct
 typedef struct {
     float x;
     float y;
@@ -24,6 +29,7 @@ typedef struct {
 typedef struct {
     int* d_keypoint_count;
     CUDAGLResources gl_resources;
+    BRIEFDescriptor* d_descriptors;
     int id;
     bool initialized;
 } DetectorInstance;
@@ -40,9 +46,9 @@ typedef struct {
 } ImageParams;
 
 // Initialize CUDA resources
-int cuda_create_detector();
+int cuda_create_detector(int max_keypoints);
 int cuda_register_gl_buffers(int detector_id, unsigned int position_buffer, unsigned int color_buffer, int max_keypoints);
-int cuda_detect_keypoints(
+float cuda_detect_keypoints(
     int detector_id,
     uint8_t threshold,
     ImageParams* image
