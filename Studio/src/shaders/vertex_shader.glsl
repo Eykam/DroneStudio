@@ -30,7 +30,7 @@ void main()
         worldPos = modelPos.xyz + instanceOffset.xyz;
         finalColor = aInstanceColor;
         gl_Position = uProjection * uView * vec4(worldPos, 1.0);
-        gl_PointSize = 5.0;
+        gl_PointSize = 2.5;
     } else {
         // Normal rendering path
         worldPos = aPos;

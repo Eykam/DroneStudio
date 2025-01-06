@@ -638,8 +638,8 @@ pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager
     const y_plane = sw_frame.*.data[0][0 .. @as(usize, @intCast(sw_frame.*.linesize[0])) * sw_frame_height];
     const uv_plane = sw_frame.*.data[1][0 .. @as(usize, @intCast(sw_frame.*.linesize[1])) * (sw_frame_height / 2)];
 
-    std.debug.print("SW frame dim: {d}x{d}\n", .{ sw_frame_width, sw_frame_height });
-    std.debug.print("SW frame linesize: y: {d} uv:{d}\n", .{ sw_frame.*.linesize[0], sw_frame.*.linesize[1] });
+    // std.debug.print("SW frame dim: {d}x{d}\n", .{ sw_frame_width, sw_frame_height });
+    // std.debug.print("SW frame linesize: y: {d} uv:{d}\n", .{ sw_frame.*.linesize[0], sw_frame.*.linesize[1] });
 
     node.mutex.lock();
     defer node.mutex.unlock();

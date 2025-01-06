@@ -8,92 +8,154 @@ const KeyPoint = CudaBinds.KeyPoint;
 const video = libav.video;
 const glad = gl.glad;
 
-// FAST Keypoint Detection
-const fast_offsets = [_]i32{
-    3,  0,
-    3,  1,
-    2,  2,
-    1,  3,
-    0,  3,
-    -1, 3,
-    -2, 2,
-    -3, 1,
-    -3, 0,
-    -3, -1,
-    -2, -2,
-    -1, -3,
-    0,  -3,
-    1,  -3,
-    2,  -2,
-    3,  -1,
-};
+pub const StereoMatcher = struct {
+    const Self = @This();
 
-pub fn detectFastKeypoints(
     allocator: std.mem.Allocator,
-    image: []const u8,
-    width: usize,
-    height: usize,
-    linesize: c_int,
-    threshold: u8,
-    min_consecutive: u8,
-) !std.ArrayListAligned(KeyPoint, null) {
-    var keypoints = std.ArrayList(KeyPoint).init(allocator);
+    baseline: f32, // in mm
+    focal_length: f32, // in mm
+    max_disparity: f32,
+    epipolar_threshold: f32,
+    num_matches: *c_int,
 
-    const y_start = 3;
-    for (y_start..(height - 3)) |y| {
-        const x_start = 3;
-        for (x_start..(width - 3)) |x| {
-            const I_c = image[y * @as(usize, @intCast(linesize)) + x];
-            var neighborhood = [_]u8{0} ** 16;
-            for (0..(fast_offsets.len / 2)) |i| {
-                const dx = fast_offsets[2 * i];
-                const dy = fast_offsets[2 * i + 1];
-                const nx = @as(usize, @intCast(@as(i32, @intCast(x)) + dx));
-                const ny = @as(usize, @intCast(@as(i32, @intCast(y)) + dy));
-                neighborhood[i] = image[ny * @as(usize, @intCast(linesize)) + nx];
-            }
-            if (hasConsecutivePixels(neighborhood, I_c, threshold, min_consecutive)) {
-                try keypoints.append(.{ .x = @floatFromInt(x), .y = @floatFromInt(y) });
-            }
-        }
+    left: *KeypointManager,
+    right: *KeypointManager,
+
+    combined: *KeypointManager,
+
+    pub fn init(allocator: std.mem.Allocator, left: *KeypointManager, right: *KeypointManager, combined: *KeypointManager) !*Self {
+        var matcher = try allocator.create(Self);
+
+        matcher.allocator = allocator;
+
+        matcher.baseline = 76.3;
+        matcher.focal_length = (6.45 / 2.0) / @tan(51 * std.math.pi / 180.0);
+        matcher.max_disparity = 100.0;
+        matcher.epipolar_threshold = 20.0;
+        matcher.num_matches = try allocator.create(c_int);
+        matcher.num_matches.* = 0;
+
+        matcher.left = left;
+        matcher.right = right;
+
+        matcher.combined = combined;
+
+        return matcher;
     }
 
-    return keypoints;
-}
+    // TODO:Implement
+    pub fn deinit(self: *Self) void {
+        _ = self;
+    }
 
-fn hasConsecutivePixels(
-    neighborhood: [16]u8,
-    I_c: u8,
-    threshold: u8,
-    min_consecutive: u8,
-) bool {
-    const threshold_high: u8 = @intCast(@min(@as(u16, @intCast(I_c)) + @as(u16, @intCast(threshold)), 255));
-    const threshold_low: u8 = @intCast(@max(@as(i16, @intCast(I_c)) - @as(i16, @intCast(threshold)), 0));
+    pub fn match(self: *Self) !void {
+        self.left.mutex.lock();
+        self.right.mutex.lock();
 
-    var doubled_neighborhood = neighborhood ++ neighborhood;
-    var count_bright: u8 = 0;
-    var count_dark: u8 = 0;
+        defer self.left.mutex.unlock();
+        defer self.right.mutex.unlock();
 
-    for (doubled_neighborhood[0..16]) |pixel| {
-        if (pixel > threshold_high) {
-            count_bright += 1;
-            count_dark = 0;
-            if (count_bright >= min_consecutive) {
-                return true;
+        std.debug.print("\n\n\nStarting Frame matching!\n", .{});
+
+        var left_image_params: ?*CudaBinds.ImageParams = null;
+        var right_image_params: ?*CudaBinds.ImageParams = null;
+
+        defer {
+            if (left_image_params) |params| self.allocator.destroy(params);
+            if (right_image_params) |params| self.allocator.destroy(params);
+        }
+
+        if (self.left.frame) |frame| {
+            const frame_width = frame.width;
+            const frame_height = frame.height;
+
+            left_image_params = try self.allocator.create(CudaBinds.ImageParams);
+
+            left_image_params.?.* = CudaBinds.ImageParams{
+                .y_plane = frame.data[0],
+                .width = frame_width,
+                .height = frame_height,
+                .y_linesize = frame.linesize[0],
+                .image_width = @floatFromInt(frame_width),
+                .image_height = @floatFromInt(frame_height),
+                .num_keypoints = self.left.num_keypoints,
+            };
+        }
+
+        if (self.right.frame) |frame| {
+            const frame_width = frame.width;
+            const frame_height = frame.height;
+
+            right_image_params = try self.allocator.create(CudaBinds.ImageParams);
+
+            right_image_params.?.* = CudaBinds.ImageParams{
+                .y_plane = frame.data[0],
+                .width = frame_width,
+                .height = frame_height,
+                .y_linesize = frame.linesize[0],
+                .image_width = @floatFromInt(frame_width),
+                .image_height = @floatFromInt(frame_height),
+                .num_keypoints = self.right.num_keypoints,
+            };
+        }
+
+        if (right_image_params == null and left_image_params == null) {
+            std.debug.print("Unable to create Image params for both left and right...\n", .{});
+            return;
+        } else if (right_image_params != null and left_image_params == null) {
+            std.debug.print("Unable to create Image params for left, Continuing to detect and render Right image...\n", .{});
+            try self.right.keypoint_detector.?.detect_keypoints(
+                self.right.threshold,
+                right_image_params.?,
+            );
+
+            for (self.right.target_node.children.items) |child| {
+                child.instance_data.?.count = @intCast(self.right.num_keypoints.*);
             }
-        } else if (pixel < threshold_low) {
-            count_dark += 1;
-            count_bright = 0;
-            if (count_dark >= min_consecutive) {
-                return true;
+            return;
+        } else if (left_image_params != null and right_image_params == null) {
+            std.debug.print("Unable to create Image params for right, Continuing to detect and render Left image...\n", .{});
+            try self.left.keypoint_detector.?.detect_keypoints(
+                self.left.threshold,
+                left_image_params.?,
+            );
+
+            for (self.left.target_node.children.items) |child| {
+                child.instance_data.?.count = @intCast(self.left.num_keypoints.*);
             }
-        } else {
-            count_bright = 0;
-            count_dark = 0;
+            return;
+        }
+
+        try CudaBinds.CudaKeypointDetector.match_keypoints(
+            self.left.keypoint_detector.?.detector_id,
+            self.right.keypoint_detector.?.detector_id,
+            self.combined.keypoint_detector.?.detector_id,
+            self.baseline,
+            self.focal_length,
+            self.num_matches,
+            self.left.threshold,
+            left_image_params.?,
+            right_image_params.?,
+        );
+
+        // Just update the count
+        // std.debug.print("Left keypoints: {}\n", .{self.left.num_keypoints.*});
+        // std.debug.print("Right keypoints: {}\n", .{self.right.num_keypoints.*});
+        // std.debug.print("Detected Matches: {}\n", .{self.num_matches.*});
+
+        for (self.left.target_node.children.items) |child| {
+            child.instance_data.?.count = @intCast(self.left.num_keypoints.*);
+        }
+
+        for (self.right.target_node.children.items) |child| {
+            child.instance_data.?.count = @intCast(self.right.num_keypoints.*);
+        }
+
+        for (self.combined.target_node.children.items) |child| {
+            child.instance_data.?.count = @intCast(self.num_matches.*);
         }
     }
-    return false;
-}
+};
 
 pub const KeypointManager = struct {
     const Self = @This();
@@ -111,6 +173,7 @@ pub const KeypointManager = struct {
     max_keypoints: u32,
     frame_width: u32,
     frame_height: u32,
+    num_keypoints: *c_int,
 
     frame: ?*video.AVFrame,
 
@@ -122,8 +185,10 @@ pub const KeypointManager = struct {
 
         self.mutex = std.Thread.Mutex{};
 
-        self.max_keypoints = 5000000;
-        self.threshold = 10;
+        self.num_keypoints = try allocator.create(c_int);
+        self.num_keypoints.* = 0;
+        self.max_keypoints = 50000;
+        self.threshold = 20;
 
         self.target_node = target_node;
         self.frame = null;
@@ -134,7 +199,7 @@ pub const KeypointManager = struct {
         );
         try self.target_node.addChild(node);
 
-        var detector = try CudaBinds.CudaKeypointDetector.init();
+        var detector = try CudaBinds.CudaKeypointDetector.init(self.max_keypoints);
 
         std.debug.print("Node instance_data {any}\n", .{node.instance_data});
         if (glad.glGetError() != glad.GL_NO_ERROR) {
@@ -169,68 +234,10 @@ pub const KeypointManager = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        if (self.frame) |curr_frame| {
+            video.av_frame_free(@constCast(@ptrCast(&curr_frame)));
+        }
+
         self.frame = video.av_frame_clone(frame);
     }
-
-    // Called from render thread
-    pub fn processFrame(self: *Self) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        if (self.frame) |frame| {
-            const frame_width: u32 = @intCast(frame.width);
-            const frame_height: u32 = @intCast(frame.height);
-
-            const num_keypoints = try self.keypoint_detector.?.detectKeypoints(
-                frame.data[0],
-                frame.data[1],
-                frame_width,
-                frame_height,
-                @as(u32, @intCast(frame.linesize[0])),
-                @as(u32, @intCast(frame.linesize[1])),
-                self.threshold,
-            );
-
-            // Just update the count
-            std.debug.print("Detected Keypoint => {}\n", .{num_keypoints});
-
-            for (self.target_node.children.items) |child| {
-                child.instance_data.?.count = num_keypoints;
-            }
-
-            defer video.av_frame_free(@ptrCast(&self.frame));
-        }
-    }
-
-    pub fn convertImageToWorldCoords(x: f32, y: f32, imageWidth: f32, imageHeight: f32) [3]f32 {
-        // Convert to normalized coordinates (-1 to 1)
-        const normalizedX = (x / imageWidth) * 2.0 - 1.0;
-        const normalizedY = -((y / imageHeight) * 2.0 - 1.0); // Flip Y axis
-
-        // Scale to world coordinates (TODO: use node dimensions in future instead)
-        const worldX = normalizedX * 6.4; // Half of canvas width (12.8/2)
-        const worldY = normalizedY * 3.6; // Half of canvas height (7.2/2)
-
-        return [_]f32{ worldX, -0.01, worldY }; // Slight z-offset to avoid z-fighting
-    }
 };
-
-// Orientation Assignment
-// fn assignOrientations(image: []u8, keypoints: []KeyPoint) !void {
-//     // Implementation of orientation assignment
-// }
-
-// // BRIEF Descriptor Generation
-// fn generateBriefDescriptors(image: []u8, keypoints: []KeyPoint) ![]Descriptor {
-//     // Implementation of BRIEF descriptor generation
-// }
-
-// // Step 4: Feature Matching
-// fn matchDescriptors(descriptorsLeft: []Descriptor, descriptorsRight: []Descriptor) ![]Match {
-//     // Implementation of feature matching using Hamming distance
-// }
-
-// // Step 5: Depth Estimation
-// fn computeDepth(matchedPairs: []Match, focalLength: f32, baseline: f32) ![]f32 {
-//     // Implementation of depth computation
-// }
