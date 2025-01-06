@@ -29,9 +29,9 @@ pub const StereoMatcher = struct {
         matcher.allocator = allocator;
 
         matcher.baseline = 76.3;
-        matcher.focal_length = 2.75;
+        matcher.focal_length = (6.45 / 2.0) / @tan(51 * std.math.pi / 180.0);
         matcher.max_disparity = 100.0;
-        matcher.epipolar_threshold = 5.0;
+        matcher.epipolar_threshold = 20.0;
         matcher.num_matches = try allocator.create(c_int);
         matcher.num_matches.* = 0;
 

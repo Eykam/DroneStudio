@@ -9,10 +9,15 @@
 
 // ============================================================= Detection =================================================================
 
-__device__ const int2 brief_pattern[512] = {
-    {-8, -3}, {5, 4},
-    {-4, 6}, {7, -2},
-    {3, -7}, {-6, 5},
+__device__ int2 brief_pattern[512] = {
+{  6,  -9}, {  4,  -8}, { -6,   0}, { -5,  -3},{ -8,   1},{ -5,  -1}, { -2,  10},{ -4,   8},{ 15,  -9}, { 15, -15}, { -4,   9}, {  0,   6}, { -3,   0}, { -7,   2}, { 14,  -8}, {  8,  -7}, { -1,  11}, { -1,  11}, { -1,  -6}, {  1, -10}, {  7,   0}, {  9,  -2}, { -6,  11}, { -5,  15}, {  1,  15}, {  2,  12}, {  5,   3}, { -2,   3}, {  6,   5}, {  5,   1}, {  3,  -7}, {  7,  -8}, { -6,  -4}, { -9,  -6}, { -5,  -2}, { -4,   0}, { -7,  -6}, { -8,  -6}, {  1, -13}, {  6, -15}, { 11,  -8}, {  8,  -9}, { -1,  -5}, {  1, -11}, {  7,  -5}, { 11,  -6}, { -9,   3}, { -2,   3}, {  1,  -2}, { -2,  -4}, { -8,  -9}, { -8,  -4}, {  3,   3}, {  4,   0}, {  1,  -3}, {  4,   1}, {  8,   2}, { 11,   0}, { -1,  -1}, { -4,  -4}, { -5,  -3}, {-11,   3}, {  1,   0}, {  3,   0}, 
+{  3,   3}, {  5,  -4}, {  6,   1}, {  8,   2}, {  2,   9}, {  1,  11}, { -2,   0}, {  5,   5}, {  2,   6}, {  1,   0}, {  3,  -2}, { -1,  -9}, {  9,   3}, { 11,   1}, {  0,   8}, { -2,   9}, { -6,   1}, { -9,  -1}, { -2,   5}, { -1,   3}, { -1,   0}, { -1,  -3}, {  5,   1}, {  5,   9}, { -3,   4}, { -8,  10}, { -6,  -6}, { -7,  -9}, { -8,   5}, { -6,   5}, { -2,   4}, { -4,   2}, {  6,  -6}, {  3,  -4}, { -2,  -6}, { -3,  -7}, { -5,   2}, { -3,   5}, { -8,   1}, { -8,  -5}, { -5,   0}, {-11,   1}, {  8,  -8}, { 13,   3}, { -2,  -2}, { -3, -11}, { -8,   5}, { -9,   7}, {  0,   0}, {  2,  -3}, {  3,   2}, { -1,  -3}, { -3,  15}, {  2,  15}, { -2,   2}, { -3,   5}, {  3, -12}, {  6,  -9}, { -3,  -5}, { -1,  -7}, {  2,   0}, {  0,  -4}, { 14,  -5}, { 15,  -5}, {  0, -10}, { -3, -14}, {  7,  -5}, {  4,  -2}, {  2,   8}, 
+{  4,   8}, { -5,   9}, { -6,   6}, { -1,  -1}, {  4,   7}, { -2,   6}, { -4,   5}, { -5,   1}, { -3,   2}, { -2,   0}, { -4,   2}, { -2,   1}, {  1,  -1}, {  9, -14}, {  7, -11}, { -2,  -6}, { -4,  -1}, { 11,  -9}, {  9, -11}, {  9,  -1}, { 10,   0}, {  0,  -2}, {  3,  -2}, { -7,  -1}, {-11,  -1}, { -3,  -6}, { -9,   1}, { -1,  11}, { -4,  12}, { 11,   5}, {  9,  -1}, { -9,   3}, { -7,   5}, {  0,   2}, {  2,   1}, {  2,   3}, { -1,   6}, { 11,  15}, { 13,  15}, { -8,   5}, { -5,   2}, {  5,  -3}, {  1,  -3}, { -2,  -4}, { -4,  -5}, { -9,  13}, { -4,  10}, {  3,   1}, {  3,   6}, {  4,  -7}, {  3, -13}, {  2,   1}, {  3,   0}, {  0,   2}, {  6,   3}, { -2,   3}, {  1,   7}, {  7,  -1}, { 10,  -3}, { -8,  -4}, { -6,  -9}, { 10,  -1}, { 12,  -2}, { -8,  -2}, { -6,  -5}, {  2,  -6}, { -3,  -9}, {  3,  -9}, {  5,  -9}, 
+{ -5,   0}, {  1,   2}, {  5,  -2}, {  0,   1}, {  8,   3}, { 10,   5}, {  1,  -2}, {  4,  -1}, {-12,   1}, {-13,  -4}, { 11,  15}, {  7,  15}, { -1,   1}, { -3,   1}, {  8,   2}, {  7,   1}, { -5,  -2}, { -9,   2}, {-13,   1}, {-15,  -1}, { -4,  -4}, { -1,  -1}, { -8,  -8}, { -3,  -3}, {  4, -13}, {  7, -15}, {  3,  -7}, {  3,  -9}, {  1,  -7}, {  1, -10}, {  1,  -2}, {  8,   0}, {-13,   1}, { -9,  -1}, { -4,  -2}, {  1,   1}, {  8,  -7}, {  7, -10}, { -1,   3}, { -5,   5}, { 13,  -7}, { 12,  -6}, {  2, -10}, {  5,  -9}, { -1,  -1}, {  6,  -5}, {  0,  -2}, {  3,  -1}, {  6,   1}, { 14,   2}, {  1,  -2}, {  3,  -3}, {  3,   9}, {  4,   8}, {  6,   0}, { 10,   1}, {  3,  -3}, {  5,  -1}, {  3,  -1}, 
+{  6,  -2}, { -5,   1}, {  2,  -2}, { -3,  -3}, { -2,  -3}, { -3,  -2}, {  3,  -6}, {  2,  -5}, {  2,   0}, { -2,   6}, {  0,   6}, {  2,   0}, {  5,   1}, {-10,  -3}, { -8,   0}, { -2,  -2}, { -5,  -1}, {  2,  -1}, { -1,   1}, { -1,  -5}, {  0,  -3}, {-15,   3}, {-14,   1}, { -9,  -3}, { -8,  -6}, { -9,   6}, {-11,   7}, {-14,   4}, {-12,   7}, { -5,  -5}, { -5,  -5}, { -3,  -8}, {  0,  -8}, {  1,  -9}, { -1, -10}, { -2,  -7}, { -4, -12}, {  1,  10}, { -1,  15}, {  9,   9}, { 11,  10}, { -8,  -1}, { -9,   0}, {  0,   5}, {  0,  -2}, { -1,  -1}, {  0,  -4}, { -4,   6}, { -4,  13}, {  3,   5}, {  2,   9}, { -8,  -4}, {-11,  -5}, { -4,  -5}, { -3, -10}, { -2,   6}, { -3,   5}, { -2,  -6}, { -3,  -7}, { -3,  -5}, { -6,  -4}, { -9,   1}, {-11,   5}, {  5,   2}, {  5,   1}, { -1,  -1}, { -7,   0}, {  8,   0}, { 14,   3}, 
+{ -4,  -9}, { -4,  -9}, {  8,   2}, { 14,   2}, { -3,  -9}, { -2,  -4}, { -1,   3}, { -4,   4}, {  3,   6}, {  6,   4}, { -9,   3}, {-11,   3}, {  6,  -4}, {  7,  -7}, {  2,  -6}, {  2,  -4}, {  8,  -3}, { 11,  -2}, {  0,   3}, {  0,   4}, { -2,  -3}, { -5,  -6}, { -2,  -7}, { -3,  -1}, { -4,   5}, { -7,   2}, { 15,  -4}, { 15,  -7}, { -6,  -4}, { -7,  -6}, {  0,   2}, {  0,   2}, { -2,  -3}, { -1,  -8}, {  6,  -1}, {  9,  -3}, { -2,   2}, {  2,  -2}, { -3,   6}, { -3,   7}, {  6,   2}, {  7,   6}, {  2,   4}, {  0,   0}, { -5,  11}, { -5,  14}, {  0,  -2}, {  1,  -2}, {-10,   2}, { -5,   4}, {  7,  -1}, {  8,   0}, {  9,   6}, {  3,  10}, { -2,   1}, { -7,   3}, 
+{  1,  -2}, {  3,   1}, {  9,   9}, { 11,   8}, { -7,   3}, { -8,   7}, {  2,   5}, { -2,   7}, { -5,  -1}, { -5,   1}, {  1,  -3}, {  1,  -5}, { -2,  10}, { -5,   6}, {-12,  -1}, { -9,   2}, {  7,   7}, {  4,  11}, { -3,  -9}, { -2,  -3}, {  0,   7}, { -1,   5}, { -4,  -4}, { -1,   1}, { -5,  -2}, { -6,  -2}, {  4,   5}, {  8,   4}, {  9,   5}, { 10,   0}, { -9,  -4}, { -8,   1}, {  4, -10}, {  1,  -7}, { -9, -10}, { -4,  -6}, { -6,  -1}, { -6,  -1}, {  2,   9}, {  0,   6}, {  7,  -2}, {  5,   4}, {  0,   8}, { -2,   2}, {  1,  -6}, {  2,  -6}, { -2, -15}, { -4, -12}, { -1,  -9}, { -1,  -4}, { -2,   5}, { -7,   4}, {  1,   1}, {  1,   1}, {  4,   1}, {  3,   0}, { 15,   6}, {  9,   9}, {  1,   6}, {  0,   8}, { -9,  15}, { -9,  12}, { -4,   3}, { -9,   2}, { -3,  -6}, {  4,  -4}, { -5,   3}, { -3,   3}, {  5,  -5}, 
+{  5,  -7}, { -6,  10}, { -5,   8}, { 11,   2}, { 14,   7}, { -2,  -3}, {  4,   0}, { -7,  -5}, { -9,  -5}, { -4,  -3}, { -2,  -8}, { 14,   2}, { 15,   2}, { -1,   3}, { -1,   6}, { -1,  -6}, { -1,  -2}, { -4,   3}, { -1,   1}, { 11,  -2}, {  9,  -3}, { -3,  -6}, { -4,  -9}, { -1,   0}, { -1,  -1}, { -3,  -7}, { -3, -10}, { -2,  -4}, { -5,  -5}, { 15,  -2}, { 15,   2}, { -8,  14}, { -4,  12}, { -2,  -9}, { -6,  -3}, {  4,  -3}, {  4,  -3}, {  3,  -7}, {  6,  -8}, { -4,  -4}, { -3,  -8}, {  0,   0}, {  1,   1}, { 10,  10}, { 13,   9}, { 11,  -4}, { 12,  -9}, {  3,   7}, { -4,  10}, {  2,   3}, {  1,   1}, {  6,   5}, {  7,   1}, {  0,  -5}, { -1,  -2}, { 10,  -1}, { 14,  -2}
 };
 
 // FAST circle offsets
@@ -146,8 +151,9 @@ __global__ void detectFASTKeypoints(
     if (is_keypoint) {
         // Simple score based on absolute difference from center
         BRIEFDescriptor desc = {0};  // Initialize all bits to 0
-
-        for (int i = 0; i < 512; i++) {
+        
+        #pragma unroll
+        for (int i = 0; i < 512; i += 2) {
             int2 offset1 = brief_pattern[i];
             int2 offset2 = brief_pattern[i+1];
             
@@ -156,7 +162,8 @@ __global__ void detectFASTKeypoints(
             
             // Set bit if first point is brighter than second
             if (p1 > p2) {
-                desc.descriptor[i / 64] |= (1ULL << (i % 64));
+                int bitIdx = i / 2;
+                desc.descriptor[bitIdx / 64] |= (1ULL << (bitIdx % 64));
             }
         }
 
@@ -241,50 +248,54 @@ struct MatchedKeypoint {
     float disparity;
 };
 
-struct MatchedPoint {
+struct Keypoint {
     float3 position;    // Position in OpenGL world coordinates
     float disparity;    // Pixel disparity between left and right views
 };
 
-__device__ MatchedPoint triangulatePosition(
-    float3 leftWorldPos,   // Already transformed by convertImageToWorldCoords
-    float3 rightWorldPos,  // Already transformed by convertImageToWorldCoords
-    float baseline,        // Distance between cameras in world units
-    float canvas_width     // Width of the canvas in world units
+__device__ Keypoint triangulatePosition(
+    float3 leftWorldPos,
+    float3 rightWorldPos,
+    float baseline,        
+    float canvas_width
 ) {
-    MatchedPoint result;
-
-    // Calculate disparity in world units
+    Keypoint result;
+    
+    // Calculate disparity with more stable threshold
     float worldDisparity = leftWorldPos.x - rightWorldPos.x;
-
-    if (fabsf(worldDisparity) < 0.0001f) {
+    if (fabsf(worldDisparity) < 0.01f) {  // Increased threshold
         result.position = make_float3(0.0f, 0.0f, 0.0f);
         result.disparity = worldDisparity;
         return result;
     }
+
+    float mm_per_world_unit = 6.45f / 6.4f;
+    float disparity_mm = worldDisparity * mm_per_world_unit;
+   
+
+    // Calculate depth using similar triangles principle
+    float depth_mm = (baseline * 2.612f) / disparity_mm;  // 3.04f is focal length in mm
+
     
-    // Since the positions are already in world coordinates, we can use them directly
-    // But we need to account for the baseline shift and calculate the midpoint
+    // Clamp depth to reasonable range (adjust these values based on your scene)
+    // const float MIN_DEPTH_MM = 100.0f;   // 10cm
+    // const float MAX_DEPTH_MM = 5000.0f;  // 5m
+    // depth_mm = fmaxf(fminf(depth_mm, MAX_DEPTH_MM), MIN_DEPTH_MM);
+ 
+    float depth_world = depth_mm / mm_per_world_unit;
+
+    // Calculate final world position
+    float world_scale = depth_world / depth_mm;
+    float worldX = leftWorldPos.x;  // Use left camera x position
+    float worldY = -depth_world / 100;    // Negative because OpenGL Y goes up
+    float worldZ = leftWorldPos.z * world_scale;
     
-    // Calculate the matched point position as the midpoint between left and right points,
-    // but adjusted for depth based on disparity
-    float depthFactor = baseline / worldDisparity;
-    
-    // X position: average of left and right X coordinates
-    float worldX = (leftWorldPos.x + rightWorldPos.x) / 2.0f;
-    
-    // Y position: keep consistent with your original function
-    float worldY = depthFactor / 1000;
-    
-    // Z position: average of left and right Z coordinates, scaled by depth factor
-    float worldZ = (leftWorldPos.z + rightWorldPos.z) / 2.0f;
-    
-    // Ensure the position stays within the canvas bounds
-    // worldX = fmax(fmin(worldX, canvas_width/2), -canvas_width/2);
-    // worldZ = fmax(fmin(worldZ, canvas_width/2), -canvas_width/2);
+    // Bound check the final coordinates
+    // worldX = fmaxf(fminf(worldX, canvas_width/2), -canvas_width/2);
+    // worldZ = fmaxf(fminf(worldZ, canvas_width/2), -canvas_width/2);
     
     result.position = make_float3(worldX, worldY, worldZ);
-    result.disparity = worldDisparity;
+    result.disparity = disparity_mm;  // Store disparity in mm for debugging
     
     return result;
 }
@@ -369,7 +380,7 @@ __global__ void matchKeypointsKernel(
                 right_positions[best_matches[threadIdx.x]].z
             );
 
-            MatchedPoint matchedPoint = triangulatePosition(
+            Keypoint matchedPoint = triangulatePosition(
                 left_pos,
                 right_pos,
                 params.baseline,  
@@ -400,7 +411,7 @@ __global__ void generateVisualizationKernel(
     const int base_idx = idx; // 3 vertices per match (triangle strip)
 
     // Center point (world position)
-    positions[base_idx] = make_float4(match.world_pos.x, -0.1f, match.world_pos.z, 1.0f);
+    positions[base_idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 1.0f);
     colors[base_idx] = make_float4(0.0f, 1.0f, 0.0f, 1.0f); // Green for center
 
     // Left keypoint
@@ -692,7 +703,7 @@ int cuda_match_keypoints(
     };
     
 
-    // cudaDeviceSynchronize();   
+    cudaDeviceSynchronize();   
     
     //Use left_detector as the basis for matching
     const int max_matches = min(*right->num_keypoints, *left->num_keypoints);
@@ -722,9 +733,9 @@ int cuda_match_keypoints(
 
     MatchingParams params = {
         .baseline = baseline_world,  // mm
-        .focal_length = focal_length,        // mm
-        .max_disparity = 200.0f,     // pixels
-        .epipolar_threshold = 10.0f,  // pixels
+        .focal_length = focal_length, // mm
+        .max_disparity = 100.0f,     // pixels
+        .epipolar_threshold = 20.0f,  // pixels
         .sensor_width_mm = sensor_width_mm,
         .sensor_width_pixels = 4608.0f,  // pixels
         .sensor_height_pixels = 2592.0f  // pixels
@@ -755,6 +766,7 @@ int cuda_match_keypoints(
     );
     cudaEventRecord(stop);
 
+    cudaDeviceSynchronize();   
     cudaEventSynchronize(stop);
     float milliseconds_matching;
     cudaEventElapsedTime(&milliseconds_matching, start, stop);
@@ -791,6 +803,7 @@ int cuda_match_keypoints(
     );
     cudaEventRecord(stop);
 
+    cudaDeviceSynchronize();   
     cudaEventSynchronize(stop);
     float milliseconds_vis;
     cudaEventElapsedTime(&milliseconds_vis, start, stop);

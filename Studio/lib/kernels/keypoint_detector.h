@@ -5,7 +5,7 @@
 
 
 struct BRIEFDescriptor {
-    uint64_t descriptor[8];  // 512-bit descriptor (can be adjusted)
+    uint64_t descriptor[4];  // 256-bit descriptor (can be adjusted)
 };
 
 
