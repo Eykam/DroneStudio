@@ -617,53 +617,9 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
 }
 
 pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager: *KeypointManager, frame: *video.AVFrame) !void {
+    _ = allocator;
+    _ = node;
 
     // Queue keypoints for keypoint extraction
     try keypoint_manager.queueFrame(frame);
-
-    const sw_frame = video.av_frame_alloc() orelse {
-        std.debug.print("Failed to allocate transferred frame\n", .{});
-        return error.FrameAllocationFailed;
-    };
-    defer video.av_frame_free(@ptrCast(@constCast(&sw_frame)));
-
-    if (video.av_hwframe_transfer_data(sw_frame, frame, 0) < 0) {
-        std.debug.print("Failed to transfer frame data\n", .{});
-        return error.TransferFailed;
-    }
-
-    const sw_frame_width = @as(usize, @intCast(sw_frame.*.width));
-    const sw_frame_height = @as(usize, @intCast(sw_frame.*.height));
-
-    const y_plane = sw_frame.*.data[0][0 .. @as(usize, @intCast(sw_frame.*.linesize[0])) * sw_frame_height];
-    const uv_plane = sw_frame.*.data[1][0 .. @as(usize, @intCast(sw_frame.*.linesize[1])) * (sw_frame_height / 2)];
-
-    // std.debug.print("SW frame dim: {d}x{d}\n", .{ sw_frame_width, sw_frame_height });
-    // std.debug.print("SW frame linesize: y: {d} uv:{d}\n", .{ sw_frame.*.linesize[0], sw_frame.*.linesize[1] });
-
-    node.mutex.lock();
-    defer node.mutex.unlock();
-
-    if (node.y == null) {
-        node.y = try allocator.alloc(u8, sw_frame_width * sw_frame_height);
-    }
-    if (node.uv == null) {
-        node.uv = try allocator.alloc(u8, sw_frame_width * (sw_frame_height / 2));
-    }
-
-    // Copy rows, skipping the padding
-    for (0..sw_frame_height) |i| {
-        const src_row = y_plane[i * @as(usize, @intCast(sw_frame.*.linesize[0])) ..][0..sw_frame_width];
-        @memcpy(node.y.?[i * sw_frame_width ..][0..sw_frame_width], src_row);
-    }
-
-    // // Similar for UV plane
-    for (0..(sw_frame_height / 2)) |i| {
-        const src_row = uv_plane[i * @as(usize, @intCast(sw_frame.*.linesize[1])) ..][0..sw_frame_width];
-        @memcpy(node.uv.?[i * sw_frame_width ..][0..sw_frame_width], src_row);
-    }
-
-    node.width = @intCast(sw_frame_width);
-    node.height = @intCast(sw_frame_height);
-    node.texture_updated = true;
 }

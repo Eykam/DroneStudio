@@ -51,9 +51,11 @@ pub const StereoMatcher = struct {
     pub fn match(self: *Self) !void {
         self.left.mutex.lock();
         self.right.mutex.lock();
+        self.combined.mutex.lock();
 
         defer self.left.mutex.unlock();
         defer self.right.mutex.unlock();
+        defer self.combined.mutex.unlock();
 
         std.debug.print("\n\n\nStarting Frame matching!\n", .{});
 
@@ -73,9 +75,11 @@ pub const StereoMatcher = struct {
 
             left_image_params.?.* = CudaBinds.ImageParams{
                 .y_plane = frame.data[0],
+                .uv_plane = frame.data[1],
                 .width = frame_width,
                 .height = frame_height,
                 .y_linesize = frame.linesize[0],
+                .uv_linesize = frame.linesize[1],
                 .image_width = @floatFromInt(frame_width),
                 .image_height = @floatFromInt(frame_height),
                 .num_keypoints = self.left.num_keypoints,
@@ -90,9 +94,11 @@ pub const StereoMatcher = struct {
 
             right_image_params.?.* = CudaBinds.ImageParams{
                 .y_plane = frame.data[0],
+                .uv_plane = frame.data[1],
                 .width = frame_width,
                 .height = frame_height,
                 .y_linesize = frame.linesize[0],
+                .uv_linesize = frame.linesize[1],
                 .image_width = @floatFromInt(frame_width),
                 .image_height = @floatFromInt(frame_height),
                 .num_keypoints = self.right.num_keypoints,
@@ -138,10 +144,9 @@ pub const StereoMatcher = struct {
             right_image_params.?,
         );
 
-        // Just update the count
-        // std.debug.print("Left keypoints: {}\n", .{self.left.num_keypoints.*});
-        // std.debug.print("Right keypoints: {}\n", .{self.right.num_keypoints.*});
-        // std.debug.print("Detected Matches: {}\n", .{self.num_matches.*});
+        self.left.target_node.texture_updated = true;
+        self.right.target_node.texture_updated = true;
+        self.combined.target_node.texture_updated = true;
 
         for (self.left.target_node.children.items) |child| {
             child.instance_data.?.count = @intCast(self.left.num_keypoints.*);
@@ -177,7 +182,7 @@ pub const KeypointManager = struct {
 
     frame: ?*video.AVFrame,
 
-    pub fn init(allocator: std.mem.Allocator, target_node: *Node) !*Self {
+    pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, target_node: *Node) !*Self {
         var self = try allocator.create(KeypointManager);
 
         self.allocator = std.heap.c_allocator;
@@ -195,27 +200,38 @@ pub const KeypointManager = struct {
 
         const node = try KeypointDebugger.init(
             self.arena.allocator(),
+            color,
             self.max_keypoints,
         );
         try self.target_node.addChild(node);
 
-        var detector = try CudaBinds.CudaKeypointDetector.init(self.max_keypoints);
+        const mesh = target_node.mesh.?;
+        var detector = try CudaBinds.CudaKeypointDetector.init(
+            self.max_keypoints,
+            mesh.textureID.y,
+            mesh.textureID.uv,
+        );
 
         std.debug.print("Node instance_data {any}\n", .{node.instance_data});
         if (glad.glGetError() != glad.GL_NO_ERROR) {
             std.debug.print("GL error before registration\n", .{});
             return error.GLError;
         }
-        std.debug.print("Current openGL rendering device => {s} {s}\n", .{ std.mem.span(glad.glGetString(glad.GL_VENDOR)), std.mem.span(glad.glGetString(glad.GL_RENDERER)) });
+
+        std.debug.print("Current openGL rendering device => {s} {s}\n", .{
+            std.mem.span(glad.glGetString(glad.GL_VENDOR)),
+            std.mem.span(glad.glGetString(glad.GL_RENDERER)),
+        });
 
         // Ensure buffers are valid
-        if (glad.glIsBuffer(node.instance_data.?.position_buffer) != 1 or glad.glIsBuffer(node.instance_data.?.color_buffer) != 1) {
+        const instance_data = node.instance_data.?;
+        if (glad.glIsBuffer(instance_data.position_buffer) != 1 or glad.glIsBuffer(instance_data.color_buffer) != 1) {
             return error.InvalidBuffer;
         }
 
         try detector.enableGLInterop(
-            node.instance_data.?.position_buffer,
-            node.instance_data.?.color_buffer,
+            instance_data.position_buffer,
+            instance_data.color_buffer,
             self.max_keypoints,
         );
 

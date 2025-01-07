@@ -63,15 +63,35 @@ pub fn main() !void {
     var canvasNode = try Node.init(alloc, null, null, null);
     canvasNode.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
 
-    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    var canvasNodeLeft = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = 1280, .h = 720 },
+    );
     canvasNodeLeft.setPosition(-canvas_width, canvas_height / 2.0, -5);
+    canvasNodeLeft.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
     try canvasNode.addChild(canvasNodeLeft);
 
-    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    var canvasNodeRight = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = 1280, .h = 720 },
+    );
     canvasNodeRight.setPosition(canvas_width, canvas_height / 2.0, -5);
+    canvasNodeRight.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
     try canvasNode.addChild(canvasNodeRight);
 
-    var canvasNodeCombined = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    var canvasNodeCombined = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = 1280, .h = 720 },
+    );
     canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
     canvasNodeCombined.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
     try canvasNode.addChild(canvasNodeCombined);
@@ -121,18 +141,21 @@ pub fn main() !void {
 
     var right_keypoint_manager = try KeypointManager.init(
         alloc,
+        .{ 0.0, 0.0, 1.0 },
         canvasNodeRight,
     );
     defer right_keypoint_manager.deinit();
 
     var left_keypoint_manager = try KeypointManager.init(
         alloc,
+        .{ 1.0, 0.0, 0.0 },
         canvasNodeLeft,
     );
     defer left_keypoint_manager.deinit();
 
     const combined_keypoint_manager = try KeypointManager.init(
         alloc,
+        .{ 1.0, 0.0, 1.0 },
         canvasNodeCombined,
     );
     defer combined_keypoint_manager.deinit();
@@ -187,10 +210,16 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
+        const start = try std.time.Instant.now();
+
         try StereoMatcher.match();
 
         scene.processInput(false);
         scene.render(window);
+
+        const end = try std.time.Instant.now();
+        const render_cycle = end.since(start);
+        std.debug.print("Total Render cycle time (ms): {d:.4}\n", .{@as(f32, @floatFromInt(render_cycle)) / 1e6});
     }
 }
 

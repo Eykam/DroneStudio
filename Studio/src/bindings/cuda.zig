@@ -1,7 +1,6 @@
 const std = @import("std");
-// const kernels = @cImport({
-//     @cInclude("keypoint_detector.h");
-// });
+const gl = @import("gl.zig");
+const glad = gl.glad;
 
 pub const KeyPoint = extern struct {
     x: f32,
@@ -10,22 +9,34 @@ pub const KeyPoint = extern struct {
 
 pub const ImageParams = extern struct {
     y_plane: [*c]u8,
+    uv_plane: [*c]u8,
     width: c_int,
     height: c_int,
     y_linesize: c_int,
+    uv_linesize: c_int,
     num_keypoints: *c_int,
     image_width: f32,
     image_height: f32,
 };
 
 // External CUDA function declarations
-extern "cuda_keypoint_detector" fn cuda_create_detector(max_keypoints: c_int) c_int;
+extern "cuda_keypoint_detector" fn cuda_create_detector(max_keypoints: c_int, gl_ytexture: c_uint, gl_uvtexture: c_uint) c_int;
+extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) void;
+
+extern "cuda_keypoint_detector" fn cuda_register_gl_texture(detector_id: c_int) c_int;
+extern "cuda_keypoint_detector" fn cuda_unregister_gl_texture() void;
+
 extern "cuda_keypoint_detector" fn cuda_register_gl_buffers(
     detector_id: c_int,
     position_buffer: c_uint,
     color_buffer: c_uint,
     max_keypoints: c_int,
 ) c_int;
+extern "cuda_keypoint_detector" fn cuda_unregister_gl_buffers(detector_id: c_int) void;
+
+extern "cuda_keypoint_detector" fn cuda_map_gl_resources(detector_id: c_int) c_int;
+extern "cuda_keypoint_detector" fn cuda_unmap_gl_resources(detector_id: c_int) void;
+
 extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     detector_id: c_int,
     threshold: u8,
@@ -42,20 +53,15 @@ extern "cuda_keypoint_detector" fn cuda_match_keypoints(
     left: *ImageParams,
     right: *ImageParams,
 ) c_int;
-extern "cuda_keypoint_detector" fn cuda_unregister_gl_buffers(detector_id: c_int) void;
-extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) void;
-extern "cuda_keypoint_detector" fn cuda_map_gl_resources(detector_id: c_int) c_int;
-extern "cuda_keypoint_detector" fn cuda_unmap_gl_resources(detector_id: c_int) void;
 
 pub const CudaKeypointDetector = struct {
     const Self = @This();
 
-    // Track whether we're using GL interop
     detector_id: c_int,
     gl_interop_enabled: bool,
 
-    pub fn init(max_keypoints: u32) !Self {
-        const id = cuda_create_detector(@intCast(max_keypoints));
+    pub fn init(max_keypoints: u32, gl_ytexture: glad.GLuint, gl_uvtexture: glad.GLuint) !Self {
+        const id = cuda_create_detector(@intCast(max_keypoints), gl_ytexture, gl_uvtexture);
         if (id < 0) {
             return error.CudaInitFailed;
         }
@@ -73,20 +79,14 @@ pub const CudaKeypointDetector = struct {
             color_buffer,
             @intCast(max_keypoints),
         ) != 0) {
-            return error.CudaGLRegistrationFailed;
+            return error.CudaGLBufferRegistrationFailed;
         }
+
         self.gl_interop_enabled = true;
     }
 
-    pub fn disableGLInterop(self: *Self) void {
-        if (self.gl_interop_enabled) {
-            cuda_unregister_gl_buffers(self.detector_id);
-            self.gl_interop_enabled = false;
-        }
-    }
-
     pub fn deinit(self: *Self) void {
-        self.disableGLInterop();
+        self.gl_interop_enabled = false;
         cuda_cleanup_detector(self.detector_id);
     }
 
@@ -95,8 +95,10 @@ pub const CudaKeypointDetector = struct {
         threshold: u8,
         image: *ImageParams,
     ) !void {
+        if (!self.gl_interop_enabled) @panic("GL Resources are not registered!\n");
+
         std.debug.print(
-            "\n\nCalling CUDA detector with dims: {}x{}, linestride: {}\n",
+            "Calling CUDA detector with dims: {}x{}, linestride: {}\n",
             .{ image.width, image.height, image.y_linesize },
         );
 
@@ -148,7 +150,5 @@ pub const CudaKeypointDetector = struct {
             std.debug.print("CUDA-GL keypoint matcher failed with error: {}\n", .{result});
             return error.KeypointMatchFailed;
         }
-
-        std.debug.print("Result of cuda_match_keypoints => {}\n", .{result});
     }
 };

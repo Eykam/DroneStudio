@@ -287,7 +287,7 @@ __device__ Keypoint triangulatePosition(
     // Calculate final world position
     float world_scale = depth_world / depth_mm;
     float worldX = leftWorldPos.x;  // Use left camera x position
-    float worldY = -depth_world / 100;    // Negative because OpenGL Y goes up
+    float worldY = -depth_world / 1000;    // Negative because OpenGL Y goes up
     float worldZ = leftWorldPos.z * world_scale;
     
     // Bound check the final coordinates
@@ -320,7 +320,10 @@ __global__ void matchKeypointsKernel(
     const MatchingParams params,
     MatchedKeypoint* matches,
     int* match_count,
-    const int max_matches
+    const int max_matches,
+    cudaSurfaceObject_t source_tex,      // Y plane texture from left image
+    cudaSurfaceObject_t combined_tex     // Target texture for visualization
+
 ) {
     const int left_idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (left_idx >= left_count) return;
@@ -397,6 +400,62 @@ __global__ void matchKeypointsKernel(
     }
 }
 
+__global__ void setTextureKernel(
+    cudaSurfaceObject_t y_surface,
+    cudaSurfaceObject_t uv_surface,
+    const uint8_t* __restrict__ y_plane,
+    const uint8_t* __restrict__ uv_plane,
+    int width,
+    int height,
+    int y_linesize,
+    int uv_linesize
+){
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x >= width || y >= height) return;
+
+    unsigned char pixel = y_plane[y * y_linesize + x];
+    surf2Dwrite(pixel, y_surface, x * sizeof(u_char) , y);
+
+    if (x < width/2 && y < height/2) {
+        // UV planes are interleaved in memory as UVUV...
+        const int uv_index = (y * uv_linesize) + (x * 2);
+        uchar2 uv_pixels = make_uchar2(
+            uv_plane[uv_index],     // U component
+            uv_plane[uv_index + 1]  // V component
+        );
+        surf2Dwrite(uv_pixels, uv_surface, x * sizeof(uchar2), y);
+    }
+}
+
+__global__ void copySurfaceKernel(
+    cudaSurfaceObject_t srcSurf_y,
+    cudaSurfaceObject_t srcSurf_uv,
+    cudaSurfaceObject_t dstSurf_y,
+    cudaSurfaceObject_t dstSurf_uv,
+    int width,
+    int height
+) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x >= width || y >= height) return;
+    
+ 
+   
+    unsigned char pixel;
+    surf2Dread(&pixel, srcSurf_y, x, y);
+    surf2Dwrite(pixel, dstSurf_y, x * sizeof(u_char), y);
+
+    if (x < width / 2 && y < height / 2) { 
+        uchar2 uv;
+        surf2Dread(&uv, srcSurf_uv, x * sizeof(uchar2), y);
+        surf2Dwrite(uv, dstSurf_uv, x * sizeof(uchar2), y);
+    }
+}
+
+
 // Kernel to generate visualization data
 __global__ void generateVisualizationKernel(
     const MatchedKeypoint* matches,
@@ -429,7 +488,7 @@ __global__ void generateVisualizationKernel(
 
 extern "C" {
 
-int cuda_create_detector(int max_keypoints) {
+int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture) {
     int slot = find_free_detector_slot();
     if (slot < 0) {
         return -1;
@@ -445,6 +504,9 @@ int cuda_create_detector(int max_keypoints) {
 
     g_detectors[slot].initialized = true;
     g_detectors[slot].id = g_next_detector_id++;
+    g_detectors[slot].gl_ytexture = gl_ytexture;
+    g_detectors[slot].gl_uvtexture = gl_uvtexture;
+
     return g_detectors[slot].id;
 }
 
@@ -458,6 +520,66 @@ void cuda_cleanup_detector(int detector_id) {
     if (detector->d_descriptors) cudaFree(detector->d_descriptors);
     detector->d_keypoint_count = nullptr;
     detector->d_descriptors = nullptr;
+}
+
+
+int cuda_register_gl_texture(int detector_id) {
+    DetectorInstance* detector = get_detector_instance(detector_id);
+    if (!detector) return -1;
+
+    // Allocate texture resource
+    detector->y_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
+    if (!detector->y_texture) return -1;
+
+    // Register the OpenGL texture with CUDA
+    cudaError_t err = cudaGraphicsGLRegisterImage(
+        &detector->y_texture->tex_resource,
+        detector->gl_ytexture,
+        GL_TEXTURE_2D,
+        cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
+    );
+    
+    if (err != cudaSuccess) {
+        free(detector->y_texture);
+        detector->y_texture = NULL;
+        return -1;
+    }
+
+    detector->uv_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
+    if (!detector->uv_texture) return -1;
+
+    // Register the OpenGL texture with CUDA
+    err = cudaGraphicsGLRegisterImage(
+        &detector->uv_texture->tex_resource,
+        detector->gl_uvtexture,
+        GL_TEXTURE_2D,
+        cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
+    );
+    
+    if (err != cudaSuccess) {
+        free(detector->uv_texture);
+        detector->uv_texture = NULL;
+        return -1;
+    }
+
+    return 0;
+}
+
+void cuda_unregister_gl_texture(int detector_id) {
+    DetectorInstance* detector = get_detector_instance(detector_id);
+    if (!detector) return;
+
+    if (detector->y_texture){
+        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
+        free(detector->y_texture);
+        detector->y_texture = NULL;
+    }
+
+    if (detector->uv_texture){
+        cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
+        free(detector->uv_texture);
+        detector->uv_texture = NULL;
+    }
 }
 
 
@@ -567,6 +689,58 @@ int cuda_map_gl_resources(int detector_id) {
         cuda_unmap_gl_resources(detector_id);
     }
 
+    if (detector->y_texture) {
+        cudaError_t err;
+        
+        err = cudaGraphicsMapResources(1, &detector->y_texture->tex_resource);
+        if (err != cudaSuccess) return -1;
+        
+        err = cudaGraphicsSubResourceGetMappedArray(
+            &detector->y_texture->array,
+            detector->y_texture->tex_resource,
+            0, 0
+        );
+        if (err != cudaSuccess) return -1;
+
+        // Create surface object
+        cudaResourceDesc res_desc = {};
+        res_desc.resType = cudaResourceTypeArray;
+        res_desc.res.array.array = detector->y_texture->array;
+
+        // Ensure surface parameters match texture format (GL_R8)
+        err = cudaCreateSurfaceObject(&detector->y_texture->surface, &res_desc);
+        if (err != cudaSuccess) {
+            printf("Failed to create surface object: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+    }
+
+    if (detector->uv_texture) {
+        cudaError_t err;
+        
+        err = cudaGraphicsMapResources(1, &detector->uv_texture->tex_resource);
+        if (err != cudaSuccess) return -1;
+        
+        err = cudaGraphicsSubResourceGetMappedArray(
+            &detector->uv_texture->array,
+            detector->uv_texture->tex_resource,
+            0, 0
+        );
+        if (err != cudaSuccess) return -1;
+
+        // Create surface object
+        cudaResourceDesc res_desc = {};
+        res_desc.resType = cudaResourceTypeArray;
+        res_desc.res.array.array = detector->uv_texture->array;
+
+        // Ensure surface parameters match texture format (GL_R8)
+        err = cudaCreateSurfaceObject(&detector->uv_texture->surface, &res_desc);
+        if (err != cudaSuccess) {
+            printf("Failed to create surface object: %s\n", cudaGetErrorString(err));
+            return -1;
+        }
+    }
+
     return error == cudaSuccess ? 0 : -1;
 }
 
@@ -576,6 +750,16 @@ void cuda_unmap_gl_resources(int detector_id) {
 
     cudaGraphicsUnmapResources(1, &detector->gl_resources.position_resource);
     cudaGraphicsUnmapResources(1, &detector->gl_resources.color_resource);
+
+    if (detector->y_texture) {
+        cudaDestroySurfaceObject(detector->y_texture->surface);
+        cudaGraphicsUnmapResources(1, &detector->y_texture->tex_resource);
+    }
+
+    if (detector->uv_texture) {
+        cudaDestroySurfaceObject(detector->uv_texture->surface);
+        cudaGraphicsUnmapResources(1, &detector->uv_texture->tex_resource);
+    }
 }
 
 
@@ -587,11 +771,15 @@ float cuda_detect_keypoints(
     DetectorInstance* detector = get_detector_instance(detector_id);
     
     if (!detector) return -1.0;
+    
 
     cudaError_t error;
  
     dim3 block(16, 16);
-    dim3 grid((image->width + block.x - 1) / block.x, (image->height + block.y - 1) / block.y);
+    dim3 grid(
+        (image->width + block.x - 1) / block.x, 
+        (image->height + block.y - 1) / block.y
+    );
 
     // Reset keypoint counter
     error = cudaMemset(detector->d_keypoint_count, 0, sizeof(int));
@@ -662,9 +850,27 @@ int cuda_match_keypoints(
 
     if (!left_detector || !right_detector || !combined_detector) return -1;
     
-    
+    if (cuda_register_gl_texture(detector_id_left) < 0) {
+        printf("Failed to register GL Texture for Left Detector!\n");
+        return -1;
+    }
+    if (cuda_register_gl_texture(detector_id_right) < 0) {
+        printf("Failed to register GL Texture for Combined Detector!\n");
+        cuda_unregister_gl_texture(detector_id_left);
+        return -1;
+    }
+    if (cuda_register_gl_texture(detector_id_combined) < 0) {
+        printf("Failed to register GL Texture for Combined Detector!\n");
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_left);
+        return -1;
+    }
+
     if (cuda_map_gl_resources(detector_id_left) < 0){
         printf("Failed to map GL Resources for Left Detector!\n");
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
         return -1;
     }  
 
@@ -678,12 +884,20 @@ int cuda_match_keypoints(
     if (detection_time_left < 0){
         printf("Failed to detect keypoints from left image\n");
         cuda_unmap_gl_resources(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
+        
         return -1;
     };
 
     if (cuda_map_gl_resources(detector_id_right) < 0){
         printf("Failed to map GL Resources for Right Detector!\n");
         cuda_unmap_gl_resources(detector_id_left);
+        
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
         return -1;
     }
 
@@ -699,6 +913,10 @@ int cuda_match_keypoints(
         printf("Failed to detect keypoints from right image\n");
         cuda_unmap_gl_resources(detector_id_left);
         cuda_unmap_gl_resources(detector_id_right);
+        
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
         return -1;
     };
     
@@ -716,6 +934,10 @@ int cuda_match_keypoints(
         printf("No matches possible! Returning...\n");
         cuda_unmap_gl_resources(detector_id_left);
         cuda_unmap_gl_resources(detector_id_right);
+
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
         return 0;
     };
    
@@ -742,17 +964,17 @@ int cuda_match_keypoints(
     };
 
     // Launch matching kernel
-    dim3 blockA(512);
-    dim3 gridA((max_matches + blockA.x - 1) / blockA.x); 
+    dim3 blockMatching(512);
+    dim3 gridMatching((max_matches + blockMatching.x - 1) / blockMatching.x); 
 
-    printf("Matching Dims: Thread per Block: %d : Blocks: %d => Total Threads: %d\n", blockA.x, gridA.x, blockA.x * gridA.x);
+    printf("Matching Dims: Thread per Block: %d : Blocks: %d => Total Threads: %d\n", blockMatching.x, gridMatching.x, blockMatching.x * gridMatching.x);
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
     cudaEventRecord(start);
-    matchKeypointsKernel<<<blockA, gridA>>>(
+    matchKeypointsKernel<<<gridMatching, blockMatching>>>(
         left_detector->gl_resources.d_positions,
         right_detector->gl_resources.d_positions,
         left_detector->d_descriptors,
@@ -762,7 +984,9 @@ int cuda_match_keypoints(
         params,
         d_matches,
         d_match_count,
-        max_matches
+        max_matches,
+        left_detector->y_texture->surface,
+        combined_detector->y_texture->surface
     );
     cudaEventRecord(stop);
 
@@ -776,6 +1000,12 @@ int cuda_match_keypoints(
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
         printf("Matching Kernel failed: %s\n", cudaGetErrorString(error));
+        cuda_unmap_gl_resources(detector_id_left);
+        cuda_unmap_gl_resources(detector_id_right);
+        
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
         return -1;
     }
 
@@ -787,15 +1017,107 @@ int cuda_match_keypoints(
         printf("Failed to map GL Resources for Combined Detector!\n");
         cuda_unmap_gl_resources(detector_id_left);
         cuda_unmap_gl_resources(detector_id_right);
+
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
+        return -1;
+    }
+
+    dim3 blockCopyLeft(16,16);
+    dim3 gridCopyLeft(
+        (left->width + blockCopyLeft.x - 1) / blockCopyLeft.x, 
+        (left->height + blockCopyLeft.y - 1) / blockCopyLeft.y
+    );
+
+    setTextureKernel<<<gridCopyLeft, blockCopyLeft>>>(
+        left_detector->y_texture->surface,
+        left_detector->uv_texture->surface,
+        left->y_plane,
+        left->uv_plane,
+        left->width,
+        left->height,
+        left->y_linesize,
+        left->uv_linesize
+    );
+
+    dim3 blockCopyRight(16,16);
+    dim3 gridCopyRight(
+        (left->width + blockCopyRight.x - 1) / blockCopyRight.x, 
+        (left->height + blockCopyRight.y - 1) / blockCopyRight.y
+    );
+
+    setTextureKernel<<<gridCopyRight, blockCopyRight>>>(
+        right_detector->y_texture->surface,
+        right_detector->uv_texture->surface,
+        right->y_plane,
+        right->uv_plane,
+        right->width,
+        right->height,
+        right->y_linesize,
+        right->uv_linesize
+    );
+
+    cudaDeviceSynchronize();
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        printf("Texture set kernel failed: %s\n", cudaGetErrorString(err));
+        cuda_unmap_gl_resources(detector_id_left);
+        cuda_unmap_gl_resources(detector_id_right);
+        cuda_unmap_gl_resources(detector_id_combined);
+            
+        cuda_unregister_gl_texture(detector_id_left);
+        cuda_unregister_gl_texture(detector_id_right);
+        cuda_unregister_gl_texture(detector_id_combined);
         return -1;
     }
     
-    dim3 blockB(1024);
-    dim3 gridB(((*num_matches) + blockB.x - 1) / blockB.x); 
+    if (left_detector->y_texture && left_detector->uv_texture && combined_detector->y_texture && combined_detector->y_texture) {
+        dim3 blockCopyCombined(16, 16);
+        dim3 gridCopyCombined(
+            (left->width + blockCopyCombined.x - 1) / blockCopyCombined.x,
+            (left->height + blockCopyCombined.y - 1) / blockCopyCombined.y
+        );
+        
+        printf("Copying surface from left to combined detector...\n");
+        cudaEventRecord(start);
+        copySurfaceKernel<<<gridCopyCombined, blockCopyCombined>>>(
+            left_detector->y_texture->surface,     // source surface
+            left_detector->uv_texture->surface,     // source surface
+            combined_detector->y_texture->surface, // destination surface
+            combined_detector->uv_texture->surface, // destination surface
+            left->width,
+            left->height
+        );
+        cudaEventRecord(stop);
+        
+        err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("Surface copy kernel failed: %s\n", cudaGetErrorString(err));
+            cuda_unmap_gl_resources(detector_id_left);
+            cuda_unmap_gl_resources(detector_id_right);
+            cuda_unmap_gl_resources(detector_id_combined);
+            
+            cuda_unregister_gl_texture(detector_id_left);
+            cuda_unregister_gl_texture(detector_id_right);
+            cuda_unregister_gl_texture(detector_id_combined);
+            return -1;
+        }
+        
+        cudaEventSynchronize(stop);
+    }
+    
+    float milliseconds_surface_cp = 0;
+    cudaEventElapsedTime(&milliseconds_surface_cp, start, stop);
+    printf("Surface Copy Kernel Execution Time (ms): %f\n", milliseconds_surface_cp);
+
+    dim3 blockVis(1024);
+    dim3 gridVis(((*num_matches) + blockVis.x - 1) / blockVis.x); 
     
     // Generate visualization
     cudaEventRecord(start);
-    generateVisualizationKernel<<<blockB, gridB>>>(
+    generateVisualizationKernel<<<gridVis, blockVis>>>(
         d_matches,
         *num_matches,
         combined_detector->gl_resources.d_positions,
@@ -808,7 +1130,7 @@ int cuda_match_keypoints(
     float milliseconds_vis;
     cudaEventElapsedTime(&milliseconds_vis, start, stop);
     printf("Visualization Kernel Execution Time (ms): %f\n", milliseconds_vis);
-    printf("Total Pipeline Execution (ms): %f\n", milliseconds_matching + milliseconds_vis + detection_time_left + detection_time_right);
+    printf("Total Pipeline Execution (ms): %f\n", milliseconds_matching + milliseconds_vis + detection_time_left + detection_time_right + milliseconds_surface_cp);
 
 
     error = cudaGetLastError();
@@ -824,6 +1146,12 @@ int cuda_match_keypoints(
     cuda_unmap_gl_resources(detector_id_left);
     cuda_unmap_gl_resources(detector_id_right);
     cuda_unmap_gl_resources(detector_id_combined);
+
+    cuda_unregister_gl_texture(detector_id_left);
+    cuda_unregister_gl_texture(detector_id_right);
+    cuda_unregister_gl_texture(detector_id_combined);
+
+    glFinish();
 
     return 0;
 }

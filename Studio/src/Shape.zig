@@ -457,7 +457,7 @@ pub const Grid = struct {
 pub const TexturedPlane = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32) !*Node {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32, texture_dims: ?struct { w: u32, h: u32 }) !*Node {
         const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
         const plane_params = try Self.generatePlaneVertices(
             pos orelse default_pos,
@@ -468,6 +468,51 @@ pub const TexturedPlane = struct {
         const indices: []u32 = try allocator.dupe(u32, &plane_params.indices);
 
         const node = try Node.init(allocator, vertices, indices, Self.draw);
+
+        // Initialize textures if dimensions are provided
+        if (texture_dims) |dims| {
+            if (node.mesh) |mesh| {
+                glad.glGenTextures(1, &mesh.textureID.y);
+                glad.glGenTextures(1, &mesh.textureID.uv);
+
+                // Initialize Y texture with null data
+                glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.yTextureUnit));
+                glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
+                glad.glTexImage2D(
+                    glad.GL_TEXTURE_2D,
+                    0,
+                    glad.GL_R8,
+                    @intCast(dims.w),
+                    @intCast(dims.h),
+                    0,
+                    glad.GL_RED,
+                    glad.GL_UNSIGNED_BYTE,
+                    null, // no initial data
+                );
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+
+                // Initialize UV texture with null data
+                glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.yTextureUnit));
+                glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
+                glad.glTexImage2D(
+                    glad.GL_TEXTURE_2D,
+                    0,
+                    glad.GL_RG8,
+                    @intCast(@divTrunc(dims.w, 2)),
+                    @intCast(@divTrunc(dims.h, 2)),
+                    0,
+                    glad.GL_RG,
+                    glad.GL_UNSIGNED_BYTE,
+                    null, // no initial data
+                );
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+
+                node.width = @intCast(dims.w);
+                node.height = @intCast(dims.h);
+            }
+        }
 
         return node;
     }
@@ -520,10 +565,8 @@ pub const TexturedPlane = struct {
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
         if (mesh.node) |node| {
-            if (node.y != null and node.uv != null) {
-                if (node.scene) |scene| {
-                    glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
-                }
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
             }
         }
 
@@ -564,7 +607,12 @@ pub const TexturedPlane = struct {
         glad.glEnableVertexAttribArray(2);
 
         // Draw the plane
-        glad.glDrawElements(glad.GL_TRIANGLES, @intCast(mesh.indices.?.len), glad.GL_UNSIGNED_INT, null);
+        glad.glDrawElements(
+            glad.GL_TRIANGLES,
+            @intCast(mesh.indices.?.len),
+            glad.GL_UNSIGNED_INT,
+            null,
+        );
 
         if (mesh.node) |node| {
             if (node.scene) |scene| {
@@ -589,12 +637,12 @@ pub const InstancedKeypointDebugger = struct {
         color: [3]f32 = .{ 1.0, 0.0, 0.0 }, // Default to red
     };
 
-    pub fn init(allocator: std.mem.Allocator, max_keypoints: usize) !*Node {
+    pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, max_keypoints: usize) !*Node {
         // Generate the shared circle mesh if it doesn't exist
         const vertices = try allocator.alloc(Vertex, 1);
         vertices[0] = Vertex{
             .position = .{ 0, 0, 0 },
-            .color = .{ 1.0, 0.0, 0.0 },
+            .color = color orelse .{ 1.0, 0.0, 0.0 },
         };
         const node = try Node.init(allocator, vertices, null, Self.draw);
         const mesh = node.mesh.?;

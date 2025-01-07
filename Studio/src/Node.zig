@@ -67,8 +67,6 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?
 
     if (mesh_ptr) |mesh| {
         mesh.node = node_ptr;
-        glad.glGenTextures(1, &mesh.textureID.y);
-        glad.glGenTextures(1, &mesh.textureID.uv);
     }
 
     return node_ptr;
@@ -203,33 +201,39 @@ pub fn update(self: *Self) void {
 
 pub fn bindTexture(self: *Self) !void {
     // Generate texture objects if not already created
-    if (self.texture_updated) {
-        const mesh = self.*.mesh.?;
 
-        if (self.y) |y_data| {
-            // Bind and configure Y plane texture
-            glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
-            glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
-            glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_R8, self.width.?, self.height.?, 0, glad.GL_RED, glad.GL_UNSIGNED_BYTE, y_data.ptr);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-            if (self.scene) |scene| {
-                glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
-            }
-        }
+    if (!self.texture_updated) return;
 
-        if (self.uv) |uv_data| {
-            // Bind and configure interleaved UV plane texture
-            glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
-            glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
-            glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, glad.GL_RG, glad.GL_UNSIGNED_BYTE, uv_data.ptr);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-            if (self.scene) |scene| {
-                glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
-            }
-        }
+    const mesh = self.*.mesh.?;
+    std.debug.print("Binding Texture: {}\n", .{mesh.textureID.y});
+
+    glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
+    glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
+
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
+
+    glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
+    glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
+
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
+
+    if (self.scene) |scene| {
+        glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
+        glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
     }
+
+    const err = glad.glGetError();
+    if (err != glad.GL_NO_ERROR) {
+        std.debug.print("GL Error in bindTexture: {}\n", .{err});
+    }
+
+    self.texture_updated = false;
 }
 
 pub fn debug(self: *Self) void {
