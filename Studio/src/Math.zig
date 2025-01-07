@@ -1,6 +1,441 @@
 const std = @import("std");
+const math = std.math;
 const Sensors = @import("Sensors.zig");
 const SensorState = Sensors.SensorState;
+const TypeId = std.builtin.TypeId;
+
+fn isNumericType(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .int, .float => true,
+        else => false,
+    };
+}
+
+pub fn Vec3(comptime T: type) type {
+    // Verify T is a numeric type
+    comptime {
+        const type_id = @typeInfo(T);
+        switch (type_id) {
+            .int, .float => {},
+            else => @compileError("Vec3 requires a numeric type (integer or float), got " ++ @typeName(T)),
+        }
+    }
+
+    const can_use_simd = switch (@typeInfo(T)) {
+        .float => true,
+        .int => |int_info| int_info.bits <= 32,
+        else => false,
+    };
+
+    return struct {
+        const Self = @This();
+        const SimdVector = if (can_use_simd) @Vector(4, T) else void;
+
+        // Fields
+        x: T,
+        y: T,
+        z: T,
+        simd: if (can_use_simd) SimdVector else void,
+
+        // Initialize a new Vec3
+        pub fn init(x: T, y: T, z: T) Self {
+            if (can_use_simd) {
+                return .{
+                    .x = x,
+                    .y = y,
+                    .z = z,
+                    .simd = SimdVector{ x, y, z, 0 },
+                };
+            } else {
+                return .{
+                    .x = x,
+                    .y = y,
+                    .z = z,
+                    .simd = undefined,
+                };
+            }
+        }
+
+        // Create a zero vector
+        pub fn zero() Self {
+            return Self.init(0, 0, 0);
+        }
+
+        // Create a unit vector along a primary axis
+        pub fn unit(axis: enum { x, y, z }) Self {
+            return switch (axis) {
+                .x => Self.init(1, 0, 0),
+                .y => Self.init(0, 1, 0),
+                .z => Self.init(0, 0, 1),
+            };
+        }
+
+        // Add two vectors
+        pub fn add(a: Self, b: Self) Self {
+            if (can_use_simd) {
+                const result = a.simd + b.simd;
+                return .{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .simd = result,
+                };
+            }
+            return Self.init(
+                a.x + b.x,
+                a.y + b.y,
+                a.z + b.z,
+            );
+        }
+
+        // Subtract two vectors
+        pub fn sub(a: Self, b: Self) Self {
+            if (can_use_simd) {
+                const result = a.simd - b.simd;
+                return .{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .simd = result,
+                };
+            }
+            return Self.init(
+                a.x - b.x,
+                a.y - b.y,
+                a.z - b.z,
+            );
+        }
+
+        // Scale vector by scalar
+        pub fn scale(self: Self, scalar: T) Self {
+            if (can_use_simd) {
+                const scale_vec = @as(scalar, @splat(4));
+                const result = self.simd * scale_vec;
+                return .{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .simd = result,
+                };
+            }
+            return Self.init(
+                self.x * scalar,
+                self.y * scalar,
+                self.z * scalar,
+            );
+        }
+
+        // Dot product
+        pub fn dot(a: Self, b: Self) T {
+            if (can_use_simd) {
+                const prod = a.simd * b.simd;
+                var sum: T = 0;
+
+                inline for (0..3) |i| {
+                    sum += prod[i];
+                }
+                return sum;
+            }
+            return a.x * b.x + a.y * b.y + a.z * b.z;
+        }
+
+        // Cross product
+        pub fn cross(a: Self, b: Self) Self {
+            if (can_use_simd) {
+                // Use SIMD shuffle operations for cross product
+                const a_yzx = @shuffle(T, a.simd, undefined, @Vector(4, i32){ 1, 2, 0, 3 });
+                const b_yzx = @shuffle(T, b.simd, undefined, @Vector(4, i32){ 1, 2, 0, 3 });
+                const a_zxy = @shuffle(T, a.simd, undefined, @Vector(4, i32){ 2, 0, 1, 3 });
+                const b_zxy = @shuffle(T, b.simd, undefined, @Vector(4, i32){ 2, 0, 1, 3 });
+                const result = (a_yzx * b_zxy) - (a_zxy * b_yzx);
+
+                return .{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .simd = result,
+                };
+            }
+
+            return Self.init(
+                a.y * b.z - a.z * b.y,
+                a.z * b.x - a.x * b.z,
+                a.x * b.y - a.y * b.x,
+            );
+        }
+
+        // Length squared
+        pub fn lengthSquared(self: Self) T {
+            return self.dot(self);
+        }
+
+        // Length
+        pub fn length(self: Self) T {
+            return switch (@typeInfo(T)) {
+                .float => @sqrt(self.lengthSquared()),
+                .int => @intFromFloat(@sqrt(@as(f64, @floatFromInt(self.lengthSquared())))),
+                else => unreachable,
+            };
+        }
+
+        // Normalize vector (only for floating point types)
+        pub fn normalize(self: Self) Self {
+            if (@typeInfo(T) != .float) {
+                @compileError("normalize() is only available for floating point vectors");
+            }
+
+            const l = self.length();
+            if (l == 0) {
+                std.debug.print("Warning: Attempting to normalize zero vector\n", .{});
+                return self;
+            }
+            return self.scale(1.0 / l);
+        }
+
+        // Distance between two points
+        pub fn distance(a: Self, b: Self) T {
+            return a.sub(b).length();
+        }
+
+        // Linear interpolation between vectors
+        // pub fn lerp(a: Self, b: Self, t: T) Self {
+        //     if (@typeInfo(T) != .Float) {
+        //         @compileError("lerp() is only available for floating point vectors");
+        //     }
+
+        //     if (can_use_simd) {
+        //         const t_vec = @as(T., @splat(4));
+        //         const one_minus_t = @as@splat(4, @as(T, 1.0) - t);
+        //         const result = (a.simd * one_minus_t) + (b.simd * t_vec);
+        //         return .{
+        //             .x = result[0],
+        //             .y = result[1],
+        //             .z = result[2],
+        //             .simd = result,
+        //         };
+        //     }
+
+        //     return a.scale(1 - t).add(b.scale(t));
+        // }
+
+        // Rotate vector around axis by angle (radians, only for floating point)
+        pub fn rotate(self: Self, axis: Self, _angle: T) Self {
+            if (@typeInfo(T) != .float) {
+                @compileError("rotate() is only available for floating point vectors");
+            }
+
+            const normalized_axis = axis.normalize();
+            const sin_angle = @sin(_angle);
+            const cos_angle = @cos(_angle);
+            const one_minus_cos = 1 - cos_angle;
+
+            // Rodrigues rotation formula
+            const dot_prod = self.dot(normalized_axis) * one_minus_cos;
+            const cross_prod = normalized_axis.cross(self).scale(sin_angle);
+            const parallel = normalized_axis.scale(dot_prod);
+            const perpendicular = self.scale(cos_angle);
+
+            return parallel.add(perpendicular).add(cross_prod);
+        }
+
+        // Angle between two vectors (in radians, only for floating point)
+        pub fn angle(a: Self, b: Self) T {
+            if (@typeInfo(T) != .float) {
+                @compileError("angle() is only available for floating point vectors");
+            }
+
+            const dot_prod = a.dot(b);
+            const lengths_prod = a.length() * b.length();
+            if (lengths_prod == 0) return 0;
+
+            // Clamp to avoid floating point errors
+            const cos_theta = @max(@min(dot_prod / lengths_prod, 1), -1);
+            return std.math.acos(cos_theta);
+        }
+
+        pub fn from_angles(yaw_deg: T, pitch_deg: T) Self {
+            if (@typeInfo(T) != .float) {
+                @compileError("from_angles() is only available for floating point vectors");
+            }
+
+            const yaw = radians(yaw_deg);
+            const pitch = radians(pitch_deg);
+
+            return Self.init(
+                @cos(yaw) * @cos(pitch),
+                @sin(pitch),
+                @sin(yaw) * @cos(pitch),
+            ).normalize();
+        }
+
+        // Convert to array
+        pub fn toArray(self: Self) [3]T {
+            return .{ self.x, self.y, self.z };
+        }
+
+        // Format for printing
+        pub fn format(
+            self: Self,
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+            try writer.print("Vec3({d}, {d}, {d})", .{ self.x, self.y, self.z });
+        }
+
+        // Test whether two vectors are approximately equal (for floating point)
+        pub fn approxEqual(a: Self, b: Self, tolerance: T) bool {
+            if (@typeInfo(T) != .float) {
+                @compileError("approxEqual() is only available for floating point vectors");
+            }
+            return math.approxEqAbs(T, a.x, b.x, tolerance) and
+                math.approxEqAbs(T, a.y, b.y, tolerance) and
+                math.approxEqAbs(T, a.z, b.z, tolerance);
+        }
+    };
+}
+
+pub fn Vec4(comptime T: type) type {
+    if (!isNumericType(T)) {
+        @compileError("Vec4 requires a numeric type (integer or float), got " ++ @typeName(T));
+    }
+
+    // Determine if we can use SIMD
+    const can_use_simd = switch (@typeInfo(T)) {
+        .float => true,
+        .int => |int_info| int_info.bits <= 32,
+        else => false,
+    };
+
+    const Vec4Vector = if (can_use_simd) @Vector(4, T) else void;
+
+    return struct {
+        const Self = @This();
+
+        x: T,
+        y: T,
+        z: T,
+        w: T,
+
+        // Internal SIMD data if available
+        simd_data: if (can_use_simd) Vec4Vector else void = undefined,
+
+        pub fn init(x: T, y: T, z: T, w: T) Self {
+            var result = Self{ .x = x, .y = y, .z = z, .w = w, .simd_data = undefined };
+            if (can_use_simd) {
+                result.simd_data = Vec4Vector{ x, y, z, w };
+            }
+            return result;
+        }
+
+        pub fn zero() Self {
+            return Self.init(0, 0, 0, 0);
+        }
+
+        pub fn one() Self {
+            return Self.init(1, 1, 1, 1);
+        }
+
+        pub fn add(a: Self, b: Self) Self {
+            if (can_use_simd) {
+                const result = a.simd_data + b.simd_data;
+                return Self{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .w = result[3],
+                    .simd_data = result,
+                };
+            }
+            return Self.init(
+                a.x + b.x,
+                a.y + b.y,
+                a.z + b.z,
+                a.w + b.w,
+            );
+        }
+
+        pub fn sub(a: Self, b: Self) Self {
+            if (can_use_simd) {
+                const result = a.simd_data - b.simd_data;
+                return Self{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .w = result[3],
+                    .simd_data = result,
+                };
+            }
+            return Self.init(
+                a.x - b.x,
+                a.y - b.y,
+                a.z - b.z,
+                a.w - b.w,
+            );
+        }
+
+        pub fn scale(self: Self, scalar: T) Self {
+            if (can_use_simd) {
+                const result = self.simd_data * @as(scalar, @splat(4));
+                return Self{
+                    .x = result[0],
+                    .y = result[1],
+                    .z = result[2],
+                    .w = result[3],
+                    .simd_data = result,
+                };
+            }
+            return Self.init(
+                self.x * scalar,
+                self.y * scalar,
+                self.z * scalar,
+                self.w * scalar,
+            );
+        }
+
+        pub fn dot(a: Self, b: Self) T {
+            if (can_use_simd) {
+                const prod = a.simd_data * b.simd_data;
+                return @reduce(.Add, prod);
+            }
+            return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+        }
+
+        pub fn length(self: Self) T {
+            return switch (@typeInfo(T)) {
+                .float => @sqrt(self.dot(self)),
+                .int => @as(T, @intFromFloat(@sqrt(@as(f64, @floatFromInt(self.dot(self)))))),
+                else => unreachable,
+            };
+        }
+
+        pub fn normalize(self: Self) Self {
+            if (@typeInfo(T) != .float) {
+                @compileError("normalize() is only available for floating point vectors");
+            }
+
+            const l = self.length();
+            if (l == 0) {
+                std.debug.print("Warning: Attempting to normalize zero vector\n", .{});
+                return self;
+            }
+            return self.scale(1.0 / l);
+        }
+
+        pub fn lerp(a: Self, b: Self, t: T) Self {
+            if (@typeInfo(T) != .float) {
+                @compileError("lerp() is only available for floating point vectors");
+            }
+            return a.scale(1 - t).add(b.scale(t));
+        }
+
+        pub fn toArray(self: Self) [4]T {
+            return .{ self.x, self.y, self.z, self.w };
+        }
+    };
+}
 
 pub const Mat4 = [16]f32;
 
@@ -148,76 +583,6 @@ pub const Quaternion = struct {
                 .w = a.w * ratio_a + b_copy.w * ratio_b,
             };
         }
-    }
-};
-
-//Todo: Use @Vector for SIMD
-pub const Vec3 = struct {
-    x: f32,
-    y: f32,
-    z: f32,
-
-    pub fn normalize(self: Vec3) Vec3 {
-        const length = @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
-
-        if (length == 0) {
-            std.debug.print("Vec3 with 0 Length Detected", .{});
-            return self;
-        }
-
-        return Vec3{
-            .x = self.x / length,
-            .y = self.y / length,
-            .z = self.z / length,
-        };
-    }
-
-    pub fn add(a: Vec3, b: Vec3) Vec3 {
-        return Vec3{
-            .x = a.x + b.x,
-            .y = a.y + b.y,
-            .z = a.z + b.z,
-        };
-    }
-
-    pub fn sub(a: Vec3, b: Vec3) Vec3 {
-        return Vec3{
-            .x = a.x - b.x,
-            .y = a.y - b.y,
-            .z = a.z - b.z,
-        };
-    }
-
-    pub fn scale(self: Vec3, scalar: f32) Vec3 {
-        return Vec3{
-            .x = self.x * scalar,
-            .y = self.y * scalar,
-            .z = self.z * scalar,
-        };
-    }
-
-    pub fn cross(a: Vec3, b: Vec3) Vec3 {
-        return Vec3{
-            .x = a.y * b.z - a.z * b.y,
-            .y = a.z * b.x - a.x * b.z,
-            .z = a.x * b.y - a.y * b.x,
-        };
-    }
-
-    pub fn dot(a: Vec3, b: Vec3) f32 {
-        return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
-
-    pub fn from_angles(yaw_deg: f32, pitch_deg: f32) Vec3 {
-        const yaw = radians(yaw_deg);
-        const pitch = radians(pitch_deg);
-
-        const front = Vec3{
-            .x = @cos(yaw) * @cos(pitch),
-            .y = @sin(pitch),
-            .z = @sin(yaw) * @cos(pitch),
-        };
-        return Vec3.normalize(front);
     }
 };
 

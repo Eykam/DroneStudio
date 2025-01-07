@@ -52,9 +52,9 @@ pub fn main() !void {
 
     //Initializing Entities
     const gridNode = try Shape.Grid.init(alloc, 1000, 5);
-    const axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
-    const triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
+    const axisNode = try Shape.Axis.init(alloc, Vec3(f32).zero(), 10.0);
+    const triangleNode = try Shape.Triangle.init(alloc, Vec3(f32).init(0.0, 1.0, 10.0), null);
+    const droneAxis = try Shape.Axis.init(alloc, Vec3(f32).zero(), 2.0);
     const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
     const canvas_width = 12.8;

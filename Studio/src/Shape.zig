@@ -17,7 +17,7 @@ const DrawErrors = error{FailedToDraw};
 pub const Triangle = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, _vertices: ?[]Vertex) !*Node {
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3(f32), _vertices: ?[]Vertex) !*Node {
         const vertices: []Vertex = try allocator.dupe(Vertex, _vertices orelse &Self.default(position));
 
         const draw = Mesh.gen_draw(comptime glad.GL_TRIANGLES);
@@ -25,17 +25,13 @@ pub const Triangle = struct {
         return node;
     }
 
-    pub inline fn default(origin: ?Vec3) [3]Vertex {
-        var pos: Vec3 = undefined;
+    pub inline fn default(origin: ?Vec3(f32)) [3]Vertex {
+        var pos: Vec3(f32) = undefined;
 
         if (origin) |position| {
             pos = position;
         } else {
-            pos = Vec3{
-                .x = 0.0,
-                .y = 0.0,
-                .z = 0.0,
-            };
+            pos = Vec3(f32).init(0.0, 0.0, 0.0);
         }
 
         const vertices = [_]Vertex{
@@ -60,7 +56,7 @@ pub const Triangle = struct {
 pub const Box = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, height: ?f32, width: ?f32, depth: ?f32) !*Node {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3(f32), height: ?f32, width: ?f32, depth: ?f32) !*Node {
         _ = pos;
         _ = height;
         _ = width;
@@ -161,8 +157,8 @@ pub const Box = struct {
 pub const Axis = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !*Node {
-        const default_pos: Vec3 = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    pub fn init(allocator: std.mem.Allocator, position: ?Vec3(f32), length: ?f32) !*Node {
+        const default_pos = Vec3(f32).init(0.0, 0.0, 0.0);
         const vertices: []Vertex = try generateVertices(
             allocator,
             position orelse default_pos,
@@ -235,7 +231,7 @@ pub const Axis = struct {
         glad.glDisable(glad.GL_LINE_SMOOTH);
     }
 
-    pub fn generateVertices(allocator: std.mem.Allocator, position: Vec3, length: f32) ![]Vertex {
+    pub fn generateVertices(allocator: std.mem.Allocator, position: Vec3(f32), length: f32) ![]Vertex {
         const vertex_count: usize = @intFromFloat(3 * 2);
         var vertices: []Vertex = try allocator.alloc(Vertex, vertex_count);
         var index: usize = 0;
@@ -457,8 +453,8 @@ pub const Grid = struct {
 pub const TexturedPlane = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32, texture_dims: ?struct { w: u32, h: u32 }) !*Node {
-        const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3(f32), width: ?f32, height: ?f32, texture_dims: ?struct { w: u32, h: u32 }) !*Node {
+        const default_pos = Vec3(f32).init(0.0, 0.0, 0.0);
         const plane_params = try Self.generatePlaneVertices(
             pos orelse default_pos,
             width orelse 1.0,
@@ -517,7 +513,7 @@ pub const TexturedPlane = struct {
         return node;
     }
 
-    pub fn generatePlaneVertices(position: Vec3, width: f32, height: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
+    pub fn generatePlaneVertices(position: Vec3(f32), width: f32, height: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
         const halfWidth: f32 = width / 2.0;
         const halfHeight: f32 = height / 2.0;
 

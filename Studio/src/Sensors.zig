@@ -15,22 +15,22 @@ pub const SensorState = struct {
     sample_count: u32 = 0,
     previous_mag: f32 = 0,
     mag_updated: bool = false,
-    gyro_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
-    accel_offset: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
-    velocity: Vec3 = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 },
-    position: Vec3,
+    gyro_offset: Vec3(f32) = Vec3(f32).zero(),
+    accel_offset: Vec3(f32) = Vec3(f32).zero(),
+    velocity: Vec3(f32) = Vec3(f32).zero(),
+    position: Vec3(f32),
 
     pub fn init(node: *Node) SensorState {
         return SensorState{
-            .position = Vec3{ .x = node.position[0], .y = node.position[1], .z = node.position[2] },
+            .position = Vec3(f32).init(node.position[0], node.position[1], node.position[2]),
         };
     }
 };
 
 pub const Pose = struct {
-    accel: Vec3,
-    gyro: Vec3,
-    mag: Vec3,
+    accel: Vec3(f32),
+    gyro: Vec3(f32),
+    mag: Vec3(f32),
     timestamp: i64,
 };
 
@@ -51,23 +51,23 @@ pub const PoseHandler = struct {
     }
 
     pub fn parse(packet: []const u8) !Pose {
-        const accel = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, packet[0..4], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[4..8], .little)),
-            .z = @bitCast(std.mem.readInt(u32, packet[8..12], .little)),
-        };
+        const accel = Vec3(f32).init(
+            @bitCast(std.mem.readInt(u32, packet[0..4], .little)),
+            @bitCast(std.mem.readInt(u32, packet[4..8], .little)),
+            @bitCast(std.mem.readInt(u32, packet[8..12], .little)),
+        );
 
-        const gyro = Vec3{
-            .x = Math.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
-            .y = Math.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
-            .z = Math.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
-        };
+        const gyro = Vec3(f32).init(
+            Math.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
+            Math.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
+            Math.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
+        );
 
-        const mag = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[28..32], .little)),
-            .z = @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
-        };
+        const mag = Vec3(f32).init(
+            @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
+            @bitCast(std.mem.readInt(u32, packet[28..32], .little)),
+            @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
+        );
 
         const timestamp: i64 = @bitCast(std.mem.readInt(i64, packet[36..44], .little));
 
@@ -84,11 +84,11 @@ pub const PoseHandler = struct {
             const pose = try PoseHandler.parse(data);
 
             if (self.sensor_state.sample_count < 10000) {
-                self.sensor_state.accel_offset = self.sensor_state.accel_offset.add(Vec3{
-                    .x = pose.accel.x,
-                    .y = pose.accel.y,
-                    .z = 1.0 - pose.accel.z,
-                });
+                self.sensor_state.accel_offset = self.sensor_state.accel_offset.add(Vec3(f32).init(
+                    pose.accel.x,
+                    pose.accel.y,
+                    1.0 - pose.accel.z,
+                ));
                 self.sensor_state.gyro_offset = self.sensor_state.gyro_offset.add(pose.gyro);
                 self.sensor_state.sample_count += 1;
                 return;

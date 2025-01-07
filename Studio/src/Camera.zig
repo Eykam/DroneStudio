@@ -4,22 +4,22 @@ const Vec3 = Math.Vec3;
 
 const Self = @This();
 
-position: Vec3,
-front: Vec3,
-up: Vec3,
-right: Vec3,
+position: Vec3(f32),
+front: Vec3(f32),
+up: Vec3(f32),
+right: Vec3(f32),
 yaw: f32, // Rotation around Y-axis in degrees
 pitch: f32, // Rotation around X-axis in degrees
 speed: f32, // Movement speed
 sensitivity: f32, // Mouse sensitivity
 
 // Initialize a new Camera
-pub fn init(position: ?Vec3, front: ?Vec3) Self {
+pub fn init(position: ?Vec3(f32), front: ?Vec3(f32)) Self {
     var camera = Self{
-        .position = position orelse Vec3{ .x = 0.0, .y = 1.0, .z = 5.0 },
-        .front = front orelse Vec3{ .x = 0.0, .y = 0.0, .z = -1.0 },
-        .up = Vec3{ .x = 0.0, .y = 1.0, .z = 0.0 },
-        .right = Vec3{ .x = 1.0, .y = 0.0, .z = 0.0 },
+        .position = position orelse Vec3(f32).init(0.0, 1.0, 5.0),
+        .front = front orelse Vec3(f32).init(0.0, 0.0, -1.0),
+        .up = Vec3(f32).init(0.0, 1.0, 0.0),
+        .right = Vec3(f32).init(1.0, 0.0, 0.0),
         .yaw = 0.0,
         .pitch = 0.0,
         .speed = 2.5,
@@ -31,8 +31,8 @@ pub fn init(position: ?Vec3, front: ?Vec3) Self {
 
 // Update the front, right, and up vectors based on current yaw and pitch
 pub fn update_vectors(self: *Self) void {
-    self.front = Vec3.from_angles(self.yaw, self.pitch);
-    self.right = Vec3.normalize(Vec3.cross(self.front, self.up));
+    self.front = Vec3(f32).from_angles(self.yaw, self.pitch);
+    self.right = Vec3(f32).normalize(Vec3(f32).cross(self.front, self.up));
 }
 
 //Todo: Move function that takes direction instead of separate functions for each direction
@@ -53,11 +53,11 @@ pub fn move_forward(self: *Self, delta_time: f32, sprinting: bool, debug: bool) 
         }});
     }
 
-    self.position = Vec3.add(self.position, Vec3{
-        .x = self.front.x * velocity,
-        .y = 0.0,
-        .z = self.front.z * velocity,
-    });
+    self.position = Vec3.add(self.position, Vec3(f32).init(
+        self.front.x * velocity,
+        0.0,
+        self.front.z * velocity,
+    ));
 
     if (debug) std.debug.print("New: {d:.6}\n", .{[_]f32{
         self.position.x,
@@ -82,11 +82,11 @@ pub fn move_backward(self: *Self, delta_time: f32, sprinting: bool, debug: bool)
         }});
     }
 
-    self.position = Vec3.sub(self.position, Vec3{
-        .x = self.front.x * velocity,
-        .y = 0.0,
-        .z = self.front.z * velocity,
-    });
+    self.position = Vec3(f32).sub(self.position, Vec3(f32).init(
+        self.front.x * velocity,
+        0.0,
+        self.front.z * velocity,
+    ));
 
     if (debug) std.debug.print("New: {d:.6}\n", .{[_]f32{
         self.position.x,
@@ -111,11 +111,11 @@ pub fn move_right(self: *Self, delta_time: f32, sprinting: bool, debug: bool) vo
         }});
     }
 
-    self.position = Vec3.add(self.position, Vec3{
-        .x = self.right.x * velocity,
-        .y = 0.0,
-        .z = self.right.z * velocity,
-    });
+    self.position = Vec3(f32).add(self.position, Vec3(f32).init(
+        self.right.x * velocity,
+        0.0,
+        self.right.z * velocity,
+    ));
 
     if (debug) std.debug.print("New: {d:.6}\n", .{[_]f32{
         self.position.x,
@@ -140,11 +140,11 @@ pub fn move_left(self: *Self, delta_time: f32, sprinting: bool, debug: bool) voi
         }});
     }
 
-    self.position = Vec3.sub(self.position, Vec3{
-        .x = self.right.x * velocity,
-        .y = 0.0,
-        .z = self.right.z * velocity,
-    });
+    self.position = Vec3(f32).sub(self.position, Vec3(f32).init(
+        self.right.x * velocity,
+        0.0,
+        self.right.z * velocity,
+    ));
 
     if (debug) std.debug.print("New: {d:.6}\n", .{[_]f32{
         self.position.x,
