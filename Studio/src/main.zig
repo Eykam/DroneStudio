@@ -15,6 +15,7 @@ const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const KeypointManager = @import("ORB.zig").KeypointManager;
 const ORB = @import("ORB.zig");
+const globals = @import("Globals.zig");
 
 // TODO: Look for a way to set these env variables in build script on linux
 // try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
@@ -210,16 +211,18 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
-        const start = try std.time.Instant.now();
+        // const start = try std.time.Instant.now();
 
-        try StereoMatcher.match();
+        if (!globals.PAUSED) {
+            try StereoMatcher.match();
+        }
 
         scene.processInput(false);
         scene.render(window);
 
-        const end = try std.time.Instant.now();
-        const render_cycle = end.since(start);
-        std.debug.print("Total Render cycle time (ms): {d:.4}\n", .{@as(f32, @floatFromInt(render_cycle)) / 1e6});
+        // const end = try std.time.Instant.now();
+        // const render_cycle = end.since(start);
+        // std.debug.print("Total Render cycle time (ms): {d:.4}\n", .{@as(f32, @floatFromInt(render_cycle)) / 1e6});
     }
 }
 

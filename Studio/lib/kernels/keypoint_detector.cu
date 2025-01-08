@@ -5,27 +5,40 @@
 
 #define MAX_DETECTORS 16
 
-
+#define GAUSSIAN_KERNEL_RADIUS 2
+#define GAUSSIAN_KERNEL_SIZE (2 * GAUSSIAN_KERNEL_RADIUS + 1)
 
 // ============================================================= Detection =================================================================
-
-__device__ int2 brief_pattern[512] = {
-{  6,  -9}, {  4,  -8}, { -6,   0}, { -5,  -3},{ -8,   1},{ -5,  -1}, { -2,  10},{ -4,   8},{ 15,  -9}, { 15, -15}, { -4,   9}, {  0,   6}, { -3,   0}, { -7,   2}, { 14,  -8}, {  8,  -7}, { -1,  11}, { -1,  11}, { -1,  -6}, {  1, -10}, {  7,   0}, {  9,  -2}, { -6,  11}, { -5,  15}, {  1,  15}, {  2,  12}, {  5,   3}, { -2,   3}, {  6,   5}, {  5,   1}, {  3,  -7}, {  7,  -8}, { -6,  -4}, { -9,  -6}, { -5,  -2}, { -4,   0}, { -7,  -6}, { -8,  -6}, {  1, -13}, {  6, -15}, { 11,  -8}, {  8,  -9}, { -1,  -5}, {  1, -11}, {  7,  -5}, { 11,  -6}, { -9,   3}, { -2,   3}, {  1,  -2}, { -2,  -4}, { -8,  -9}, { -8,  -4}, {  3,   3}, {  4,   0}, {  1,  -3}, {  4,   1}, {  8,   2}, { 11,   0}, { -1,  -1}, { -4,  -4}, { -5,  -3}, {-11,   3}, {  1,   0}, {  3,   0}, 
-{  3,   3}, {  5,  -4}, {  6,   1}, {  8,   2}, {  2,   9}, {  1,  11}, { -2,   0}, {  5,   5}, {  2,   6}, {  1,   0}, {  3,  -2}, { -1,  -9}, {  9,   3}, { 11,   1}, {  0,   8}, { -2,   9}, { -6,   1}, { -9,  -1}, { -2,   5}, { -1,   3}, { -1,   0}, { -1,  -3}, {  5,   1}, {  5,   9}, { -3,   4}, { -8,  10}, { -6,  -6}, { -7,  -9}, { -8,   5}, { -6,   5}, { -2,   4}, { -4,   2}, {  6,  -6}, {  3,  -4}, { -2,  -6}, { -3,  -7}, { -5,   2}, { -3,   5}, { -8,   1}, { -8,  -5}, { -5,   0}, {-11,   1}, {  8,  -8}, { 13,   3}, { -2,  -2}, { -3, -11}, { -8,   5}, { -9,   7}, {  0,   0}, {  2,  -3}, {  3,   2}, { -1,  -3}, { -3,  15}, {  2,  15}, { -2,   2}, { -3,   5}, {  3, -12}, {  6,  -9}, { -3,  -5}, { -1,  -7}, {  2,   0}, {  0,  -4}, { 14,  -5}, { 15,  -5}, {  0, -10}, { -3, -14}, {  7,  -5}, {  4,  -2}, {  2,   8}, 
-{  4,   8}, { -5,   9}, { -6,   6}, { -1,  -1}, {  4,   7}, { -2,   6}, { -4,   5}, { -5,   1}, { -3,   2}, { -2,   0}, { -4,   2}, { -2,   1}, {  1,  -1}, {  9, -14}, {  7, -11}, { -2,  -6}, { -4,  -1}, { 11,  -9}, {  9, -11}, {  9,  -1}, { 10,   0}, {  0,  -2}, {  3,  -2}, { -7,  -1}, {-11,  -1}, { -3,  -6}, { -9,   1}, { -1,  11}, { -4,  12}, { 11,   5}, {  9,  -1}, { -9,   3}, { -7,   5}, {  0,   2}, {  2,   1}, {  2,   3}, { -1,   6}, { 11,  15}, { 13,  15}, { -8,   5}, { -5,   2}, {  5,  -3}, {  1,  -3}, { -2,  -4}, { -4,  -5}, { -9,  13}, { -4,  10}, {  3,   1}, {  3,   6}, {  4,  -7}, {  3, -13}, {  2,   1}, {  3,   0}, {  0,   2}, {  6,   3}, { -2,   3}, {  1,   7}, {  7,  -1}, { 10,  -3}, { -8,  -4}, { -6,  -9}, { 10,  -1}, { 12,  -2}, { -8,  -2}, { -6,  -5}, {  2,  -6}, { -3,  -9}, {  3,  -9}, {  5,  -9}, 
-{ -5,   0}, {  1,   2}, {  5,  -2}, {  0,   1}, {  8,   3}, { 10,   5}, {  1,  -2}, {  4,  -1}, {-12,   1}, {-13,  -4}, { 11,  15}, {  7,  15}, { -1,   1}, { -3,   1}, {  8,   2}, {  7,   1}, { -5,  -2}, { -9,   2}, {-13,   1}, {-15,  -1}, { -4,  -4}, { -1,  -1}, { -8,  -8}, { -3,  -3}, {  4, -13}, {  7, -15}, {  3,  -7}, {  3,  -9}, {  1,  -7}, {  1, -10}, {  1,  -2}, {  8,   0}, {-13,   1}, { -9,  -1}, { -4,  -2}, {  1,   1}, {  8,  -7}, {  7, -10}, { -1,   3}, { -5,   5}, { 13,  -7}, { 12,  -6}, {  2, -10}, {  5,  -9}, { -1,  -1}, {  6,  -5}, {  0,  -2}, {  3,  -1}, {  6,   1}, { 14,   2}, {  1,  -2}, {  3,  -3}, {  3,   9}, {  4,   8}, {  6,   0}, { 10,   1}, {  3,  -3}, {  5,  -1}, {  3,  -1}, 
-{  6,  -2}, { -5,   1}, {  2,  -2}, { -3,  -3}, { -2,  -3}, { -3,  -2}, {  3,  -6}, {  2,  -5}, {  2,   0}, { -2,   6}, {  0,   6}, {  2,   0}, {  5,   1}, {-10,  -3}, { -8,   0}, { -2,  -2}, { -5,  -1}, {  2,  -1}, { -1,   1}, { -1,  -5}, {  0,  -3}, {-15,   3}, {-14,   1}, { -9,  -3}, { -8,  -6}, { -9,   6}, {-11,   7}, {-14,   4}, {-12,   7}, { -5,  -5}, { -5,  -5}, { -3,  -8}, {  0,  -8}, {  1,  -9}, { -1, -10}, { -2,  -7}, { -4, -12}, {  1,  10}, { -1,  15}, {  9,   9}, { 11,  10}, { -8,  -1}, { -9,   0}, {  0,   5}, {  0,  -2}, { -1,  -1}, {  0,  -4}, { -4,   6}, { -4,  13}, {  3,   5}, {  2,   9}, { -8,  -4}, {-11,  -5}, { -4,  -5}, { -3, -10}, { -2,   6}, { -3,   5}, { -2,  -6}, { -3,  -7}, { -3,  -5}, { -6,  -4}, { -9,   1}, {-11,   5}, {  5,   2}, {  5,   1}, { -1,  -1}, { -7,   0}, {  8,   0}, { 14,   3}, 
-{ -4,  -9}, { -4,  -9}, {  8,   2}, { 14,   2}, { -3,  -9}, { -2,  -4}, { -1,   3}, { -4,   4}, {  3,   6}, {  6,   4}, { -9,   3}, {-11,   3}, {  6,  -4}, {  7,  -7}, {  2,  -6}, {  2,  -4}, {  8,  -3}, { 11,  -2}, {  0,   3}, {  0,   4}, { -2,  -3}, { -5,  -6}, { -2,  -7}, { -3,  -1}, { -4,   5}, { -7,   2}, { 15,  -4}, { 15,  -7}, { -6,  -4}, { -7,  -6}, {  0,   2}, {  0,   2}, { -2,  -3}, { -1,  -8}, {  6,  -1}, {  9,  -3}, { -2,   2}, {  2,  -2}, { -3,   6}, { -3,   7}, {  6,   2}, {  7,   6}, {  2,   4}, {  0,   0}, { -5,  11}, { -5,  14}, {  0,  -2}, {  1,  -2}, {-10,   2}, { -5,   4}, {  7,  -1}, {  8,   0}, {  9,   6}, {  3,  10}, { -2,   1}, { -7,   3}, 
-{  1,  -2}, {  3,   1}, {  9,   9}, { 11,   8}, { -7,   3}, { -8,   7}, {  2,   5}, { -2,   7}, { -5,  -1}, { -5,   1}, {  1,  -3}, {  1,  -5}, { -2,  10}, { -5,   6}, {-12,  -1}, { -9,   2}, {  7,   7}, {  4,  11}, { -3,  -9}, { -2,  -3}, {  0,   7}, { -1,   5}, { -4,  -4}, { -1,   1}, { -5,  -2}, { -6,  -2}, {  4,   5}, {  8,   4}, {  9,   5}, { 10,   0}, { -9,  -4}, { -8,   1}, {  4, -10}, {  1,  -7}, { -9, -10}, { -4,  -6}, { -6,  -1}, { -6,  -1}, {  2,   9}, {  0,   6}, {  7,  -2}, {  5,   4}, {  0,   8}, { -2,   2}, {  1,  -6}, {  2,  -6}, { -2, -15}, { -4, -12}, { -1,  -9}, { -1,  -4}, { -2,   5}, { -7,   4}, {  1,   1}, {  1,   1}, {  4,   1}, {  3,   0}, { 15,   6}, {  9,   9}, {  1,   6}, {  0,   8}, { -9,  15}, { -9,  12}, { -4,   3}, { -9,   2}, { -3,  -6}, {  4,  -4}, { -5,   3}, { -3,   3}, {  5,  -5}, 
-{  5,  -7}, { -6,  10}, { -5,   8}, { 11,   2}, { 14,   7}, { -2,  -3}, {  4,   0}, { -7,  -5}, { -9,  -5}, { -4,  -3}, { -2,  -8}, { 14,   2}, { 15,   2}, { -1,   3}, { -1,   6}, { -1,  -6}, { -1,  -2}, { -4,   3}, { -1,   1}, { 11,  -2}, {  9,  -3}, { -3,  -6}, { -4,  -9}, { -1,   0}, { -1,  -1}, { -3,  -7}, { -3, -10}, { -2,  -4}, { -5,  -5}, { 15,  -2}, { 15,   2}, { -8,  14}, { -4,  12}, { -2,  -9}, { -6,  -3}, {  4,  -3}, {  4,  -3}, {  3,  -7}, {  6,  -8}, { -4,  -4}, { -3,  -8}, {  0,   0}, {  1,   1}, { 10,  10}, { 13,   9}, { 11,  -4}, { 12,  -9}, {  3,   7}, { -4,  10}, {  2,   3}, {  1,   1}, {  6,   5}, {  7,   1}, {  0,  -5}, { -1,  -2}, { 10,  -1}, { 14,  -2}
+// Generated BRIEF pattern (512 pairs):
+__device__ int2 brief_pattern[1024] = {
+    { -7, -1}, {  0, -2},{ -6, -1}, { -5, -6},{ -6, -1}, { -7, -3},{ -6, -1}, { -1,  2},{ -5, -1}, { -5, -5},{ -5, -1}, { -7, -4},{ -5, -1}, { -3,  1},{ -5, -1}, { -7, -4},{ -5, -1}, { -7, -2},{ -4, -1}, { -7,  0},{ -4, -1}, { -7,  2},{ -4, -1}, { -5, -7},{ -7, -2}, { -4, -6},{ -7, -2}, { -7, -4},{ -3, -1}, { -4,  7},{ -3, -1}, { -3,  5},{ -6, -2}, { -1, -6},{ -6, -2}, { -7, -4},{ -3, -1}, { -3,  2},{ -3, -1}, { -5,  3},{ -3, -1}, { -4, -3},{ -5, -2}, { -7, -1},{ -2, -1}, { -2,  2},{ -6, -3}, { -7, -5},{ -2, -1}, {  1, -1},{ -2, -1}, { -5, -4},{ -2, -1}, { -4, -7},{ -4, -2}, { -5, -6},{ -2, -1}, { -1, -6},{ -2, -1}, {  0,  2},{ -2, -1}, { -7,  2},{ -2, -1}, {  0,  7},{ -4, -2}, { -4,  4},{ -3, -2}, { -7, -3},{ -3, -2}, { -5, -5},{ -3, -2}, { -3,  1},{ -6, -4}, { -4, -7},{ -4, -3}, {  0, -7},{ -4, -3}, { -7, -1},{ -5, -4}, { -3, -7},{ -5, -4}, { -2, -7},{ -5, -4}, { -6, -7},{ -5, -4}, { -4, -7},{ -5, -4}, { -7, -4},{ -1, -1}, { -1, -1},{ -2, -2}, {  3,  5},{ -2, -2}, {  0,  3},{ -1, -1}, { -1, -3},{ -4, -4}, { -4, -7},{ -3, -3}, { -6, -7},{ -1, -1}, {  2, -4},{ -2, -2}, { -2,  2},{ -4, -4}, { -3, -7},{ -5, -5}, { -4, -7},{ -3, -3}, {  0, -1},{ -1, -1}, { -3, -2},{ -3, -3}, { -5,  6},{ -1, -1}, { -3,  5},{ -2, -2}, { -2,  6},{ -3, -3}, {  1, -2},{ -1, -1}, {  3,  1},{ -1, -1}, {  0,  2},{ -5, -6}, { -7, -7},{ -4, -5}, { -6, -1},{ -4, -5}, {  0,  4},
+    { -3, -4}, { -7, -4},{ -3, -5}, { -1, -5},{ -3, -5}, { -4, -4},{ -3, -5}, {  3, -7},{ -3, -5}, {  0, -7},{ -1, -2}, {  2,  1},{ -1, -2}, { -3, -3},{ -2, -4}, { -2, -2},{ -3, -6}, {  1, -7},{ -1, -2}, {  3, -3},{ -1, -2}, { -5, -7},{ -3, -6}, { -1, -3},{ -1, -2}, {  0, -3},{ -2, -4}, { -3, -1},{ -3, -6}, { -2, -7},{ -2, -5}, { -1, -6},{ -2, -5}, { -4, -7},{ -2, -6}, { -3, -4},{ -2, -6}, { -7, -7},{ -1, -3}, { -3, -3},{ -1, -3}, { -5,  3},{ -1, -3}, {  3, -1},{ -2, -7}, { -6, -4},{ -1, -4}, {  1, -1},{ -1, -4}, {  3, -7},{ -1, -4}, {  4, -5},{ -1, -7}, { -7, -7},{  0, -1}, {  2,  2},{  0, -1}, {  0, -3},{  0, -1}, {  0,  3},{  0, -5}, {  2, -6},{  0, -1}, {  3, -5},{  0, -2}, { -4,  5},{  0, -1}, { -6, -1},{  0, -4}, {  1, -2},{  0, -2}, { -1, -6},{  0, -1}, { -2, -2},{  0, -5}, {  1, -6},{  0, -5}, {  4, -6},{  0, -1}, { -7, -4},{  0, -3}, { -6, -6},{  0, -3}, {  1, -7},{  0, -5}, { -1, -7},{  0, -1}, {  2, -3},{  0, -1}, {  0, -1},{  0, -1}, { -6,  0},{  0, -5}, { -3, -2},{  0, -4}, { -2,  7},{  0, -1}, { -5,  2},{  0, -1}, {  1, -6},{  0, -2}, {  5, -2},{  0, -2}, {  1, -3},{  0, -3}, {  1, -7},{  1, -6}, {  1, -5},{  1, -6}, {  4, -4},{  1, -6}, {  2, -7},{  1, -6}, { -4, -7},{  1, -5}, {  1, -7},{  1, -5}, { -4, -2},{  1, -4}, {  4, -6},{  2, -7}, { -2, -2},{  1, -3}, {  2, -5},{  2, -6}, {  7, -3},{  1, -3}, {  3, -6},{  1, -3}, {  0, -6},
+    {  1, -3}, {  1, -7},{  3, -7}, {  4, -7},{  3, -7}, {  7, -7},{  3, -6}, {  3, -5},{  1, -2}, { -2, -1},{  1, -2}, { -5,  0},{  3, -6}, {  7,  0},{  2, -4}, {  1, -7},{  1, -2}, {  2, -3},{  1, -2}, {  4, -2},{  1, -2}, {  2,  2},{  1, -2}, { -2, -4},{  2, -4}, {  3, -5},{  2, -4}, {  7, -1},{  2, -4}, { -4, -7},{  1, -2}, { -5, -3},{  1, -2}, { -3,  2},{  1, -2}, {  1, -5},{  4, -6}, {  0, -7},{  2, -3}, { -5,  0},{  4, -6}, {  2, -6},{  2, -3}, {  0,  3},{  3, -4}, {  0,  1},{  3, -4}, { -3, -7},{  3, -4}, {  2, -6},{  4, -5}, {  6, -7},{  4, -5}, {  5, -7},{  4, -5}, {  3,  2},{  4, -5}, {  2, -3},{  5, -6}, {  3, -7},{  5, -5}, {  4, -3},{  2, -2}, {  5, -3},{  3, -3}, {  6, -6},{  1, -1}, {  7, -1},{  4, -4}, {  2, -7},{  3, -3}, {  7, -7},{  4, -4}, {  6, -4},{  3, -3}, {  1, -6},{  5, -5}, {  5, -6},{  4, -4}, {  7, -4},{  1, -1}, {  5,  1},{  3, -3}, {  5,  3},{  5, -4}, {  7, -3},{  5, -4}, {  1,  0},{  4, -3}, {  5, -4},{  3, -2}, {  4, -3},{  6, -4}, {  4, -4},{  3, -2}, {  4, -5},{  3, -2}, { -2, -4},{  3, -2}, { -4, -3},{  3, -2}, {  5, -1},{  5, -3}, {  4,  1},{  5, -3}, { -4, -7},{  2, -1}, { -1, -5},{  2, -1}, { -5,  2},{  2, -1}, {  4, -5},{  4, -2}, { -1,  0},{  2, -1}, {  5,  2},{  4, -2}, {  4, -1},{  2, -1}, {  7, -5},{  4, -2}, {  3, -4},{  4, -2}, { -3,  3},{  4, -2}, {  5, -3},{  7, -3}, {  7, -5},{  5, -2}, {  6, -1},{  5, -2}, {  6,  0},
+    {  5, -2}, {  6, -7},{  5, -2}, {  1,  0},{  5, -2}, {  1,  3},{  3, -1}, {  5, -3},{  6, -2}, {  7,  0},{  6, -2}, {  1,  1},{  3, -1}, { -4, -1},{  3, -1}, {  4,  3},{  7, -2}, {  7, -5},{  4, -1}, {  1,  2},{  5, -1}, {  4,  6},{  5, -1}, {  7,  3},{  6, -1}, {  7, -7},{  6, -1}, {  7,  0},{  6, -1}, {  7, -6},{  0,  0}, { -3, -4},{  1,  0}, {  5,  3},{  0,  0}, { -2, -4},{  0,  0}, {  7,  1},{  0,  0}, {  1,  7},{  3,  0}, {  2,  7},{  0,  0}, { -7,  0},{  1,  0}, {  3,  1},{  5,  0}, {  6, -3},{  3,  0}, {  7,  4},{  0,  0}, { -4,  7},{  0,  0}, { -6, -1},{  1,  0}, {  0,  0},{  5,  0}, { -3, -5},{  3,  0}, { -1,  5},{  0,  0}, {  3,  3},{  0,  0}, {  1,  3},{  0,  0}, {  4,  4},{  1,  0}, {  2, -3},{  1,  0}, { -2, -1},{  0,  0}, {  2,  1},{  0,  0}, { -3, -2},{  0,  0}, { -1,  3},{  1,  0}, {  4, -4},{  7,  0}, {  6, -3},{  0,  0}, { -5,  1},{  1,  0}, { -1, -2},{  0,  0}, {  7, -6},{  0,  0}, { -1,  4},{  0,  0}, { -7,  0},{  0,  0}, { -5,  2},{  1,  0}, {  0,  4},{  1,  0}, {  4,  3},{  0,  0}, { -3, -4},{  2,  0}, { -2, -1},{  3,  0}, {  6, -4},{  1,  0}, {  4,  4},{  0,  0}, {  0,  2},{  0,  0}, {  7, -4},{  1,  0}, { -2,  6},{  0,  0}, { -1,  3},{  0,  0}, { -2,  4},{  0,  0}, {  7,  3},{  1,  0}, {  7,  5},{  0,  0}, { -1, -3},{  0,  0}, {  5,  4},{  3,  0}, {  7,  1},{  2,  0}, {  1,  1},{  0,  0}, {  0,  2},{  2,  0}, {  3, -3},{  0,  0}, { -7, -1},
+    {  0,  0}, { -4,  5},{  3,  0}, {  1,  7},{  0,  0}, { -5,  5},{  0,  0}, { -3, -4},{  1,  0}, { -3,  2},{  2,  0}, {  6, -2},{  1,  0}, {  1, -3},{  7,  0}, {  4,  3},{  0,  0}, {  7,  7},{  2,  0}, { -2, -1},{  0,  0}, { -5,  0},{  0,  0}, {  2, -6},{  0,  0}, {  7,  5},{  2,  0}, {  5,  0},{  1,  0}, { -4, -3},{  0,  0}, { -2,  2},{  0,  0}, {  6, -6},{  6,  1}, {  7,  4},{  5,  1}, {  5,  4},{  5,  1}, {  1,  4},{  5,  1}, {  7,  2},{  5,  1}, {  7, -2},{  5,  1}, {  1,  4},{  5,  1}, { -5,  3},{  4,  1}, {  7,  1},{  4,  1}, {  5, -2},{  7,  2}, {  7, -5},{  3,  1}, {  4,  5},{  3,  1}, {  0,  6},{  3,  1}, {  4, -1},{  6,  2}, {  6, -4},{  3,  1}, {  5, -2},{  5,  2}, {  5,  5},{  5,  2}, {  1,  5},{  5,  2}, {  3, -3},{  5,  2}, {  7,  4},{  6,  3}, {  6,  7},{  2,  1}, {  7,  2},{  2,  1}, {  3,  4},{  6,  3}, {  7,  5},{  2,  1}, { -4,  4},{  2,  1}, { -5, -1},{  6,  3}, {  7,  2},{  6,  3}, {  7,  3},{  5,  3}, {  3,  7},{  5,  3}, {  7,  7},{  5,  3}, { -1, -1},{  3,  2}, {  1,  5},{  3,  2}, { -2,  4},{  3,  2}, {  7, -1},{  4,  3}, {  2, -4},{  4,  3}, {  5,  3},{  4,  3}, {  7,  2},{  4,  3}, {  4,  3},{  5,  4}, {  7, -1},{  1,  1}, {  5, -1},{  1,  1}, { -2,  7},{  1,  1}, {  2, -7},{  5,  5}, {  7,  5},{  3,  3}, {  4,  7},{  1,  1}, {  2,  3},{  2,  2}, {  0, -3},{  1,  1}, {  5, -3},{  1,  1}, { -7, -1},
+    {  2,  2}, {  4,  2},{  1,  1}, {  1,  3},{  2,  2}, {  3,  1},{  2,  2}, { -1,  6},{  2,  2}, {  1,  1},{  4,  4}, {  2,  6},{  1,  1}, {  1, -3},{  3,  3}, {  5,  0},{  1,  1}, { -2,  6},{  5,  5}, {  7,  5},{  1,  1}, { -1, -2},{  1,  1}, {  0,  4},{  2,  2}, {  5,  0},{  4,  4}, {  5,  0},{  3,  3}, {  3,  6},{  4,  5}, {  4,  4},{  3,  4}, {  4,  5},{  3,  4}, { -7,  6},{  2,  3}, {  7, -1},{  2,  3}, {  0,  3},{  2,  3}, { -1,  2},{  4,  6}, {  1,  1},{  2,  3}, { -2,  7},{  3,  5}, {  7,  7},{  3,  5}, {  2,  6},{  3,  5}, {  7, -1},{  3,  6}, { -2,  3},{  1,  2}, {  0, -1},{  2,  4}, { -2,  0},{  3,  6}, {  5,  4},{  2,  5}, {  0,  3},{  2,  5}, {  1,  7},{  1,  3}, {  5,  3},{  1,  3}, { -5,  2},{  1,  3}, { -7,  4},{  1,  3}, { -6,  7},{  2,  7}, {  1,  7},{  1,  4}, {  0,  5},{  1,  4}, { -1, -2},{  1,  4}, {  0,  4},{  1,  5}, {  1,  6},{  1,  5}, {  7,  7},{  1,  5}, { -2,  7},{  1,  5}, {  2,  7},{  1,  6}, {  3,  6},{  1,  6}, {  3,  7},{  0,  1}, {  2,  3},{  0,  2}, {  2,  7},{  0,  4}, { -7,  0},{  0,  7}, { -4,  4},{  0,  1}, { -1,  7},{  0,  5}, {  0,  0},{  0,  4}, {  0,  4},{  0,  4}, {  0,  7},{  0,  1}, {  0,  4},{  0,  7}, { -5,  7},{  0,  1}, { -1, -2},{  0,  1}, {  0, -4},{  0,  2}, {  7,  2},{  0,  4}, { -4,  2},{  0,  1}, {  7,  2},{  0,  2}, {  2,  0},{  0,  3}, { -2,  6},{  0,  3}, {  0,  1},{  0,  6}, { -4,  4},
+    {  0,  1}, {  3, -4},{  0,  1}, {  2, -3},{  0,  4}, {  0,  2},{  0,  1}, {  4,  6},{  0,  2}, {  3,  4},{  0,  1}, { -3,  6},{  0,  3}, { -2,  3},{  0,  1}, { -3,  2},{  0,  2}, {  0, -7},{ -1,  7}, {  2,  7},{ -1,  7}, {  7,  6},{ -1,  6}, {  1,  5},{ -1,  5}, {  7,  6},{ -1,  5}, { -3,  1},{ -1,  4}, {  1,  4},{ -1,  4}, {  1,  0},{ -2,  7}, {  3,  6},{ -1,  3}, {  5,  3},{ -1,  3}, {  2,  6},{ -1,  3}, { -5,  7},{ -1,  3}, { -3, -1},{ -1,  3}, { -3,  6},{ -1,  3}, { -1, -1},{ -1,  3}, { -4,  6},{ -1,  3}, {  1,  4},{ -2,  5}, { -5,  7},{ -2,  5}, { -6,  2},{ -2,  5}, { -3,  7},{ -2,  5}, { -7,  7},{ -3,  7}, { -7,  3},{ -3,  7}, { -7,  7},{ -3,  6}, { -5,  3},{ -2,  4}, { -5,  7},{ -2,  4}, {  1, -2},{ -1,  2}, { -7, -5},{ -1,  2}, {  0,  3},{ -1,  2}, {  5,  2},{ -2,  4}, {  3,  7},{ -3,  6}, { -4,  7},{ -2,  4}, {  2,  7},{ -1,  2}, {  1,  7},{ -1,  2}, {  5, -1},{ -1,  2}, { -2, -1},{ -1,  2}, { -2,  7},{ -3,  5}, { -4,  2},{ -3,  5}, {  3,  3},{ -4,  6}, { -3,  7},{ -2,  3}, {  0,  1},{ -4,  6}, { -7,  1},{ -4,  6}, { -5, -1},{ -3,  4}, { -5,  6},{ -3,  4}, { -5,  3},{ -4,  5}, {  6,  1},{ -1,  1}, {  4,  1},{ -4,  4}, { -4, -3},{ -2,  2}, { -5,  2},{ -3,  3}, {  1,  1},{ -2,  2}, { -1,  4},{ -1,  1}, { -2, -3},{ -1,  1}, { -2,  5},{ -2,  2}, { -1,  4},{ -1,  1}, {  4, -3},{ -2,  2}, { -7,  0},{ -1,  1}, { -4, -1},{ -1,  1}, { -5,  2},
+    { -2,  2}, { -1, -4},{ -1,  1}, { -3,  1},{ -5,  4}, { -7, -2},{ -5,  4}, { -1,  3},{ -4,  3}, {  1,  2},{ -3,  2}, {  7, -1},{ -3,  2}, { -2,  5},{ -3,  2}, { -2,  2},{ -3,  2}, { -5, -2},{ -3,  2}, { -4,  0},{ -5,  3}, { -2,  4},{ -2,  1}, { -6,  3},{ -4,  2}, {  0,  2},{ -4,  2}, { -7,  2},{ -5,  2}, { -1,  5},{ -3,  1}, { -3,  2},{ -6,  2}, { -7, -6},{ -3,  1}, {  4, -1},{ -6,  2}, { -7, -3},{ -3,  1}, { -7, -7},{ -6,  2}, { -1,  5},{ -6,  2}, { -7,  2},{ -7,  2}, { -7,  5},{ -4,  1}, { -7,  0},{ -4,  1}, { -7,  4},{ -4,  1}, { -5, -3},{ -4,  1}, { -3,  1},{ -6,  1}, { -4, -5},{ -7,  1}, { -5, -2},{ -7,  1}, { -7,  3},{ -7,  1}, { -4,  7},{ -3,  0}, { -1,  2},{ -1,  0}, { -5,  2},{ -1,  0}, { -4,  1},{ -1,  0}, {  7,  0},{ -1,  0}, { -2,  5},{ -2,  0}, { -1, -1},{ -4,  0}, { -7,  2},{ -7,  0}, { -4, -4},{ -7,  0}, { -7,  0},{ -3,  0}, {  2,  0},{ -1,  0}, { -3, -1},{ -6,  0}, { -7, -4},{ -7,  0}, { -3,  1},{ -1,  0}, { -7, -3},{ -1,  0}, {  5,  3},{ -6,  0}, { -3,  3},{ -1,  0}, {  2,  3},{ -6,  0}, { -6, -6},{ -4,  0}, {  1,  0},{ -2,  0}, { -4,  0},{ -6,  0}, { -7,  0},{ -1,  0}, { -2,  0},{ -5,  0}, { -7,  5},{ -3,  0}, {  2, -4},{ -1,  0}, { -7, -1}
 };
 
 // FAST circle offsets
 __constant__ int2 fast_offsets[16] = {
-    {3,  0},  {3,  1},  {2,  2},  {1,  3},
-    {0,  3},  {-1, 3},  {-2, 2},  {-3, 1},
-    {-3, 0},  {-3, -1}, {-2, -2}, {-1, -3},
-    {0, -3},  {1, -3},  {2, -2},  {3,  -1}
+    // Right side
+    {3,  0}, {3,  1}, {3, -1},
+    // Top right
+    {2,  2}, {1,  3},
+    // Top
+    {0,  3}, {-1, 3},
+    // Top left
+    {-2, 2}, {-3, 1},
+    // Left
+    {-3, 0}, {-3,-1},
+    // Bottom left
+    {-2,-2}, {-1,-3},
+    // Bottom
+    {0, -3}, {1, -3},
+    // Bottom right
+    {2, -2}
 };
 
 
@@ -49,6 +62,57 @@ static int find_free_detector_slot(void) {
         }
     }
     return -1;
+}
+
+
+__constant__ float d_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
+
+
+// Separable Gaussian blur kernels
+__global__ void gaussianBlurHorizontal(
+    const uint8_t* __restrict__ input,
+    uint8_t* output,
+    int width,
+    int height,
+    int pitch
+) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x >= width || y >= height) return;
+    
+    float sum = 0.0f;
+    
+    // Horizontal pass
+    for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
+        int cur_x = min(max(x + i, 0), width - 1);
+        sum += input[y * pitch + cur_x] * d_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
+    }
+    
+    output[y * pitch + x] = (uint8_t)sum;
+}
+
+__global__ void gaussianBlurVertical(
+    const uint8_t* __restrict__ input,
+    uint8_t* output,
+    int width,
+    int height,
+    int pitch
+) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x >= width || y >= height) return;
+    
+    float sum = 0.0f;
+    
+    // Vertical pass
+    for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
+        int cur_y = min(max(y + i, 0), height - 1);
+        sum += input[cur_y * pitch + x] * d_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
+    }
+    
+    output[y * pitch + x] = (uint8_t)sum;
 }
 
 __device__ float3 convertImageToWorldCoords(float x, float y, float imageWidth, float imageHeight) {
@@ -203,6 +267,7 @@ __global__ void detectFASTKeypoints(
             int local_idx = atomicAdd(&block_counter, 1);
             if (local_idx < 256) {
                 block_keypoints[local_idx] = make_float2(x, y);
+                block_descriptors[local_idx] = desc;
             }
         }
     }
@@ -263,11 +328,11 @@ __device__ Keypoint triangulatePosition(
     
     // Calculate disparity with more stable threshold
     float worldDisparity = leftWorldPos.x - rightWorldPos.x;
-    if (fabsf(worldDisparity) < 0.01f) {  // Increased threshold
-        result.position = make_float3(0.0f, 0.0f, 0.0f);
-        result.disparity = worldDisparity;
-        return result;
-    }
+    // if (fabsf(worldDisparity) < 0.01f) {  // Increased threshold
+    //     result.position = make_float3(0.0f, 0.0f, 0.0f);
+    //     result.disparity = worldDisparity;
+    //     return result;
+    // }
 
     float mm_per_world_unit = 6.45f / 6.4f;
     float disparity_mm = worldDisparity * mm_per_world_unit;
@@ -294,7 +359,7 @@ __device__ Keypoint triangulatePosition(
     // worldX = fmaxf(fminf(worldX, canvas_width/2), -canvas_width/2);
     // worldZ = fmaxf(fminf(worldZ, canvas_width/2), -canvas_width/2);
     
-    result.position = make_float3(worldX, worldY, worldZ);
+    result.position = make_float3(rightWorldPos.x, -0.1, rightWorldPos.z);
     result.disparity = disparity_mm;  // Store disparity in mm for debugging
     
     return result;
@@ -302,9 +367,10 @@ __device__ Keypoint triangulatePosition(
 
 __device__ inline int hammingDistance(const BRIEFDescriptor& desc1, const BRIEFDescriptor& desc2) {
     int distance = 0;
+   
     for (int i = 0; i < 8; i++) {
         uint64_t xor_result = desc1.descriptor[i] ^ desc2.descriptor[i];
-        distance += __popcll(xor_result);  // Built-in population count for 64-bit integers
+        distance += __popcll(xor_result);  // Count differing bits
     }
     return distance;
 }
@@ -325,15 +391,36 @@ __global__ void matchKeypointsKernel(
     cudaSurfaceObject_t combined_tex     // Target texture for visualization
 
 ) {
+    extern __shared__ float shared_mem[];
+    
+    // Split shared memory into different arrays
+    float* min_costs = shared_mem;
+    float* second_min_costs = &min_costs[blockDim.x];
+    int* best_matches = (int*)&second_min_costs[blockDim.x];
+    int* used_right_points = &best_matches[blockDim.x];
+    int* shared_count = (int*)&used_right_points[right_count];
+
     const int left_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    // Initialize shared memory
+    if (threadIdx.x < blockDim.x) {
+        min_costs[threadIdx.x] = INFINITY;
+        second_min_costs[threadIdx.x] = INFINITY;
+        best_matches[threadIdx.x] = -1;
+    }
+    
+    if (threadIdx.x < right_count) {
+        used_right_points[threadIdx.x] = 0;
+    }
+    
+    if (threadIdx.x == 0) {
+        shared_count[0] = 0;
+    }
+
+    __syncthreads();
+
     if (left_idx >= left_count) return;
-
-    __shared__ float min_costs[512]; 
-    __shared__ int best_matches[512];
-
-    min_costs[threadIdx.x] = INFINITY;
-    best_matches[threadIdx.x] = -1;
-
+    
     float3 left_pos = make_float3(
         left_positions[left_idx].x,
         left_positions[left_idx].y,
@@ -342,7 +429,14 @@ __global__ void matchKeypointsKernel(
 
     BRIEFDescriptor left_desc = left_descriptors[left_idx];
 
-    // Find best match for this left keypoint
+    float best_desc_distance = INFINITY;
+    float best_y_diff = INFINITY;
+    float best_disparity = INFINITY;
+
+
+    const int MAX_DESC_DISTANCE = 64.0f; 
+    
+    // Find best and second-best matches for this left keypoint
     for (int right_idx = 0; right_idx < right_count; right_idx++) {
         float3 right_pos = make_float3(
             right_positions[right_idx].x,
@@ -350,44 +444,96 @@ __global__ void matchKeypointsKernel(
             right_positions[right_idx].z
         );
 
-        // Check epipolar constraint
+        // Check epipolar constraint (y-difference)
         float y_diff = fabsf(left_pos.y - right_pos.y);
-        if (y_diff > params.epipolar_threshold) continue;
-
-        // Calculate disparity (should be positive)
         float disparity = left_pos.x - right_pos.x;
-        if (disparity <= 0 || disparity > params.max_disparity) continue;
 
-        // Calculate Hamming distance between descriptors
+        if (y_diff > params.epipolar_threshold || 
+            disparity <= 0 || 
+            disparity > params.max_disparity) {
+            continue;
+        }
+      
+        // Calculate descriptor distance
         int desc_distance = hammingDistance(left_desc, right_descriptors[right_idx]);
-        
-        // Combined cost function using both y-difference and descriptor distance
-        float desc_cost = desc_distance / 512.0f;  // Normalize to [0,1]
-        float cost = y_diff * 0.3f + desc_cost * 0.7f;  // Weighted combination
+        if (desc_distance > MAX_DESC_DISTANCE) continue;
+      
+        // Calculate individual costs
+        float desc_cost = desc_distance / 512.0f;
+        float epipolar_cost = y_diff / params.epipolar_threshold;
+        float disparity_cost = disparity / params.max_disparity;
 
-        if (cost < min_costs[threadIdx.x]) {
-            min_costs[threadIdx.x] = cost;
+        // Weighted combination of costs
+        float total_cost = epipolar_cost * 0.3f +
+                          desc_cost * 0.5f +
+                          disparity_cost * 0.2f;
+
+        // Maintain best and second-best matches
+        if (total_cost < min_costs[threadIdx.x]) {
+            best_desc_distance = desc_distance;
+            best_y_diff = y_diff;
+            best_disparity = disparity;
+            
+            second_min_costs[threadIdx.x] = min_costs[threadIdx.x];
+            min_costs[threadIdx.x] = total_cost;
             best_matches[threadIdx.x] = right_idx;
+        } else if (total_cost < second_min_costs[threadIdx.x]) {
+            second_min_costs[threadIdx.x] = total_cost;
         }
     }
 
     __syncthreads();
 
-    // Store match if good enough
-    if (best_matches[threadIdx.x] >= 0 && min_costs[threadIdx.x] < params.epipolar_threshold) {
-        int match_idx = atomicAdd(match_count, 1);
-        if (match_idx < max_matches) {
-           float3 right_pos = make_float3(
-                right_positions[best_matches[threadIdx.x]].x,
-                right_positions[best_matches[threadIdx.x]].y,
-                right_positions[best_matches[threadIdx.x]].z
+    // Apply Lowe's ratio test and absolute threshold
+    const float RATIO_THRESH = 0.7f; 
+    const float ABS_COST_THRESH = 0.25f;
+    
+    bool is_good_match = false;
+    int right_idx = best_matches[threadIdx.x];
+
+    if (right_idx >= 0) {
+        bool passes_thresholds = (min_costs[threadIdx.x] < ABS_COST_THRESH) &&
+                                (min_costs[threadIdx.x] < second_min_costs[threadIdx.x] * RATIO_THRESH);
+        
+        bool passes_validation = (best_y_diff < params.epipolar_threshold * 0.5f) &&
+                                (best_disparity > 1.0f) &&
+                                (best_desc_distance < MAX_DESC_DISTANCE * 0.75f);
+        
+        is_good_match = passes_thresholds && passes_validation;
+        
+        // Try to claim the right point
+        if (is_good_match && right_idx < right_count) {
+            is_good_match = (atomicCAS(&used_right_points[right_idx], 0, 1) == 0);
+            if (is_good_match) {
+                atomicAdd(shared_count, 1);
+            }
+        }
+    }
+
+     __syncthreads();
+
+    // Update global match count
+    if (threadIdx.x == 0 && shared_count[0] > 0) {
+        atomicAdd(match_count, min(shared_count[0], max_matches));
+    }
+
+    __syncthreads();
+
+    // Store matches, respecting the max_matches limit
+    if (is_good_match) {
+        int match_idx = atomicSub(shared_count, 1) - 1;
+        if (match_idx >= 0 && match_idx < max_matches) {
+            float3 right_pos = make_float3(
+                right_positions[right_idx].x,
+                right_positions[right_idx].y,
+                right_positions[right_idx].z
             );
 
             Keypoint matchedPoint = triangulatePosition(
                 left_pos,
                 right_pos,
-                params.baseline,  
-                6.4f      // Canvas width in world units
+                params.baseline,
+                6.4f
             );
 
             matches[match_idx] = {
@@ -467,11 +613,11 @@ __global__ void generateVisualizationKernel(
     if (idx >= match_count) return;
 
     const MatchedKeypoint match = matches[idx];
-    const int base_idx = idx; // 3 vertices per match (triangle strip)
+    // const int base_idx = idx; // 3 vertices per match (triangle strip)
 
     // Center point (world position)
-    positions[base_idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 1.0f);
-    colors[base_idx] = make_float4(0.0f, 1.0f, 0.0f, 1.0f); // Green for center
+    positions[idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 1.0f);
+    colors[idx] = make_float4(0.5f, 0.0f, 0.5f, 1.0f); // Purple for center
 
     // Left keypoint
     // positions[base_idx + 1] = make_float4(match.left_pos.x, match.left_pos.y, match.left_pos.z, 1.0f);
@@ -763,10 +909,33 @@ void cuda_unmap_gl_resources(int detector_id) {
 }
 
 
+void initGaussianKernel(float sigma) {
+    float h_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
+    float sum = 0.0f;
+    
+    // Calculate Gaussian kernel values
+    for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
+        float x = i;
+        h_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS] = expf(-(x * x) / (2 * sigma * sigma));
+        sum += h_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
+    }
+    
+    // Normalize kernel
+    for (int i = 0; i < GAUSSIAN_KERNEL_SIZE; i++) {
+        h_gaussian_kernel[i] /= sum;
+    }
+    
+    // Copy kernel to constant memory
+    cudaMemcpyToSymbol(d_gaussian_kernel, h_gaussian_kernel, GAUSSIAN_KERNEL_SIZE * sizeof(float));
+}
+
+
+
 float cuda_detect_keypoints(
     int detector_id,
     uint8_t threshold,
-    ImageParams* image
+    ImageParams* image,
+    float sigma = 1.0f
 ) {
     DetectorInstance* detector = get_detector_instance(detector_id);
     
@@ -775,10 +944,36 @@ float cuda_detect_keypoints(
 
     cudaError_t error;
  
+    uint8_t *d_temp1, *d_temp2;
+    cudaMalloc(&d_temp1, image->y_linesize * image->height);
+    cudaMalloc(&d_temp2, image->y_linesize * image->height);
+    
+    // Initialize Gaussian kernel
+    initGaussianKernel(sigma);
+    
+    // Setup kernel launch parameters
     dim3 block(16, 16);
     dim3 grid(
-        (image->width + block.x - 1) / block.x, 
+        (image->width + block.x - 1) / block.x,
         (image->height + block.y - 1) / block.y
+    );
+    
+    // Apply horizontal Gaussian blur
+    gaussianBlurHorizontal<<<grid, block>>>(
+        image->y_plane,
+        d_temp1,
+        image->width,
+        image->height,
+        image->y_linesize
+    );
+    
+    // Apply vertical Gaussian blur
+    gaussianBlurVertical<<<grid, block>>>(
+        d_temp1,
+        d_temp2,
+        image->width,
+        image->height,
+        image->y_linesize
     );
 
     // Reset keypoint counter
@@ -792,10 +987,10 @@ float cuda_detect_keypoints(
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    cudaEventRecord(start);
     // Launch kernel
+    cudaEventRecord(start);
     detectFASTKeypoints<<<grid, block>>>(
-        image->y_plane,
+        d_temp2,
         image->width,
         image->height,
         image->y_linesize,
@@ -809,11 +1004,14 @@ float cuda_detect_keypoints(
         image->image_height
     );
     cudaEventRecord(stop);
-
     cudaEventSynchronize(stop);
+
     float milliseconds; 
     cudaEventElapsedTime(&milliseconds, start, stop);
     printf("Detection Kernel Timing (ms): %f\n", milliseconds);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     error = cudaGetLastError();
     if (error != cudaSuccess) {
@@ -821,6 +1019,8 @@ float cuda_detect_keypoints(
         return -1.0;
     }
 
+    cudaFree(d_temp1);
+    cudaFree(d_temp2);
 
     // Get keypoint count
     error = cudaMemcpy(image->num_keypoints, detector->d_keypoint_count, sizeof(int), cudaMemcpyDeviceToHost);
@@ -874,11 +1074,14 @@ int cuda_match_keypoints(
         return -1;
     }  
 
+    float sigma = 1.25f;
+
     printf("Getting keypoints from left...\n");
     float detection_time_left = cuda_detect_keypoints(
         detector_id_left,
         threshold,
-        left
+        left,
+        sigma
     );
 
     if (detection_time_left < 0){
@@ -905,7 +1108,8 @@ int cuda_match_keypoints(
     float detection_time_right = cuda_detect_keypoints(
         detector_id_right,
         threshold,
-        right
+        right,
+        sigma
     );
    
 
@@ -930,10 +1134,47 @@ int cuda_match_keypoints(
     printf("Right Keypoints: %d\n", *right->num_keypoints);
     printf("Max matches allowed: %d\n", max_matches);
 
+    dim3 blockCopyLeft(16,16);
+    dim3 gridCopyLeft(
+        (left->width + blockCopyLeft.x - 1) / blockCopyLeft.x, 
+        (left->height + blockCopyLeft.y - 1) / blockCopyLeft.y
+    );
+
+    dim3 blockCopyRight(16,16);
+    dim3 gridCopyRight(
+        (left->width + blockCopyRight.x - 1) / blockCopyRight.x, 
+        (left->height + blockCopyRight.y - 1) / blockCopyRight.y
+    );
+
+
     if (max_matches <= 0) {
         printf("No matches possible! Returning...\n");
         cuda_unmap_gl_resources(detector_id_left);
         cuda_unmap_gl_resources(detector_id_right);
+
+        setTextureKernel<<<gridCopyLeft, blockCopyLeft>>>(
+            left_detector->y_texture->surface,
+            left_detector->uv_texture->surface,
+            left->y_plane,
+            left->uv_plane,
+            left->width,
+            left->height,
+            left->y_linesize,
+            left->uv_linesize
+        );
+
+        setTextureKernel<<<gridCopyRight, blockCopyRight>>>(
+            right_detector->y_texture->surface,
+            right_detector->uv_texture->surface,
+            right->y_plane,
+            right->uv_plane,
+            right->width,
+            right->height,
+            right->y_linesize,
+            right->uv_linesize
+        );
+
+        cudaDeviceSynchronize();
 
         cuda_unregister_gl_texture(detector_id_left);
         cuda_unregister_gl_texture(detector_id_right);
@@ -956,8 +1197,8 @@ int cuda_match_keypoints(
     MatchingParams params = {
         .baseline = baseline_world,  // mm
         .focal_length = focal_length, // mm
-        .max_disparity = 100.0f,     // pixels
-        .epipolar_threshold = 20.0f,  // pixels
+        .max_disparity = 200.0f,     // pixels
+        .epipolar_threshold = 75.0f,  // pixels
         .sensor_width_mm = sensor_width_mm,
         .sensor_width_pixels = 4608.0f,  // pixels
         .sensor_height_pixels = 2592.0f  // pixels
@@ -973,8 +1214,13 @@ int cuda_match_keypoints(
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
+    size_t shared_mem_size = 
+        (2 * sizeof(float) + sizeof(int)) * blockMatching.x + 
+        sizeof(int) * *right->num_keypoints +                         
+        sizeof(int);                                        
+    
     cudaEventRecord(start);
-    matchKeypointsKernel<<<gridMatching, blockMatching>>>(
+    matchKeypointsKernel<<<gridMatching, blockMatching, shared_mem_size>>>(
         left_detector->gl_resources.d_positions,
         right_detector->gl_resources.d_positions,
         left_detector->d_descriptors,
@@ -1006,6 +1252,12 @@ int cuda_match_keypoints(
         cuda_unregister_gl_texture(detector_id_left);
         cuda_unregister_gl_texture(detector_id_right);
         cuda_unregister_gl_texture(detector_id_combined);
+        
+        cudaFree(d_matches);
+        cudaFree(d_match_count);
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
         return -1;
     }
 
@@ -1021,14 +1273,14 @@ int cuda_match_keypoints(
         cuda_unregister_gl_texture(detector_id_left);
         cuda_unregister_gl_texture(detector_id_right);
         cuda_unregister_gl_texture(detector_id_combined);
+
+        cudaFree(d_matches);
+        cudaFree(d_match_count);
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
         return -1;
     }
-
-    dim3 blockCopyLeft(16,16);
-    dim3 gridCopyLeft(
-        (left->width + blockCopyLeft.x - 1) / blockCopyLeft.x, 
-        (left->height + blockCopyLeft.y - 1) / blockCopyLeft.y
-    );
 
     setTextureKernel<<<gridCopyLeft, blockCopyLeft>>>(
         left_detector->y_texture->surface,
@@ -1039,12 +1291,6 @@ int cuda_match_keypoints(
         left->height,
         left->y_linesize,
         left->uv_linesize
-    );
-
-    dim3 blockCopyRight(16,16);
-    dim3 gridCopyRight(
-        (left->width + blockCopyRight.x - 1) / blockCopyRight.x, 
-        (left->height + blockCopyRight.y - 1) / blockCopyRight.y
     );
 
     setTextureKernel<<<gridCopyRight, blockCopyRight>>>(
@@ -1070,6 +1316,12 @@ int cuda_match_keypoints(
         cuda_unregister_gl_texture(detector_id_left);
         cuda_unregister_gl_texture(detector_id_right);
         cuda_unregister_gl_texture(detector_id_combined);
+
+        cudaFree(d_matches);
+        cudaFree(d_match_count);
+
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
         return -1;
     }
     
@@ -1083,12 +1335,12 @@ int cuda_match_keypoints(
         printf("Copying surface from left to combined detector...\n");
         cudaEventRecord(start);
         copySurfaceKernel<<<gridCopyCombined, blockCopyCombined>>>(
-            left_detector->y_texture->surface,     // source surface
-            left_detector->uv_texture->surface,     // source surface
+            right_detector->y_texture->surface,     // source surface
+            right_detector->uv_texture->surface,     // source surface
             combined_detector->y_texture->surface, // destination surface
             combined_detector->uv_texture->surface, // destination surface
-            left->width,
-            left->height
+            right->width,
+            right->height
         );
         cudaEventRecord(stop);
         
@@ -1102,6 +1354,12 @@ int cuda_match_keypoints(
             cuda_unregister_gl_texture(detector_id_left);
             cuda_unregister_gl_texture(detector_id_right);
             cuda_unregister_gl_texture(detector_id_combined);
+
+            cudaFree(d_matches);
+            cudaFree(d_match_count);
+
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
             return -1;
         }
         
@@ -1141,6 +1399,9 @@ int cuda_match_keypoints(
 
     cudaFree(d_matches);
     cudaFree(d_match_count);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     
     cuda_unmap_gl_resources(detector_id_left);

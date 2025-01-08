@@ -13,7 +13,7 @@ typedef struct KeyPoint {
 } KeyPoint;
 
 typedef struct BRIEFDescriptor {
-    uint64_t descriptor[4];  // 256-bit descriptor (can be adjusted)
+    uint64_t descriptor[8];  // 256-bit descriptor (can be adjusted)
 } BRIEFDescriptor;
 
 typedef struct ImageParams {
@@ -72,7 +72,8 @@ void cuda_unmap_gl_resources(int detector_id);
 float cuda_detect_keypoints(
     int detector_id,
     uint8_t threshold,
-    ImageParams* image
+    ImageParams* image,
+    float sigma
 );
 
 int cuda_match_keypoints(

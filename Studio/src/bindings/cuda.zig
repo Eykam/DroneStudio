@@ -41,6 +41,7 @@ extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     detector_id: c_int,
     threshold: u8,
     image: *ImageParams,
+    sigma: f32,
 ) f32;
 extern "cuda_keypoint_detector" fn cuda_match_keypoints(
     detector_id_left: c_int,
@@ -112,6 +113,7 @@ pub const CudaKeypointDetector = struct {
             self.detector_id,
             threshold,
             image,
+            1.25,
         );
 
         if (result < 0) {

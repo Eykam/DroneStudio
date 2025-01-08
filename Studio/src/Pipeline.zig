@@ -9,6 +9,7 @@ const Camera = @import("Camera.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const glad = gl.glad;
+const globals = @import("Globals.zig");
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
@@ -42,6 +43,14 @@ pub const Scene = struct {
     useInstancingLoc: glad.GLint,
     texGen: TextureGenerator = TextureGenerator{},
 
+    last_projection: [16]f32 = undefined,
+    projection_dirty: bool = true,
+
+    frame_count: u64 = 0,
+    last_fps_time: f64 = 0,
+    frame_times: [120]f64 = .{0} ** 120,
+    frame_time_index: usize = 0,
+
     pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !*Self {
         if (window == null) {
             std.debug.print("Failed to create GLFW window\n", .{});
@@ -54,7 +63,7 @@ pub const Scene = struct {
 
         // Make the window's context current
         glfw.glfwMakeContextCurrent(window);
-        glfw.glfwSwapInterval(1);
+        glfw.glfwSwapInterval(0);
 
         // Initialize OpenGL Loader
         std.debug.print("Loading Glad...\n", .{});
@@ -210,55 +219,85 @@ pub const Scene = struct {
     }
 
     pub fn render(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
+        // Start frame timing
+        const frame_start = glfw.glfwGetTime();
+
         glad.glClearColor(0.15, 0.15, 0.15, 1.0);
         glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
 
-        glad.glUseProgram(self.shaderProgram);
-
         var view = self.camera.get_view_matrix();
-
-        // Use the current projection matrix that accounts for window size
-        const currentProjection = self.updateProjection();
-
         if (self.uViewLoc != -1) {
             glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view);
         }
-        if (self.uProjectionLoc != -1) {
-            glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &currentProjection);
+
+        if (self.projection_dirty) {
+            const currentProjection = self.updateProjection();
+            if (self.uProjectionLoc != -1) {
+                glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &currentProjection);
+            }
+            self.projection_dirty = false;
         }
 
-        // Iterate through all nodes in the hash map
+        // Batch similar draw calls if possible
         var it = self.nodes.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.*.update();
         }
 
+        // Ensure all GL commands are submitted before swap
+        glad.glFlush();
+
         glfw.glfwSwapBuffers(window);
         glfw.glfwPollEvents();
+
+        // Frame timing and FPS calculation
+        const frame_end = glfw.glfwGetTime();
+        const frame_time = frame_end - frame_start;
+
+        // Store frame time in circular buffer
+        self.frame_times[self.frame_time_index] = frame_time * 1000.0; // Convert to ms
+        self.frame_time_index = (self.frame_time_index + 1) % 120;
+
+        // Calculate and print average frame time every second
+        self.frame_count += 1;
+        if (frame_end - self.last_fps_time >= 1.0) {
+            var sum: f64 = 0;
+            for (self.frame_times) |time| {
+                sum += time;
+            }
+            const avg_frame_time = sum / @as(f64, @floatFromInt(self.frame_times.len));
+
+            std.debug.print("Avg Frame Time: {d:.2}ms, FPS: {d:.1}\n", .{ avg_frame_time, 1000.0 / avg_frame_time });
+
+            self.frame_count = 0;
+            self.last_fps_time = frame_end;
+        }
     }
 
     pub fn processInput(self: *Self, debug: bool) void {
+        _ = debug;
+
         const sprinting = self.appState.keys[@as(usize, glfw.GLFW_KEY_LEFT_SHIFT)];
+        const velocity = self.camera.speed * self.appState.delta_time *
+            (if (sprinting) @as(f32, 2.0) else @as(f32, 1.0));
 
-        // Forward
+        // Pre-calculate movement vectors once per frame if needed
+        var movement = Vec3{ .x = 0, .y = 0, .z = 0 };
+
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
-            self.camera.move_forward(self.appState.delta_time, sprinting, debug);
+            movement = Vec3.add(movement, Vec3.scale(self.camera.front, velocity));
         }
-
-        // Left
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
-            self.camera.move_left(self.appState.delta_time, sprinting, debug);
-        }
-
-        // Backward
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_S)]) {
-            self.camera.move_backward(self.appState.delta_time, sprinting, debug);
+            movement = Vec3.sub(movement, Vec3.scale(self.camera.front, velocity));
+        }
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
+            movement = Vec3.add(movement, Vec3.scale(self.camera.right, velocity));
+        }
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
+            movement = Vec3.sub(movement, Vec3.scale(self.camera.right, velocity));
         }
 
-        // Right
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
-            self.camera.move_right(self.appState.delta_time, sprinting, debug);
-        }
+        self.camera.position = Vec3.add(self.camera.position, movement);
 
         // Zoom controls can remain in the keyCallback if they are discrete actions
     }
@@ -396,12 +435,14 @@ fn getCurrentMonitor(window: ?*glfw.struct_GLFWwindow) ?*glfw.GLFWmonitor {
     return glfw.glfwGetPrimaryMonitor();
 }
 
-// Window creation with proper monitor handling
 pub fn createWindow() ?*glfw.GLFWwindow {
     glfw.glfwWindowHint(glfw.GLFW_FOCUSED, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_FOCUS_ON_SHOW, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_CLIENT_API, glfw.GLFW_OPENGL_API);
     glfw.glfwWindowHint(glfw.GLFW_CONTEXT_CREATION_API, glfw.GLFW_NATIVE_CONTEXT_API);
+
+    glfw.glfwWindowHint(glfw.GLFW_DOUBLEBUFFER, glfw.GLFW_TRUE);
+    glfw.glfwWindowHint(glfw.GLFW_SRGB_CAPABLE, glfw.GLFW_TRUE);
 
     const width: i32 = @intFromFloat(1920 * 0.75);
     const height: i32 = @intFromFloat(1080 * 0.75);
@@ -410,6 +451,7 @@ pub fn createWindow() ?*glfw.GLFWwindow {
 
     // Make context current immediately after window creation
     glfw.glfwMakeContextCurrent(window);
+    glfw.glfwSwapInterval(1);
 
     // Set up cursor mode BEFORE changing monitor settings
     glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
@@ -521,6 +563,10 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
                 // Zoom out (wider FOV)
                 scene.appState.zoom += 1.0;
             },
+            glfw.GLFW_KEY_P => {
+                globals.PAUSED = !globals.PAUSED;
+            },
+
             else => {},
         }
     }
@@ -546,6 +592,8 @@ fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) 
     } else {
         scene.appState.zoom = newZoom;
     }
+
+    scene.projection_dirty = true;
 
     std.debug.print("yOffset: {d}\n", .{yoffset});
     std.debug.print("Zoom Level: {d}\n", .{newZoom});

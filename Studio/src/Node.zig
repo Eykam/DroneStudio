@@ -76,8 +76,6 @@ pub fn deinit(self: *Self) void {
     const backing_allocator = self.backing_allocator;
     const arena = self.arena;
 
-    self.mutex.lock();
-
     for (self.children.items) |child| {
         child.deinit();
     }
@@ -87,8 +85,6 @@ pub fn deinit(self: *Self) void {
         glad.glDeleteTextures(1, &mesh.textureID.uv);
         mesh.deinit();
     }
-
-    self.mutex.unlock();
 
     arena.deinit();
     backing_allocator.destroy(arena);
@@ -115,9 +111,6 @@ pub fn setScale(self: *Self, x: f32, y: f32, z: f32) void {
 }
 
 pub fn addChild(self: *Self, child: *Self) !void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-
     child.parent = self;
 
     if (self.scene) |scene| {
@@ -128,9 +121,6 @@ pub fn addChild(self: *Self, child: *Self) !void {
 }
 
 pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-
     self.scene = scene;
 
     self.yTextureUnit = scene.texGen.generateID();
@@ -175,9 +165,6 @@ fn updateWorldTransform(self: *Self) void {
 }
 
 pub fn update(self: *Self) void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-
     self.updateWorldTransform();
 
     if (self.mesh) |mesh| {
@@ -232,8 +219,6 @@ pub fn bindTexture(self: *Self) !void {
     if (err != glad.GL_NO_ERROR) {
         std.debug.print("GL Error in bindTexture: {}\n", .{err});
     }
-
-    self.texture_updated = false;
 }
 
 pub fn debug(self: *Self) void {

@@ -151,8 +151,6 @@ fn initGL(self: *Self) !void {
         std.debug.print("Color attribute not enabled\n", .{});
     }
 
-    // Unbind
-    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
     glad.glBindVertexArray(0);
 
     // Final error check
@@ -171,92 +169,28 @@ pub fn deinit(self: *Self) void {
     if (self.meta.IBO != 0) glad.glDeleteBuffers(1, &self.meta.IBO);
 }
 
-pub fn gen_draw(comptime draw_type: glad.GLenum) draw {
+pub fn gen_draw(comptime drawType: glad.GLuint) draw {
     return struct {
         pub fn default_draw(mesh: *Self) void {
             glad.glBindVertexArray(mesh.meta.VAO);
-            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
-
-            // Position attribute (location = 0)
-            glad.glVertexAttribPointer(
-                0, // location
-                3, // (vec3)
-                glad.GL_FLOAT,
-                glad.GL_FALSE,
-                @sizeOf(Vertex),
-                null, // offset for position
-            );
-            glad.glEnableVertexAttribArray(0);
-
-            // Color attribute (location = 1)
-            const color_offset = @offsetOf(Vertex, "color");
-            glad.glVertexAttribPointer(
-                1, // location
-                3, // (vec3)
-                glad.GL_FLOAT,
-                glad.GL_FALSE,
-                @sizeOf(Vertex), // stride (size of entire vertex struct)
-                @ptrFromInt(color_offset),
-            );
-            glad.glEnableVertexAttribArray(1);
 
             if (mesh.indices) |indices| {
-                glad.glDrawElements(draw_type, @intCast(indices.len), glad.GL_UNSIGNED_INT, null);
+                glad.glDrawElements(drawType, @intCast(indices.len), glad.GL_UNSIGNED_INT, null);
             } else {
-                // When drawing without indices, we need to account for the full vertex struct size
-                glad.glDrawArrays(draw_type, 0, @intCast(mesh.vertices.len));
+                glad.glDrawArrays(drawType, 0, @intCast(mesh.vertices.len));
             }
-
-            // Disable vertex attributes
-            glad.glDisableVertexAttribArray(0);
-            glad.glDisableVertexAttribArray(1);
-
-            // Unbind the VAO
-            glad.glBindVertexArray(0);
         }
     }.default_draw;
 }
 
 pub fn default_draw(mesh: *Self) void {
     glad.glBindVertexArray(mesh.meta.VAO);
-    glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
-
-    // Position attribute (location = 0)
-    glad.glVertexAttribPointer(
-        0, // location
-        3, // (vec3)
-        glad.GL_FLOAT,
-        glad.GL_FALSE,
-        @sizeOf(Vertex),
-        null, // offset for position
-    );
-    glad.glEnableVertexAttribArray(0);
-
-    // Color attribute (location = 1)
-    const color_offset = @offsetOf(Vertex, "color");
-    glad.glVertexAttribPointer(
-        1, // location
-        3, // (vec3)
-        glad.GL_FLOAT,
-        glad.GL_FALSE,
-        @sizeOf(Vertex), // stride (size of entire vertex struct)
-        @ptrFromInt(color_offset),
-    );
-    glad.glEnableVertexAttribArray(1);
 
     if (mesh.indices) |indices| {
         glad.glDrawElements(mesh.drawType, @intCast(indices.len), glad.GL_UNSIGNED_INT, null);
     } else {
-        // When drawing without indices, we need to account for the full vertex struct size
         glad.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
     }
-
-    // Disable vertex attributes
-    glad.glDisableVertexAttribArray(0);
-    glad.glDisableVertexAttribArray(1);
-
-    // Unbind the VAO
-    glad.glBindVertexArray(0);
 }
 
 pub fn setFaceColor(self: *Self, face_index: usize, color: [3]f32) void {
