@@ -60,6 +60,7 @@ pub fn main() !void {
 
     const canvas_width = 12.8;
     const canvas_height = 7.2;
+    const texture_dims = [_]f32{ 640.0, 480.0 };
 
     var canvasNode = try Node.init(alloc, null, null, null);
     canvasNode.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
@@ -69,7 +70,7 @@ pub fn main() !void {
         null,
         canvas_width,
         canvas_height,
-        .{ .w = 1280, .h = 720 },
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
     );
     canvasNodeLeft.setPosition(-canvas_width, canvas_height / 2.0, -5);
     canvasNodeLeft.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
@@ -80,7 +81,7 @@ pub fn main() !void {
         null,
         canvas_width,
         canvas_height,
-        .{ .w = 1280, .h = 720 },
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
     );
     canvasNodeRight.setPosition(canvas_width, canvas_height / 2.0, -5);
     canvasNodeRight.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
@@ -91,7 +92,7 @@ pub fn main() !void {
         null,
         canvas_width,
         canvas_height,
-        .{ .w = 1280, .h = 720 },
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
     );
     canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
     canvasNodeCombined.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });

@@ -297,7 +297,22 @@ pub const Scene = struct {
             movement = Vec3.sub(movement, Vec3.scale(self.camera.right, velocity));
         }
 
-        self.camera.position = Vec3.add(self.camera.position, movement);
+        if (globals.FLY) {
+            self.camera.position = Vec3.add(self.camera.position, movement);
+        } else {
+            self.camera.position = Vec3.add(
+                Vec3{
+                    .x = self.camera.position.x,
+                    .y = 1,
+                    .z = self.camera.position.z,
+                },
+                Vec3{
+                    .x = movement.x,
+                    .y = 0,
+                    .z = movement.z,
+                },
+            );
+        }
 
         // Zoom controls can remain in the keyCallback if they are discrete actions
     }
@@ -565,6 +580,9 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
             },
             glfw.GLFW_KEY_P => {
                 globals.PAUSED = !globals.PAUSED;
+            },
+            glfw.GLFW_KEY_F => {
+                globals.FLY = !globals.FLY;
             },
 
             else => {},
