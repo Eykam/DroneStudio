@@ -1074,76 +1074,43 @@ int cuda_match_keypoints(
         return -1;
     }  
 
-    float sigma = 1.25f;
+    return 0;
+}
 
-    printf("Getting keypoints from left...\n");
-    float detection_time_left = cuda_detect_keypoints(
-        detector_id_left,
-        threshold,
-        left,
-        sigma
-    );
-
-    if (detection_time_left < 0){
-        printf("Failed to detect keypoints from left image\n");
-        cuda_unmap_gl_resources(detector_id_left);
-        cuda_unregister_gl_texture(detector_id_left);
-        cuda_unregister_gl_texture(detector_id_right);
-        cuda_unregister_gl_texture(detector_id_combined);
-        
-        return -1;
+static float execute_matching(
+    DetectorInstance* left_detector,
+    DetectorInstance* right_detector, 
+    DetectorInstance* combined_detector,
+    MatchedKeypoint* d_matches,
+    int* d_match_count,
+    int max_matches,
+    int* num_matches,
+    float baseline,
+    float focal_length,
+    ImageParams* left,
+    ImageParams* right,
+    cudaEvent_t start,
+    cudaEvent_t stop
+) {
+    // Set up matching parameters
+    float sensor_width_mm = 6.45f;
+    float baseline_world = (baseline / sensor_width_mm) * 6.4f;
+    
+    MatchingParams params = {
+        .baseline = baseline_world,
+        .focal_length = focal_length,
+        .max_disparity = 200.0f,
+        .epipolar_threshold = 150.0f,
+        .sensor_width_mm = sensor_width_mm,
+        .sensor_width_pixels = 4608.0f,
+        .sensor_height_pixels = 2592.0f
     };
 
-    if (cuda_map_gl_resources(detector_id_right) < 0){
-        printf("Failed to map GL Resources for Right Detector!\n");
-        cuda_unmap_gl_resources(detector_id_left);
-        
-        cuda_unregister_gl_texture(detector_id_left);
-        cuda_unregister_gl_texture(detector_id_right);
-        cuda_unregister_gl_texture(detector_id_combined);
-        return -1;
-    }
-
-    printf("Getting keypoints from right...\n");
-    float detection_time_right = cuda_detect_keypoints(
-        detector_id_right,
-        threshold,
-        right,
-        sigma
-    );
-   
-
-    if (detection_time_right < 0){
-        printf("Failed to detect keypoints from right image\n");
-        cuda_unmap_gl_resources(detector_id_left);
-        cuda_unmap_gl_resources(detector_id_right);
-        
-        cuda_unregister_gl_texture(detector_id_left);
-        cuda_unregister_gl_texture(detector_id_right);
-        cuda_unregister_gl_texture(detector_id_combined);
-        return -1;
-    };
-    
-
-    cudaDeviceSynchronize();   
-    
-    //Use left_detector as the basis for matching
-    const int max_matches = min(*right->num_keypoints, *left->num_keypoints);
-
-    printf("Left keypoints: %d\n", *left->num_keypoints);
-    printf("Right Keypoints: %d\n", *right->num_keypoints);
-    printf("Max matches allowed: %d\n", max_matches);
-
-    dim3 blockCopyLeft(16,16);
-    dim3 gridCopyLeft(
-        (left->width + blockCopyLeft.x - 1) / blockCopyLeft.x, 
-        (left->height + blockCopyLeft.y - 1) / blockCopyLeft.y
-    );
-
-    dim3 blockCopyRight(16,16);
-    dim3 gridCopyRight(
-        (left->width + blockCopyRight.x - 1) / blockCopyRight.x, 
-        (left->height + blockCopyRight.y - 1) / blockCopyRight.y
+    // Configure kernel launch parameters for texture operations
+    dim3 blockCopy(16, 16);
+    dim3 gridCopy(
+        (left->width + blockCopy.x - 1) / blockCopy.x,
+        (left->height + blockCopy.y - 1) / blockCopy.y
     );
 
 
