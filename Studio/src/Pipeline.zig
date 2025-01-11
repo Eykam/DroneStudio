@@ -40,7 +40,8 @@ pub const Scene = struct {
     useTextureLoc: glad.GLint,
     yTextureLoc: glad.GLint,
     uvTextureLoc: glad.GLint,
-    useInstancingLoc: glad.GLint,
+    useInstancedKeypointLoc: glad.GLint,
+    useInstancedLinesLoc: glad.GLint,
     texGen: TextureGenerator = TextureGenerator{},
 
     last_projection: [16]f32 = undefined,
@@ -121,7 +122,8 @@ pub const Scene = struct {
         const useTextureLoc = glad.glGetUniformLocation(shaderProgram, "useTexture");
         const yTextureLoc = glad.glGetUniformLocation(shaderProgram, "yTexture");
         const uvTextureLoc = glad.glGetUniformLocation(shaderProgram, "uvTexture");
-        const useInstancingLoc = glad.glGetUniformLocation(shaderProgram, "uUseInstancing");
+        const useInstancedKeypointLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedKeypoints");
+        const uInstancedLinesLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedLines");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
@@ -144,7 +146,8 @@ pub const Scene = struct {
             .useTextureLoc = useTextureLoc,
             .yTextureLoc = yTextureLoc,
             .uvTextureLoc = uvTextureLoc,
-            .useInstancingLoc = useInstancingLoc,
+            .useInstancedKeypointLoc = useInstancedKeypointLoc,
+            .useInstancedLinesLoc = uInstancedLinesLoc,
         };
 
         return scene;

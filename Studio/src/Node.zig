@@ -10,6 +10,12 @@ const glCheckError = @import("Debug.zig").glCheckError;
 
 const Self = @This();
 
+pub const InstanceData = struct {
+    position_buffer: u32,
+    color_buffer: u32,
+    count: usize,
+};
+
 scene: ?*Scene = null,
 mesh: ?*Mesh,
 _update: ?*const fn (*Mesh) void,
@@ -28,11 +34,7 @@ uvTextureUnit: c_int = 0,
 width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
-instance_data: ?struct {
-    position_buffer: u32,
-    color_buffer: u32,
-    count: usize,
-} = null,
+instance_data: ?InstanceData = null,
 
 // Transformation properties
 position: [3]f32 = .{ 0, 0, 0 },

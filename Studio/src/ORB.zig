@@ -1,6 +1,7 @@
 const std = @import("std");
 const Node = @import("Node.zig");
 const KeypointDebugger = @import("Shape.zig").InstancedKeypointDebugger;
+const InstancedLine = @import("Shape.zig").InstancedLine;
 const CudaBinds = @import("bindings/cuda.zig");
 const libav = @import("bindings/libav.zig");
 const gl = @import("bindings/gl.zig");
@@ -21,6 +22,9 @@ pub const StereoMatcher = struct {
     left: *KeypointManager,
     right: *KeypointManager,
 
+    left_to_combined: *Node,
+    right_to_combined: *Node,
+
     combined: *KeypointManager,
 
     pub fn init(allocator: std.mem.Allocator, left: *KeypointManager, right: *KeypointManager, combined: *KeypointManager) !*Self {
@@ -39,6 +43,33 @@ pub const StereoMatcher = struct {
         matcher.right = right;
 
         matcher.combined = combined;
+
+        const left_to_combined = try InstancedLine.init(
+            matcher.allocator,
+            [_]f32{ 1.0, 0.0, 0.0 },
+            left.max_keypoints,
+        );
+        const right_to_combined = try InstancedLine.init(
+            matcher.allocator,
+            [_]f32{ 0.0, 0.0, 1.0 },
+            right.max_keypoints,
+        );
+
+        try combined.target_node.addChild(left_to_combined);
+        try combined.target_node.addChild(right_to_combined);
+
+        matcher.left_to_combined = left_to_combined;
+        matcher.right_to_combined = right_to_combined;
+
+        try checkBufferValidAndEnable(left, null);
+        try checkBufferValidAndEnable(right, null);
+        try checkBufferValidAndEnable(
+            combined,
+            .{
+                .left = left_to_combined,
+                .right = right_to_combined,
+            },
+        );
 
         return matcher;
     }
@@ -115,6 +146,7 @@ pub const StereoMatcher = struct {
                 right_image_params.?,
             );
 
+            self.right.target_node.texture_updated = true;
             for (self.right.target_node.children.items) |child| {
                 child.instance_data.?.count = @intCast(self.right.num_keypoints.*);
             }
@@ -126,6 +158,7 @@ pub const StereoMatcher = struct {
                 left_image_params.?,
             );
 
+            self.left.target_node.texture_updated = true;
             for (self.left.target_node.children.items) |child| {
                 child.instance_data.?.count = @intCast(self.left.num_keypoints.*);
             }
@@ -171,8 +204,9 @@ pub const KeypointManager = struct {
     arena: std.heap.ArenaAllocator,
 
     target_node: *Node,
+    keypoints: *Node,
 
-    keypoint_detector: ?CudaBinds.CudaKeypointDetector,
+    keypoint_detector: ?*CudaBinds.CudaKeypointDetector,
 
     threshold: u8,
     max_keypoints: u32,
@@ -206,11 +240,13 @@ pub const KeypointManager = struct {
         try self.target_node.addChild(node);
 
         const mesh = target_node.mesh.?;
-        var detector = try CudaBinds.CudaKeypointDetector.init(
+        self.keypoint_detector.? = try allocator.create(CudaBinds.CudaKeypointDetector);
+        self.keypoint_detector.?.* = try CudaBinds.CudaKeypointDetector.init(
             self.max_keypoints,
             mesh.textureID.y,
             mesh.textureID.uv,
         );
+        self.keypoints = node;
 
         std.debug.print("Node instance_data {any}\n", .{node.instance_data});
         if (glad.glGetError() != glad.GL_NO_ERROR) {
@@ -223,25 +259,14 @@ pub const KeypointManager = struct {
             std.mem.span(glad.glGetString(glad.GL_RENDERER)),
         });
 
-        // Ensure buffers are valid
-        const instance_data = node.instance_data.?;
-        if (glad.glIsBuffer(instance_data.position_buffer) != 1 or glad.glIsBuffer(instance_data.color_buffer) != 1) {
-            return error.InvalidBuffer;
-        }
-
-        try detector.enableGLInterop(
-            instance_data.position_buffer,
-            instance_data.color_buffer,
-            self.max_keypoints,
-        );
-
-        self.keypoint_detector = detector;
-
         return self;
     }
 
     pub fn deinit(self: *Self) void {
-        self.keypoint_detector.?.deinit();
+        if (self.keypoint_detector) |detector| {
+            detector.deinit();
+            self.allocator.destroy(detector);
+        }
         self.arena.deinit();
     }
 
@@ -257,3 +282,53 @@ pub const KeypointManager = struct {
         self.frame = video.av_frame_clone(frame);
     }
 };
+
+fn checkBufferValidAndEnable(
+    manager: *KeypointManager,
+    connections: ?struct { left: *Node, right: *Node },
+) !void {
+    const instance_data = manager.keypoints.instance_data.?;
+
+    if (glad.glIsBuffer(instance_data.position_buffer) != 1 or glad.glIsBuffer(instance_data.color_buffer) != 1) {
+        return error.InvalidKeypointBuffer;
+    }
+
+    var keypoint_detector = manager.keypoint_detector.?;
+    if (connections) |line_nodes| {
+        // Combined node with line connections
+        const left_instance_data = line_nodes.left.instance_data.?;
+        const right_instance_data = line_nodes.right.instance_data.?;
+
+        if (glad.glIsBuffer(left_instance_data.position_buffer) != 1 or glad.glIsBuffer(left_instance_data.color_buffer) != 1) {
+            return error.InvalidLeftConnectionBuffer;
+        }
+
+        if (glad.glIsBuffer(right_instance_data.position_buffer) != 1 or glad.glIsBuffer(right_instance_data.color_buffer) != 1) {
+            return error.InvalidRightConnectionBuffer;
+        }
+
+        try keypoint_detector.enableGlInterop(
+            instance_data.position_buffer,
+            instance_data.color_buffer,
+            left_instance_data.position_buffer,
+            left_instance_data.color_buffer,
+            right_instance_data.position_buffer,
+            right_instance_data.color_buffer,
+            manager.max_keypoints,
+        );
+    } else {
+        // Left or right node without connections
+        try keypoint_detector.enableGlInterop(
+            instance_data.position_buffer,
+            instance_data.color_buffer,
+            null,
+            null,
+            null,
+            null,
+            manager.max_keypoints,
+        );
+    }
+
+    std.debug.print("Enabled Gl Interop => {any}!\n", .{manager.keypoint_detector.?.gl_interop_enabled});
+    return;
+}

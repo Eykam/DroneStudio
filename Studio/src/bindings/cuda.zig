@@ -1,4 +1,5 @@
 const std = @import("std");
+const Node = @import("../Node.zig").InstanceData;
 const gl = @import("gl.zig");
 const glad = gl.glad;
 
@@ -25,17 +26,20 @@ extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) voi
 
 extern "cuda_keypoint_detector" fn cuda_register_gl_texture(detector_id: c_int) c_int;
 extern "cuda_keypoint_detector" fn cuda_unregister_gl_texture() void;
-
-extern "cuda_keypoint_detector" fn cuda_register_gl_buffers(
+extern "cuda_keypoint_detector" fn cuda_register_buffers(
     detector_id: c_int,
-    position_buffer: c_uint,
-    color_buffer: c_uint,
-    max_keypoints: c_int,
+    keypoint_position_buffer: c_uint,
+    keypoint_color_buffer: c_uint,
+    left_position_buffer: [*c]c_uint,
+    left_color_buffer: [*c]c_uint,
+    right_position_buffer: [*c]c_uint,
+    right_color_buffer: [*c]c_uint,
+    buffer_size: c_uint,
 ) c_int;
-extern "cuda_keypoint_detector" fn cuda_unregister_gl_buffers(detector_id: c_int) void;
+extern "cuda_keypoint_detector" fn cuda_unregister_buffers(detector_id: c_int) void;
 
-extern "cuda_keypoint_detector" fn cuda_map_gl_resources(detector_id: c_int) c_int;
-extern "cuda_keypoint_detector" fn cuda_unmap_gl_resources(detector_id: c_int) void;
+extern "cuda_keypoint_detector" fn cuda_map_resources(detector_id: c_int) c_int;
+extern "cuda_keypoint_detector" fn cuda_unmap_resources(detector_id: c_int) void;
 
 extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     detector_id: c_int,
@@ -43,6 +47,7 @@ extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     image: *ImageParams,
     sigma: f32,
 ) f32;
+
 extern "cuda_keypoint_detector" fn cuda_match_keypoints(
     detector_id_left: c_int,
     detector_id_right: c_int,
@@ -62,7 +67,12 @@ pub const CudaKeypointDetector = struct {
     gl_interop_enabled: bool,
 
     pub fn init(max_keypoints: u32, gl_ytexture: glad.GLuint, gl_uvtexture: glad.GLuint) !Self {
-        const id = cuda_create_detector(@intCast(max_keypoints), gl_ytexture, gl_uvtexture);
+        const id = cuda_create_detector(
+            @intCast(max_keypoints),
+            gl_ytexture,
+            gl_uvtexture,
+        );
+
         if (id < 0) {
             return error.CudaInitFailed;
         }
@@ -73,16 +83,58 @@ pub const CudaKeypointDetector = struct {
         };
     }
 
-    pub fn enableGLInterop(self: *Self, position_buffer: u32, color_buffer: u32, max_keypoints: u32) !void {
-        if (cuda_register_gl_buffers(
+    pub fn enableGlInterop(
+        self: *Self,
+        keypoint_position_buffer: u32,
+        keypoint_color_buffer: u32,
+        left_position_buffer: ?u32,
+        left_color_buffer: ?u32,
+        right_position_buffer: ?u32,
+        right_color_buffer: ?u32,
+        buffer_size: u32,
+    ) !void {
+        // Create null pointers by default
+        var left_pos: c_uint = undefined;
+        var left_col: c_uint = undefined;
+        var right_pos: c_uint = undefined;
+        var right_col: c_uint = undefined;
+
+        // Only pass non-null pointers if both position and color buffers are provided
+        const left_pos_ptr: [*c]c_uint = if (left_position_buffer != null and left_color_buffer != null) blk: {
+            left_pos = @intCast(left_position_buffer.?);
+            break :blk &left_pos;
+        } else null;
+
+        const left_col_ptr: [*c]c_uint = if (left_position_buffer != null and left_color_buffer != null) blk: {
+            left_col = @intCast(left_color_buffer.?);
+            break :blk &left_col;
+        } else null;
+
+        const right_pos_ptr: [*c]c_uint = if (right_position_buffer != null and right_color_buffer != null) blk: {
+            right_pos = @intCast(right_position_buffer.?);
+            break :blk &right_pos;
+        } else null;
+
+        const right_col_ptr: [*c]c_uint = if (right_position_buffer != null and right_color_buffer != null) blk: {
+            right_col = @intCast(right_color_buffer.?);
+            break :blk &right_col;
+        } else null;
+
+        if (cuda_register_buffers(
             self.detector_id,
-            position_buffer,
-            color_buffer,
-            @intCast(max_keypoints),
+            keypoint_position_buffer,
+            keypoint_color_buffer,
+            left_pos_ptr,
+            left_col_ptr,
+            right_pos_ptr,
+            right_col_ptr,
+            @intCast(buffer_size),
         ) != 0) {
+            std.debug.print("Failed to Enable GL Interop!\n", .{});
             return error.CudaGLBufferRegistrationFailed;
         }
 
+        std.debug.print("Setting interop to true!\n", .{});
         self.gl_interop_enabled = true;
     }
 
@@ -103,10 +155,10 @@ pub const CudaKeypointDetector = struct {
             .{ image.width, image.height, image.y_linesize },
         );
 
-        if (cuda_map_gl_resources(self.detector_id) < 0) {
+        if (cuda_map_resources(self.detector_id) < 0) {
             return;
         }
-        defer cuda_unmap_gl_resources(self.detector_id);
+        defer cuda_unmap_resources(self.detector_id);
 
         // Use GL interop path
         const result = cuda_detect_keypoints(
@@ -121,7 +173,7 @@ pub const CudaKeypointDetector = struct {
             return error.KeypointDetectionFailed;
         }
 
-        std.debug.print("Keypoint Detection Exection TIMe: {d:.5}\n", .{result});
+        std.debug.print("Keypoint Detection Exection Time: {d:.5}\n", .{result});
         std.debug.print("Found {} keypoints\n", .{image.num_keypoints.*});
     }
 

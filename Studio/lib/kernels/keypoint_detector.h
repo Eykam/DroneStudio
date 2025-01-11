@@ -28,12 +28,22 @@ typedef struct ImageParams {
     float image_height;
 } ImageParams;
 
-typedef struct CudaGLResources {
+typedef struct InstanceBuffer {
     cudaGraphicsResource_t position_resource;
     cudaGraphicsResource_t color_resource;
     float4* d_positions;
     float4* d_colors;
     size_t buffer_size;
+} InstanceBuffer;
+
+typedef struct ConnectedKeypoint {
+    InstanceBuffer left;
+    InstanceBuffer right;
+} ConnectedKeypoint;
+
+typedef struct CudaGLResources {
+    ConnectedKeypoint connections;
+    InstanceBuffer keypoints;
 } CudaGLResources;
 
 typedef struct CudaGLTextureResource {
@@ -46,6 +56,7 @@ typedef struct DetectorInstance {
     int* d_keypoint_count;
     int gl_ytexture;
     int gl_uvtexture;
+    float world_transform[4][4]; 
     CudaGLResources gl_resources;
     CudaGLTextureResource* y_texture;
     CudaGLTextureResource* uv_texture;
@@ -63,11 +74,20 @@ void cuda_cleanup_detector(int detector_id);
 int cuda_register_gl_texture(int detector_id);
 void cuda_unregister_gl_texture(int detector_id);
 
-int cuda_register_gl_buffers(int detector_id, unsigned int position_buffer, unsigned int color_buffer, int max_keypoints);
-void cuda_unregister_gl_buffers(int detector_id);
+int cuda_register_buffers(
+    int detector_id,
+    int keypoint_position_buffer,
+    int keypoint_color_buffer,
+    int* left_position_buffer,
+    int* left_color_buffer,
+    int* right_position_buffer,
+    int* right_color_buffer,
+    int buffer_size
+);
+void cuda_unregister_buffers(int detector_id);
 
-int cuda_map_gl_resources(int detector_id);
-void cuda_unmap_gl_resources(int detector_id);
+int cuda_map_resources(int detector_id);
+void cuda_unmap_resources(int detector_id);
 
 float cuda_detect_keypoints(
     int detector_id,

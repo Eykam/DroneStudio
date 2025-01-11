@@ -632,11 +632,6 @@ pub const TexturedPlane = struct {
 pub const InstancedKeypointDebugger = struct {
     const Self = @This();
 
-    pub const Instance = struct {
-        position: [3]f32,
-        color: [3]f32 = .{ 1.0, 0.0, 0.0 }, // Default to red
-    };
-
     pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, max_keypoints: usize) !*Node {
         // Generate the shared circle mesh if it doesn't exist
         const vertices = try allocator.alloc(Vertex, 1);
@@ -681,17 +676,17 @@ pub const InstancedKeypointDebugger = struct {
             null,
             glad.GL_DYNAMIC_COPY,
         );
-        // Color (location = 4)
-        glad.glEnableVertexAttribArray(4);
+        // Color (location = 5)
+        glad.glEnableVertexAttribArray(5);
         glad.glVertexAttribPointer(
-            4,
+            5,
             4,
             glad.GL_FLOAT,
             glad.GL_FALSE,
             @sizeOf([4]f32),
             null,
         );
-        glad.glVertexAttribDivisor(4, 1);
+        glad.glVertexAttribDivisor(5, 1);
 
         node.instance_data = .{
             .position_buffer = position_buffer,
@@ -710,7 +705,7 @@ pub const InstancedKeypointDebugger = struct {
             }
 
             if (node.scene) |scene| {
-                glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 1));
+                glad.glUniform1i(scene.useInstancedKeypointLoc, @as(c_int, 1));
             }
 
             // OpenGL state setup
@@ -729,7 +724,7 @@ pub const InstancedKeypointDebugger = struct {
             glad.glDisable(glad.GL_BLEND);
 
             if (node.scene) |scene| {
-                glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 0));
+                glad.glUniform1i(scene.useInstancedKeypointLoc, @as(c_int, 0));
             }
         }
     }
@@ -756,5 +751,124 @@ pub const InstancedKeypointDebugger = struct {
         }
 
         return vertices;
+    }
+};
+
+pub const InstancedLine = struct {
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, max_lines: usize) !*Node {
+        // Generate simple line vertices (start and end points)
+        const vertices = try allocator.alloc(Vertex, 2);
+        vertices[0] = Vertex{
+            .position = .{ 0, 0, 0 },
+            .color = color orelse .{ 1.0, 0.0, 0.0 },
+        };
+        vertices[1] = Vertex{
+            .position = .{ 1, 0, 0 }, // Unit vector in x direction as base
+            .color = color orelse .{ 1.0, 0.0, 0.0 },
+        };
+
+        const node = try Node.init(allocator, vertices, null, Self.draw);
+        const mesh = node.mesh.?;
+
+        // Set up instance attributes in VAO
+        glad.glBindVertexArray(mesh.meta.VAO);
+
+        // Start position buffer
+        var start_position_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &start_position_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, start_position_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_lines * @sizeOf([4]f32)), // vec4 for alignment
+            null,
+            glad.GL_DYNAMIC_COPY,
+        );
+
+        // Start position offset (location = 3)
+        glad.glEnableVertexAttribArray(3);
+        glad.glVertexAttribPointer(
+            3,
+            4,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            2 * @sizeOf([4]f32),
+            null,
+        );
+        glad.glVertexAttribDivisor(3, 1);
+
+        // End position offset (location = 4)
+        glad.glEnableVertexAttribArray(4);
+        glad.glVertexAttribPointer(
+            4,
+            4,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            2 * @sizeOf([4]f32),
+            @ptrFromInt(@sizeOf([4]f32)),
+        );
+        glad.glVertexAttribDivisor(4, 1);
+
+        // Color buffer
+        var color_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &color_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, color_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_lines * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_COPY,
+        );
+
+        // Color (location = 5)
+        glad.glEnableVertexAttribArray(5);
+        glad.glVertexAttribPointer(
+            5,
+            4,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            @sizeOf([4]f32),
+            null,
+        );
+        glad.glVertexAttribDivisor(5, 1);
+
+        node.instance_data = .{
+            .position_buffer = start_position_buffer,
+            .color_buffer = color_buffer,
+            .count = 0,
+        };
+
+        return node;
+    }
+
+    pub fn draw(mesh: *Mesh) void {
+        if (mesh.node) |node| {
+            // Debug checks
+            if (node.instance_data == null or node.instance_data.?.count == 0) {
+                return; // Skip drawing if no instances
+            }
+
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useInstancedLinesLoc, @as(c_int, 1));
+            }
+
+            // OpenGL state setup
+            glad.glEnable(glad.GL_BLEND);
+            glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
+            glad.glLineWidth(2.0); // Set line width
+
+            glad.glBindVertexArray(mesh.meta.VAO);
+
+            // Draw lines
+            glad.glDrawArraysInstanced(glad.GL_LINES, 0, 2, @intCast(node.instance_data.?.count));
+
+            glad.glDisable(glad.GL_BLEND);
+            glad.glLineWidth(1.0); // Reset line width
+
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useInstancedLinesLoc, @as(c_int, 0));
+            }
+        }
     }
 };

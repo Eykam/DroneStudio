@@ -60,7 +60,7 @@ pub fn main() !void {
 
     const canvas_width = 12.8;
     const canvas_height = 7.2;
-    const texture_dims = [_]f32{ 640.0, 480.0 };
+    const texture_dims = [_]u32{ 1280, 720 };
 
     var canvasNode = try Node.init(alloc, null, null, null);
     canvasNode.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
