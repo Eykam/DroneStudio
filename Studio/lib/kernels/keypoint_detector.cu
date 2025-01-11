@@ -122,7 +122,7 @@ __device__ float3 convertImageToWorldCoords(float x, float y, float imageWidth, 
     float worldX = normalizedX * 6.4f;
     float worldY = normalizedY * 3.6f;
     
-    return make_float3(worldX, -0.01f, worldY);
+    return make_float3(worldX, 0.01f, worldY);
 }
 
 __global__ void detectFASTKeypoints(
@@ -287,7 +287,7 @@ __global__ void detectFASTKeypoints(
                     image_width, image_height
                 );
                 
-                positions[global_idx + i] = make_float4(world_pos.x, world_pos.y, world_pos.z, 1.0f);
+                positions[global_idx + i] = make_float4(world_pos.x, world_pos.y, world_pos.z, 0.0f);
                 colors[global_idx + i] = make_float4(1.0f, 0.0f, 0.0f, 1.0f);
                 descriptors[global_idx + i] = block_descriptors[i];
             }
@@ -604,6 +604,33 @@ __global__ void copySurfaceKernel(
     }
 }
 
+// __device__ float4 transform_point(const float* transform, float4 point) {
+//     // Ensure w component is 1.0 for proper transformation
+//     point.w = 1.0f;
+    
+//     float4 result;
+//     // Column-major matrix multiplication 
+//     result.x = transform[0] * point.x + transform[4] * point.y + 
+//                transform[8] * point.z + transform[12] * point.w;
+//     result.y = transform[1] * point.x + transform[5] * point.y + 
+//                transform[9] * point.z + transform[13] * point.w;
+//     result.z = transform[2] * point.x + transform[6] * point.y + 
+//                transform[10] * point.z + transform[14] * point.w;
+//     result.w = transform[3] * point.x + transform[7] * point.y + 
+//                transform[11] * point.z + transform[15] * point.w;
+    
+//     // Perspective divide if needed
+//     if (result.w != 0.0f && result.w != 1.0f) {
+//         result.x /= result.w;
+//         result.y /= result.w;
+//         result.z /= result.w;
+//         result.w = 1.0f;
+//     }
+    
+//     return result;
+// }
+
+
 
 // Kernel to generate visualization data
 __global__ void generateVisualizationKernel(
@@ -616,37 +643,39 @@ __global__ void generateVisualizationKernel(
     float4* left_line_colors,
 
     float4* right_line_positions,
-    float4* right_line_colors
+    float4* right_line_colors,
+
+    const float* left_transform,
+    const float* right_transform
 ) {
-   const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= match_count) return;
 
     const MatchedKeypoint match = matches[idx];
     
-    // Center point (world position)
-    keypoint_positions[idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 1.0f);
-    keypoint_colors[idx] = make_float4(1.0f, 0.0f, 1.0f, 1.0f); // Purple for center
+    // Transform the world position
+    keypoint_positions[idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 0.0f);
+    keypoint_colors[idx] = make_float4(1.0f, 0.0f, 1.0f, 1.0f);
     
-    // For the left line connection:
-    // Start position (2 vertices per line, so idx * 2)
-    left_line_positions[idx * 2] = make_float4(match.left_pos.x - 2.5f, match.left_pos.y + 5.0f, match.left_pos.z, 1.0f);
-    left_line_colors[idx * 2] = make_float4(1.0f, 0.0f, 0.0f, 1.0f); // Red start
+    // Transform left keypoint from canvas space to world space
+    // float4 left_world_pos = transform_point(left_transform, 
+        // make_float4(match.left_pos.x, 0.0f, match.left_pos.z, 1.0f));
+    float4 left_world_pos = make_float4(match.left_pos.x-12.8f, -5.0f, match.left_pos.z, 0.0f);
+    // Transform right keypoint from canvas space to world space
+    // float4 right_world_pos = transform_point(right_transform, 
+        // make_float4(match.right_pos.x, 0.0f, match.right_pos.z, 1.0f));
+    float4 right_world_pos = make_float4(match.right_pos.x+12.8f, -5.0f, match.right_pos.z, 0.0f);
+
+    // Set line positions
+    left_line_positions[idx * 2] = left_world_pos;
+    left_line_positions[idx * 2 + 1] = keypoint_positions[idx];
+    left_line_colors[idx] = make_float4(1.0f, 0.0f, 0.0f, 0.5f);
     
-    // End position
-    left_line_positions[idx * 2 + 1] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 1.0f);
-    left_line_colors[idx * 2 + 1] = make_float4(1.0f, 0.0f, 0.0f, 0.5f); // Red end (semi-transparent)
-    
-    // For the right line connection:
-    // Start position
-    right_line_positions[idx * 2] = make_float4(match.right_pos.x + 2.5f, match.right_pos.y + 5.0f, match.right_pos.z, 1.0f);
-    right_line_colors[idx * 2] = make_float4(0.0f, 0.0f, 1.0f, 1.0f); // Blue start
-    
-    // End position
-    right_line_positions[idx * 2 + 1] = make_float4(match.world_pos.x, match.world_pos.y , match.world_pos.z, 1.0f);
-    right_line_colors[idx * 2 + 1] = make_float4(0.0f, 0.0f, 1.0f, 0.5f); // Blue end (semi-transparent)
+    right_line_positions[idx * 2] = right_world_pos;
+    right_line_positions[idx * 2 + 1] = keypoint_positions[idx];
+    right_line_colors[idx] = make_float4(0.0f, 0.0f, 1.0f, 0.5f);
+
 }
-
-
 
 // ============================================================= Bindings =================================================================
 
@@ -668,11 +697,21 @@ extern "C" {
 
 //     printf("Using CUDA Device: %d - %s\n", cudaDevice, prop.name);
 
-int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture) {
+int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, const float transform[16]) {
     int slot = find_free_detector_slot();
     if (slot < 0) {
         return -1;
     }
+
+    printf("Transform => %d\n", slot);
+    for (int i = 0; i < 16; i++){
+        printf("%f ", transform[i]);
+        if (i+1 % 4 == 0) printf("\n") ;   
+    }
+    printf("\n");
+    
+
+    memset(&g_detectors[slot], 0, sizeof(DetectorInstance));
 
     if (cudaMalloc(&g_detectors[slot].d_keypoint_count, sizeof(int)) != cudaSuccess) {
         return -1;
@@ -687,6 +726,11 @@ int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture) {
     g_detectors[slot].gl_ytexture = gl_ytexture;
     g_detectors[slot].gl_uvtexture = gl_uvtexture;
 
+    memcpy(g_detectors[slot].world_transform, transform, 16 * sizeof(float));
+    cudaMalloc(&g_detectors[slot].d_world_transform, 16 * sizeof(float));
+    cudaMemcpy(g_detectors[slot].d_world_transform, transform, 16 * sizeof(float), cudaMemcpyHostToDevice);
+
+
     return g_detectors[slot].id;
 }
 
@@ -700,6 +744,11 @@ void cuda_cleanup_detector(int detector_id) {
     if (detector->d_descriptors) cudaFree(detector->d_descriptors);
     detector->d_keypoint_count = nullptr;
     detector->d_descriptors = nullptr;
+
+    if (detector->d_world_transform) {
+        cudaFree(detector->d_world_transform);
+        detector->d_world_transform = nullptr;
+    }
 }
 
 
@@ -815,7 +864,6 @@ int cuda_register_instance_buffer(
 
     return 0;  // Added missing return
 }
-
 
 int cuda_register_buffers(
     int detector_id,
@@ -1301,6 +1349,10 @@ static int allocate_matching_resources(MatchedKeypoint** d_matches, int** d_matc
     return 0;
 }
 
+
+
+// TODO: Need to set matches to position and colors of combined keypoints
+// Not sure how combined is currently being visualized
 static float execute_matching(
     DetectorInstance* left_detector,
     DetectorInstance* right_detector, 
@@ -1397,7 +1449,9 @@ static float execute_matching(
         combined_detector->gl_resources.connections.left.d_positions,
         combined_detector->gl_resources.connections.left.d_colors,
         combined_detector->gl_resources.connections.right.d_positions,
-        combined_detector->gl_resources.connections.right.d_colors
+        combined_detector->gl_resources.connections.right.d_colors,
+        left_detector->d_world_transform,
+        right_detector->d_world_transform
     );
     cudaEventRecord(stop);
 

@@ -240,12 +240,15 @@ pub const KeypointManager = struct {
         try self.target_node.addChild(node);
 
         const mesh = target_node.mesh.?;
+
         self.keypoint_detector.? = try allocator.create(CudaBinds.CudaKeypointDetector);
         self.keypoint_detector.?.* = try CudaBinds.CudaKeypointDetector.init(
             self.max_keypoints,
             mesh.textureID.y,
             mesh.textureID.uv,
+            target_node.local_transform,
         );
+
         self.keypoints = node;
 
         std.debug.print("Node instance_data {any}\n", .{node.instance_data});

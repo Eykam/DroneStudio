@@ -21,7 +21,12 @@ pub const ImageParams = extern struct {
 };
 
 // External CUDA function declarations
-extern "cuda_keypoint_detector" fn cuda_create_detector(max_keypoints: c_int, gl_ytexture: c_uint, gl_uvtexture: c_uint) c_int;
+extern "cuda_keypoint_detector" fn cuda_create_detector(
+    max_keypoints: c_int,
+    gl_ytexture: c_uint,
+    gl_uvtexture: c_uint,
+    transform: *const [16]f32,
+) c_int;
 extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) void;
 
 extern "cuda_keypoint_detector" fn cuda_register_gl_texture(detector_id: c_int) c_int;
@@ -66,11 +71,17 @@ pub const CudaKeypointDetector = struct {
     detector_id: c_int,
     gl_interop_enabled: bool,
 
-    pub fn init(max_keypoints: u32, gl_ytexture: glad.GLuint, gl_uvtexture: glad.GLuint) !Self {
+    pub fn init(
+        max_keypoints: u32,
+        gl_ytexture: glad.GLuint,
+        gl_uvtexture: glad.GLuint,
+        transform: [16]f32,
+    ) !Self {
         const id = cuda_create_detector(
             @intCast(max_keypoints),
             gl_ytexture,
             gl_uvtexture,
+            &transform,
         );
 
         if (id < 0) {

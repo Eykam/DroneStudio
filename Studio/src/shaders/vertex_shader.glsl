@@ -5,49 +5,49 @@ layout(location = 1) in vec3 aColor;
 layout(location = 2) in vec2 aTexCoord;
 
 // Instance attributes (only used by instanced meshes)
-layout(location = 3) in vec3 aInstancePos;
-layout(location = 4) in vec3 aInstanceEnd;
-layout(location = 5) in vec3 aInstanceColor;
+layout(location = 3) in vec4 aInstancePos;
+layout(location = 4) in vec4 aInstanceEnd;
+layout(location = 5) in vec4 aInstanceColor;
 
 // Uniforms
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-uniform bool uInstanceKeypoints;
+uniform bool uInstancedKeypoints;
 uniform bool uInstancedLines;
 
-out vec3 vertexColor;
+out vec4 vertexColor;
 out vec2 texCoord;
 
 void main()
 {
     vec3 worldPos;
-    vec3 finalColor;
+    vec4 finalColor;
     
-    if (uInstanceKeypoints) {
-        vec4 instanceOffset = uModel * vec4(aInstancePos, 0.0);
+    if (uInstancedKeypoints) {
+        vec4 instanceOffset = uModel * aInstancePos;
         vec4 modelPos = uModel * vec4(aPos, 1.0);
 
         // Add instance offset in world space
         worldPos = modelPos.xyz + instanceOffset.xyz;
         finalColor = aInstanceColor;
         gl_Position = uProjection * uView * vec4(worldPos, 1.0);
-        gl_PointSize = 4.0;
+        gl_PointSize = 15.0;
     } 
     else if(uInstancedLines){
-        vec4 instanceOffset = uModel * vec4(aInstancePos, 0.0);
+        vec4 instancePos = gl_VertexID == 0 ? aInstancePos : aInstanceEnd;
+        vec4 instanceOffset = uModel * instancePos;
         vec4 modelPos = uModel * vec4(aPos, 1.0);
 
         // Add instance offset in world space
         worldPos = modelPos.xyz + instanceOffset.xyz;
         finalColor = aInstanceColor;
         gl_Position = uProjection * uView * vec4(worldPos, 1.0);
-        gl_PointSize = 4.0;
     }
     else {
         // Normal rendering path
         worldPos = aPos;
-        finalColor = aColor;
+        finalColor = vec4(aColor, 1.0);
         gl_Position = uProjection * uView * uModel * vec4(worldPos, 1.0);
     }
     
