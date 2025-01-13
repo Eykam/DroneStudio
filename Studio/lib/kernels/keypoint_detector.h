@@ -56,7 +56,7 @@ typedef struct DetectorInstance {
     int* d_keypoint_count;
     int gl_ytexture;
     int gl_uvtexture;
-    float world_transform [16]; 
+    alignas(16) float world_transform[16];; 
     float* d_world_transform;
     CudaGLResources gl_resources;
     CudaGLTextureResource* y_texture;
@@ -89,6 +89,8 @@ void cuda_unregister_buffers(int detector_id);
 
 int cuda_map_resources(int detector_id);
 void cuda_unmap_resources(int detector_id);
+
+int cuda_map_transformation(int detector_id,  const float transformation[16]);
 
 float cuda_detect_keypoints(
     int detector_id,

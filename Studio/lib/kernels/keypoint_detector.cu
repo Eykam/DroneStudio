@@ -115,7 +115,7 @@ __global__ void gaussianBlurVertical(
     output[y * pitch + x] = (uint8_t)sum;
 }
 
-__device__ float3 convertImageToWorldCoords(float x, float y, float imageWidth, float imageHeight) {
+__device__ float3 convertImageToCanvasCoords(float x, float y, float imageWidth, float imageHeight) {
     float normalizedX = (x / imageWidth) * 2.0f - 1.0f;
     float normalizedY = -((y / imageHeight) * 2.0f - 1.0f);
     
@@ -282,7 +282,7 @@ __global__ void detectFASTKeypoints(
         if (global_idx + block_counter <= max_keypoints) {
             for (int i = 0; i < block_counter; i++) {
                 float2 kp = block_keypoints[i];
-                float3 world_pos = convertImageToWorldCoords(
+                float3 world_pos = convertImageToCanvasCoords(
                     kp.x, kp.y,
                     image_width, image_height
                 );
@@ -308,18 +308,18 @@ struct MatchingParams {
     float sensor_height_pixels;
 };
 
-// Structure to hold matched keypoint data
-struct MatchedKeypoint {
-    float3 left_pos;
-    float3 right_pos;
-    float3 world_pos;
-    float disparity;
-};
-
 struct Keypoint {
     float3 position;    // Position in OpenGL world coordinates
     float disparity;    // Pixel disparity between left and right views
 };
+
+// Structure to hold matched keypoint data
+struct MatchedKeypoint {
+    float3 left_pos;
+    float3 right_pos;
+    Keypoint world;
+};
+
 
 __device__ Keypoint triangulatePosition(
     float3 leftWorldPos,
@@ -342,7 +342,7 @@ __device__ Keypoint triangulatePosition(
    
 
     // Calculate depth using similar triangles principle
-    float depth_mm = (baseline * 2.612f) / disparity_mm;  // 3.04f is focal length in mm
+    // float depth_mm = (baseline * 2.612f) / disparity_mm;  // 3.04f is focal length in mm
 
     
     // Clamp depth to reasonable range (adjust these values based on your scene)
@@ -350,19 +350,19 @@ __device__ Keypoint triangulatePosition(
     // const float MAX_DEPTH_MM = 5000.0f;  // 5m
     // depth_mm = fmaxf(fminf(depth_mm, MAX_DEPTH_MM), MIN_DEPTH_MM);
  
-    float depth_world = depth_mm / mm_per_world_unit;
+    // float depth_world = depth_mm / mm_per_world_unit;
 
     // Calculate final world position
-    float world_scale = depth_world / depth_mm;
-    float worldX = leftWorldPos.x;  // Use left camera x position
-    float worldY = -depth_world / 1000;    // Negative because OpenGL Y goes up
-    float worldZ = leftWorldPos.z * world_scale;
+    // float world_scale = depth_world / depth_mm;
+    // float worldX = leftWorldPos.x;  // Use left camera x position
+    // float worldY = -depth_world / 1000;    // Negative because OpenGL Y goes up
+    // float worldZ = leftWorldPos.z * world_scale;
     
     // Bound check the final coordinates
     // worldX = fmaxf(fminf(worldX, canvas_width/2), -canvas_width/2);
     // worldZ = fmaxf(fminf(worldZ, canvas_width/2), -canvas_width/2);
     
-    result.position = make_float3(rightWorldPos.x, -0.1, rightWorldPos.z);
+    result.position = make_float3(rightWorldPos.x, -rightWorldPos.y, rightWorldPos.z);
     result.disparity = disparity_mm;  // Store disparity in mm for debugging
     
     return result;
@@ -542,8 +542,7 @@ __global__ void matchKeypointsKernel(
             matches[match_idx] = {
                 left_pos,
                 right_pos,
-                matchedPoint.position,
-                matchedPoint.disparity
+                matchedPoint
             };
         }
     }
@@ -604,31 +603,30 @@ __global__ void copySurfaceKernel(
     }
 }
 
-// __device__ float4 transform_point(const float* transform, float4 point) {
-//     // Ensure w component is 1.0 for proper transformation
-//     point.w = 1.0f;
+__device__ float4 transform_point(const float* transform, float4 point) {
+    // Ensure w component is 1.0 for proper transformation
+    point.w = 1.0f;
     
-//     float4 result;
-//     // Column-major matrix multiplication 
-//     result.x = transform[0] * point.x + transform[4] * point.y + 
-//                transform[8] * point.z + transform[12] * point.w;
-//     result.y = transform[1] * point.x + transform[5] * point.y + 
-//                transform[9] * point.z + transform[13] * point.w;
-//     result.z = transform[2] * point.x + transform[6] * point.y + 
-//                transform[10] * point.z + transform[14] * point.w;
-//     result.w = transform[3] * point.x + transform[7] * point.y + 
-//                transform[11] * point.z + transform[15] * point.w;
+    float4 result;
+    // Column-major matrix multiplication 
+    result.x = transform[0] * point.x + transform[4] * point.y + 
+               transform[8] * point.z + transform[12] * point.w;
+    result.y = transform[1] * point.x + transform[5] * point.y + 
+               transform[9] * point.z + transform[13] * point.w;
+    result.z = transform[2] * point.x + transform[6] * point.y + 
+               transform[10] * point.z + transform[14] * point.w;
+    result.w = transform[3] * point.x + transform[7] * point.y + 
+               transform[11] * point.z + transform[15] * point.w;
     
-//     // Perspective divide if needed
-//     if (result.w != 0.0f && result.w != 1.0f) {
-//         result.x /= result.w;
-//         result.y /= result.w;
-//         result.z /= result.w;
-//         result.w = 1.0f;
-//     }
-    
-//     return result;
-// }
+    if (result.w != 0.0f) {
+        result.x /= result.w;
+        result.y /= result.w;
+        result.z /= result.w;
+        result.w = 1.0f;
+    }
+
+    return result;
+}
 
 
 
@@ -636,14 +634,15 @@ __global__ void copySurfaceKernel(
 __global__ void generateVisualizationKernel(
     const MatchedKeypoint* matches,
     const int match_count,
-    float4* keypoint_positions,
-    float4* keypoint_colors,
     
-    float4* left_line_positions,
+    float4*  keypoint_positions,
+    float4*  keypoint_colors,
+    
+    float4*  left_line_positions,
     float4* left_line_colors,
-
-    float4* right_line_positions,
-    float4* right_line_colors,
+    
+    float4* __restrict__ right_line_positions,
+    float4* __restrict__ right_line_colors,
 
     const float* left_transform,
     const float* right_transform
@@ -654,24 +653,23 @@ __global__ void generateVisualizationKernel(
     const MatchedKeypoint match = matches[idx];
     
     // Transform the world position
-    keypoint_positions[idx] = make_float4(match.world_pos.x, match.world_pos.y, match.world_pos.z, 0.0f);
+    keypoint_positions[idx] = make_float4(match.world.position.x, match.world.position.y, match.world.position.z, 0.0f);
     keypoint_colors[idx] = make_float4(1.0f, 0.0f, 1.0f, 1.0f);
-    
+
     // Transform left keypoint from canvas space to world space
-    // float4 left_world_pos = transform_point(left_transform, 
-        // make_float4(match.left_pos.x, 0.0f, match.left_pos.z, 1.0f));
-    float4 left_world_pos = make_float4(match.left_pos.x-12.8f, -5.0f, match.left_pos.z, 0.0f);
+    float4 left_world_pos = transform_point(left_transform, 
+        make_float4(match.left_pos.x, match.left_pos.y, match.left_pos.z, 0.0f));
     // Transform right keypoint from canvas space to world space
-    // float4 right_world_pos = transform_point(right_transform, 
-        // make_float4(match.right_pos.x, 0.0f, match.right_pos.z, 1.0f));
-    float4 right_world_pos = make_float4(match.right_pos.x+12.8f, -5.0f, match.right_pos.z, 0.0f);
+    float4 right_world_pos = transform_point(right_transform, 
+        make_float4(match.right_pos.x, match.right_pos.y, match.right_pos.z, 0.0f));
+
 
     // Set line positions
-    left_line_positions[idx * 2] = left_world_pos;
+    left_line_positions[idx * 2] = make_float4(left_world_pos.x, left_world_pos.y,left_world_pos.z, 0.0f);
     left_line_positions[idx * 2 + 1] = keypoint_positions[idx];
     left_line_colors[idx] = make_float4(1.0f, 0.0f, 0.0f, 0.5f);
     
-    right_line_positions[idx * 2] = right_world_pos;
+    right_line_positions[idx * 2] = make_float4(right_world_pos.x, right_world_pos.y,right_world_pos.z, 0.0f);;
     right_line_positions[idx * 2 + 1] = keypoint_positions[idx];
     right_line_colors[idx] = make_float4(0.0f, 0.0f, 1.0f, 0.5f);
 
@@ -701,15 +699,7 @@ int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, c
     int slot = find_free_detector_slot();
     if (slot < 0) {
         return -1;
-    }
-
-    printf("Transform => %d\n", slot);
-    for (int i = 0; i < 16; i++){
-        printf("%f ", transform[i]);
-        if (i+1 % 4 == 0) printf("\n") ;   
-    }
-    printf("\n");
-    
+    }    
 
     memset(&g_detectors[slot], 0, sizeof(DetectorInstance));
 
@@ -717,18 +707,34 @@ int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, c
         return -1;
     }
 
-    if (cudaMalloc(&g_detectors[slot].d_descriptors, max_keypoints * sizeof(BRIEFDescriptor) != cudaSuccess)) {
+    if (cudaMalloc(&g_detectors[slot].d_descriptors, max_keypoints * sizeof(BRIEFDescriptor)) != cudaSuccess) {
         return -1;
     } ;
+
+    cudaError_t error = cudaMalloc((void**)&g_detectors[slot].d_world_transform, 16 * sizeof(float));
+    if (error != cudaSuccess) {
+        printf("Transform allocation failed: %s\n", cudaGetErrorString(error));
+        return -1;
+    }
+    
+    // Initialize transform to identity matrix
+    float identity[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+    error = cudaMemcpy(g_detectors[slot].d_world_transform, identity, 16 * sizeof(float), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        printf("Initial transform copy failed: %s\n", cudaGetErrorString(error));
+        return -1;
+    }
 
     g_detectors[slot].initialized = true;
     g_detectors[slot].id = g_next_detector_id++;
     g_detectors[slot].gl_ytexture = gl_ytexture;
     g_detectors[slot].gl_uvtexture = gl_uvtexture;
 
-    memcpy(g_detectors[slot].world_transform, transform, 16 * sizeof(float));
-    cudaMalloc(&g_detectors[slot].d_world_transform, 16 * sizeof(float));
-    cudaMemcpy(g_detectors[slot].d_world_transform, transform, 16 * sizeof(float), cudaMemcpyHostToDevice);
 
 
     return g_detectors[slot].id;
@@ -749,6 +755,42 @@ void cuda_cleanup_detector(int detector_id) {
         cudaFree(detector->d_world_transform);
         detector->d_world_transform = nullptr;
     }
+}
+
+int cuda_map_transformation(int detector_id,  const float transformation[16]) {
+    DetectorInstance* detector = get_detector_instance(detector_id);
+    if (!detector) return -1;
+
+    printf("Input transform:\n");
+    for(int i = 0; i < 4; i++) {
+        printf("%f %f %f %f\n", 
+               transformation[i], transformation[i+4], 
+               transformation[i+8], transformation[i+12]);
+    }
+
+    memcpy(detector->world_transform, transformation, 16 * sizeof(float));
+    cudaError_t error = cudaMemcpy(detector->d_world_transform, detector->world_transform, 
+                                  16 * sizeof(float), cudaMemcpyHostToDevice);
+    if (error != cudaSuccess) {
+        printf("Transform copy to device failed: %s\n", cudaGetErrorString(error));
+        return -1;
+    }
+
+    float verify[16];
+    error = cudaMemcpy(verify, detector->d_world_transform, 16 * sizeof(float), cudaMemcpyDeviceToHost);
+    if (error != cudaSuccess) {
+        printf("Transform verification failed: %s\n", cudaGetErrorString(error));
+        return -1;
+    }
+    
+    printf("Verified transform on device:\n");
+    for(int i = 0; i < 4; i++) {
+        printf("%f %f %f %f\n", 
+               verify[i], verify[i+4], 
+               verify[i+8], verify[i+12]);
+    }
+
+    return 0;
 }
 
 
@@ -1437,7 +1479,7 @@ static float execute_matching(
     printf("num_matches: %d\n", *num_matches);
 
     // Generate visualization
-    dim3 blockVis(1024);
+    dim3 blockVis(256);
     dim3 gridVis((*num_matches + blockVis.x - 1) / blockVis.x);
 
     cudaEventRecord(start);

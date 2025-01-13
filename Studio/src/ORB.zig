@@ -115,6 +115,8 @@ pub const StereoMatcher = struct {
                 .image_height = @floatFromInt(frame_height),
                 .num_keypoints = self.left.num_keypoints,
             };
+
+            try self.left.keypoint_detector.?.updateDetectorTransformation(self.left.target_node.world_transform);
         }
 
         if (self.right.frame) |frame| {
@@ -134,6 +136,8 @@ pub const StereoMatcher = struct {
                 .image_height = @floatFromInt(frame_height),
                 .num_keypoints = self.right.num_keypoints,
             };
+
+            try self.right.keypoint_detector.?.updateDetectorTransformation(self.right.target_node.world_transform);
         }
 
         if (right_image_params == null and left_image_params == null) {
@@ -164,6 +168,8 @@ pub const StereoMatcher = struct {
             }
             return;
         }
+
+        try self.combined.keypoint_detector.?.updateDetectorTransformation(self.combined.target_node.world_transform);
 
         try CudaBinds.CudaKeypointDetector.match_keypoints(
             self.left.keypoint_detector.?.detector_id,
@@ -246,7 +252,6 @@ pub const KeypointManager = struct {
             self.max_keypoints,
             mesh.textureID.y,
             mesh.textureID.uv,
-            target_node.local_transform,
         );
 
         self.keypoints = node;

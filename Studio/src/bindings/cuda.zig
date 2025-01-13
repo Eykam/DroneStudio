@@ -25,7 +25,6 @@ extern "cuda_keypoint_detector" fn cuda_create_detector(
     max_keypoints: c_int,
     gl_ytexture: c_uint,
     gl_uvtexture: c_uint,
-    transform: *const [16]f32,
 ) c_int;
 extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) void;
 
@@ -45,6 +44,8 @@ extern "cuda_keypoint_detector" fn cuda_unregister_buffers(detector_id: c_int) v
 
 extern "cuda_keypoint_detector" fn cuda_map_resources(detector_id: c_int) c_int;
 extern "cuda_keypoint_detector" fn cuda_unmap_resources(detector_id: c_int) void;
+
+extern "cuda_keypoint_detector" fn cuda_map_transformation(detector_id: c_int, transformation: *const [16]f32) c_int;
 
 extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     detector_id: c_int,
@@ -75,13 +76,11 @@ pub const CudaKeypointDetector = struct {
         max_keypoints: u32,
         gl_ytexture: glad.GLuint,
         gl_uvtexture: glad.GLuint,
-        transform: [16]f32,
     ) !Self {
         const id = cuda_create_detector(
             @intCast(max_keypoints),
             gl_ytexture,
             gl_uvtexture,
-            &transform,
         );
 
         if (id < 0) {
@@ -147,6 +146,18 @@ pub const CudaKeypointDetector = struct {
 
         std.debug.print("Setting interop to true!\n", .{});
         self.gl_interop_enabled = true;
+    }
+
+    pub fn updateDetectorTransformation(self: *Self, transformation: [16]f32) !void {
+        // std.debug.print("World Transform: {any}\n", .{transformation});
+        const err = cuda_map_transformation(self.detector_id, &transformation);
+
+        if (err < 0) {
+            std.debug.print("Failed to update Detectors Transformation matrix => {d}\n", .{self.detector_id});
+            return error.DetectorTransformationUpdateFailed;
+        }
+
+        return;
     }
 
     pub fn deinit(self: *Self) void {

@@ -72,8 +72,7 @@ pub fn main() !void {
         canvas_height,
         .{ .w = texture_dims[0], .h = texture_dims[1] },
     );
-    canvasNodeLeft.setPosition(-canvas_width, canvas_height / 2.0, -5);
-    canvasNodeLeft.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
+    canvasNodeLeft.setPosition(-(canvas_width / 2.0) - 0.1, canvas_height / 2.0, 5);
     try canvasNode.addChild(canvasNodeLeft);
 
     var canvasNodeRight = try Shape.TexturedPlane.init(
@@ -83,8 +82,7 @@ pub fn main() !void {
         canvas_height,
         .{ .w = texture_dims[0], .h = texture_dims[1] },
     );
-    canvasNodeRight.setPosition(canvas_width, canvas_height / 2.0, -5);
-    canvasNodeRight.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
+    canvasNodeRight.setPosition((canvas_width / 2.0) + 0.1, canvas_height / 2.0, 5);
     try canvasNode.addChild(canvasNodeRight);
 
     var canvasNodeCombined = try Shape.TexturedPlane.init(
@@ -95,7 +93,6 @@ pub fn main() !void {
         .{ .w = texture_dims[0], .h = texture_dims[1] },
     );
     canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
-    canvasNodeCombined.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
     try canvasNode.addChild(canvasNodeCombined);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
@@ -214,12 +211,12 @@ pub fn main() !void {
 
         // const start = try std.time.Instant.now();
 
+        scene.processInput(false);
+        scene.render(window);
+
         if (!globals.PAUSED) {
             try StereoMatcher.match();
         }
-
-        scene.processInput(false);
-        scene.render(window);
 
         // const end = try std.time.Instant.now();
         // const render_cycle = end.since(start);

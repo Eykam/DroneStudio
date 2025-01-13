@@ -194,7 +194,6 @@ pub fn bindTexture(self: *Self) !void {
     if (!self.texture_updated) return;
 
     const mesh = self.*.mesh.?;
-    std.debug.print("Binding Texture: {}\n", .{mesh.textureID.y});
 
     glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
     glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);

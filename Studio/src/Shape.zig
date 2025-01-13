@@ -765,7 +765,7 @@ pub const InstancedLine = struct {
             .color = color orelse .{ 1.0, 0.0, 0.0 },
         };
         vertices[1] = Vertex{
-            .position = .{ 1, 0, 0 }, // Unit vector in x direction as base
+            .position = .{ 0, 0, 0 }, // Unit vector in x direction as base
             .color = color orelse .{ 1.0, 0.0, 0.0 },
         };
 
@@ -856,7 +856,7 @@ pub const InstancedLine = struct {
             // OpenGL state setup
             glad.glEnable(glad.GL_BLEND);
             glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
-            glad.glLineWidth(2.0); // Set line width
+            glad.glLineWidth(10.0); // Set line width
 
             glad.glBindVertexArray(mesh.meta.VAO);
 
