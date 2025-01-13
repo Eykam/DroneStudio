@@ -32,14 +32,14 @@ void main()
         worldPos = modelPos.xyz + instanceOffset.xyz;
         finalColor = aInstanceColor;
         gl_Position = uProjection * uView * vec4(worldPos, 1.0);
-        gl_PointSize = 15.0;
+        gl_PointSize = 6.0;
     } 
     else if(uInstancedLines){
         vec4 instanceOffset = gl_VertexID == 0 ? aInstancePos : uModel * aInstanceEnd;
         vec4 modelPos = uModel * vec4(aPos, 1.0);
 
         // Add instance offset in world space
-        worldPos =  modelPos.xyz + instanceOffset.xyz;
+        worldPos =  gl_VertexID == 0 ? instanceOffset.xyz :modelPos.xyz + instanceOffset.xyz;
         finalColor = aInstanceColor;
         gl_Position = uProjection * uView * vec4(worldPos, 1.0);
     }

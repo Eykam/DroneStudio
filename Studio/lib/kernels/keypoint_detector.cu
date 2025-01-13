@@ -437,7 +437,7 @@ __global__ void matchKeypointsKernel(
     float best_disparity = INFINITY;
 
 
-    const int MAX_DESC_DISTANCE = 64.0f; 
+    const int MAX_DESC_DISTANCE = 128.0f; 
     
     // Find best and second-best matches for this left keypoint
     for (int right_idx = 0; right_idx < right_count; right_idx++) {
@@ -603,6 +603,30 @@ __global__ void copySurfaceKernel(
     }
 }
 
+
+__device__ float4 generate_unique_color(int idx, float alpha) {
+    // Use a simple hash function to generate pseudo-random but consistent colors
+    const float golden_ratio = 0.618033988749895f;
+    float hue = fmodf(idx * golden_ratio, 1.0f);
+    
+    // Convert HSV to RGB (simplified, assuming S=V=1)
+    float h = hue * 6.0f;
+    float x = 1.0f - fabsf(fmodf(h, 2.0f) - 1.0f);
+    
+    float r = 0.0f, g = 0.0f, b = 0.0f;
+    
+    if      (h < 1.0f) { r = 1.0f; g = x; }
+    else if (h < 2.0f) { r = x; g = 1.0f; }
+    else if (h < 3.0f) { g = 1.0f; b = x; }
+    else if (h < 4.0f) { g = x; b = 1.0f; }
+    else if (h < 5.0f) { r = x; b = 1.0f; }
+    else               { r = 1.0f; b = x; }
+    
+    return make_float4(r, g, b, alpha);
+}
+
+
+
 __device__ float4 transform_point(const float* transform, float4 point) {
     // Ensure w component is 1.0 for proper transformation
     point.w = 1.0f;
@@ -652,6 +676,8 @@ __global__ void generateVisualizationKernel(
 
     const MatchedKeypoint match = matches[idx];
     
+    float4 match_color = generate_unique_color(idx, 0.5f);
+    
     // Transform the world position
     keypoint_positions[idx] = make_float4(match.world.position.x, match.world.position.y, match.world.position.z, 0.0f);
     keypoint_colors[idx] = make_float4(1.0f, 0.0f, 1.0f, 1.0f);
@@ -667,11 +693,11 @@ __global__ void generateVisualizationKernel(
     // Set line positions
     left_line_positions[idx * 2] = make_float4(left_world_pos.x, left_world_pos.y,left_world_pos.z, 0.0f);
     left_line_positions[idx * 2 + 1] = keypoint_positions[idx];
-    left_line_colors[idx] = make_float4(1.0f, 0.0f, 0.0f, 0.5f);
+    left_line_colors[idx] = match_color;
     
     right_line_positions[idx * 2] = make_float4(right_world_pos.x, right_world_pos.y,right_world_pos.z, 0.0f);;
     right_line_positions[idx * 2 + 1] = keypoint_positions[idx];
-    right_line_colors[idx] = make_float4(0.0f, 0.0f, 1.0f, 0.5f);
+    right_line_colors[idx] = match_color;
 
 }
 
@@ -761,12 +787,6 @@ int cuda_map_transformation(int detector_id,  const float transformation[16]) {
     DetectorInstance* detector = get_detector_instance(detector_id);
     if (!detector) return -1;
 
-    printf("Input transform:\n");
-    for(int i = 0; i < 4; i++) {
-        printf("%f %f %f %f\n", 
-               transformation[i], transformation[i+4], 
-               transformation[i+8], transformation[i+12]);
-    }
 
     memcpy(detector->world_transform, transformation, 16 * sizeof(float));
     cudaError_t error = cudaMemcpy(detector->d_world_transform, detector->world_transform, 
@@ -774,20 +794,6 @@ int cuda_map_transformation(int detector_id,  const float transformation[16]) {
     if (error != cudaSuccess) {
         printf("Transform copy to device failed: %s\n", cudaGetErrorString(error));
         return -1;
-    }
-
-    float verify[16];
-    error = cudaMemcpy(verify, detector->d_world_transform, 16 * sizeof(float), cudaMemcpyDeviceToHost);
-    if (error != cudaSuccess) {
-        printf("Transform verification failed: %s\n", cudaGetErrorString(error));
-        return -1;
-    }
-    
-    printf("Verified transform on device:\n");
-    for(int i = 0; i < 4; i++) {
-        printf("%f %f %f %f\n", 
-               verify[i], verify[i+4], 
-               verify[i+8], verify[i+12]);
     }
 
     return 0;
@@ -798,11 +804,8 @@ int cuda_register_gl_texture(int detector_id) {
     DetectorInstance* detector = get_detector_instance(detector_id);
     if (!detector) return -1;
 
-    printf("Registering GL textures for detector %d\n", detector_id);
-    printf("GL texture IDs - Y: %d, UV: %d\n", detector->gl_ytexture, detector->gl_uvtexture);
-
     // Allocate texture resource
-     detector->y_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
+    detector->y_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
     if (!detector->y_texture) {
         printf("Failed to allocate Y texture resource\n");
         return -1;
@@ -1032,20 +1035,9 @@ int cuda_map_buffer_resources(InstanceBuffer* buffer) {
 
 int cuda_map_resources(int detector_id) {
     DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return -1;
-
-    printf("Mapping resources for detector %d\n", detector_id);
-    printf("Keypoint buffers: pos=%p, color=%p\n", 
-        detector->gl_resources.keypoints.position_resource,
-        detector->gl_resources.keypoints.color_resource);
-    printf("Y texture: %p, UV texture: %p\n", 
-        detector->y_texture, 
-        detector->uv_texture);
-
-    int error;
-      
+    if (!detector) return -1;   
     
-    error = cuda_map_buffer_resources(&detector->gl_resources.keypoints);
+    int error = cuda_map_buffer_resources(&detector->gl_resources.keypoints);
     if (error < 0) printf("Failed to map keypoint buffers!\n");
     if (detector->gl_resources.connections.left.position_resource){
         error = cuda_map_buffer_resources(&detector->gl_resources.connections.left);
@@ -1253,8 +1245,6 @@ float cuda_detect_keypoints(
     uint8_t *d_temp1, *d_temp2;
     cudaMalloc(&d_temp1, image->y_linesize * image->height);
     cudaMalloc(&d_temp2, image->y_linesize * image->height);
-
-    printf("Image Params: %d %d\n", image->y_linesize, image->height);
     
     // Initialize Gaussian kernel
     initGaussianKernel(sigma);
@@ -1417,8 +1407,8 @@ static float execute_matching(
     MatchingParams params = {
         .baseline = baseline_world,
         .focal_length = focal_length,
-        .max_disparity = 200.0f,
-        .epipolar_threshold = 150.0f,
+        .max_disparity = 300.0f,
+        .epipolar_threshold = 50.0f,
         .sensor_width_mm = sensor_width_mm,
         .sensor_width_pixels = 4608.0f,
         .sensor_height_pixels = 2592.0f
@@ -1479,7 +1469,7 @@ static float execute_matching(
     printf("num_matches: %d\n", *num_matches);
 
     // Generate visualization
-    dim3 blockVis(256);
+    dim3 blockVis(512);
     dim3 gridVis((*num_matches + blockVis.x - 1) / blockVis.x);
 
     cudaEventRecord(start);
@@ -1523,7 +1513,7 @@ int cuda_match_keypoints(
     ImageParams* left,
     ImageParams* right
 ) {
-    float sigma = 1.25f;
+    float sigma = 0.05f;
 
     DetectorInstance* left_detector = get_detector_instance(detector_id_left);
     DetectorInstance* right_detector = get_detector_instance(detector_id_right);

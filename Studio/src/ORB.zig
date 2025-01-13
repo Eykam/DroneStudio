@@ -233,7 +233,7 @@ pub const KeypointManager = struct {
         self.num_keypoints = try allocator.create(c_int);
         self.num_keypoints.* = 0;
         self.max_keypoints = 50000;
-        self.threshold = 20;
+        self.threshold = 15;
 
         self.target_node = target_node;
         self.frame = null;
