@@ -14,7 +14,7 @@ pub const StereoMatcher = struct {
 
     allocator: std.mem.Allocator,
     baseline: f32, // in mm
-    focal_length: f32, // in mm
+    focal_length_mm: f32, // in mm
     max_disparity: f32,
     epipolar_threshold: f32,
     num_matches: *c_int,
@@ -33,7 +33,7 @@ pub const StereoMatcher = struct {
         matcher.allocator = allocator;
 
         matcher.baseline = 76.3;
-        matcher.focal_length = (6.45 / 2.0) / @tan(51 * std.math.pi / 180.0);
+        matcher.focal_length_mm = 2.75;
         matcher.max_disparity = 100.0;
         matcher.epipolar_threshold = 20.0;
         matcher.num_matches = try allocator.create(c_int);
@@ -176,7 +176,7 @@ pub const StereoMatcher = struct {
             self.right.keypoint_detector.?.detector_id,
             self.combined.keypoint_detector.?.detector_id,
             self.baseline,
-            self.focal_length,
+            self.focal_length_mm,
             self.num_matches,
             self.left.threshold,
             left_image_params.?,

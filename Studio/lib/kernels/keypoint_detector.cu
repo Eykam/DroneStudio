@@ -115,7 +115,7 @@ __global__ void gaussianBlurVertical(
     output[y * pitch + x] = (uint8_t)sum;
 }
 
-__device__ float3 convertImageToCanvasCoords(float x, float y, float imageWidth, float imageHeight) {
+__device__ float3 convertPxToCanvasCoords(float x, float y, float imageWidth, float imageHeight) {
     float normalizedX = (x / imageWidth) * 2.0f - 1.0f;
     float normalizedY = -((y / imageHeight) * 2.0f - 1.0f);
     
@@ -123,6 +123,13 @@ __device__ float3 convertImageToCanvasCoords(float x, float y, float imageWidth,
     float worldY = normalizedY * 3.6f;
     
     return make_float3(worldX, 0.01f, worldY);
+}
+
+__device__ float convertCanvasToPxCoords(float x, float imageWidth) {
+    float normX = x / 6.4f;
+    float pixelX = (normX + 1.0f)  * 0.5f * imageWidth;
+
+    return pixelX;
 }
 
 __global__ void detectFASTKeypoints(
@@ -282,7 +289,7 @@ __global__ void detectFASTKeypoints(
         if (global_idx + block_counter <= max_keypoints) {
             for (int i = 0; i < block_counter; i++) {
                 float2 kp = block_keypoints[i];
-                float3 world_pos = convertImageToCanvasCoords(
+                float3 world_pos = convertPxToCanvasCoords(
                     kp.x, kp.y,
                     image_width, image_height
                 );
@@ -300,12 +307,10 @@ __global__ void detectFASTKeypoints(
 // Matching parameters
 struct MatchingParams {
     float baseline;
-    float focal_length;
+    float focal_length_px;
     float max_disparity;
     float epipolar_threshold;
-    float sensor_width_mm;
-    float sensor_width_pixels;
-    float sensor_height_pixels;
+    int image_width;
 };
 
 struct Keypoint {
@@ -324,46 +329,28 @@ struct MatchedKeypoint {
 __device__ Keypoint triangulatePosition(
     float3 leftWorldPos,
     float3 rightWorldPos,
-    float baseline,        
-    float canvas_width
+    float baseline,
+    float focal_length_px,  
+    float image_width
 ) {
     Keypoint result;
     
-    // Calculate disparity with more stable threshold
-    float worldDisparity = leftWorldPos.x - rightWorldPos.x;
-    // if (fabsf(worldDisparity) < 0.01f) {  // Increased threshold
-    //     result.position = make_float3(0.0f, 0.0f, 0.0f);
-    //     result.disparity = worldDisparity;
-    //     return result;
-    // }
 
-    float mm_per_world_unit = 6.45f / 6.4f;
-    float disparity_mm = worldDisparity * mm_per_world_unit;
+    float disparity_px = convertCanvasToPxCoords(leftWorldPos.x, image_width) - convertCanvasToPxCoords(rightWorldPos.x, image_width);
    
-
     // Calculate depth using similar triangles principle
-    // float depth_mm = (baseline * 2.612f) / disparity_mm;  // 3.04f is focal length in mm
+    float depth_mm = baseline * focal_length_px / disparity_px;  // 3.04f is focal length in mm
 
-    
-    // Clamp depth to reasonable range (adjust these values based on your scene)
-    // const float MIN_DEPTH_MM = 100.0f;   // 10cm
-    // const float MAX_DEPTH_MM = 5000.0f;  // 5m
-    // depth_mm = fmaxf(fminf(depth_mm, MAX_DEPTH_MM), MIN_DEPTH_MM);
- 
-    // float depth_world = depth_mm / mm_per_world_unit;
+    float world_unit_per_mm = 50; // 1.0 world => 1.0m
+    float depth_world = depth_mm / world_unit_per_mm;
 
     // Calculate final world position
-    // float world_scale = depth_world / depth_mm;
-    // float worldX = leftWorldPos.x;  // Use left camera x position
-    // float worldY = -depth_world / 1000;    // Negative because OpenGL Y goes up
-    // float worldZ = leftWorldPos.z * world_scale;
-    
-    // Bound check the final coordinates
-    // worldX = fmaxf(fminf(worldX, canvas_width/2), -canvas_width/2);
-    // worldZ = fmaxf(fminf(worldZ, canvas_width/2), -canvas_width/2);
-    
-    result.position = make_float3(rightWorldPos.x, -rightWorldPos.y, rightWorldPos.z);
-    result.disparity = disparity_mm;  // Store disparity in mm for debugging
+    float worldX = leftWorldPos.x; 
+    float worldY = -depth_world;
+    float worldZ = leftWorldPos.z;
+        
+    result.position = make_float3(worldX, worldY, worldZ);
+    result.disparity = disparity_px;  // Store disparity in mm for debugging
     
     return result;
 }
@@ -467,8 +454,8 @@ __global__ void matchKeypointsKernel(
         float disparity_cost = disparity / params.max_disparity;
 
         // Weighted combination of costs
-        float total_cost = epipolar_cost * 0.3f +
-                          desc_cost * 0.5f +
+        float total_cost = epipolar_cost * 0.5f +
+                          desc_cost * 0.3f +
                           disparity_cost * 0.2f;
 
         // Maintain best and second-best matches
@@ -536,7 +523,8 @@ __global__ void matchKeypointsKernel(
                 left_pos,
                 right_pos,
                 params.baseline,
-                6.4f
+                params.focal_length_px,
+                params.image_width
             );
 
             matches[match_idx] = {
@@ -547,6 +535,12 @@ __global__ void matchKeypointsKernel(
         }
     }
 }
+
+__global__ void setTextureDistanceKernel(
+    cudaSurfaceObject_t y_surface,
+    cudaSurfaceObject_t uv_surface
+)
+{}
 
 __global__ void setTextureKernel(
     cudaSurfaceObject_t y_surface,
@@ -1395,6 +1389,7 @@ static float execute_matching(
     int* num_matches,
     float baseline,
     float focal_length,
+    int image_width,
     ImageParams* left,
     ImageParams* right,
     cudaEvent_t start,
@@ -1402,16 +1397,13 @@ static float execute_matching(
 ) {
     // Set up matching parameters
     float sensor_width_mm = 6.45f;
-    float baseline_world = (baseline / sensor_width_mm) * 6.4f;
-    
+
     MatchingParams params = {
-        .baseline = baseline_world,
-        .focal_length = focal_length,
-        .max_disparity = 300.0f,
-        .epipolar_threshold = 50.0f,
-        .sensor_width_mm = sensor_width_mm,
-        .sensor_width_pixels = 4608.0f,
-        .sensor_height_pixels = 2592.0f
+        .baseline = baseline,
+        .focal_length_px = focal_length * (left->width / sensor_width_mm),
+        .max_disparity = 100.0f,
+        .epipolar_threshold = 10.0f,
+        .image_width = image_width
     };
 
 
@@ -1557,14 +1549,14 @@ int cuda_match_keypoints(
         right->uv_linesize
     );
 
-     // Copy surface from right to combined detector
+     // Copy surface from left to combined detector
     copySurfaceKernel<<<gridCopy, blockCopy>>>(
-        right_detector->y_texture->surface,
-        right_detector->uv_texture->surface,
+        left_detector->y_texture->surface,
+        left_detector->uv_texture->surface,
         combined_detector->y_texture->surface,
         combined_detector->uv_texture->surface,
-        right->width,
-        right->height
+        left->width,
+        left->height
     );
 
     cudaError_t error;
@@ -1581,6 +1573,8 @@ int cuda_match_keypoints(
     float detection_time_right = cuda_detect_keypoints(detector_id_right, threshold, right, sigma);
     
     cudaDeviceSynchronize();
+
+    printf("Detected Left: %d <====> Detected Right: %d\n", *left->num_keypoints, *right->num_keypoints);
 
     if (detection_time_left < 0 || detection_time_right < 0) {
         cleanup_resources(detector_id_left, detector_id_right, detector_id_combined, NULL, NULL, NULL, NULL);
@@ -1630,6 +1624,7 @@ int cuda_match_keypoints(
         num_matches,
         baseline,
         focal_length, 
+        left->width,
         left, 
         right, 
         start, 
