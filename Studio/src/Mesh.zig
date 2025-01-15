@@ -34,6 +34,7 @@ pub const Metadata = struct {
 pub const TextureID = struct {
     y: c_uint = 0,
     uv: c_uint = 0,
+    depth: c_uint = 0,
 };
 
 pub fn init(allocator: std.mem.Allocator, vertices: []Vertex, indices: ?[]u32, draw_fn: ?draw) !*Self {

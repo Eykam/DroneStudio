@@ -25,6 +25,7 @@ extern "cuda_keypoint_detector" fn cuda_create_detector(
     max_keypoints: c_int,
     gl_ytexture: c_uint,
     gl_uvtexture: c_uint,
+    gl_depthtexture: c_uint,
 ) c_int;
 extern "cuda_keypoint_detector" fn cuda_cleanup_detector(detector_id: c_int) void;
 
@@ -76,11 +77,13 @@ pub const CudaKeypointDetector = struct {
         max_keypoints: u32,
         gl_ytexture: glad.GLuint,
         gl_uvtexture: glad.GLuint,
+        gl_depthtexture: glad.GLuint,
     ) !Self {
         const id = cuda_create_detector(
             @intCast(max_keypoints),
             gl_ytexture,
             gl_uvtexture,
+            gl_depthtexture,
         );
 
         if (id < 0) {

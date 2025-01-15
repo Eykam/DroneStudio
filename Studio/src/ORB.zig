@@ -252,6 +252,7 @@ pub const KeypointManager = struct {
             self.max_keypoints,
             mesh.textureID.y,
             mesh.textureID.uv,
+            mesh.textureID.depth,
         );
 
         self.keypoints = node;

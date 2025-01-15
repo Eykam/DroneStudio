@@ -55,8 +55,8 @@ pub fn main() !void {
     const gridNode = try Shape.Grid.init(alloc, 1000, 5);
     const axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
     const triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
-    const boxNode = try Shape.Box.init(alloc, null, null, null, null);
+    // const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
+    // const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
     const canvas_width = 12.8;
     const canvas_height = 7.2;
@@ -96,17 +96,17 @@ pub fn main() !void {
     try canvasNode.addChild(canvasNodeCombined);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
-    var droneNode = try Node.init(alloc, null, null, null);
-    droneNode.setPosition(0, 0.5, 0);
-    try droneNode.addChild(boxNode);
-    try droneNode.addChild(droneAxis);
+    // var droneNode = try Node.init(alloc, null, null, null);
+    // droneNode.setPosition(0, 0.5, 0);
+    // try droneNode.addChild(boxNode);
+    // try droneNode.addChild(droneAxis);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null, null, null);
     try environment.addChild(gridNode);
     try environment.addChild(axisNode);
     try environment.addChild(triangleNode);
-    try environment.addChild(droneNode);
+    // try environment.addChild(droneNode);
     try environment.addChild(canvasNode);
 
     //Adding environment to scene
@@ -124,17 +124,17 @@ pub fn main() !void {
     // ======================================================= IMU Setup =======================================================
 
     //Initialize UDP servers
-    var imu_server = UDP.init(
-        Secrets.host_ip,
-        Secrets.host_port_imu,
-        Secrets.client_ip,
-        Secrets.client_port_imu,
-    );
+    // var imu_server = UDP.init(
+    //     Secrets.host_ip,
+    //     Secrets.host_port_imu,
+    //     Secrets.client_ip,
+    //     Secrets.client_port_imu,
+    // );
 
-    const pose_handler = Sensors.PoseHandler.init(droneNode);
-    var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
-    const pose_interface = pose_udp_handler.interface();
-    try imu_server.start(pose_interface);
+    // const pose_handler = Sensors.PoseHandler.init(droneNode);
+    // var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
+    // const pose_interface = pose_udp_handler.interface();
+    // try imu_server.start(pose_interface);
 
     // ================================================= Stereo Matching Setup =================================================
 

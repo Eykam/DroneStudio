@@ -40,6 +40,7 @@ pub const Scene = struct {
     useTextureLoc: glad.GLint,
     yTextureLoc: glad.GLint,
     uvTextureLoc: glad.GLint,
+    depthTextureLoc: glad.GLint,
     useInstancedKeypointLoc: glad.GLint,
     useInstancedLinesLoc: glad.GLint,
     texGen: TextureGenerator = TextureGenerator{},
@@ -122,6 +123,7 @@ pub const Scene = struct {
         const useTextureLoc = glad.glGetUniformLocation(shaderProgram, "useTexture");
         const yTextureLoc = glad.glGetUniformLocation(shaderProgram, "yTexture");
         const uvTextureLoc = glad.glGetUniformLocation(shaderProgram, "uvTexture");
+        const depthTextureLoc = glad.glGetUniformLocation(shaderProgram, "depthTexture");
         const useInstancedKeypointLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedKeypoints");
         const uInstancedLinesLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedLines");
 
@@ -146,6 +148,7 @@ pub const Scene = struct {
             .useTextureLoc = useTextureLoc,
             .yTextureLoc = yTextureLoc,
             .uvTextureLoc = uvTextureLoc,
+            .depthTextureLoc = depthTextureLoc,
             .useInstancedKeypointLoc = useInstancedKeypointLoc,
             .useInstancedLinesLoc = uInstancedLinesLoc,
         };

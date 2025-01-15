@@ -56,11 +56,13 @@ typedef struct DetectorInstance {
     int* d_keypoint_count;
     int gl_ytexture;
     int gl_uvtexture;
+    int gl_depthtexture;
     alignas(16) float world_transform[16];; 
     float* d_world_transform;
     CudaGLResources gl_resources;
     CudaGLTextureResource* y_texture;
     CudaGLTextureResource* uv_texture;
+    CudaGLTextureResource* depth_texture;
     BRIEFDescriptor* d_descriptors;
     int id;
     bool initialized;
@@ -69,7 +71,7 @@ typedef struct DetectorInstance {
 
 
 // Initialize CUDA resources
-int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, const float transform[16]);
+int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture, const float transform[16]);
 void cuda_cleanup_detector(int detector_id);
 
 int cuda_register_gl_texture(int detector_id);

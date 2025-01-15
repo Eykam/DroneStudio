@@ -474,6 +474,7 @@ pub const TexturedPlane = struct {
             if (node.mesh) |mesh| {
                 glad.glGenTextures(1, &mesh.textureID.y);
                 glad.glGenTextures(1, &mesh.textureID.uv);
+                glad.glGenTextures(1, &mesh.textureID.depth);
 
                 // Initialize Y texture with null data
                 glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.yTextureUnit));
@@ -505,6 +506,23 @@ pub const TexturedPlane = struct {
                     glad.GL_RG,
                     glad.GL_UNSIGNED_BYTE,
                     null, // no initial data
+                );
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+
+                // Initialize depth texture (using GL_R32F for floating-point depth values)
+                glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.depthTextureUnit));
+                glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.depth);
+                glad.glTexImage2D(
+                    glad.GL_TEXTURE_2D,
+                    0,
+                    glad.GL_R32F, // Single-channel floating point format for depth
+                    @intCast(dims.w),
+                    @intCast(dims.h),
+                    0,
+                    glad.GL_RED,
+                    glad.GL_FLOAT,
+                    null,
                 );
                 glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
                 glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);

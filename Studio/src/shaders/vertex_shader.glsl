@@ -15,9 +15,13 @@ uniform mat4 uView;
 uniform mat4 uProjection;
 uniform bool uInstancedKeypoints;
 uniform bool uInstancedLines;
+uniform bool useTexture;
+
+uniform sampler2D depthTexture;
 
 out vec4 vertexColor;
 out vec2 texCoord;
+out float vertexDepth;
 
 void main()
 {
@@ -53,11 +57,21 @@ void main()
     }
     else {
         // Normal rendering path
-        worldPos = aPos;
+        float depth;
+        vec3 aPosWithDistance = aPos;
+
+        if (useTexture){
+            depth = texture(depthTexture, aTexCoord).r;
+            aPosWithDistance.y += depth / 1000.0;
+        }
+
+        worldPos = aPosWithDistance;
         finalColor = vec4(aColor, 1.0);
         gl_Position = uProjection * uView * uModel * vec4(worldPos, 1.0);
     }
     
+    vertexDepth = worldPos.y;
     vertexColor = finalColor;
     texCoord = aTexCoord;
+
 }

@@ -545,6 +545,7 @@ __global__ void setTextureDistanceKernel(
 __global__ void setTextureKernel(
     cudaSurfaceObject_t y_surface,
     cudaSurfaceObject_t uv_surface,
+    cudaSurfaceObject_t depth_surface,
     const uint8_t* __restrict__ y_plane,
     const uint8_t* __restrict__ uv_plane,
     int width,
@@ -569,6 +570,8 @@ __global__ void setTextureKernel(
         );
         surf2Dwrite(uv_pixels, uv_surface, x * sizeof(uchar2), y);
     }
+
+    surf2Dwrite((float)x, depth_surface, x * sizeof(float), y);
 }
 
 __global__ void copySurfaceKernel(
@@ -576,6 +579,7 @@ __global__ void copySurfaceKernel(
     cudaSurfaceObject_t srcSurf_uv,
     cudaSurfaceObject_t dstSurf_y,
     cudaSurfaceObject_t dstSurf_uv,
+    cudaSurfaceObject_t dstSurf_depth,
     int width,
     int height
 ) {
@@ -595,6 +599,8 @@ __global__ void copySurfaceKernel(
         surf2Dread(&uv, srcSurf_uv, x * sizeof(uchar2), y);
         surf2Dwrite(uv, dstSurf_uv, x * sizeof(uchar2), y);
     }
+
+    surf2Dwrite((float)-10000, dstSurf_depth, x * sizeof(float), y);
 }
 
 
@@ -715,7 +721,7 @@ extern "C" {
 
 //     printf("Using CUDA Device: %d - %s\n", cudaDevice, prop.name);
 
-int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, const float transform[16]) {
+int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture, const float transform[16]) {
     int slot = find_free_detector_slot();
     if (slot < 0) {
         return -1;
@@ -754,7 +760,7 @@ int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, c
     g_detectors[slot].id = g_next_detector_id++;
     g_detectors[slot].gl_ytexture = gl_ytexture;
     g_detectors[slot].gl_uvtexture = gl_uvtexture;
-
+    g_detectors[slot].gl_depthtexture = gl_depthtexture;
 
 
     return g_detectors[slot].id;
@@ -798,6 +804,8 @@ int cuda_register_gl_texture(int detector_id) {
     DetectorInstance* detector = get_detector_instance(detector_id);
     if (!detector) return -1;
 
+   
+   
     // Allocate texture resource
     detector->y_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
     if (!detector->y_texture) {
@@ -821,6 +829,11 @@ int cuda_register_gl_texture(int detector_id) {
         return -1;
     }
 
+    
+    
+    
+    
+    
     // Allocate UV texture resource
     detector->uv_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
     if (!detector->uv_texture) {
@@ -850,6 +863,42 @@ int cuda_register_gl_texture(int detector_id) {
         return -1;
     }
 
+    
+    // Allocate Depth texture resource
+    detector->depth_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
+    if (!detector->depth_texture) {
+        printf("Failed to allocate Depth texture resource\n");
+        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
+        free(detector->y_texture);
+        detector->y_texture = NULL;
+        cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
+        free(detector->uv_texture);
+        detector->uv_texture = NULL;
+        return -1;
+    }
+    memset(detector->depth_texture, 0, sizeof(CudaGLTextureResource));
+
+    // Register Depth texture
+    err = cudaGraphicsGLRegisterImage(
+        &detector->depth_texture->tex_resource,
+        detector->gl_depthtexture,
+        GL_TEXTURE_2D,
+        cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
+    );
+    
+    if (err != cudaSuccess) {
+        printf("Failed to register UV texture: %s\n", cudaGetErrorString(err));
+        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
+        free(detector->y_texture);
+        detector->y_texture = NULL;
+        cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
+        free(detector->uv_texture);
+        detector->uv_texture = NULL;
+        free(detector->depth_texture);
+        detector->depth_texture = NULL;
+        return -1;
+    }
+
 
     return 0;
 }
@@ -869,6 +918,13 @@ void cuda_unregister_gl_texture(int detector_id) {
         free(detector->uv_texture);
         detector->uv_texture = NULL;
     }
+
+    if (detector->depth_texture){
+        cudaGraphicsUnregisterResource(detector->depth_texture->tex_resource);
+        free(detector->depth_texture);
+        detector->depth_texture = NULL;
+    }
+
 }
 
 
@@ -920,7 +976,7 @@ int cuda_register_buffers(
     int error;
 
     error = cuda_register_instance_buffer(
-        &detector->gl_resources.keypoints,  // Pass address
+        &detector->gl_resources.keypoints,
         keypoint_position_buffer, 
         keypoint_color_buffer,
         buffer_size
@@ -929,7 +985,7 @@ int cuda_register_buffers(
 
     if (left_position_buffer != NULL && left_color_buffer != NULL) {
         error = cuda_register_instance_buffer(
-            &detector->gl_resources.connections.left,  // Pass address
+            &detector->gl_resources.connections.left,
             *left_position_buffer, 
             *left_color_buffer,
             buffer_size * 2
@@ -940,7 +996,7 @@ int cuda_register_buffers(
 
     if (right_position_buffer != NULL && right_color_buffer != NULL) {
         error = cuda_register_instance_buffer(
-            &detector->gl_resources.connections.right,  // Pass address
+            &detector->gl_resources.connections.right,
             *right_position_buffer, 
             *right_color_buffer,
             buffer_size * 2
@@ -1026,6 +1082,34 @@ int cuda_map_buffer_resources(InstanceBuffer* buffer) {
     return 0;
 }
 
+// int cuda_map_texture_resources(CudaGLTextureResource* texture){
+//     if (texture) {
+//         cudaError_t err = cudaGraphicsMapResources(1, &texture->tex_resource);
+//         if (err != cudaSuccess) {
+//             printf("Failed to map texture resource: %s\n", cudaGetErrorString(err));
+//             return -1;
+//         }
+
+//         err = cudaGraphicsSubResourceGetMappedArray(&texture->array,
+//                                                     texture->tex_resource,
+//                                                     0, 0);
+//         if (err != cudaSuccess) {
+//             printf("Failed to get mapped array for texture: %s\n", cudaGetErrorString(err));
+//             return -1;
+//         }
+
+//         cudaResourceDesc res_desc = {};
+//         res_desc.resType = cudaResourceTypeArray;
+//         res_desc.res.array.array = texture->array;
+
+//         err = cudaCreateSurfaceObject(&texture->surface, &res_desc);
+//         if (err != cudaSuccess) {
+//             printf("Failed to create surface object: %s\n", cudaGetErrorString(err));
+//             return -1;
+//         }
+//     }
+// }
+
 
 int cuda_map_resources(int detector_id) {
     DetectorInstance* detector = get_detector_instance(detector_id);
@@ -1033,12 +1117,13 @@ int cuda_map_resources(int detector_id) {
     
     int error = cuda_map_buffer_resources(&detector->gl_resources.keypoints);
     if (error < 0) printf("Failed to map keypoint buffers!\n");
+
     if (detector->gl_resources.connections.left.position_resource){
-        error = cuda_map_buffer_resources(&detector->gl_resources.connections.left);
+        error |= cuda_map_buffer_resources(&detector->gl_resources.connections.left);
         if (error < 0)  printf("Failed to map left connection buffers!\n");
     }
     if (detector->gl_resources.connections.right.position_resource){
-        error = cuda_map_buffer_resources(&detector->gl_resources.connections.right);
+        error |= cuda_map_buffer_resources(&detector->gl_resources.connections.right);
         if (error < 0) printf("Failed to map right connection buffers!\n");
     }
 
@@ -1106,6 +1191,35 @@ int cuda_map_resources(int detector_id) {
         }
     }
 
+    if (detector->depth_texture) {
+        cudaError_t err = cudaGraphicsMapResources(1, &detector->depth_texture->tex_resource);
+        if (err != cudaSuccess) {
+            printf("Failed to map Depth texture resource: %s\n", cudaGetErrorString(err));
+            cuda_unmap_resources(detector_id);
+            return -1;
+        }
+
+        err = cudaGraphicsSubResourceGetMappedArray(&detector->depth_texture->array,
+                                                  detector->depth_texture->tex_resource,
+                                                  0, 0);
+        if (err != cudaSuccess) {
+            printf("Failed to get mapped array for Depth texture: %s\n", cudaGetErrorString(err));
+            cuda_unmap_resources(detector_id);
+            return -1;
+        }
+
+        cudaResourceDesc res_desc = {};
+        res_desc.resType = cudaResourceTypeArray;
+        res_desc.res.array.array = detector->depth_texture->array;
+
+        err = cudaCreateSurfaceObject(&detector->depth_texture->surface, &res_desc);
+        if (err != cudaSuccess) {
+            printf("Failed to create Depth surface object: %s\n", cudaGetErrorString(err));
+            cuda_unmap_resources(detector_id);
+            return -1;
+        }
+    }
+
     return error == cudaSuccess ? 0 : -1;
 }
 
@@ -1144,6 +1258,11 @@ void cuda_unmap_resources(int detector_id) {
     if (detector->uv_texture) {
         cudaDestroySurfaceObject(detector->uv_texture->surface);
         cudaGraphicsUnmapResources(1, &detector->uv_texture->tex_resource);
+    }
+
+    if (detector->depth_texture) {
+        cudaDestroySurfaceObject(detector->depth_texture->surface);
+        cudaGraphicsUnmapResources(1, &detector->depth_texture->tex_resource);
     }
 }
 
@@ -1530,6 +1649,7 @@ int cuda_match_keypoints(
     setTextureKernel<<<gridCopy, blockCopy>>>(
         left_detector->y_texture->surface,
         left_detector->uv_texture->surface,
+        left_detector->depth_texture->surface,
         left->y_plane,
         left->uv_plane,
         left->width,
@@ -1541,6 +1661,7 @@ int cuda_match_keypoints(
     setTextureKernel<<<gridCopy, blockCopy>>>(
         right_detector->y_texture->surface,
         right_detector->uv_texture->surface,
+        right_detector->depth_texture->surface,
         right->y_plane,
         right->uv_plane,
         right->width,
@@ -1555,6 +1676,7 @@ int cuda_match_keypoints(
         left_detector->uv_texture->surface,
         combined_detector->y_texture->surface,
         combined_detector->uv_texture->surface,
+        combined_detector->depth_texture->surface,
         left->width,
         left->height
     );

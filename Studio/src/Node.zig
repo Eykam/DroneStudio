@@ -27,10 +27,9 @@ parent: ?*Self = null,
 
 mutex: std.Thread.Mutex = std.Thread.Mutex{},
 
-y: ?[]u8 = null,
-uv: ?[]u8 = null,
 yTextureUnit: c_int = 0,
 uvTextureUnit: c_int = 0,
+depthTextureUnit: c_int = 0,
 width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
@@ -127,6 +126,7 @@ pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
 
     self.yTextureUnit = scene.texGen.generateID();
     self.uvTextureUnit = scene.texGen.generateID();
+    self.depthTextureUnit = scene.texGen.generateID();
     // std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
 
     for (self.children.items) |child| {
@@ -189,8 +189,6 @@ pub fn update(self: *Self) void {
 }
 
 pub fn bindTexture(self: *Self) !void {
-    // Generate texture objects if not already created
-
     if (!self.texture_updated) return;
 
     const mesh = self.*.mesh.?;
@@ -211,9 +209,18 @@ pub fn bindTexture(self: *Self) !void {
     glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
     glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
 
+    glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.depthTextureUnit));
+    glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.depth);
+
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
+
     if (self.scene) |scene| {
         glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
         glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
+        glad.glUniform1i(scene.depthTextureLoc, self.depthTextureUnit);
     }
 
     const err = glad.glGetError();
