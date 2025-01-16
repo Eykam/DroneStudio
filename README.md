@@ -163,10 +163,33 @@ Most of these parts can be found for cheaper from Aliexpress, etc.
 - :white_check_mark: Build and 3D-print STL for stereo camera housing (2x RPi Zero 2W, 2x RPi Camera Module 3, 6 cm apart)
     - :white_square_button: Explore adding rechargeable LiPo battery to power both Raspberry Pis
 - :white_square_button: Configure streams from each camera to be synced to server time using NTP
-- :white_square_button: Pair frames from each stream
-- :white_square_button: Derive distance and pose from paired frames
+- :white_check_mark: Pair frames from each stream
+- :white_check_mark: Derive distance from paired frames
+    - Keypoint Detection
+        - :white_check_mark: FAST Keypoint Detection
+        - :white_check_mark: Gaussian Blurring
+        - Visualizing Keypoints
+            - :white_check_mark: Left canvas
+            - :white_check_mark: Right canvas
+            - :white_check_mark: Combined canvas
+    - Keypoint Matching
+        - :white_check_mark: Match based on argmin score, where score => weighted sum:
+            - Hamming distance of Gaussian BRIEF Descriptor
+            - Epipolar distance
+            - Disparity
+        - :white_square_button: Scale Invariance
+        - :white_square_button: Rotation Invariance
+        - Visualize Matching
+            - :white_check_mark: Triangulation from Left => Combined <= Right
+            - :white_square_button: Interactive matches to see matching details (disparity, coords, hamming distance, etc)
+    - Finding nearest Matched keypoint
+        - :white_check_mark: Argmin Euclidean distance from Matched Keypoints 
+    - Assigning distances per pixel (look into quadtree etc)
+        - :white_square_button: Visualize combined image as 3D plane
+        - :white_square_button: Visualize combined image as depthmap
+- :white_square_button: Derive new pose from previous frames
 - :white_square_button: Fuse MPU pose data with visual odometry for more robust pose estimation
-- :white_square_button: Combine frame pair and project into scene based on pose and depth information  
+- :white_square_button: Project 3D texture into scene based on pose and depth information  
 - :white_square_button: Visual odometry using pose
 
 
