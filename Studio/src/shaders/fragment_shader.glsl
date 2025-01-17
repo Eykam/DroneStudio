@@ -2,13 +2,11 @@
 
 in vec4 vertexColor;
 in vec2 texCoord;
-in float vertexDepth;
 
 out vec4 FragColor;
 
 uniform sampler2D yTexture;
 uniform sampler2D uvTexture;
-
 uniform bool useTexture;
 
 

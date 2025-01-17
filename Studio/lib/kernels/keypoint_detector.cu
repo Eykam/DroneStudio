@@ -120,17 +120,19 @@ __device__ float3 convertPxToCanvasCoords(float x, float y, float imageWidth, fl
     float normalizedY = -((y / imageHeight) * 2.0f - 1.0f);
     
     float worldX = normalizedX * 6.4f;
-    float worldY = normalizedY * 3.6f;
+    float worldZ = normalizedY * 3.6f;
     
-    return make_float3(worldX, 0.01f, worldY);
+    return make_float3(worldX, 0.01f, worldZ);
 }
 
-__device__ float convertCanvasToPxCoords(float x, float imageWidth) {
+__device__ float2 convertCanvasToPxCoords(float x, float z, float imageWidth, float imageHeight) {
     float normX = x / 6.4f;
-    float pixelX = (normX + 1.0f)  * 0.5f * imageWidth;
-
-    return pixelX;
+    float normZ = z / 3.6f;
+    float pixelX = (normX + 1.0f) * 0.5f * imageWidth;
+    float pixelY = (-normZ + 1.0f) * 0.5f * imageHeight; 
+    return make_float2(pixelX, pixelY);
 }
+
 
 __global__ void detectFASTKeypoints(
     const uint8_t* __restrict__ y_plane,
@@ -311,11 +313,14 @@ struct MatchingParams {
     float max_disparity;
     float epipolar_threshold;
     int image_width;
+    int image_height;
 };
 
 struct Keypoint {
-    float3 position;    // Position in OpenGL world coordinates
+    float3 position;   // Position in OpenGL world coordinates
+    float2 image_coords;
     float disparity;    // Pixel disparity between left and right views
+    float depth;
 };
 
 // Structure to hold matched keypoint data
@@ -331,12 +336,15 @@ __device__ Keypoint triangulatePosition(
     float3 rightWorldPos,
     float baseline,
     float focal_length_px,  
-    float image_width
+    float image_width,
+    float image_height
 ) {
     Keypoint result;
     
+    float2 left_px_coords = convertCanvasToPxCoords(leftWorldPos.x, leftWorldPos.z, image_width, image_height);
+    float2 right_px_coords = convertCanvasToPxCoords(rightWorldPos.x, rightWorldPos.z, image_width, image_height);
 
-    float disparity_px = convertCanvasToPxCoords(leftWorldPos.x, image_width) - convertCanvasToPxCoords(rightWorldPos.x, image_width);
+    float disparity_px = left_px_coords.x - right_px_coords.x;
    
     // Calculate depth using similar triangles principle
     float depth_mm = baseline * focal_length_px / disparity_px;  // 3.04f is focal length in mm
@@ -346,11 +354,13 @@ __device__ Keypoint triangulatePosition(
 
     // Calculate final world position
     float worldX = leftWorldPos.x; 
-    float worldY = -depth_world;
+    float worldY = depth_world;
     float worldZ = leftWorldPos.z;
         
     result.position = make_float3(worldX, worldY, worldZ);
     result.disparity = disparity_px;  // Store disparity in mm for debugging
+    result.image_coords = make_float2(left_px_coords.x, left_px_coords.y);
+    result.depth = depth_world;
     
     return result;
 }
@@ -424,7 +434,7 @@ __global__ void matchKeypointsKernel(
     float best_disparity = INFINITY;
 
 
-    const int MAX_DESC_DISTANCE = 128.0f; 
+    const int MAX_DESC_DISTANCE = 256.0f; 
     
     // Find best and second-best matches for this left keypoint
     for (int right_idx = 0; right_idx < right_count; right_idx++) {
@@ -524,7 +534,8 @@ __global__ void matchKeypointsKernel(
                 right_pos,
                 params.baseline,
                 params.focal_length_px,
-                params.image_width
+                params.image_width,
+                params.image_height
             );
 
             matches[match_idx] = {
@@ -536,11 +547,6 @@ __global__ void matchKeypointsKernel(
     }
 }
 
-__global__ void setTextureDistanceKernel(
-    cudaSurfaceObject_t y_surface,
-    cudaSurfaceObject_t uv_surface
-)
-{}
 
 __global__ void setTextureKernel(
     cudaSurfaceObject_t y_surface,
@@ -571,7 +577,7 @@ __global__ void setTextureKernel(
         surf2Dwrite(uv_pixels, uv_surface, x * sizeof(uchar2), y);
     }
 
-    surf2Dwrite((float)x, depth_surface, x * sizeof(float), y);
+    surf2Dwrite((float)0, depth_surface, x * sizeof(float), y);
 }
 
 __global__ void copySurfaceKernel(
@@ -599,8 +605,42 @@ __global__ void copySurfaceKernel(
         surf2Dread(&uv, srcSurf_uv, x * sizeof(uchar2), y);
         surf2Dwrite(uv, dstSurf_uv, x * sizeof(uchar2), y);
     }
+    
+    surf2Dwrite((float)0, dstSurf_depth, x * sizeof(float), y);
+}
 
-    surf2Dwrite((float)-10000, dstSurf_depth, x * sizeof(float), y);
+
+__global__ void set_distance_texture(
+    cudaSurfaceObject_t depth_texture,
+    MatchedKeypoint* matches,
+    int num_matches,
+    int width,
+    int height
+){
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (x >= width || y >= height) return;
+
+    MatchedKeypoint nearest;
+    float current_min;
+
+    for (int i = 0; i < num_matches; i++){
+        MatchedKeypoint current_match = matches[i]; 
+        float2 current_keypoint = current_match.world.image_coords;
+        float dist = pow(current_keypoint.x - x, 2) + pow(current_keypoint.y - y, 2);
+        
+        if (i == 0) {
+            current_min = dist;
+            nearest  = current_match;
+        }
+        else if (dist < current_min) { 
+            current_min = dist;
+            nearest = current_match;
+        }
+    }
+
+    surf2Dwrite(nearest.world.position.y, depth_texture, x * sizeof(float), y);
 }
 
 
@@ -655,7 +695,7 @@ __device__ float4 transform_point(const float* transform, float4 point) {
 
 
 // Kernel to generate visualization data
-__global__ void generateVisualizationKernel(
+__global__ void visualizeTriangulation(
     const MatchedKeypoint* matches,
     const int match_count,
     
@@ -1508,7 +1548,6 @@ static float execute_matching(
     int* num_matches,
     float baseline,
     float focal_length,
-    int image_width,
     ImageParams* left,
     ImageParams* right,
     cudaEvent_t start,
@@ -1522,7 +1561,8 @@ static float execute_matching(
         .focal_length_px = focal_length * (left->width / sensor_width_mm),
         .max_disparity = 100.0f,
         .epipolar_threshold = 10.0f,
-        .image_width = image_width
+        .image_width = left->width,
+        .image_height = left->height
     };
 
 
@@ -1584,7 +1624,7 @@ static float execute_matching(
     dim3 gridVis((*num_matches + blockVis.x - 1) / blockVis.x);
 
     cudaEventRecord(start);
-    generateVisualizationKernel<<<gridVis, blockVis>>>(
+    visualizeTriangulation<<<gridVis, blockVis>>>(
         d_matches,
         *num_matches,
         combined_detector->gl_resources.keypoints.d_positions,
@@ -1608,8 +1648,35 @@ static float execute_matching(
     float milliseconds_vis;
     cudaEventElapsedTime(&milliseconds_vis, start, stop);
     printf("Visualization time: %.2f ms\n", milliseconds_vis);
+
+    dim3 blockCopy(16, 16);
+    dim3 gridCopy(
+        (left->width + blockCopy.x - 1) / blockCopy.x,
+        (left->height + blockCopy.y - 1) / blockCopy.y
+    );
+
+    cudaEventRecord(start);
+    set_distance_texture<<<gridCopy, blockCopy>>>(
+        combined_detector->depth_texture->surface,
+        d_matches,
+        *num_matches,
+        left->image_width,
+        left->image_height
+    );
+    cudaEventRecord(stop);
+
+    error = cudaGetLastError();
+    if (error != cudaSuccess) {
+        printf("Visualization kernel failed: %s\n", cudaGetErrorString(error));
+        return -1.0;
+    }
+
+    cudaEventSynchronize(stop);
+    float milliseconds_segmentation;
+    cudaEventElapsedTime(&milliseconds_segmentation, start, stop);
+    printf("Assigning Nearest keypoint Distance time: %.2f ms\n", milliseconds_segmentation);
     
-    return milliseconds_vis + milliseconds_matching;
+    return milliseconds_vis + milliseconds_matching + milliseconds_segmentation;
 }
 
 int cuda_match_keypoints(
@@ -1638,6 +1705,12 @@ int cuda_match_keypoints(
     if (setup_resources(detector_id_left, detector_id_right, detector_id_combined) < 0) {
         return -1;
     }
+
+    // Allocate resources for matching
+    MatchedKeypoint* d_matches = NULL;
+    int* d_match_count = NULL;
+    cudaEvent_t start = NULL, stop = NULL;
+
 
     dim3 blockCopy(16, 16);
     dim3 gridCopy(
@@ -1703,10 +1776,6 @@ int cuda_match_keypoints(
         return -1;
     }
 
-    // Allocate resources for matching
-    MatchedKeypoint* d_matches = NULL;
-    int* d_match_count = NULL;
-    cudaEvent_t start = NULL, stop = NULL;
     
     const int max_matches = min(*right->num_keypoints, *left->num_keypoints);
     if (max_matches <= 0) {
@@ -1746,7 +1815,6 @@ int cuda_match_keypoints(
         num_matches,
         baseline,
         focal_length, 
-        left->width,
         left, 
         right, 
         start, 

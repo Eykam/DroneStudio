@@ -460,12 +460,19 @@ pub const TexturedPlane = struct {
     pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32, texture_dims: ?struct { w: u32, h: u32 }) !*Node {
         const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
         const plane_params = try Self.generatePlaneVertices(
+            allocator,
             pos orelse default_pos,
             width orelse 1.0,
             height orelse 1.0,
+            1280,
         );
-        const vertices: []Vertex = try allocator.dupe(Vertex, &plane_params.vertices);
-        const indices: []u32 = try allocator.dupe(u32, &plane_params.indices);
+        // defer {
+        //     allocator.free(plane_params.vertices);
+        //     allocator.free(plane_params.indices);
+        // }
+
+        const vertices: []Vertex = plane_params.vertices;
+        const indices: []u32 = plane_params.indices;
 
         const node = try Node.init(allocator, vertices, indices, Self.draw);
 
@@ -535,38 +542,63 @@ pub const TexturedPlane = struct {
         return node;
     }
 
-    pub fn generatePlaneVertices(position: Vec3, width: f32, height: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
-        const halfWidth: f32 = width / 2.0;
-        const halfHeight: f32 = height / 2.0;
+    pub fn generatePlaneVertices(allocator: std.mem.Allocator, position: Vec3, width: f32, height: f32, resolution: u32) !struct { vertices: []Vertex, indices: []u32 } {
+        const segments = resolution; // Number of segments per side
+        const vertices_per_side = segments + 1;
+        const num_vertices = vertices_per_side * vertices_per_side;
+        const num_triangles = segments * segments * 2;
 
-        const vertices: [4]Vertex = .{
-            .{
-                .position = .{ position.x - halfWidth, position.y, position.z - halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 0.0, 1.0 },
-            },
-            .{
-                .position = .{ position.x + halfWidth, position.y, position.z - halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 1.0, 1.0 },
-            },
-            .{
-                .position = .{ position.x + halfWidth, position.y, position.z + halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 1.0, 0.0 },
-            },
-            .{
-                .position = .{ position.x - halfWidth, position.y, position.z + halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 0.0, 0.0 },
-            },
-        };
+        var vertices = try allocator.alloc(Vertex, num_vertices);
+        var indices = try allocator.alloc(u32, num_triangles * 3);
 
-        const indices =
-            [6]u32{
-            0, 1, 2, // First triangle
-            2, 3, 0, // Second triangle
-        };
+        const step_x = width / @as(f32, @floatFromInt(segments));
+        const step_z = height / @as(f32, @floatFromInt(segments));
+        const start_x = position.x - (width / 2.0);
+        const start_z = position.z - (height / 2.0);
+
+        // Generate vertices
+        var z: u32 = 0;
+        while (z <= segments) : (z += 1) {
+            var x: u32 = 0;
+            while (x <= segments) : (x += 1) {
+                const vertex_idx = z * vertices_per_side + x;
+                const pos_x = start_x + @as(f32, @floatFromInt(x)) * step_x;
+                const pos_z = start_z + @as(f32, @floatFromInt(z)) * step_z;
+                const tex_x = @as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(segments));
+                const tex_z = 1.0 - @as(f32, @floatFromInt(z)) / @as(f32, @floatFromInt(segments));
+
+                vertices[vertex_idx] = .{
+                    .position = .{ pos_x, position.y, pos_z },
+                    .color = .{ 0.8, 0.8, 0.8 },
+                    .texture = [_]f32{ tex_x, tex_z },
+                };
+            }
+        }
+
+        // Generate indices
+        var idx: u32 = 0;
+        var z2: u32 = 0;
+        while (z2 < segments) : (z2 += 1) {
+            var x2: u32 = 0;
+            while (x2 < segments) : (x2 += 1) {
+                const top_left = z2 * vertices_per_side + x2;
+                const top_right = top_left + 1;
+                const bottom_left = (z2 + 1) * vertices_per_side + x2;
+                const bottom_right = bottom_left + 1;
+
+                // First triangle
+                indices[idx] = top_left;
+                indices[idx + 1] = bottom_left;
+                indices[idx + 2] = top_right;
+
+                // Second triangle
+                indices[idx + 3] = top_right;
+                indices[idx + 4] = bottom_left;
+                indices[idx + 5] = bottom_right;
+
+                idx += 6;
+            }
+        }
 
         return .{
             .vertices = vertices,

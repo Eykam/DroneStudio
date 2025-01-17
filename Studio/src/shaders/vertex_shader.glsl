@@ -62,7 +62,7 @@ void main()
 
         if (useTexture){
             depth = texture(depthTexture, aTexCoord).r;
-            aPosWithDistance.y += depth / 1000.0;
+            aPosWithDistance.y += depth;
         }
 
         worldPos = aPosWithDistance;

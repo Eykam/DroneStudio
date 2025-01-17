@@ -77,6 +77,7 @@ pub const Scene = struct {
         std.debug.print("Initializing viewport...\n\n", .{});
         glad.glViewport(0, 0, width, height);
         glad.glEnable(glad.GL_DEPTH_TEST);
+        glad.glDepthFunc(glad.GL_LESS);
 
         const shaderProgram = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
         glad.glUseProgram(shaderProgram);
@@ -320,7 +321,7 @@ pub const Scene = struct {
             );
         }
 
-        // Zoom controls can remain in the keyCallback if they are discrete actions
+        // Zoom controls can remain in the keyCallback since they are discrete actions
     }
 };
 
