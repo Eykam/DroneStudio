@@ -9,19 +9,23 @@ const Camera = @import("Camera.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const glad = gl.glad;
-const globals = @import("Globals.zig");
+const c = @import("bindings/c.zig");
+const imgui = c.imgui;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
 
 pub const AppState = struct {
+    last_frame_time: f64 = 0.0, // Time of the last frame
+    delta_time: f32 = 0.0, // Time between current frame and last frame
     last_mouse_x: f64 = 0.0,
     last_mouse_y: f64 = 0.0,
     first_mouse: bool = true,
     zoom: f32 = 90.0,
     keys: [1024]bool = .{false} ** 1024,
-    last_frame_time: f64 = 0.0, // Time of the last frame
-    delta_time: f32 = 0.0, // Time between current frame and last frame
+    paused: bool = false,
+    fly: bool = false,
+    menu: bool = false,
 };
 
 pub const Scene = struct {
@@ -34,6 +38,7 @@ pub const Scene = struct {
     height: f32,
     appState: AppState,
     camera: Camera,
+
     uModelLoc: glad.GLint,
     uViewLoc: glad.GLint,
     uProjectionLoc: glad.GLint,
@@ -43,12 +48,14 @@ pub const Scene = struct {
     depthTextureLoc: glad.GLint,
     useInstancedKeypointLoc: glad.GLint,
     useInstancedLinesLoc: glad.GLint,
+
     texGen: TextureGenerator = TextureGenerator{},
 
     last_projection: [16]f32 = undefined,
     projection_dirty: bool = true,
 
     frame_count: u64 = 0,
+    avg_frame_time: f64 = 0,
     last_fps_time: f64 = 0,
     frame_times: [120]f64 = .{0} ** 120,
     frame_time_index: usize = 0,
@@ -62,22 +69,6 @@ pub const Scene = struct {
         var width: i32 = undefined;
         var height: i32 = undefined;
         glfw.glfwGetWindowSize(window.?, &width, &height);
-
-        // Make the window's context current
-        glfw.glfwMakeContextCurrent(window);
-        glfw.glfwSwapInterval(0);
-
-        // Initialize OpenGL Loader
-        std.debug.print("Loading Glad...\n", .{});
-        if (glad.gladLoadGLLoader(@ptrCast(&glfw.glfwGetProcAddress)) == 0) {
-            std.debug.print("Failed to initialize GLAD\n", .{});
-            return GSLWError.FailedToInitialize;
-        }
-
-        std.debug.print("Initializing viewport...\n\n", .{});
-        glad.glViewport(0, 0, width, height);
-        glad.glEnable(glad.GL_DEPTH_TEST);
-        glad.glDepthFunc(glad.GL_LESS);
 
         const shaderProgram = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
         glad.glUseProgram(shaderProgram);
@@ -174,6 +165,7 @@ pub const Scene = struct {
 
         self.nodes.deinit();
         glad.glDeleteProgram(self.shaderProgram);
+        cleanupImGui();
     }
 
     pub fn setupCallbacks(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
@@ -191,16 +183,7 @@ pub const Scene = struct {
         _ = glfw.glfwSetCursorPosCallback(window, mouseCallback);
         _ = glfw.glfwSetKeyCallback(window, keyCallback);
         _ = glfw.glfwSetScrollCallback(window, scrollCallback);
-
-        const current_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
-        if (current_mode != glfw.GLFW_CURSOR_DISABLED) {
-            glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
-
-            const new_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
-            if (new_mode != glfw.GLFW_CURSOR_DISABLED) {
-                std.debug.print("Failed to disable cursor in setupCallbacks\n", .{});
-            }
-        }
+        _ = glfw.glfwSetMouseButtonCallback(window, mouseButtonCallback);
     }
 
     pub fn updateProjection(self: *Self) [16]f32 {
@@ -251,8 +234,8 @@ pub const Scene = struct {
             entry.value_ptr.*.update();
         }
 
-        // Ensure all GL commands are submitted before swap
-        glad.glFlush();
+        imgui.igRender();
+        imgui.ImGui_ImplOpenGL3_RenderDrawData(imgui.igGetDrawData());
 
         glfw.glfwSwapBuffers(window);
         glfw.glfwPollEvents();
@@ -273,10 +256,10 @@ pub const Scene = struct {
                 sum += time;
             }
             const avg_frame_time = sum / @as(f64, @floatFromInt(self.frame_times.len));
-
             std.debug.print("Avg Frame Time: {d:.2}ms, FPS: {d:.1}\n", .{ avg_frame_time, 1000.0 / avg_frame_time });
 
             self.frame_count = 0;
+            self.avg_frame_time = avg_frame_time;
             self.last_fps_time = frame_end;
         }
     }
@@ -304,7 +287,7 @@ pub const Scene = struct {
             movement = Vec3.sub(movement, Vec3.scale(self.camera.right, velocity));
         }
 
-        if (globals.FLY) {
+        if (self.appState.fly) {
             self.camera.position = Vec3.add(self.camera.position, movement);
         } else {
             self.camera.position = Vec3.add(
@@ -325,7 +308,7 @@ pub const Scene = struct {
     }
 };
 
-inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
+fn readShaderSource(comptime path: []const u8) ![]const u8 {
     const file: []const u8 = @embedFile(path);
     std.debug.print("Source Length: {}\n", .{file.len});
     return file;
@@ -457,7 +440,7 @@ fn getCurrentMonitor(window: ?*glfw.struct_GLFWwindow) ?*glfw.GLFWmonitor {
     return glfw.glfwGetPrimaryMonitor();
 }
 
-pub fn createWindow() ?*glfw.GLFWwindow {
+pub fn createWindow() !?*glfw.GLFWwindow {
     glfw.glfwWindowHint(glfw.GLFW_FOCUSED, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_FOCUS_ON_SHOW, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_CLIENT_API, glfw.GLFW_OPENGL_API);
@@ -473,7 +456,33 @@ pub fn createWindow() ?*glfw.GLFWwindow {
 
     // Make context current immediately after window creation
     glfw.glfwMakeContextCurrent(window);
-    glfw.glfwSwapInterval(1);
+    glfw.glfwSwapInterval(0);
+
+    // Initialize OpenGL Loader
+    std.debug.print("Loading Glad...\n", .{});
+    if (glad.gladLoadGLLoader(@ptrCast(&glfw.glfwGetProcAddress)) == 0) {
+        std.debug.print("Failed to initialize GLAD\n", .{});
+        return GSLWError.FailedToInitialize;
+    }
+
+    std.debug.print("Initializing viewport...\n\n", .{});
+    glad.glViewport(0, 0, width, height);
+    glad.glEnable(glad.GL_DEPTH_TEST);
+    glad.glDepthFunc(glad.GL_LESS);
+
+    // Initialize ImGui
+    _ = imgui.igCreateContext(null);
+    const io = imgui.igGetIO();
+    io.*.ConfigFlags |= imgui.ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+    io.*.ConfigFlags |= imgui.ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+
+    const optional_window: ?*imgui.GLFWwindow = @ptrCast(window);
+    if (!imgui.ImGui_ImplGlfw_InitForOpenGL(optional_window, false)) {
+        return null;
+    }
+    if (!imgui.ImGui_ImplOpenGL3_Init("#version 330")) {
+        return null;
+    }
 
     // Set up cursor mode BEFORE changing monitor settings
     glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
@@ -504,6 +513,12 @@ pub fn createWindow() ?*glfw.GLFWwindow {
     glfw.glfwShowWindow(window);
 
     return window;
+}
+
+pub fn cleanupImGui() void {
+    imgui.ImGui_ImplOpenGL3_Shutdown();
+    imgui.ImGui_ImplGlfw_Shutdown();
+    imgui.igDestroyContext(null);
 }
 
 fn framebufferSizeCallback(window: ?*glfw.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
@@ -547,9 +562,28 @@ fn mouseCallback(window: ?*glfw.struct_GLFWwindow, xpos: f64, ypos: f64) callcon
     scene.appState.last_mouse_x = xpos;
     scene.appState.last_mouse_y = ypos;
 
+    if (scene.appState.menu) return;
+
     const aspectRatio: f32 = scene.width / scene.height;
 
     scene.camera.process_mouse_movement(xoffset, yoffset, aspectRatio, false);
+}
+
+fn mouseButtonCallback(window: ?*glfw.struct_GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
+    if (window == null) return;
+
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.menu) {
+        imgui.ImGui_ImplGlfw_MouseButtonCallback(@ptrCast(window), button, action, mods);
+
+        const io = imgui.igGetIO();
+        if (!io.*.WantCaptureMouse) {
+            // If ImGui doesn't want it
+        }
+    } else {
+        // Menu not up
+    }
 }
 
 fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -571,6 +605,25 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
     if (action == glfw.GLFW_PRESS or action == glfw.GLFW_REPEAT) {
         switch (key) {
             glfw.GLFW_KEY_ESCAPE => {
+                scene.appState.menu = !scene.appState.menu;
+                var cursor_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+
+                switch (cursor_mode) {
+                    glfw.GLFW_CURSOR_NORMAL => {
+                        cursor_mode = glfw.GLFW_CURSOR_DISABLED;
+                    },
+                    glfw.GLFW_CURSOR_HIDDEN => {
+                        cursor_mode = glfw.GLFW_CURSOR_NORMAL;
+                    },
+                    glfw.GLFW_CURSOR_DISABLED => {
+                        cursor_mode = glfw.GLFW_CURSOR_NORMAL;
+                    },
+                    else => {},
+                }
+
+                glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, cursor_mode);
+            },
+            glfw.GLFW_KEY_M => {
                 glfw.glfwIconifyWindow(window);
             },
             glfw.GLFW_KEY_RIGHT_BRACKET => {
@@ -586,10 +639,10 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
                 scene.appState.zoom += 1.0;
             },
             glfw.GLFW_KEY_P => {
-                globals.PAUSED = !globals.PAUSED;
+                scene.appState.paused = !scene.appState.paused;
             },
             glfw.GLFW_KEY_F => {
-                globals.FLY = !globals.FLY;
+                scene.appState.fly = !scene.appState.fly;
             },
 
             else => {},

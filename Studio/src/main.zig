@@ -1,25 +1,26 @@
 const std = @import("std");
+const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
+const Secrets = _Secrets{};
+
 const Math = @import("Math.zig");
 const Vec3 = Math.Vec3;
+
 const Pipeline = @import("Pipeline.zig");
 const Scene = Pipeline.Scene;
 const Shape = @import("Shape.zig");
 const Node = @import("Node.zig");
 const Mesh = @import("Mesh.zig");
-const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
-const Secrets = _Secrets{};
+
 const UDP = @import("UDP.zig");
 const Sensors = @import("Sensors.zig");
+
+const KeypointManager = @import("ORB.zig").KeypointManager;
 const Video = @import("Video.zig");
+const ORB = @import("ORB.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
-const KeypointManager = @import("ORB.zig").KeypointManager;
-const ORB = @import("ORB.zig");
-const globals = @import("Globals.zig");
 
-// TODO: Look for a way to set these env variables in build script on linux
-// try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
-// try std.process.setEnvVar("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+const UI = @import("UI.zig");
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -36,7 +37,7 @@ pub fn main() !void {
 
     defer glfw.glfwTerminate();
 
-    const window = Pipeline.createWindow() orelse {
+    const window = try Pipeline.createWindow() orelse {
         std.debug.print("Failed to create window\n", .{});
         return;
     };
@@ -138,32 +139,12 @@ pub fn main() !void {
 
     // ================================================= Stereo Matching Setup =================================================
 
-    var right_keypoint_manager = try KeypointManager.init(
-        alloc,
-        .{ 0.0, 0.0, 1.0 },
-        canvasNodeRight,
-    );
-    defer right_keypoint_manager.deinit();
-
-    var left_keypoint_manager = try KeypointManager.init(
-        alloc,
-        .{ 1.0, 0.0, 0.0 },
-        canvasNodeLeft,
-    );
-    defer left_keypoint_manager.deinit();
-
-    const combined_keypoint_manager = try KeypointManager.init(
-        alloc,
-        .{ 1.0, 0.0, 1.0 },
-        canvasNodeCombined,
-    );
-    defer combined_keypoint_manager.deinit();
-
     const StereoMatcher = try ORB.StereoMatcher.init(
         alloc,
-        left_keypoint_manager,
-        right_keypoint_manager,
-        combined_keypoint_manager,
+        canvasNodeLeft,
+        canvasNodeRight,
+        canvasNodeCombined,
+        null,
     );
     defer StereoMatcher.deinit();
 
@@ -172,17 +153,6 @@ pub fn main() !void {
     try Video.initializeFFmpegNetwork();
     defer Video.deinitFFmpegNetwork();
 
-    var video_handler_right = try Video.VideoHandler.start(
-        alloc,
-        canvasNodeRight,
-        Secrets.sdp_content_right,
-        null,
-        Video.frameCallback,
-        null,
-        right_keypoint_manager,
-    );
-    defer video_handler_right.join();
-
     var video_handler_left = try Video.VideoHandler.start(
         alloc,
         canvasNodeLeft,
@@ -190,15 +160,37 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        left_keypoint_manager,
+        StereoMatcher.left,
     );
     defer video_handler_left.join();
 
+    var video_handler_right = try Video.VideoHandler.start(
+        alloc,
+        canvasNodeRight,
+        Secrets.sdp_content_right,
+        null,
+        Video.frameCallback,
+        null,
+        StereoMatcher.right,
+    );
+    defer video_handler_right.join();
+
+    // ==================================================== UI Window Setup ====================================================
+
+    const windows = [_]type{ UI.OverlayWindow, UI.StereoDebugWindow };
+    const TWindowManager = UI.WindowManager(&windows);
+    const WindowManager = try TWindowManager.init(
+        alloc,
+        .{
+            .scene = scene,
+            .StereoMatcher = StereoMatcher,
+        },
+    );
+
     // ====================================================== Render Loop ======================================================
+
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
-        glfw.glfwPollEvents();
-
         if (glfw.glfwGetWindowAttrib(window, glfw.GLFW_FOCUSED) == glfw.GLFW_FALSE or scene.width == 0 or scene.height == 0) {
             continue; // Skip frame if window is not focused
         }
@@ -209,18 +201,14 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
-        // const start = try std.time.Instant.now();
+        WindowManager.drawAll();
 
         scene.processInput(false);
         scene.render(window);
 
-        if (!globals.PAUSED) {
+        if (!scene.appState.paused) {
             try StereoMatcher.match();
         }
-
-        // const end = try std.time.Instant.now();
-        // const render_cycle = end.since(start);
-        // std.debug.print("Total Render cycle time (ms): {d:.4}\n", .{@as(f32, @floatFromInt(render_cycle)) / 1e6});
     }
 }
 

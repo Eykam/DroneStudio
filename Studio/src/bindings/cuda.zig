@@ -1,5 +1,6 @@
 const std = @import("std");
 const Node = @import("../Node.zig").InstanceData;
+const ORB = @import("../ORB.zig");
 const gl = @import("gl.zig");
 const glad = gl.glad;
 
@@ -206,10 +207,8 @@ pub const CudaKeypointDetector = struct {
         detector_id_left: c_int,
         detector_id_right: c_int,
         detector_id_combined: c_int,
-        baseline: f32,
-        focal_length: f32,
+        params: *ORB.MatchingParameters,
         num_matches: *c_int,
-        threshold: u8,
         left: *ImageParams,
         right: *ImageParams,
     ) !void {
@@ -217,10 +216,10 @@ pub const CudaKeypointDetector = struct {
             detector_id_left,
             detector_id_right,
             detector_id_combined,
-            baseline,
-            focal_length,
+            params.baseline_mm,
+            params.focal_length_mm,
             num_matches,
-            threshold,
+            params.intensity_threshold,
             left,
             right,
         );

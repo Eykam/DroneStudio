@@ -9,14 +9,34 @@ const KeyPoint = CudaBinds.KeyPoint;
 const video = libav.video;
 const glad = gl.glad;
 
+pub const MatchingParameters = struct {
+    // distance between center of camera sensors in mm
+    baseline_mm: f32,
+    // focal length of camera in mm
+    focal_length_mm: f32,
+    sensor_width_mm: f32,
+    // Difference in grayscale value to be considered brighter or darker than reference pixel in FAST corner detection
+    intensity_threshold: u8 = 15,
+    // Radius of ring to check around reference pixel for FAST corner detection
+    circle_radius: u32 = 3,
+    // Length of contiguous pixels on circle radius around reference pixel that all need to be brighter / darker than
+    // reference pixel by intesity threshold
+    arc_length: u32 = 9,
+    // Maximum number of keypoints that can be detected in a given image
+    max_keypoints: u32 = 50000,
+    // Sigma for gaussian blurring before corner detection
+    sigma: f32 = 1.0,
+    // max horizontal distance between keypoints
+    max_disparity: f32 = 100,
+    // max vertical distance between keypoints
+    epipolar_threshold: f32 = 15,
+};
+
 pub const StereoMatcher = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    baseline: f32, // in mm
-    focal_length_mm: f32, // in mm
-    max_disparity: f32,
-    epipolar_threshold: f32,
+    params: *MatchingParameters,
     num_matches: *c_int,
 
     left: *KeypointManager,
@@ -27,48 +47,74 @@ pub const StereoMatcher = struct {
 
     combined: *KeypointManager,
 
-    pub fn init(allocator: std.mem.Allocator, left: *KeypointManager, right: *KeypointManager, combined: *KeypointManager) !*Self {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        left_node: *Node,
+        right_node: *Node,
+        combined_node: *Node,
+        params: ?MatchingParameters,
+    ) !*Self {
         var matcher = try allocator.create(Self);
 
         matcher.allocator = allocator;
 
-        matcher.baseline = 76.3;
-        matcher.focal_length_mm = 2.75;
-        matcher.max_disparity = 100.0;
-        matcher.epipolar_threshold = 20.0;
+        const matching_params = try allocator.create(MatchingParameters);
+
+        matching_params.* = params orelse MatchingParameters{
+            .baseline_mm = 76.3,
+            .focal_length_mm = 2.75,
+            .sensor_width_mm = 6.45,
+        };
+
+        matcher.params = matching_params;
         matcher.num_matches = try allocator.create(c_int);
         matcher.num_matches.* = 0;
 
-        matcher.left = left;
-        matcher.right = right;
-
-        matcher.combined = combined;
+        matcher.left = try KeypointManager.init(
+            allocator,
+            .{ 0.0, 0.0, 1.0 },
+            left_node,
+            matcher.params.max_keypoints,
+        );
+        matcher.right = try KeypointManager.init(
+            allocator,
+            .{ 0.0, 0.0, 1.0 },
+            right_node,
+            matcher.params.max_keypoints,
+        );
+        matcher.combined = try KeypointManager.init(
+            allocator,
+            .{ 0.0, 0.0, 1.0 },
+            combined_node,
+            matcher.params.max_keypoints,
+        );
 
         const left_to_combined = try InstancedLine.init(
             matcher.allocator,
             [_]f32{ 1.0, 0.0, 0.0 },
-            left.max_keypoints,
+            matcher.params.max_keypoints,
         );
         const right_to_combined = try InstancedLine.init(
             matcher.allocator,
             [_]f32{ 0.0, 0.0, 1.0 },
-            right.max_keypoints,
+            matcher.params.max_keypoints,
         );
 
-        try combined.target_node.addChild(left_to_combined);
-        try combined.target_node.addChild(right_to_combined);
+        try matcher.combined.target_node.addChild(left_to_combined);
+        try matcher.combined.target_node.addChild(right_to_combined);
 
         matcher.left_to_combined = left_to_combined;
         matcher.right_to_combined = right_to_combined;
 
-        try checkBufferValidAndEnable(left, null);
-        try checkBufferValidAndEnable(right, null);
+        try checkBufferValidAndEnable(matcher.left, null, matcher.params.max_keypoints);
+        try checkBufferValidAndEnable(matcher.right, null, matcher.params.max_keypoints);
         try checkBufferValidAndEnable(
-            combined,
+            matcher.combined,
             .{
                 .left = left_to_combined,
                 .right = right_to_combined,
             },
+            matcher.params.max_keypoints,
         );
 
         return matcher;
@@ -146,7 +192,7 @@ pub const StereoMatcher = struct {
         } else if (right_image_params != null and left_image_params == null) {
             std.debug.print("Unable to create Image params for left, Continuing to detect and render Right image...\n", .{});
             try self.right.keypoint_detector.?.detect_keypoints(
-                self.right.threshold,
+                self.params.intensity_threshold,
                 right_image_params.?,
             );
 
@@ -158,7 +204,7 @@ pub const StereoMatcher = struct {
         } else if (left_image_params != null and right_image_params == null) {
             std.debug.print("Unable to create Image params for right, Continuing to detect and render Left image...\n", .{});
             try self.left.keypoint_detector.?.detect_keypoints(
-                self.left.threshold,
+                self.params.intensity_threshold,
                 left_image_params.?,
             );
 
@@ -175,10 +221,8 @@ pub const StereoMatcher = struct {
             self.left.keypoint_detector.?.detector_id,
             self.right.keypoint_detector.?.detector_id,
             self.combined.keypoint_detector.?.detector_id,
-            self.baseline,
-            self.focal_length_mm,
+            self.params,
             self.num_matches,
-            self.left.threshold,
             left_image_params.?,
             right_image_params.?,
         );
@@ -213,16 +257,18 @@ pub const KeypointManager = struct {
     keypoints: *Node,
 
     keypoint_detector: ?*CudaBinds.CudaKeypointDetector,
-
-    threshold: u8,
-    max_keypoints: u32,
     frame_width: u32,
     frame_height: u32,
     num_keypoints: *c_int,
 
     frame: ?*video.AVFrame,
 
-    pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, target_node: *Node) !*Self {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        color: ?[3]f32,
+        target_node: *Node,
+        max_keypoints: u32,
+    ) !*Self {
         var self = try allocator.create(KeypointManager);
 
         self.allocator = std.heap.c_allocator;
@@ -232,8 +278,6 @@ pub const KeypointManager = struct {
 
         self.num_keypoints = try allocator.create(c_int);
         self.num_keypoints.* = 0;
-        self.max_keypoints = 50000;
-        self.threshold = 15;
 
         self.target_node = target_node;
         self.frame = null;
@@ -241,7 +285,7 @@ pub const KeypointManager = struct {
         const node = try KeypointDebugger.init(
             self.arena.allocator(),
             color,
-            self.max_keypoints,
+            max_keypoints,
         );
         try self.target_node.addChild(node);
 
@@ -249,7 +293,7 @@ pub const KeypointManager = struct {
 
         self.keypoint_detector.? = try allocator.create(CudaBinds.CudaKeypointDetector);
         self.keypoint_detector.?.* = try CudaBinds.CudaKeypointDetector.init(
-            self.max_keypoints,
+            max_keypoints,
             mesh.textureID.y,
             mesh.textureID.uv,
             mesh.textureID.depth,
@@ -295,6 +339,7 @@ pub const KeypointManager = struct {
 fn checkBufferValidAndEnable(
     manager: *KeypointManager,
     connections: ?struct { left: *Node, right: *Node },
+    max_keypoints: u32,
 ) !void {
     const instance_data = manager.keypoints.instance_data.?;
 
@@ -323,7 +368,7 @@ fn checkBufferValidAndEnable(
             left_instance_data.color_buffer,
             right_instance_data.position_buffer,
             right_instance_data.color_buffer,
-            manager.max_keypoints,
+            max_keypoints,
         );
     } else {
         // Left or right node without connections
@@ -334,7 +379,7 @@ fn checkBufferValidAndEnable(
             null,
             null,
             null,
-            manager.max_keypoints,
+            max_keypoints,
         );
     }
 

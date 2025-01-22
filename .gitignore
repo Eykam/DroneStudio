@@ -12,3 +12,4 @@ gprof2dot.py
 generate_brief_pattern.py
 out.dot
 callgrind*
+sass.txt

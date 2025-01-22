@@ -316,6 +316,12 @@ struct MatchingParams {
     int image_height;
 };
 
+struct BestMatch {
+    int   bestIdx;   
+    float bestCost;   
+    //float secondBestCost; // for ratio tests
+};
+
 struct Keypoint {
     float3 position;   // Position in OpenGL world coordinates
     float2 image_coords;
@@ -349,7 +355,7 @@ __device__ Keypoint triangulatePosition(
     // Calculate depth using similar triangles principle
     float depth_mm = baseline * focal_length_px / disparity_px;  // 3.04f is focal length in mm
 
-    float world_unit_per_mm = 50; // 1.0 world => 1.0m
+    float world_unit_per_mm = 100; // 1.0 world => 1.0m
     float depth_world = depth_mm / world_unit_per_mm;
 
     // Calculate final world position
@@ -376,176 +382,362 @@ __device__ inline int hammingDistance(const BRIEFDescriptor& desc1, const BRIEFD
 }
 
 
-__global__ void matchKeypointsKernel(
-    const float4* __restrict__ left_positions,
-    const float4* __restrict__ right_positions,
-    const BRIEFDescriptor* __restrict__ left_descriptors,
-    const BRIEFDescriptor* __restrict__ right_descriptors,
-    const int left_count,
-    const int right_count,
-    const MatchingParams params,
-    MatchedKeypoint* matches,
-    int* match_count,
-    const int max_matches,
-    cudaSurfaceObject_t source_tex,      // Y plane texture from left image
-    cudaSurfaceObject_t combined_tex     // Target texture for visualization
-
+__device__ float computeCost(
+    const float4& leftPos,            
+    const BRIEFDescriptor& leftDesc,  
+    const float4& rightPos,           
+    const BRIEFDescriptor& rightDesc, 
+    const MatchingParams& params     
 ) {
-    extern __shared__ float shared_mem[];
-    
-    // Split shared memory into different arrays
-    float* min_costs = shared_mem;
-    float* second_min_costs = &min_costs[blockDim.x];
-    int* best_matches = (int*)&second_min_costs[blockDim.x];
-    int* used_right_points = &best_matches[blockDim.x];
-    int* shared_count = (int*)&used_right_points[right_count];
+    // 1. Epipolar difference
+    float yDiff = fabsf(leftPos.y - rightPos.y);
+    // Scale it by the epipolar threshold so that epipolarCost is roughly in [0..1]
+    float epipolarCost = yDiff / params.epipolar_threshold;
 
-    const int left_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-    // Initialize shared memory
-    if (threadIdx.x < blockDim.x) {
-        min_costs[threadIdx.x] = INFINITY;
-        second_min_costs[threadIdx.x] = INFINITY;
-        best_matches[threadIdx.x] = -1;
+    // 2. Disparity difference
+    float disparity = leftPos.x - rightPos.x; 
+    // If disparity <= 0 or beyond max, we give a large cost
+    if (disparity <= 0.0f || disparity > params.max_disparity) {
+        return 1e10f;  // A huge cost => effectively invalid match
     }
-    
-    if (threadIdx.x < right_count) {
-        used_right_points[threadIdx.x] = 0;
+    float disparityCost = disparity / params.max_disparity; // Normalized [0..1]
+
+    // 3. Descriptor distance
+    int descDistance = hammingDistance(leftDesc, rightDesc);
+    float descCost = (float)descDistance / 512.0f;
+
+
+    float totalCost = 0.5f * epipolarCost 
+                    + 0.3f * descCost
+                    + 0.2f * disparityCost;
+
+    return totalCost;
+}
+
+__global__ void matchLeftToRight(
+    const float4* __restrict__ leftPositions,
+    const BRIEFDescriptor* __restrict__ leftDescriptors,
+    int leftCount,
+
+    const float4* __restrict__ rightPositions,
+    const BRIEFDescriptor* __restrict__ rightDescriptors,
+    int rightCount,
+
+    MatchingParams params,
+
+    BestMatch* __restrict__ bestMatchesLeft  // [leftCount]
+) {
+    int leftIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (leftIdx >= leftCount) return;
+
+    float4 leftPos = leftPositions[leftIdx];
+    BRIEFDescriptor leftDesc = leftDescriptors[leftIdx];
+
+    float bestCost      = 1e9f;  // large sentinel
+    float secondBestCost= 1e9f;  // for ratio test
+    int   bestIdx       = -1;
+
+    // Search all right keypoints (naive LxR approach)
+    for (int rightIdx = 0; rightIdx < rightCount; rightIdx++) {
+        float cost = computeCost(
+            leftPos, leftDesc,
+            rightPositions[rightIdx], rightDescriptors[rightIdx],
+            params
+        );
+        if (cost < bestCost) {
+            secondBestCost = bestCost;
+            bestCost = cost;
+            bestIdx  = rightIdx;
+        }
+        else if (cost < secondBestCost) {
+            secondBestCost = cost;
+        }
     }
+
+    // Optionally apply ratio test or absolute threshold
+    // e.g., if bestCost > SOME_THRESH or bestCost > 0.7f * secondBestCost => discard
+    // but for cross-check, you can also do it after the cross-check step.
     
-    if (threadIdx.x == 0) {
-        shared_count[0] = 0;
+    bestMatchesLeft[leftIdx].bestIdx  = bestIdx;
+    bestMatchesLeft[leftIdx].bestCost = bestCost;
+    // bestMatchesLeft[leftIdx].secondBestCost = secondBestCost; // optional
+}
+
+__global__ void matchRightToLeft(
+    const float4* __restrict__ rightPositions,
+    const BRIEFDescriptor* __restrict__ rightDescriptors,
+    int rightCount,
+
+    const float4* __restrict__ leftPositions,
+    const BRIEFDescriptor* __restrict__ leftDescriptors,
+    int leftCount,
+
+    MatchingParams params,
+
+    BestMatch* __restrict__ bestMatchesRight  // [rightCount]
+) {
+    int rightIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (rightIdx >= rightCount) return;
+
+    float4 rightPos = rightPositions[rightIdx];
+    BRIEFDescriptor rightDesc = rightDescriptors[rightIdx];
+
+    float bestCost = 1e9f;
+    float secondBestCost = 1e9f;
+    int   bestIdx = -1;
+
+    for (int leftIdx = 0; leftIdx < leftCount; leftIdx++) {
+        float cost = computeCost(
+            leftPositions[leftIdx], leftDescriptors[leftIdx],
+            rightPos, rightDesc,
+            params
+        );
+        if (cost < bestCost) {
+            secondBestCost = bestCost;
+            bestCost = cost;
+            bestIdx  = leftIdx;
+        }
+        else if (cost < secondBestCost) {
+            secondBestCost = cost;
+        }
     }
 
-    __syncthreads();
+    // optional ratio test or threshold
+    bestMatchesRight[rightIdx].bestIdx  = bestIdx;
+    bestMatchesRight[rightIdx].bestCost = bestCost;
+}
 
-    if (left_idx >= left_count) return;
+
+__global__ void crossCheckMatches(
+    const BestMatch* __restrict__ bestMatchesLeft,
+    const BestMatch* __restrict__ bestMatchesRight,
+
+    const float4* __restrict__ leftPositions,
+    const float4* __restrict__ rightPositions,
     
-    float3 left_pos = make_float3(
-        left_positions[left_idx].x,
-        left_positions[left_idx].y,
-        left_positions[left_idx].z
-    );
+    int leftCount,
+    int rightCount,
 
-    BRIEFDescriptor left_desc = left_descriptors[left_idx];
+    const MatchingParams params,
 
-    float best_desc_distance = INFINITY;
-    float best_y_diff = INFINITY;
-    float best_disparity = INFINITY;
+    // Output arrays:
+    MatchedKeypoint* __restrict__ matchedPairs, 
+    int* outCount
+) {
+    int leftIdx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (leftIdx >= leftCount) return;
 
+    // If left side found a best match
+    int rightIdx = bestMatchesLeft[leftIdx].bestIdx;
+    if (rightIdx < 0 || rightIdx >= rightCount) {
+        return; // no valid match
+    }
 
-    const int MAX_DESC_DISTANCE = 256.0f; 
-    
-    // Find best and second-best matches for this left keypoint
-    for (int right_idx = 0; right_idx < right_count; right_idx++) {
-        float3 right_pos = make_float3(
-            right_positions[right_idx].x,
-            right_positions[right_idx].y,
-            right_positions[right_idx].z
+    // Check the reciprocal
+    if (bestMatchesRight[rightIdx].bestIdx == leftIdx) {
+        // We have a consistent match L_i <--> R_j
+        int idx = atomicAdd(outCount, 1);
+        
+        float3 left_pos = make_float3(
+            leftPositions[leftIdx].x,
+            leftPositions[leftIdx].y,
+            leftPositions[leftIdx].z
         );
 
-        // Check epipolar constraint (y-difference)
-        float y_diff = fabsf(left_pos.y - right_pos.y);
-        float disparity = left_pos.x - right_pos.x;
+        float3 right_pos = make_float3(
+                rightPositions[rightIdx].x,
+                rightPositions[rightIdx].y,
+                rightPositions[rightIdx].z
+        );
 
-        if (y_diff > params.epipolar_threshold || 
-            disparity <= 0 || 
-            disparity > params.max_disparity) {
-            continue;
-        }
-      
-        // Calculate descriptor distance
-        int desc_distance = hammingDistance(left_desc, right_descriptors[right_idx]);
-        if (desc_distance > MAX_DESC_DISTANCE) continue;
-      
-        // Calculate individual costs
-        float desc_cost = desc_distance / 512.0f;
-        float epipolar_cost = y_diff / params.epipolar_threshold;
-        float disparity_cost = disparity / params.max_disparity;
-
-        // Weighted combination of costs
-        float total_cost = epipolar_cost * 0.5f +
-                          desc_cost * 0.3f +
-                          disparity_cost * 0.2f;
-
-        // Maintain best and second-best matches
-        if (total_cost < min_costs[threadIdx.x]) {
-            best_desc_distance = desc_distance;
-            best_y_diff = y_diff;
-            best_disparity = disparity;
-            
-            second_min_costs[threadIdx.x] = min_costs[threadIdx.x];
-            min_costs[threadIdx.x] = total_cost;
-            best_matches[threadIdx.x] = right_idx;
-        } else if (total_cost < second_min_costs[threadIdx.x]) {
-            second_min_costs[threadIdx.x] = total_cost;
-        }
-    }
-
-    __syncthreads();
-
-    // Apply Lowe's ratio test and absolute threshold
-    const float RATIO_THRESH = 0.7f; 
-    const float ABS_COST_THRESH = 0.25f;
-    
-    bool is_good_match = false;
-    int right_idx = best_matches[threadIdx.x];
-
-    if (right_idx >= 0) {
-        bool passes_thresholds = (min_costs[threadIdx.x] < ABS_COST_THRESH) &&
-                                (min_costs[threadIdx.x] < second_min_costs[threadIdx.x] * RATIO_THRESH);
-        
-        bool passes_validation = (best_y_diff < params.epipolar_threshold * 0.5f) &&
-                                (best_disparity > 1.0f) &&
-                                (best_desc_distance < MAX_DESC_DISTANCE * 0.75f);
-        
-        is_good_match = passes_thresholds && passes_validation;
-        
-        // Try to claim the right point
-        if (is_good_match && right_idx < right_count) {
-            is_good_match = (atomicCAS(&used_right_points[right_idx], 0, 1) == 0);
-            if (is_good_match) {
-                atomicAdd(shared_count, 1);
-            }
-        }
-    }
-
-     __syncthreads();
-
-    // Update global match count
-    if (threadIdx.x == 0 && shared_count[0] > 0) {
-        atomicAdd(match_count, min(shared_count[0], max_matches));
-    }
-
-    __syncthreads();
-
-    // Store matches, respecting the max_matches limit
-    if (is_good_match) {
-        int match_idx = atomicSub(shared_count, 1) - 1;
-        if (match_idx >= 0 && match_idx < max_matches) {
-            float3 right_pos = make_float3(
-                right_positions[right_idx].x,
-                right_positions[right_idx].y,
-                right_positions[right_idx].z
-            );
-
-            Keypoint matchedPoint = triangulatePosition(
+        Keypoint matchedPoint = triangulatePosition(
                 left_pos,
                 right_pos,
                 params.baseline,
                 params.focal_length_px,
                 params.image_width,
                 params.image_height
-            );
+        );
 
-            matches[match_idx] = {
-                left_pos,
-                right_pos,
-                matchedPoint
-            };
-        }
+        matchedPairs[idx] = {
+            left_pos,
+            right_pos,
+            matchedPoint
+        };
     }
 }
+
+
+// __global__ void matchKeypointsKernel(
+//     const float4* __restrict__ left_positions,
+//     const float4* __restrict__ right_positions,
+//     const BRIEFDescriptor* __restrict__ left_descriptors,
+//     const BRIEFDescriptor* __restrict__ right_descriptors,
+//     const int left_count,
+//     const int right_count,
+//     const MatchingParams params,
+//     MatchedKeypoint* matches,
+//     int* match_count,
+//     const int max_matches,
+//     cudaSurfaceObject_t source_tex,      // Y plane texture from left image
+//     cudaSurfaceObject_t combined_tex     // Target texture for visualization
+
+// ) {
+//     extern __shared__ float shared_mem[];
+    
+//     // Split shared memory into different arrays
+//     float* min_costs = shared_mem;
+//     float* second_min_costs = &min_costs[blockDim.x];
+//     int* best_matches = (int*)&second_min_costs[blockDim.x];
+//     int* used_right_points = &best_matches[blockDim.x];
+//     int* shared_count = (int*)&used_right_points[right_count];
+
+//     const int left_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+//     // Initialize shared memory
+//     if (threadIdx.x < blockDim.x) {
+//         min_costs[threadIdx.x] = INFINITY;
+//         second_min_costs[threadIdx.x] = INFINITY;
+//         best_matches[threadIdx.x] = -1;
+//     }
+    
+//     if (threadIdx.x < right_count) {
+//         used_right_points[threadIdx.x] = 0;
+//     }
+    
+//     if (threadIdx.x == 0) {
+//         shared_count[0] = 0;
+//     }
+
+//     __syncthreads();
+
+//     if (left_idx >= left_count) return;
+    
+//     float3 left_pos = make_float3(
+//         left_positions[left_idx].x,
+//         left_positions[left_idx].y,
+//         left_positions[left_idx].z
+//     );
+
+//     BRIEFDescriptor left_desc = left_descriptors[left_idx];
+
+//     float best_desc_distance = INFINITY;
+//     float best_y_diff = INFINITY;
+//     float best_disparity = INFINITY;
+
+
+//     const int MAX_DESC_DISTANCE = 300.0f; 
+    
+//     // Find best and second-best matches for this left keypoint
+//     for (int right_idx = 0; right_idx < right_count; right_idx++) {
+//         float3 right_pos = make_float3(
+//             right_positions[right_idx].x,
+//             right_positions[right_idx].y,
+//             right_positions[right_idx].z
+//         );
+
+//         // Check epipolar constraint (y-difference)
+//         float y_diff = fabsf(left_pos.y - right_pos.y);
+//         float disparity = left_pos.x - right_pos.x;
+
+//         if (y_diff > params.epipolar_threshold || 
+//             disparity <= 0 || 
+//             disparity > params.max_disparity) {
+//             continue;
+//         }
+      
+//         // Calculate descriptor distance
+//         int desc_distance = hammingDistance(left_desc, right_descriptors[right_idx]);
+//         if (desc_distance > MAX_DESC_DISTANCE) continue;
+      
+//         // Calculate individual costs
+//         float desc_cost = desc_distance / 512.0f;
+//         float epipolar_cost = y_diff / params.epipolar_threshold;
+//         float disparity_cost = disparity / params.max_disparity;
+
+//         // Weighted combination of costs
+//         float total_cost = epipolar_cost * 0.3f +
+//                           desc_cost * 0.5f +
+//                           disparity_cost * 0.2f;
+
+//         // Maintain best and second-best matches
+//         if (total_cost < min_costs[threadIdx.x]) {
+//             best_desc_distance = desc_distance;
+//             best_y_diff = y_diff;
+//             best_disparity = disparity;
+            
+//             second_min_costs[threadIdx.x] = min_costs[threadIdx.x];
+//             min_costs[threadIdx.x] = total_cost;
+//             best_matches[threadIdx.x] = right_idx;
+//         } else if (total_cost < second_min_costs[threadIdx.x]) {
+//             second_min_costs[threadIdx.x] = total_cost;
+//         }
+//     }
+
+//     __syncthreads();
+
+//     // Apply Lowe's ratio test and absolute threshold
+//     const float RATIO_THRESH = 0.9f; 
+//     const float ABS_COST_THRESH = 0.5f;
+    
+//     bool is_good_match = false;
+//     int right_idx = best_matches[threadIdx.x];
+
+//     if (right_idx >= 0) {
+//         bool passes_thresholds = (min_costs[threadIdx.x] < ABS_COST_THRESH) &&
+//                                 (min_costs[threadIdx.x] < second_min_costs[threadIdx.x] * RATIO_THRESH);
+        
+//         bool passes_validation = (best_y_diff < params.epipolar_threshold * 0.5f) &&
+//                                 (best_disparity > 1.0f) &&
+//                                 (best_desc_distance < MAX_DESC_DISTANCE * 0.75f);
+        
+//         is_good_match = passes_thresholds && passes_validation;
+        
+//         // Try to claim the right point
+//         if (is_good_match && right_idx < right_count) {
+//             is_good_match = (atomicCAS(&used_right_points[right_idx], 0, 1) == 0);
+//             if (is_good_match) {
+//                 atomicAdd(shared_count, 1);
+//             }
+//         }
+//     }
+
+//      __syncthreads();
+
+//     // Update global match count
+//     if (threadIdx.x == 0 && shared_count[0] > 0) {
+//         atomicAdd(match_count, min(shared_count[0], max_matches));
+//     }
+
+//     __syncthreads();
+
+//     // Store matches, respecting the max_matches limit
+//     if (is_good_match) {
+//         int match_idx = atomicSub(shared_count, 1) - 1;
+//         if (match_idx >= 0 && match_idx < max_matches) {
+//             float3 right_pos = make_float3(
+//                 right_positions[right_idx].x,
+//                 right_positions[right_idx].y,
+//                 right_positions[right_idx].z
+//             );
+
+//             Keypoint matchedPoint = triangulatePosition(
+//                 left_pos,
+//                 right_pos,
+//                 params.baseline,
+//                 params.focal_length_px,
+//                 params.image_width,
+//                 params.image_height
+//             );
+
+//             matches[match_idx] = {
+//                 left_pos,
+//                 right_pos,
+//                 matchedPoint
+//             };
+//         }
+//     }
+// }
 
 
 __global__ void setTextureKernel(
@@ -1567,57 +1759,129 @@ static float execute_matching(
 
 
     // Configure kernel launch parameters
-    dim3 blockMatching(512);
-    dim3 gridMatching((max_matches + blockMatching.x - 1) / blockMatching.x);
+    // dim3 blockMatching(512);
+    // dim3 gridMatching((max_matches + blockMatching.x - 1) / blockMatching.x);
 
-    size_t shared_mem_size = 
-        (2 * sizeof(float) + sizeof(int)) * blockMatching.x + // min_costs, second_min_costs, best_matches
-        sizeof(int) * max_matches +                          // used_right_points
-        sizeof(int);                                         // shared_count
+    // size_t shared_mem_size = 
+    //     (2 * sizeof(float) + sizeof(int)) * blockMatching.x + // min_costs, second_min_costs, best_matches
+    //     sizeof(int) * max_matches +                          // used_right_points
+    //     sizeof(int);                                         // shared_count
 
     // Execute matching kernel
-    cudaEventRecord(start);
-    matchKeypointsKernel<<<gridMatching, blockMatching, shared_mem_size>>>(
-        left_detector->gl_resources.keypoints.d_positions,
-        right_detector->gl_resources.keypoints.d_positions,
-        left_detector->d_descriptors,
-        right_detector->d_descriptors,
-        max_matches,
-        max_matches,
-        params,
-        d_matches,
-        d_match_count,
-        max_matches,
-        left_detector->y_texture->surface,
-        combined_detector->y_texture->surface
-    );
-    cudaEventRecord(stop);
+    // cudaEventRecord(start);
+    // matchKeypointsKernel<<<gridMatching, blockMatching, shared_mem_size>>>(
+    //     left_detector->gl_resources.keypoints.d_positions,
+    //     right_detector->gl_resources.keypoints.d_positions,
+    //     left_detector->d_descriptors,
+    //     right_detector->d_descriptors,
+    //     max_matches,
+    //     max_matches,
+    //     params,
+    //     d_matches,
+    //     d_match_count,
+    //     max_matches,
+    //     left_detector->y_texture->surface,
+    //     combined_detector->y_texture->surface
+    // );
+    // cudaEventRecord(stop);
 
-    cudaError_t error;
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Matching kernel failed: %s\n", cudaGetErrorString(error));
-        return -1.0;
+    // error = cudaGetLastError();
+    // if (error != cudaSuccess) {
+    //     printf("Matching kernel failed: %s\n", cudaGetErrorString(error));
+    //     return -1.0;
+    // }
+    // cudaEventSynchronize(stop);
+
+    // float milliseconds_matching;
+    // cudaEventElapsedTime(&milliseconds_matching, start, stop);
+    // printf("Matching Kernel Time: %.2f ms\n", milliseconds_matching);
+
+    // if (*num_matches == 0) {
+    //     printf("No Matches detected!\n");
+    //     return milliseconds_matching;
+    // }
+
+    // // Get match count
+    // cudaError_t error;
+    // error = cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
+    // if (error != cudaSuccess) {
+    //     printf("Failed to copy match count: %s\n", cudaGetErrorString(error));
+    //     return -1.0;
+    // }
+
+    // printf("num_matches: %d\n", *num_matches);
+
+    BestMatch* d_bestMatchesLeft  = nullptr;
+    BestMatch* d_bestMatchesRight = nullptr;
+
+    cudaMalloc(&d_bestMatchesLeft,  *left->num_keypoints  * sizeof(BestMatch));
+    cudaMalloc(&d_bestMatchesRight, *right->num_keypoints * sizeof(BestMatch));
+    
+    float milliseconds_left_right;
+    float milliseconds_right_left;
+    float milliseconds_cross_check;
+    
+    {
+        dim3 block(256);
+        dim3 grid( (*left->num_keypoints + block.x - 1)/block.x );
+        cudaEventRecord(start);
+        matchLeftToRight<<<grid, block>>>(
+            left_detector->gl_resources.keypoints.d_positions, left_detector->d_descriptors, *left->num_keypoints,
+            right_detector->gl_resources.keypoints.d_positions, right_detector->d_descriptors, *right->num_keypoints,
+            params,
+            d_bestMatchesLeft
+        );
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&milliseconds_left_right, start, stop);
+        printf("Matching Time Left => Right: %.2f ms\n", milliseconds_left_right);
     }
-    cudaEventSynchronize(stop);
 
-    float milliseconds_matching;
-    cudaEventElapsedTime(&milliseconds_matching, start, stop);
-    printf("Matching Kernel Time: %.2f ms\n", milliseconds_matching);
-
-    // Get match count
-    error = cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
-    if (error != cudaSuccess) {
-        printf("Failed to copy match count: %s\n", cudaGetErrorString(error));
-        return -1.0;
+    {
+        dim3 block(256);
+        dim3 grid( (*right->num_keypoints + block.x - 1)/block.x );
+        cudaEventRecord(start);
+        matchRightToLeft<<<grid, block>>>(
+            right_detector->gl_resources.keypoints.d_positions, right_detector->d_descriptors, *right->num_keypoints,
+            left_detector->gl_resources.keypoints.d_positions, left_detector->d_descriptors, *left->num_keypoints,
+            params,
+            d_bestMatchesRight
+        );
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&milliseconds_right_left, start, stop);
+        printf("Matching Time Right => Left: %.2f ms\n", milliseconds_right_left);
     }
+
+
+    {
+        dim3 block(256);
+        dim3 grid( (*left->num_keypoints + block.x - 1)/block.x );
+        cudaEventRecord(start);
+        crossCheckMatches<<<grid, block>>>(
+            d_bestMatchesLeft,
+            d_bestMatchesRight,
+            left_detector->gl_resources.keypoints.d_positions,
+            right_detector->gl_resources.keypoints.d_positions,
+            *left->num_keypoints,
+            *right->num_keypoints,
+            params,
+            d_matches,
+            d_match_count
+        );
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&milliseconds_cross_check, start, stop);
+        printf("Cross Checking Matches Time: %.2f ms\n", milliseconds_cross_check);
+    }
+
+    cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
+    printf("num_matches: %d\n", *num_matches);
 
     if (*num_matches == 0) {
         printf("No Matches detected!\n");
-        return milliseconds_matching;
+        return milliseconds_left_right + milliseconds_right_left + milliseconds_cross_check;
     }
-
-    printf("num_matches: %d\n", *num_matches);
 
     // Generate visualization
     dim3 blockVis(512);
@@ -1638,7 +1902,7 @@ static float execute_matching(
     );
     cudaEventRecord(stop);
 
-    error = cudaGetLastError();
+    cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
         printf("Visualization kernel failed: %s\n", cudaGetErrorString(error));
         return -1.0;
@@ -1675,8 +1939,13 @@ static float execute_matching(
     float milliseconds_segmentation;
     cudaEventElapsedTime(&milliseconds_segmentation, start, stop);
     printf("Assigning Nearest keypoint Distance time: %.2f ms\n", milliseconds_segmentation);
+
+    cudaFree(d_bestMatchesLeft);
+    cudaFree(d_bestMatchesRight);
+ 
+    return milliseconds_left_right + milliseconds_right_left + milliseconds_cross_check + milliseconds_vis + milliseconds_segmentation;
+    // return milliseconds_vis + milliseconds_matching + milliseconds_segmentation;
     
-    return milliseconds_vis + milliseconds_matching + milliseconds_segmentation;
 }
 
 int cuda_match_keypoints(
@@ -1691,7 +1960,7 @@ int cuda_match_keypoints(
     ImageParams* left,
     ImageParams* right
 ) {
-    float sigma = 0.05f;
+    float sigma = 1.0f;
 
     DetectorInstance* left_detector = get_detector_instance(detector_id_left);
     DetectorInstance* right_detector = get_detector_instance(detector_id_right);
