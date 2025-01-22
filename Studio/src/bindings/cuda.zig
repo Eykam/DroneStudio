@@ -21,6 +21,40 @@ pub const ImageParams = extern struct {
     image_height: f32,
 };
 
+pub const StereoParams = extern struct {
+    image_width: c_int,
+    image_height: c_int,
+    // distance between center of camera sensors in mm
+    baseline_mm: f32,
+    // focal length of camera in mm
+    focal_length_mm: f32,
+    focal_length_px: f32,
+    sensor_width_mm: f32,
+    // Difference in grayscale value to be considered brighter or darker than reference pixel in FAST corner detection
+    intensity_threshold: u8 = 15,
+    // Radius of ring to check around reference pixel for FAST corner detection
+    circle_radius: u32 = 3,
+    // Length of contiguous pixels on circle radius around reference pixel that all need to be brighter / darker than
+    // reference pixel by intesity threshold
+    arc_length: u32 = 9,
+    // Maximum number of keypoints that can be detected in a given image
+    max_keypoints: u32 = 50000,
+    // Sigma for gaussian blurring before corner detection
+    sigma: f32 = 1.0,
+    // max horizontal distance between keypoints
+    max_disparity: f32 = 100,
+    // max vertical distance between keypoints
+    epipolar_threshold: f32 = 15,
+    max_hamming_dist: f32 = 1.0,
+    cost_ratio: f32 = 0.7,
+    lowes_ratio: f32 = 0.8,
+    epipolar_weight: f32 = 0.5,
+    disparity_weight: f32 = 0.2,
+    hamming_dist_weight: f32 = 0.3,
+    show_connections: bool = true,
+    disable_matching: bool = false,
+};
+
 // External CUDA function declarations
 extern "cuda_keypoint_detector" fn cuda_create_detector(
     max_keypoints: c_int,
@@ -51,19 +85,16 @@ extern "cuda_keypoint_detector" fn cuda_map_transformation(detector_id: c_int, t
 
 extern "cuda_keypoint_detector" fn cuda_detect_keypoints(
     detector_id: c_int,
-    threshold: u8,
+    params: StereoParams,
     image: *ImageParams,
-    sigma: f32,
 ) f32;
 
 extern "cuda_keypoint_detector" fn cuda_match_keypoints(
     detector_id_left: c_int,
     detector_id_right: c_int,
     detector_id_combined: c_int,
-    baseline: f32,
-    focal_length: f32,
+    params: StereoParams,
     num_matches: *c_int,
-    threshold: u8,
     left: *ImageParams,
     right: *ImageParams,
 ) c_int;
@@ -171,7 +202,7 @@ pub const CudaKeypointDetector = struct {
 
     pub fn detect_keypoints(
         self: *Self,
-        threshold: u8,
+        params: *StereoParams,
         image: *ImageParams,
     ) !void {
         if (!self.gl_interop_enabled) @panic("GL Resources are not registered!\n");
@@ -189,9 +220,8 @@ pub const CudaKeypointDetector = struct {
         // Use GL interop path
         const result = cuda_detect_keypoints(
             self.detector_id,
-            threshold,
+            params.*,
             image,
-            1.25,
         );
 
         if (result < 0) {
@@ -207,7 +237,7 @@ pub const CudaKeypointDetector = struct {
         detector_id_left: c_int,
         detector_id_right: c_int,
         detector_id_combined: c_int,
-        params: *ORB.MatchingParameters,
+        params: *StereoParams,
         num_matches: *c_int,
         left: *ImageParams,
         right: *ImageParams,
@@ -216,10 +246,8 @@ pub const CudaKeypointDetector = struct {
             detector_id_left,
             detector_id_right,
             detector_id_combined,
-            params.baseline_mm,
-            params.focal_length_mm,
+            params.*,
             num_matches,
-            params.intensity_threshold,
             left,
             right,
         );

@@ -618,8 +618,8 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
 
 pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager: *KeypointManager, frame: *video.AVFrame) !void {
     _ = allocator;
-    _ = node;
 
-    // Queue keypoints for keypoint extraction
-    try keypoint_manager.queueFrame(frame);
+    if (!node.scene.?.appState.paused) {
+        try keypoint_manager.queueFrame(frame);
+    }
 }

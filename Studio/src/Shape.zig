@@ -5,7 +5,6 @@ const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const gl = @import("bindings/gl.zig");
 const Debug = @import("Debug.zig");
-const CudaBinds = @import("bindings/cuda.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
 const glad = gl.glad;

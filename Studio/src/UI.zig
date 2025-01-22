@@ -173,40 +173,50 @@ pub const StereoDebugWindow = struct {
     pub fn draw(self: *Self, ctx: *const UIContext) void {
         if (!self.visible) return;
 
-        if (imgui.igBegin("Stereo Matching Debug", &self.visible, imgui.ImGuiWindowFlags_None)) {
-            // Display matching statistics
+        // Make window tall enough to fit all sections without scrolling
+        const window_flags = imgui.ImGuiWindowFlags_None;
+        imgui.igSetNextWindowSize(.{ .x = 400, .y = 600 }, imgui.ImGuiCond_FirstUseEver);
+
+        if (imgui.igBegin("Stereo Matching Debug", &self.visible, window_flags)) {
+            // Statistics Section
+            imgui.igText("Statistics");
+            imgui.igSeparator();
             imgui.igText("Current Matches: %d", ctx.StereoMatcher.num_matches.*);
             imgui.igText("Left Keypoints: %d", ctx.StereoMatcher.left.num_keypoints.*);
             imgui.igText("Right Keypoints: %d", ctx.StereoMatcher.right.num_keypoints.*);
-
             if (ctx.StereoMatcher.left.frame) |frame| {
                 imgui.igText("Frame dimensions: %dx%d", frame.width, frame.height);
             }
-
-            imgui.igSeparator();
-            imgui.igText("Matching Parameters");
+            imgui.igNewLine();
 
             var params = ctx.StereoMatcher.params;
+            var params_changed = false;
 
+            // Camera Parameters Section
+            imgui.igText("Camera Parameters");
+            imgui.igSeparator();
             imgui.igText("Baseline (mm): %.2f", params.baseline_mm);
             imgui.igText("Focal Length (mm): %.2f", params.focal_length_mm);
             imgui.igNewLine();
 
-            // Intensity threshold slider
+            // Keypoint Detection Parameters Section
+            imgui.igText("Keypoint Detection Parameters");
+            imgui.igSeparator();
+
             var intensity = params.intensity_threshold;
             if (imgui.igSliderScalar(
                 "Intensity Threshold",
                 imgui.ImGuiDataType_U8,
                 &intensity,
-                &@as(u8, 5),
+                &@as(u8, 1),
                 &@as(u8, 50),
                 "%u",
                 imgui.ImGuiSliderFlags_None,
             )) {
                 params.intensity_threshold = intensity;
+                params_changed = true;
             }
 
-            // Circle radius slider
             var radius = params.circle_radius;
             if (imgui.igSliderScalar(
                 "Circle Radius",
@@ -218,9 +228,9 @@ pub const StereoDebugWindow = struct {
                 imgui.ImGuiSliderFlags_None,
             )) {
                 params.circle_radius = radius;
+                params_changed = true;
             }
 
-            // Arc length slider
             var arc_length = params.arc_length;
             if (imgui.igSliderScalar(
                 "Arc Length",
@@ -232,39 +242,172 @@ pub const StereoDebugWindow = struct {
                 imgui.ImGuiSliderFlags_None,
             )) {
                 params.arc_length = arc_length;
+                params_changed = true;
             }
 
-            // Max keypoints slider
             var max_keypoints = params.max_keypoints;
             if (imgui.igSliderScalar(
                 "Max Keypoints",
                 imgui.ImGuiDataType_U32,
                 &max_keypoints,
-                &@as(u32, 1000),
+                &@as(u32, 1),
                 &@as(u32, 100000),
                 "%u",
                 imgui.ImGuiSliderFlags_None,
             )) {
                 params.max_keypoints = max_keypoints;
+                params_changed = true;
             }
 
-            // Sigma slider
             var sigma = params.sigma;
-            if (imgui.igSliderFloat("Sigma", &sigma, 0.1, 5.0, "%.2f", imgui.ImGuiSliderFlags_None)) {
+            if (imgui.igSliderFloat(
+                "Sigma",
+                &sigma,
+                0.01,
+                2.0,
+                "%.2f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
                 params.sigma = sigma;
+                params_changed = true;
+            }
+            imgui.igNewLine();
+
+            // Matching Parameters Section
+            imgui.igText("Matching Parameters");
+            imgui.igSeparator();
+
+            var disable_matching = params.disable_matching;
+            var show_connections = params.show_connections;
+
+            if (imgui.igCheckbox("Disable Matching", &disable_matching)) {
+                show_connections = false;
+                params_changed = true;
+                params.disable_matching = disable_matching;
+                params_changed = true;
             }
 
-            // Max disparity slider
+            if (imgui.igCheckbox("Show Connections", &show_connections)) {
+                params.show_connections = show_connections;
+                params_changed = true;
+            }
+            imgui.igSeparator();
+
             var max_disparity = params.max_disparity;
-            if (imgui.igSliderFloat("Max Disparity", &max_disparity, 10.0, 200.0, "%.1f", imgui.ImGuiSliderFlags_None)) {
+            if (imgui.igSliderFloat(
+                "Max Disparity",
+                &max_disparity,
+                10.0,
+                200.0,
+                "%.1f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
                 params.max_disparity = max_disparity;
+                params_changed = true;
             }
 
-            // Epipolar threshold slider
             var epipolar = params.epipolar_threshold;
-            if (imgui.igSliderFloat("Epipolar Threshold", &epipolar, 1.0, 50.0, "%.1f", imgui.ImGuiSliderFlags_None)) {
+            if (imgui.igSliderFloat(
+                "Epipolar Threshold",
+                &epipolar,
+                1.0,
+                50.0,
+                "%.1f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
                 params.epipolar_threshold = epipolar;
+                params_changed = true;
             }
+
+            var max_hamming_dist = params.max_hamming_dist;
+            if (imgui.igSliderFloat(
+                "Hamming Distance Threshold",
+                &max_hamming_dist,
+                0.01,
+                1.0,
+                "%.1f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                params.max_hamming_dist = max_hamming_dist;
+                params_changed = true;
+            }
+
+            var lowe_ratio = params.lowes_ratio;
+            if (imgui.igSliderFloat(
+                "Lowe's Ratio Threshold",
+                &lowe_ratio,
+                0.6,
+                0.9,
+                "%.2f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                params.lowes_ratio = lowe_ratio;
+                params_changed = true;
+            }
+
+            var cost_threshold = params.cost_ratio;
+            if (imgui.igSliderFloat(
+                "Cost Threshold",
+                &cost_threshold,
+                0.3,
+                0.8,
+                "%.2f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                params.cost_ratio = cost_threshold;
+                params_changed = true;
+            }
+
+            imgui.igNewLine();
+            imgui.igText("Cost Weights (should sum to 1.0)");
+
+            var epipolar_weight = params.epipolar_weight;
+            if (imgui.igSliderFloat(
+                "Epipolar Weight",
+                &epipolar_weight,
+                0.0,
+                1.0,
+                "%.2f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                params.epipolar_weight = epipolar_weight;
+                params_changed = true;
+            }
+
+            var disparity_weight = params.disparity_weight;
+            if (imgui.igSliderFloat(
+                "Disparity Weight",
+                &disparity_weight,
+                0.0,
+                1.0,
+                "%.2f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                params.disparity_weight = disparity_weight;
+                params_changed = true;
+            }
+
+            var hamming_dist_weight = params.hamming_dist_weight;
+            if (imgui.igSliderFloat(
+                "Hamming Distance Weight",
+                &hamming_dist_weight,
+                0.0,
+                1.0,
+                "%.2f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                params.hamming_dist_weight = hamming_dist_weight;
+                params_changed = true;
+            }
+
+            // Display total weight
+            const total_weight = epipolar_weight + disparity_weight + hamming_dist_weight;
+            imgui.igText("Total Weight: %.2f", total_weight);
+            if (@abs(total_weight - 1.0) > 0.001) {
+                imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "Warning: Weights should sum to 1.0");
+            }
+
+            ctx.StereoMatcher.params_changed = params_changed;
         }
         imgui.igEnd();
     }

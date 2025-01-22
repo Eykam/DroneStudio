@@ -3,40 +3,18 @@ const Node = @import("Node.zig");
 const KeypointDebugger = @import("Shape.zig").InstancedKeypointDebugger;
 const InstancedLine = @import("Shape.zig").InstancedLine;
 const CudaBinds = @import("bindings/cuda.zig");
+const StereoParams = CudaBinds.StereoParams;
 const libav = @import("bindings/libav.zig");
 const gl = @import("bindings/gl.zig");
-const KeyPoint = CudaBinds.KeyPoint;
 const video = libav.video;
 const glad = gl.glad;
-
-pub const MatchingParameters = struct {
-    // distance between center of camera sensors in mm
-    baseline_mm: f32,
-    // focal length of camera in mm
-    focal_length_mm: f32,
-    sensor_width_mm: f32,
-    // Difference in grayscale value to be considered brighter or darker than reference pixel in FAST corner detection
-    intensity_threshold: u8 = 15,
-    // Radius of ring to check around reference pixel for FAST corner detection
-    circle_radius: u32 = 3,
-    // Length of contiguous pixels on circle radius around reference pixel that all need to be brighter / darker than
-    // reference pixel by intesity threshold
-    arc_length: u32 = 9,
-    // Maximum number of keypoints that can be detected in a given image
-    max_keypoints: u32 = 50000,
-    // Sigma for gaussian blurring before corner detection
-    sigma: f32 = 1.0,
-    // max horizontal distance between keypoints
-    max_disparity: f32 = 100,
-    // max vertical distance between keypoints
-    epipolar_threshold: f32 = 15,
-};
 
 pub const StereoMatcher = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    params: *MatchingParameters,
+    params: *StereoParams,
+    params_changed: bool,
     num_matches: *c_int,
 
     left: *KeypointManager,
@@ -52,21 +30,26 @@ pub const StereoMatcher = struct {
         left_node: *Node,
         right_node: *Node,
         combined_node: *Node,
-        params: ?MatchingParameters,
+        params: ?StereoParams,
     ) !*Self {
         var matcher = try allocator.create(Self);
 
         matcher.allocator = allocator;
 
-        const matching_params = try allocator.create(MatchingParameters);
-
-        matching_params.* = params orelse MatchingParameters{
+        const stereo_params = try allocator.create(StereoParams);
+        const sensor_width_mm = 6.45;
+        const focal_length_mm = 2.75;
+        stereo_params.* = params orelse StereoParams{
+            .image_width = left_node.width.?,
+            .image_height = left_node.height.?,
             .baseline_mm = 76.3,
-            .focal_length_mm = 2.75,
-            .sensor_width_mm = 6.45,
+            .focal_length_mm = focal_length_mm,
+            .focal_length_px = focal_length_mm * (@as(f32, @floatFromInt(left_node.width.?)) / sensor_width_mm),
+            .sensor_width_mm = sensor_width_mm,
         };
 
-        matcher.params = matching_params;
+        matcher.params = stereo_params;
+        matcher.params_changed = false;
         matcher.num_matches = try allocator.create(c_int);
         matcher.num_matches.* = 0;
 
@@ -192,7 +175,7 @@ pub const StereoMatcher = struct {
         } else if (right_image_params != null and left_image_params == null) {
             std.debug.print("Unable to create Image params for left, Continuing to detect and render Right image...\n", .{});
             try self.right.keypoint_detector.?.detect_keypoints(
-                self.params.intensity_threshold,
+                self.params,
                 right_image_params.?,
             );
 
@@ -204,7 +187,7 @@ pub const StereoMatcher = struct {
         } else if (left_image_params != null and right_image_params == null) {
             std.debug.print("Unable to create Image params for right, Continuing to detect and render Left image...\n", .{});
             try self.left.keypoint_detector.?.detect_keypoints(
-                self.params.intensity_threshold,
+                self.params,
                 left_image_params.?,
             );
 

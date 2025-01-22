@@ -2,6 +2,17 @@
 #define KEYPOINT_DETECTOR_H
 
 #include <stdint.h>
+#include <stdbool.h> 
+
+#ifdef __CUDACC__
+    #include <cuda_runtime.h>
+    #include <cuda_gl_interop.h>
+#else
+    // Forward declare CUDA types when not compiling with CUDA
+    typedef struct CUgraphicsResource_st *cudaGraphicsResource_t;
+    typedef struct cudaArray *cudaArray_t;
+    typedef struct CUsurfObject_st *cudaSurfaceObject_t;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +68,7 @@ typedef struct DetectorInstance {
     int gl_ytexture;
     int gl_uvtexture;
     int gl_depthtexture;
-    alignas(16) float world_transform[16];; 
+    float world_transform[16];
     float* d_world_transform;
     CudaGLResources gl_resources;
     CudaGLTextureResource* y_texture;
@@ -69,9 +80,33 @@ typedef struct DetectorInstance {
 } DetectorInstance;
 
 
+typedef struct StereoParams {
+    int image_width;
+    int image_height;
+    float baseline_mm;
+    float focal_length_mm;
+    float focal_length_px;
+    float sensor_width_mm;
+    uint8_t intensity_threshold;
+    uint32_t circle_radius;
+    uint32_t arc_length;
+    uint32_t max_keypoints;
+    float sigma;
+    float max_disparity;
+    float epipolar_threshold;
+    float max_hamming_dist;
+    float lowes_ratio;
+    float cost_threshold;
+    float epipolar_weight;
+    float disparity_weight;
+    float hamming_dist_weight;
+    bool show_connections;
+    bool disable_matching;
+} StereoParams;
+
 
 // Initialize CUDA resources
-int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture, const float transform[16]);
+int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture);
 void cuda_cleanup_detector(int detector_id);
 
 int cuda_register_gl_texture(int detector_id);
@@ -96,20 +131,17 @@ int cuda_map_transformation(int detector_id,  const float transformation[16]);
 
 float cuda_detect_keypoints(
     int detector_id,
-    uint8_t threshold,
-    ImageParams* image,
-    float sigma
+    StereoParams params,  
+    ImageParams* image
 );
 
 int cuda_match_keypoints(
     int detector_id_left,
     int detector_id_right,
     int detector_id_combined,
-    float baseline,
-    float focal_length,
+    StereoParams params,  
     int* num_matches,
-    uint8_t threshold,
-    
+
     ImageParams* left,
     ImageParams* right
 );

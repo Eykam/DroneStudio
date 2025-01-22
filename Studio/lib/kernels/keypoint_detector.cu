@@ -140,6 +140,7 @@ __global__ void detectFASTKeypoints(
     int height,
     int linesize,
     uint8_t threshold,
+    uint32_t arc_length,
     float4* positions,
     float4* colors,
     BRIEFDescriptor* descriptors,
@@ -218,7 +219,7 @@ __global__ void detectFASTKeypoints(
     }
 
     // Check if point is a corner
-    bool is_keypoint = (max_consecutive_brighter >= 9 || max_consecutive_darker >= 9);
+    bool is_keypoint = (max_consecutive_brighter >= arc_length || max_consecutive_darker >= arc_length);
 
     // Non-maximum suppression
     if (is_keypoint) {
@@ -306,16 +307,6 @@ __global__ void detectFASTKeypoints(
 
 
 // ============================================================= Matching =================================================================
-// Matching parameters
-struct MatchingParams {
-    float baseline;
-    float focal_length_px;
-    float max_disparity;
-    float epipolar_threshold;
-    int image_width;
-    int image_height;
-};
-
 struct BestMatch {
     int   bestIdx;   
     float bestCost;   
@@ -383,14 +374,19 @@ __device__ inline int hammingDistance(const BRIEFDescriptor& desc1, const BRIEFD
 
 
 __device__ float computeCost(
-    const float4& leftPos,            
-    const BRIEFDescriptor& leftDesc,  
-    const float4& rightPos,           
-    const BRIEFDescriptor& rightDesc, 
-    const MatchingParams& params     
+    const float4 &leftPos,            
+    const BRIEFDescriptor &leftDesc,  
+    const float4 &rightPos,           
+    const BRIEFDescriptor &rightDesc, 
+    const StereoParams &params     
 ) {
     // 1. Epipolar difference
     float yDiff = fabsf(leftPos.y - rightPos.y);
+    
+    if (yDiff > params.epipolar_threshold) {
+        return 1e10f;
+    }
+
     // Scale it by the epipolar threshold so that epipolarCost is roughly in [0..1]
     float epipolarCost = yDiff / params.epipolar_threshold;
 
@@ -406,10 +402,13 @@ __device__ float computeCost(
     int descDistance = hammingDistance(leftDesc, rightDesc);
     float descCost = (float)descDistance / 512.0f;
 
+    if (descCost > params.max_hamming_dist) {
+        return 1e10f;
+    }
 
-    float totalCost = 0.5f * epipolarCost 
-                    + 0.3f * descCost
-                    + 0.2f * disparityCost;
+    float totalCost = params.epipolar_weight * epipolarCost 
+                    + params.hamming_dist_weight * descCost
+                    + params.disparity_weight * disparityCost;
 
     return totalCost;
 }
@@ -423,7 +422,7 @@ __global__ void matchLeftToRight(
     const BRIEFDescriptor* __restrict__ rightDescriptors,
     int rightCount,
 
-    MatchingParams params,
+    StereoParams params,
 
     BestMatch* __restrict__ bestMatchesLeft  // [leftCount]
 ) {
@@ -453,14 +452,18 @@ __global__ void matchLeftToRight(
             secondBestCost = cost;
         }
     }
+    
+    const float COST_THRESHOLD = params.cost_threshold;  // Reject matches with high absolute cost
+    const float RATIO_THRESHOLD = params.lowes_ratio; // Lowe's ratio test threshold
 
-    // Optionally apply ratio test or absolute threshold
-    // e.g., if bestCost > SOME_THRESH or bestCost > 0.7f * secondBestCost => discard
-    // but for cross-check, you can also do it after the cross-check step.
+    if (bestCost > COST_THRESHOLD || 
+        (secondBestCost < 1e9f && bestCost > RATIO_THRESHOLD * secondBestCost)) {
+        bestIdx = -1;  // Mark as invalid match
+        bestCost = 1e9f;
+    }
     
     bestMatchesLeft[leftIdx].bestIdx  = bestIdx;
     bestMatchesLeft[leftIdx].bestCost = bestCost;
-    // bestMatchesLeft[leftIdx].secondBestCost = secondBestCost; // optional
 }
 
 __global__ void matchRightToLeft(
@@ -472,7 +475,7 @@ __global__ void matchRightToLeft(
     const BRIEFDescriptor* __restrict__ leftDescriptors,
     int leftCount,
 
-    MatchingParams params,
+    StereoParams params,
 
     BestMatch* __restrict__ bestMatchesRight  // [rightCount]
 ) {
@@ -518,7 +521,7 @@ __global__ void crossCheckMatches(
     int leftCount,
     int rightCount,
 
-    const MatchingParams params,
+    const StereoParams params,
 
     // Output arrays:
     MatchedKeypoint* __restrict__ matchedPairs, 
@@ -553,7 +556,7 @@ __global__ void crossCheckMatches(
         Keypoint matchedPoint = triangulatePosition(
                 left_pos,
                 right_pos,
-                params.baseline,
+                params.baseline_mm,
                 params.focal_length_px,
                 params.image_width,
                 params.image_height
@@ -566,178 +569,6 @@ __global__ void crossCheckMatches(
         };
     }
 }
-
-
-// __global__ void matchKeypointsKernel(
-//     const float4* __restrict__ left_positions,
-//     const float4* __restrict__ right_positions,
-//     const BRIEFDescriptor* __restrict__ left_descriptors,
-//     const BRIEFDescriptor* __restrict__ right_descriptors,
-//     const int left_count,
-//     const int right_count,
-//     const MatchingParams params,
-//     MatchedKeypoint* matches,
-//     int* match_count,
-//     const int max_matches,
-//     cudaSurfaceObject_t source_tex,      // Y plane texture from left image
-//     cudaSurfaceObject_t combined_tex     // Target texture for visualization
-
-// ) {
-//     extern __shared__ float shared_mem[];
-    
-//     // Split shared memory into different arrays
-//     float* min_costs = shared_mem;
-//     float* second_min_costs = &min_costs[blockDim.x];
-//     int* best_matches = (int*)&second_min_costs[blockDim.x];
-//     int* used_right_points = &best_matches[blockDim.x];
-//     int* shared_count = (int*)&used_right_points[right_count];
-
-//     const int left_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
-//     // Initialize shared memory
-//     if (threadIdx.x < blockDim.x) {
-//         min_costs[threadIdx.x] = INFINITY;
-//         second_min_costs[threadIdx.x] = INFINITY;
-//         best_matches[threadIdx.x] = -1;
-//     }
-    
-//     if (threadIdx.x < right_count) {
-//         used_right_points[threadIdx.x] = 0;
-//     }
-    
-//     if (threadIdx.x == 0) {
-//         shared_count[0] = 0;
-//     }
-
-//     __syncthreads();
-
-//     if (left_idx >= left_count) return;
-    
-//     float3 left_pos = make_float3(
-//         left_positions[left_idx].x,
-//         left_positions[left_idx].y,
-//         left_positions[left_idx].z
-//     );
-
-//     BRIEFDescriptor left_desc = left_descriptors[left_idx];
-
-//     float best_desc_distance = INFINITY;
-//     float best_y_diff = INFINITY;
-//     float best_disparity = INFINITY;
-
-
-//     const int MAX_DESC_DISTANCE = 300.0f; 
-    
-//     // Find best and second-best matches for this left keypoint
-//     for (int right_idx = 0; right_idx < right_count; right_idx++) {
-//         float3 right_pos = make_float3(
-//             right_positions[right_idx].x,
-//             right_positions[right_idx].y,
-//             right_positions[right_idx].z
-//         );
-
-//         // Check epipolar constraint (y-difference)
-//         float y_diff = fabsf(left_pos.y - right_pos.y);
-//         float disparity = left_pos.x - right_pos.x;
-
-//         if (y_diff > params.epipolar_threshold || 
-//             disparity <= 0 || 
-//             disparity > params.max_disparity) {
-//             continue;
-//         }
-      
-//         // Calculate descriptor distance
-//         int desc_distance = hammingDistance(left_desc, right_descriptors[right_idx]);
-//         if (desc_distance > MAX_DESC_DISTANCE) continue;
-      
-//         // Calculate individual costs
-//         float desc_cost = desc_distance / 512.0f;
-//         float epipolar_cost = y_diff / params.epipolar_threshold;
-//         float disparity_cost = disparity / params.max_disparity;
-
-//         // Weighted combination of costs
-//         float total_cost = epipolar_cost * 0.3f +
-//                           desc_cost * 0.5f +
-//                           disparity_cost * 0.2f;
-
-//         // Maintain best and second-best matches
-//         if (total_cost < min_costs[threadIdx.x]) {
-//             best_desc_distance = desc_distance;
-//             best_y_diff = y_diff;
-//             best_disparity = disparity;
-            
-//             second_min_costs[threadIdx.x] = min_costs[threadIdx.x];
-//             min_costs[threadIdx.x] = total_cost;
-//             best_matches[threadIdx.x] = right_idx;
-//         } else if (total_cost < second_min_costs[threadIdx.x]) {
-//             second_min_costs[threadIdx.x] = total_cost;
-//         }
-//     }
-
-//     __syncthreads();
-
-//     // Apply Lowe's ratio test and absolute threshold
-//     const float RATIO_THRESH = 0.9f; 
-//     const float ABS_COST_THRESH = 0.5f;
-    
-//     bool is_good_match = false;
-//     int right_idx = best_matches[threadIdx.x];
-
-//     if (right_idx >= 0) {
-//         bool passes_thresholds = (min_costs[threadIdx.x] < ABS_COST_THRESH) &&
-//                                 (min_costs[threadIdx.x] < second_min_costs[threadIdx.x] * RATIO_THRESH);
-        
-//         bool passes_validation = (best_y_diff < params.epipolar_threshold * 0.5f) &&
-//                                 (best_disparity > 1.0f) &&
-//                                 (best_desc_distance < MAX_DESC_DISTANCE * 0.75f);
-        
-//         is_good_match = passes_thresholds && passes_validation;
-        
-//         // Try to claim the right point
-//         if (is_good_match && right_idx < right_count) {
-//             is_good_match = (atomicCAS(&used_right_points[right_idx], 0, 1) == 0);
-//             if (is_good_match) {
-//                 atomicAdd(shared_count, 1);
-//             }
-//         }
-//     }
-
-//      __syncthreads();
-
-//     // Update global match count
-//     if (threadIdx.x == 0 && shared_count[0] > 0) {
-//         atomicAdd(match_count, min(shared_count[0], max_matches));
-//     }
-
-//     __syncthreads();
-
-//     // Store matches, respecting the max_matches limit
-//     if (is_good_match) {
-//         int match_idx = atomicSub(shared_count, 1) - 1;
-//         if (match_idx >= 0 && match_idx < max_matches) {
-//             float3 right_pos = make_float3(
-//                 right_positions[right_idx].x,
-//                 right_positions[right_idx].y,
-//                 right_positions[right_idx].z
-//             );
-
-//             Keypoint matchedPoint = triangulatePosition(
-//                 left_pos,
-//                 right_pos,
-//                 params.baseline,
-//                 params.focal_length_px,
-//                 params.image_width,
-//                 params.image_height
-//             );
-
-//             matches[match_idx] = {
-//                 left_pos,
-//                 right_pos,
-//                 matchedPoint
-//             };
-//         }
-//     }
-// }
 
 
 __global__ void setTextureKernel(
@@ -901,7 +732,9 @@ __global__ void visualizeTriangulation(
     float4* __restrict__ right_line_colors,
 
     const float* left_transform,
-    const float* right_transform
+    const float* right_transform,
+
+    bool show_connections
 ) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= match_count) return;
@@ -911,25 +744,36 @@ __global__ void visualizeTriangulation(
     float4 match_color = generate_unique_color(idx, 0.5f);
     
     // Transform the world position
-    keypoint_positions[idx] = make_float4(match.world.position.x, match.world.position.y, match.world.position.z, 0.0f);
+    keypoint_positions[idx] = make_float4(match.world.position.x, match.world.position.y - 0.01, match.world.position.z, 0.0f);
     keypoint_colors[idx] = make_float4(1.0f, 0.0f, 1.0f, 1.0f);
 
-    // Transform left keypoint from canvas space to world space
-    float4 left_world_pos = transform_point(left_transform, 
-        make_float4(match.left_pos.x, match.left_pos.y, match.left_pos.z, 0.0f));
-    // Transform right keypoint from canvas space to world space
-    float4 right_world_pos = transform_point(right_transform, 
-        make_float4(match.right_pos.x, match.right_pos.y, match.right_pos.z, 0.0f));
+    if (show_connections){
+        // Transform left keypoint from canvas space to world space
+        float4 left_world_pos = transform_point(left_transform, 
+            make_float4(match.left_pos.x, match.left_pos.y, match.left_pos.z, 0.0f));
+        // Transform right keypoint from canvas space to world space
+        float4 right_world_pos = transform_point(right_transform, 
+            make_float4(match.right_pos.x, match.right_pos.y, match.right_pos.z, 0.0f));
 
 
-    // Set line positions
-    left_line_positions[idx * 2] = make_float4(left_world_pos.x, left_world_pos.y,left_world_pos.z, 0.0f);
-    left_line_positions[idx * 2 + 1] = keypoint_positions[idx];
-    left_line_colors[idx] = match_color;
-    
-    right_line_positions[idx * 2] = make_float4(right_world_pos.x, right_world_pos.y,right_world_pos.z, 0.0f);;
-    right_line_positions[idx * 2 + 1] = keypoint_positions[idx];
-    right_line_colors[idx] = match_color;
+        // Set line positions
+        left_line_positions[idx * 2] = make_float4(left_world_pos.x, left_world_pos.y,left_world_pos.z, 0.0f);
+        left_line_positions[idx * 2 + 1] = keypoint_positions[idx];
+        left_line_colors[idx] = match_color;
+        
+        right_line_positions[idx * 2] = make_float4(right_world_pos.x, right_world_pos.y,right_world_pos.z, 0.0f);;
+        right_line_positions[idx * 2 + 1] = keypoint_positions[idx];
+        right_line_colors[idx] = match_color;
+    } else{
+        left_line_positions[idx * 2] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        left_line_positions[idx * 2 + 1] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        left_line_colors[idx] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // Transparent
+
+        right_line_positions[idx * 2] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        right_line_positions[idx * 2 + 1] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        right_line_colors[idx] = make_float4(0.0f, 0.0f, 0.0f, 0.0f);  // Transparent
+
+    }
 
 }
 
@@ -953,7 +797,7 @@ extern "C" {
 
 //     printf("Using CUDA Device: %d - %s\n", cudaDevice, prop.name);
 
-int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture, const float transform[16]) {
+int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture) {
     int slot = find_free_detector_slot();
     if (slot < 0) {
         return -1;
@@ -1577,9 +1421,8 @@ void initGaussianKernel(float sigma) {
 
 float cuda_detect_keypoints(
     int detector_id,
-    uint8_t threshold,
-    ImageParams* image,
-    float sigma = 1.0f
+    StereoParams params,
+    ImageParams* image
 ) {
     DetectorInstance* detector = get_detector_instance(detector_id);
     
@@ -1592,7 +1435,7 @@ float cuda_detect_keypoints(
     cudaMalloc(&d_temp2, image->y_linesize * image->height);
     
     // Initialize Gaussian kernel
-    initGaussianKernel(sigma);
+    initGaussianKernel(params.sigma);
     
     // Setup kernel launch parameters
     dim3 block(16, 16);
@@ -1649,7 +1492,8 @@ float cuda_detect_keypoints(
         image->width,
         image->height,
         image->y_linesize,
-        threshold,
+        params.intensity_threshold,
+        params.arc_length,
         detector->gl_resources.keypoints.d_positions,
         detector->gl_resources.keypoints.d_colors,
         detector->d_descriptors,
@@ -1738,79 +1582,12 @@ static float execute_matching(
     int* d_match_count,
     int max_matches,
     int* num_matches,
-    float baseline,
-    float focal_length,
+    StereoParams params,
     ImageParams* left,
     ImageParams* right,
     cudaEvent_t start,
     cudaEvent_t stop
 ) {
-    // Set up matching parameters
-    float sensor_width_mm = 6.45f;
-
-    MatchingParams params = {
-        .baseline = baseline,
-        .focal_length_px = focal_length * (left->width / sensor_width_mm),
-        .max_disparity = 100.0f,
-        .epipolar_threshold = 10.0f,
-        .image_width = left->width,
-        .image_height = left->height
-    };
-
-
-    // Configure kernel launch parameters
-    // dim3 blockMatching(512);
-    // dim3 gridMatching((max_matches + blockMatching.x - 1) / blockMatching.x);
-
-    // size_t shared_mem_size = 
-    //     (2 * sizeof(float) + sizeof(int)) * blockMatching.x + // min_costs, second_min_costs, best_matches
-    //     sizeof(int) * max_matches +                          // used_right_points
-    //     sizeof(int);                                         // shared_count
-
-    // Execute matching kernel
-    // cudaEventRecord(start);
-    // matchKeypointsKernel<<<gridMatching, blockMatching, shared_mem_size>>>(
-    //     left_detector->gl_resources.keypoints.d_positions,
-    //     right_detector->gl_resources.keypoints.d_positions,
-    //     left_detector->d_descriptors,
-    //     right_detector->d_descriptors,
-    //     max_matches,
-    //     max_matches,
-    //     params,
-    //     d_matches,
-    //     d_match_count,
-    //     max_matches,
-    //     left_detector->y_texture->surface,
-    //     combined_detector->y_texture->surface
-    // );
-    // cudaEventRecord(stop);
-
-    // error = cudaGetLastError();
-    // if (error != cudaSuccess) {
-    //     printf("Matching kernel failed: %s\n", cudaGetErrorString(error));
-    //     return -1.0;
-    // }
-    // cudaEventSynchronize(stop);
-
-    // float milliseconds_matching;
-    // cudaEventElapsedTime(&milliseconds_matching, start, stop);
-    // printf("Matching Kernel Time: %.2f ms\n", milliseconds_matching);
-
-    // if (*num_matches == 0) {
-    //     printf("No Matches detected!\n");
-    //     return milliseconds_matching;
-    // }
-
-    // // Get match count
-    // cudaError_t error;
-    // error = cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
-    // if (error != cudaSuccess) {
-    //     printf("Failed to copy match count: %s\n", cudaGetErrorString(error));
-    //     return -1.0;
-    // }
-
-    // printf("num_matches: %d\n", *num_matches);
-
     BestMatch* d_bestMatchesLeft  = nullptr;
     BestMatch* d_bestMatchesRight = nullptr;
 
@@ -1898,9 +1675,11 @@ static float execute_matching(
         combined_detector->gl_resources.connections.right.d_positions,
         combined_detector->gl_resources.connections.right.d_colors,
         left_detector->d_world_transform,
-        right_detector->d_world_transform
+        right_detector->d_world_transform,
+        params.show_connections
     );
     cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
 
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
@@ -1908,7 +1687,6 @@ static float execute_matching(
         return -1.0;
     }
 
-    cudaEventSynchronize(stop);
     float milliseconds_vis;
     cudaEventElapsedTime(&milliseconds_vis, start, stop);
     printf("Visualization time: %.2f ms\n", milliseconds_vis);
@@ -1928,6 +1706,7 @@ static float execute_matching(
         left->image_height
     );
     cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
 
     error = cudaGetLastError();
     if (error != cudaSuccess) {
@@ -1935,7 +1714,6 @@ static float execute_matching(
         return -1.0;
     }
 
-    cudaEventSynchronize(stop);
     float milliseconds_segmentation;
     cudaEventElapsedTime(&milliseconds_segmentation, start, stop);
     printf("Assigning Nearest keypoint Distance time: %.2f ms\n", milliseconds_segmentation);
@@ -1952,16 +1730,12 @@ int cuda_match_keypoints(
     int detector_id_left,
     int detector_id_right,
     int detector_id_combined,
-    float baseline,
-    float focal_length,
+    StereoParams params,
     int* num_matches,
-    uint8_t threshold,
 
     ImageParams* left,
     ImageParams* right
 ) {
-    float sigma = 1.0f;
-
     DetectorInstance* left_detector = get_detector_instance(detector_id_left);
     DetectorInstance* right_detector = get_detector_instance(detector_id_right);
     DetectorInstance* combined_detector = get_detector_instance(detector_id_combined);
@@ -2033,8 +1807,8 @@ int cuda_match_keypoints(
     }
 
     // Detect keypoints
-    float detection_time_left = cuda_detect_keypoints(detector_id_left, threshold, left, sigma);
-    float detection_time_right = cuda_detect_keypoints(detector_id_right, threshold, right, sigma);
+    float detection_time_left = cuda_detect_keypoints(detector_id_left, params, left);
+    float detection_time_right = cuda_detect_keypoints(detector_id_right, params, right);
     
     cudaDeviceSynchronize();
 
@@ -2074,37 +1848,41 @@ int cuda_match_keypoints(
         return -1;
     }
 
-    float matching_time = execute_matching(
-        left_detector, 
-        right_detector, 
-        combined_detector,
-        d_matches, 
-        d_match_count, 
-        max_matches, 
-        num_matches,
-        baseline,
-        focal_length, 
-        left, 
-        right, 
-        start, 
-        stop
-    );
+    float matching_time = 0;
+    if (!params.disable_matching){
 
-    // Perform matching
-    if (matching_time < 0) {
-        cleanup_resources(
-            detector_id_left, 
-            detector_id_right, 
-            detector_id_combined,
+        matching_time = execute_matching(
+            left_detector, 
+            right_detector, 
+            combined_detector,
             d_matches, 
             d_match_count, 
+            max_matches, 
+            num_matches,
+            params,
+            left, 
+            right, 
             start, 
             stop
         );
-        cudaDeviceSynchronize();
-        printf("Matching Failed!\n");
-        return -1;
+        
+        // Perform matching
+        if (matching_time < 0) {
+            cleanup_resources(
+                detector_id_left, 
+                detector_id_right, 
+                detector_id_combined,
+                d_matches, 
+                d_match_count, 
+                start, 
+                stop
+            );
+            cudaDeviceSynchronize();
+            printf("Matching Failed!\n");
+            return -1;
+        }
     }
+
 
     printf("Total Pipeline Execution Time: %f\n", detection_time_left + detection_time_right + matching_time);
 

@@ -289,6 +289,9 @@ pub const Scene = struct {
 
         if (self.appState.fly) {
             self.camera.position = Vec3.add(self.camera.position, movement);
+            if (self.appState.keys[@as(usize, glfw.GLFW_KEY_SPACE)]) {
+                self.camera.position.y += velocity;
+            }
         } else {
             self.camera.position = Vec3.add(
                 Vec3{
@@ -655,9 +658,12 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
 fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
     if (window == null) return;
 
-    _ = xoffset;
-
     const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.menu and imgui.igGetIO().*.WantCaptureMouse) {
+        imgui.ImGui_ImplGlfw_ScrollCallback(@ptrCast(window), xoffset, yoffset);
+        return;
+    }
 
     const zoomSensitivity: f32 = 0.1;
     const newZoom = scene.appState.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.appState.zoom;

@@ -191,6 +191,8 @@ pub fn main() !void {
 
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
+        glfw.glfwPollEvents();
+
         if (glfw.glfwGetWindowAttrib(window, glfw.GLFW_FOCUSED) == glfw.GLFW_FALSE or scene.width == 0 or scene.height == 0) {
             continue; // Skip frame if window is not focused
         }
@@ -208,6 +210,9 @@ pub fn main() !void {
 
         if (!scene.appState.paused) {
             try StereoMatcher.match();
+        } else if (StereoMatcher.params_changed) {
+            try StereoMatcher.match();
+            StereoMatcher.params_changed = false;
         }
     }
 }
