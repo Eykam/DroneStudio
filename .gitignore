@@ -9,5 +9,7 @@ ffmpeg-windows
 cuda-windows
 *keypoint_detector.o
 gprof2dot.py
+generate_brief_pattern.py
 out.dot
 callgrind*
+sass.txt

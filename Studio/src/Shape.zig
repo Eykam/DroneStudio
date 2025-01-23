@@ -5,7 +5,6 @@ const Mesh = @import("Mesh.zig");
 const Node = @import("Node.zig");
 const gl = @import("bindings/gl.zig");
 const Debug = @import("Debug.zig");
-const CudaBinds = @import("bindings/cuda.zig");
 const Vertex = Mesh.Vertex;
 const Vec3 = Math.Vec3;
 const glad = gl.glad;
@@ -457,53 +456,148 @@ pub const Grid = struct {
 pub const TexturedPlane = struct {
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32) !*Node {
+    pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32, texture_dims: ?struct { w: u32, h: u32 }) !*Node {
         const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
         const plane_params = try Self.generatePlaneVertices(
+            allocator,
             pos orelse default_pos,
             width orelse 1.0,
             height orelse 1.0,
+            1280,
         );
-        const vertices: []Vertex = try allocator.dupe(Vertex, &plane_params.vertices);
-        const indices: []u32 = try allocator.dupe(u32, &plane_params.indices);
+        // defer {
+        //     allocator.free(plane_params.vertices);
+        //     allocator.free(plane_params.indices);
+        // }
+
+        const vertices: []Vertex = plane_params.vertices;
+        const indices: []u32 = plane_params.indices;
 
         const node = try Node.init(allocator, vertices, indices, Self.draw);
+
+        // Initialize textures if dimensions are provided
+        if (texture_dims) |dims| {
+            if (node.mesh) |mesh| {
+                glad.glGenTextures(1, &mesh.textureID.y);
+                glad.glGenTextures(1, &mesh.textureID.uv);
+                glad.glGenTextures(1, &mesh.textureID.depth);
+
+                // Initialize Y texture with null data
+                glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.yTextureUnit));
+                glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
+                glad.glTexImage2D(
+                    glad.GL_TEXTURE_2D,
+                    0,
+                    glad.GL_R8,
+                    @intCast(dims.w),
+                    @intCast(dims.h),
+                    0,
+                    glad.GL_RED,
+                    glad.GL_UNSIGNED_BYTE,
+                    null, // no initial data
+                );
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+
+                // Initialize UV texture with null data
+                glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.yTextureUnit));
+                glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
+                glad.glTexImage2D(
+                    glad.GL_TEXTURE_2D,
+                    0,
+                    glad.GL_RG8,
+                    @intCast(@divTrunc(dims.w, 2)),
+                    @intCast(@divTrunc(dims.h, 2)),
+                    0,
+                    glad.GL_RG,
+                    glad.GL_UNSIGNED_BYTE,
+                    null, // no initial data
+                );
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+
+                // Initialize depth texture (using GL_R32F for floating-point depth values)
+                glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + node.depthTextureUnit));
+                glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.depth);
+                glad.glTexImage2D(
+                    glad.GL_TEXTURE_2D,
+                    0,
+                    glad.GL_R32F, // Single-channel floating point format for depth
+                    @intCast(dims.w),
+                    @intCast(dims.h),
+                    0,
+                    glad.GL_RED,
+                    glad.GL_FLOAT,
+                    null,
+                );
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+                glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+
+                node.width = @intCast(dims.w);
+                node.height = @intCast(dims.h);
+            }
+        }
 
         return node;
     }
 
-    pub fn generatePlaneVertices(position: Vec3, width: f32, height: f32) !struct { vertices: [4]Vertex, indices: [6]u32 } {
-        const halfWidth: f32 = width / 2.0;
-        const halfHeight: f32 = height / 2.0;
+    pub fn generatePlaneVertices(allocator: std.mem.Allocator, position: Vec3, width: f32, height: f32, resolution: u32) !struct { vertices: []Vertex, indices: []u32 } {
+        const segments = resolution; // Number of segments per side
+        const vertices_per_side = segments + 1;
+        const num_vertices = vertices_per_side * vertices_per_side;
+        const num_triangles = segments * segments * 2;
 
-        const vertices: [4]Vertex = .{
-            .{
-                .position = .{ position.x - halfWidth, position.y, position.z - halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 0.0, 1.0 },
-            },
-            .{
-                .position = .{ position.x + halfWidth, position.y, position.z - halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 1.0, 1.0 },
-            },
-            .{
-                .position = .{ position.x + halfWidth, position.y, position.z + halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 1.0, 0.0 },
-            },
-            .{
-                .position = .{ position.x - halfWidth, position.y, position.z + halfHeight },
-                .color = .{ 0.8, 0.8, 0.8 },
-                .texture = [_]f32{ 0.0, 0.0 },
-            },
-        };
+        var vertices = try allocator.alloc(Vertex, num_vertices);
+        var indices = try allocator.alloc(u32, num_triangles * 3);
 
-        const indices =
-            [6]u32{
-            0, 1, 2, // First triangle
-            2, 3, 0, // Second triangle
-        };
+        const step_x = width / @as(f32, @floatFromInt(segments));
+        const step_z = height / @as(f32, @floatFromInt(segments));
+        const start_x = position.x - (width / 2.0);
+        const start_z = position.z - (height / 2.0);
+
+        // Generate vertices
+        var z: u32 = 0;
+        while (z <= segments) : (z += 1) {
+            var x: u32 = 0;
+            while (x <= segments) : (x += 1) {
+                const vertex_idx = z * vertices_per_side + x;
+                const pos_x = start_x + @as(f32, @floatFromInt(x)) * step_x;
+                const pos_z = start_z + @as(f32, @floatFromInt(z)) * step_z;
+                const tex_x = @as(f32, @floatFromInt(x)) / @as(f32, @floatFromInt(segments));
+                const tex_z = 1.0 - @as(f32, @floatFromInt(z)) / @as(f32, @floatFromInt(segments));
+
+                vertices[vertex_idx] = .{
+                    .position = .{ pos_x, position.y, pos_z },
+                    .color = .{ 0.8, 0.8, 0.8 },
+                    .texture = [_]f32{ tex_x, tex_z },
+                };
+            }
+        }
+
+        // Generate indices
+        var idx: u32 = 0;
+        var z2: u32 = 0;
+        while (z2 < segments) : (z2 += 1) {
+            var x2: u32 = 0;
+            while (x2 < segments) : (x2 += 1) {
+                const top_left = z2 * vertices_per_side + x2;
+                const top_right = top_left + 1;
+                const bottom_left = (z2 + 1) * vertices_per_side + x2;
+                const bottom_right = bottom_left + 1;
+
+                // First triangle
+                indices[idx] = top_left;
+                indices[idx + 1] = bottom_left;
+                indices[idx + 2] = top_right;
+
+                // Second triangle
+                indices[idx + 3] = top_right;
+                indices[idx + 4] = bottom_left;
+                indices[idx + 5] = bottom_right;
+
+                idx += 6;
+            }
+        }
 
         return .{
             .vertices = vertices,
@@ -520,10 +614,8 @@ pub const TexturedPlane = struct {
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, mesh.meta.VBO);
 
         if (mesh.node) |node| {
-            if (node.y != null and node.uv != null) {
-                if (node.scene) |scene| {
-                    glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
-                }
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useTextureLoc, @as(c_int, 1));
             }
         }
 
@@ -564,7 +656,12 @@ pub const TexturedPlane = struct {
         glad.glEnableVertexAttribArray(2);
 
         // Draw the plane
-        glad.glDrawElements(glad.GL_TRIANGLES, @intCast(mesh.indices.?.len), glad.GL_UNSIGNED_INT, null);
+        glad.glDrawElements(
+            glad.GL_TRIANGLES,
+            @intCast(mesh.indices.?.len),
+            glad.GL_UNSIGNED_INT,
+            null,
+        );
 
         if (mesh.node) |node| {
             if (node.scene) |scene| {
@@ -584,17 +681,12 @@ pub const TexturedPlane = struct {
 pub const InstancedKeypointDebugger = struct {
     const Self = @This();
 
-    pub const Instance = struct {
-        position: [3]f32,
-        color: [3]f32 = .{ 1.0, 0.0, 0.0 }, // Default to red
-    };
-
-    pub fn init(allocator: std.mem.Allocator, max_keypoints: usize) !*Node {
+    pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, max_keypoints: usize) !*Node {
         // Generate the shared circle mesh if it doesn't exist
         const vertices = try allocator.alloc(Vertex, 1);
         vertices[0] = Vertex{
             .position = .{ 0, 0, 0 },
-            .color = .{ 1.0, 0.0, 0.0 },
+            .color = color orelse .{ 1.0, 0.0, 0.0 },
         };
         const node = try Node.init(allocator, vertices, null, Self.draw);
         const mesh = node.mesh.?;
@@ -633,17 +725,17 @@ pub const InstancedKeypointDebugger = struct {
             null,
             glad.GL_DYNAMIC_COPY,
         );
-        // Color (location = 4)
-        glad.glEnableVertexAttribArray(4);
+        // Color (location = 5)
+        glad.glEnableVertexAttribArray(5);
         glad.glVertexAttribPointer(
-            4,
+            5,
             4,
             glad.GL_FLOAT,
             glad.GL_FALSE,
             @sizeOf([4]f32),
             null,
         );
-        glad.glVertexAttribDivisor(4, 1);
+        glad.glVertexAttribDivisor(5, 1);
 
         node.instance_data = .{
             .position_buffer = position_buffer,
@@ -662,7 +754,7 @@ pub const InstancedKeypointDebugger = struct {
             }
 
             if (node.scene) |scene| {
-                glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 1));
+                glad.glUniform1i(scene.useInstancedKeypointLoc, @as(c_int, 1));
             }
 
             // OpenGL state setup
@@ -681,7 +773,7 @@ pub const InstancedKeypointDebugger = struct {
             glad.glDisable(glad.GL_BLEND);
 
             if (node.scene) |scene| {
-                glad.glUniform1i(scene.useInstancingLoc, @as(c_int, 0));
+                glad.glUniform1i(scene.useInstancedKeypointLoc, @as(c_int, 0));
             }
         }
     }
@@ -708,5 +800,124 @@ pub const InstancedKeypointDebugger = struct {
         }
 
         return vertices;
+    }
+};
+
+pub const InstancedLine = struct {
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, color: ?[3]f32, max_lines: usize) !*Node {
+        // Generate simple line vertices (start and end points)
+        const vertices = try allocator.alloc(Vertex, 2);
+        vertices[0] = Vertex{
+            .position = .{ 0, 0, 0 },
+            .color = color orelse .{ 1.0, 0.0, 0.0 },
+        };
+        vertices[1] = Vertex{
+            .position = .{ 0, 0, 0 }, // Unit vector in x direction as base
+            .color = color orelse .{ 1.0, 0.0, 0.0 },
+        };
+
+        const node = try Node.init(allocator, vertices, null, Self.draw);
+        const mesh = node.mesh.?;
+
+        // Set up instance attributes in VAO
+        glad.glBindVertexArray(mesh.meta.VAO);
+
+        // Start position buffer
+        var start_position_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &start_position_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, start_position_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_lines * @sizeOf([4]f32)), // vec4 for alignment
+            null,
+            glad.GL_DYNAMIC_COPY,
+        );
+
+        // Start position offset (location = 3)
+        glad.glEnableVertexAttribArray(3);
+        glad.glVertexAttribPointer(
+            3,
+            4,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            2 * @sizeOf([4]f32),
+            null,
+        );
+        glad.glVertexAttribDivisor(3, 1);
+
+        // End position offset (location = 4)
+        glad.glEnableVertexAttribArray(4);
+        glad.glVertexAttribPointer(
+            4,
+            4,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            2 * @sizeOf([4]f32),
+            @ptrFromInt(@sizeOf([4]f32)),
+        );
+        glad.glVertexAttribDivisor(4, 1);
+
+        // Color buffer
+        var color_buffer: u32 = undefined;
+        glad.glGenBuffers(1, &color_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, color_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_lines * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_COPY,
+        );
+
+        // Color (location = 5)
+        glad.glEnableVertexAttribArray(5);
+        glad.glVertexAttribPointer(
+            5,
+            4,
+            glad.GL_FLOAT,
+            glad.GL_FALSE,
+            @sizeOf([4]f32),
+            null,
+        );
+        glad.glVertexAttribDivisor(5, 1);
+
+        node.instance_data = .{
+            .position_buffer = start_position_buffer,
+            .color_buffer = color_buffer,
+            .count = 0,
+        };
+
+        return node;
+    }
+
+    pub fn draw(mesh: *Mesh) void {
+        if (mesh.node) |node| {
+            // Debug checks
+            if (node.instance_data == null or node.instance_data.?.count == 0) {
+                return; // Skip drawing if no instances
+            }
+
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useInstancedLinesLoc, @as(c_int, 1));
+            }
+
+            // OpenGL state setup
+            glad.glEnable(glad.GL_BLEND);
+            glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
+            glad.glLineWidth(5.0); // Set line width
+
+            glad.glBindVertexArray(mesh.meta.VAO);
+
+            // Draw lines
+            glad.glDrawArraysInstanced(glad.GL_LINES, 0, 2, @intCast(node.instance_data.?.count));
+
+            glad.glDisable(glad.GL_BLEND);
+            glad.glLineWidth(1.0); // Reset line width
+
+            if (node.scene) |scene| {
+                glad.glUniform1i(scene.useInstancedLinesLoc, @as(c_int, 0));
+            }
+        }
     }
 };

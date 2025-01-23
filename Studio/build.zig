@@ -3,6 +3,10 @@ const builtin = @import("builtin");
 const Build = std.Build;
 const process = std.process;
 
+// TODO: Look for a way to set these env variables in build script on linux
+// try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
+// try std.process.setEnvVar("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+
 // Helper function to determine the OpenGL library based on the target OS
 fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
     return switch (target.result.os.tag) {
@@ -170,8 +174,37 @@ fn configureLibs(
         },
     }
 
+    // ImGUI dependencies
+    const imgui_path = "lib/cimgui";
+    const imgui_sources = [_][]const u8{
+        "cimgui.cpp",
+        "imgui/imgui.cpp",
+        "imgui/imgui_draw.cpp",
+        "imgui/imgui_tables.cpp",
+        "imgui/imgui_widgets.cpp",
+        "imgui/imgui_demo.cpp",
+        "imgui/imgui_impl_glfw.cpp",
+        "imgui/imgui_impl_opengl3.cpp",
+    };
+
+    const cpp_flags = [_][]const u8{
+        "-std=c++11",
+        "-DIMGUI_IMPL_API=extern \"C\"",
+        "-DCIMGUI_USE_GLFW=1", // Enable GLFW backend
+        "-DCIMGUI_USE_OPENGL3=1", // Enable OpenGL3 backend
+    };
+
+    exe.addIncludePath(b.path(imgui_path));
+    for (imgui_sources) |source| {
+        exe.addCSourceFile(.{
+            .file = b.path(b.pathJoin(&.{ imgui_path, source })),
+            .flags = &cpp_flags,
+        });
+    }
+
     // Link the C standard library
     exe.linkLibC();
+    exe.linkLibCpp();
 }
 
 pub fn build(b: *std.Build) void {
@@ -213,7 +246,7 @@ pub fn build(b: *std.Build) void {
             "-c",
             "lib/kernels/keypoint_detector.cu",
             "-o",
-            "keypoint_detector.o",
+            "lib/kernels/keypoint_detector.o",
         });
 
         const cuda_detector_artifact = b.addObject(.{
@@ -222,7 +255,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
-        cuda_detector_artifact.addObjectFile(b.path("keypoint_detector.o"));
+        cuda_detector_artifact.addObjectFile(b.path("lib/kernels/keypoint_detector.o"));
         cuda_detector_artifact.step.dependOn(&cuda_detector_obj.step);
 
         exe.addObjectFile(cuda_detector_artifact.getEmittedBin());

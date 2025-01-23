@@ -10,6 +10,12 @@ const glCheckError = @import("Debug.zig").glCheckError;
 
 const Self = @This();
 
+pub const InstanceData = struct {
+    position_buffer: u32,
+    color_buffer: u32,
+    count: usize,
+};
+
 scene: ?*Scene = null,
 mesh: ?*Mesh,
 _update: ?*const fn (*Mesh) void,
@@ -21,18 +27,13 @@ parent: ?*Self = null,
 
 mutex: std.Thread.Mutex = std.Thread.Mutex{},
 
-y: ?[]u8 = null,
-uv: ?[]u8 = null,
 yTextureUnit: c_int = 0,
 uvTextureUnit: c_int = 0,
+depthTextureUnit: c_int = 0,
 width: ?c_int = null,
 height: ?c_int = null,
 texture_updated: bool = false,
-instance_data: ?struct {
-    position_buffer: u32,
-    color_buffer: u32,
-    count: usize,
-} = null,
+instance_data: ?InstanceData = null,
 
 // Transformation properties
 position: [3]f32 = .{ 0, 0, 0 },
@@ -67,8 +68,6 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?
 
     if (mesh_ptr) |mesh| {
         mesh.node = node_ptr;
-        glad.glGenTextures(1, &mesh.textureID.y);
-        glad.glGenTextures(1, &mesh.textureID.uv);
     }
 
     return node_ptr;
@@ -77,8 +76,6 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?
 pub fn deinit(self: *Self) void {
     const backing_allocator = self.backing_allocator;
     const arena = self.arena;
-
-    self.mutex.lock();
 
     for (self.children.items) |child| {
         child.deinit();
@@ -89,8 +86,6 @@ pub fn deinit(self: *Self) void {
         glad.glDeleteTextures(1, &mesh.textureID.uv);
         mesh.deinit();
     }
-
-    self.mutex.unlock();
 
     arena.deinit();
     backing_allocator.destroy(arena);
@@ -117,9 +112,6 @@ pub fn setScale(self: *Self, x: f32, y: f32, z: f32) void {
 }
 
 pub fn addChild(self: *Self, child: *Self) !void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-
     child.parent = self;
 
     if (self.scene) |scene| {
@@ -130,13 +122,11 @@ pub fn addChild(self: *Self, child: *Self) !void {
 }
 
 pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-
     self.scene = scene;
 
     self.yTextureUnit = scene.texGen.generateID();
     self.uvTextureUnit = scene.texGen.generateID();
+    self.depthTextureUnit = scene.texGen.generateID();
     // std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
 
     for (self.children.items) |child| {
@@ -177,9 +167,6 @@ fn updateWorldTransform(self: *Self) void {
 }
 
 pub fn update(self: *Self) void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-
     self.updateWorldTransform();
 
     if (self.mesh) |mesh| {
@@ -202,33 +189,43 @@ pub fn update(self: *Self) void {
 }
 
 pub fn bindTexture(self: *Self) !void {
-    // Generate texture objects if not already created
-    if (self.texture_updated) {
-        const mesh = self.*.mesh.?;
+    if (!self.texture_updated) return;
 
-        if (self.y) |y_data| {
-            // Bind and configure Y plane texture
-            glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
-            glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
-            glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_R8, self.width.?, self.height.?, 0, glad.GL_RED, glad.GL_UNSIGNED_BYTE, y_data.ptr);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-            if (self.scene) |scene| {
-                glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
-            }
-        }
+    const mesh = self.*.mesh.?;
 
-        if (self.uv) |uv_data| {
-            // Bind and configure interleaved UV plane texture
-            glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
-            glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
-            glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RG8, @divTrunc(self.width.?, 2), @divTrunc(self.height.?, 2), 0, glad.GL_RG, glad.GL_UNSIGNED_BYTE, uv_data.ptr);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-            glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-            if (self.scene) |scene| {
-                glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
-            }
-        }
+    glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));
+    glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.y);
+
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
+
+    glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.uvTextureUnit));
+    glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.uv);
+
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
+
+    glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.depthTextureUnit));
+    glad.glBindTexture(glad.GL_TEXTURE_2D, mesh.textureID.depth);
+
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_CLAMP_TO_EDGE);
+    glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_CLAMP_TO_EDGE);
+
+    if (self.scene) |scene| {
+        glad.glUniform1i(scene.yTextureLoc, self.yTextureUnit);
+        glad.glUniform1i(scene.uvTextureLoc, self.uvTextureUnit);
+        glad.glUniform1i(scene.depthTextureLoc, self.depthTextureUnit);
+    }
+
+    const err = glad.glGetError();
+    if (err != glad.GL_NO_ERROR) {
+        std.debug.print("GL Error in bindTexture: {}\n", .{err});
     }
 }
 

@@ -9,18 +9,23 @@ const Camera = @import("Camera.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const glad = gl.glad;
+const c = @import("bindings/c.zig");
+const imgui = c.imgui;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
 
 pub const AppState = struct {
+    last_frame_time: f64 = 0.0, // Time of the last frame
+    delta_time: f32 = 0.0, // Time between current frame and last frame
     last_mouse_x: f64 = 0.0,
     last_mouse_y: f64 = 0.0,
     first_mouse: bool = true,
     zoom: f32 = 90.0,
     keys: [1024]bool = .{false} ** 1024,
-    last_frame_time: f64 = 0.0, // Time of the last frame
-    delta_time: f32 = 0.0, // Time between current frame and last frame
+    paused: bool = false,
+    fly: bool = false,
+    menu: bool = false,
 };
 
 pub const Scene = struct {
@@ -33,14 +38,27 @@ pub const Scene = struct {
     height: f32,
     appState: AppState,
     camera: Camera,
+
     uModelLoc: glad.GLint,
     uViewLoc: glad.GLint,
     uProjectionLoc: glad.GLint,
     useTextureLoc: glad.GLint,
     yTextureLoc: glad.GLint,
     uvTextureLoc: glad.GLint,
-    useInstancingLoc: glad.GLint,
+    depthTextureLoc: glad.GLint,
+    useInstancedKeypointLoc: glad.GLint,
+    useInstancedLinesLoc: glad.GLint,
+
     texGen: TextureGenerator = TextureGenerator{},
+
+    last_projection: [16]f32 = undefined,
+    projection_dirty: bool = true,
+
+    frame_count: u64 = 0,
+    avg_frame_time: f64 = 0,
+    last_fps_time: f64 = 0,
+    frame_times: [120]f64 = .{0} ** 120,
+    frame_time_index: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !*Self {
         if (window == null) {
@@ -51,21 +69,6 @@ pub const Scene = struct {
         var width: i32 = undefined;
         var height: i32 = undefined;
         glfw.glfwGetWindowSize(window.?, &width, &height);
-
-        // Make the window's context current
-        glfw.glfwMakeContextCurrent(window);
-        glfw.glfwSwapInterval(1);
-
-        // Initialize OpenGL Loader
-        std.debug.print("Loading Glad...\n", .{});
-        if (glad.gladLoadGLLoader(@ptrCast(&glfw.glfwGetProcAddress)) == 0) {
-            std.debug.print("Failed to initialize GLAD\n", .{});
-            return GSLWError.FailedToInitialize;
-        }
-
-        std.debug.print("Initializing viewport...\n\n", .{});
-        glad.glViewport(0, 0, width, height);
-        glad.glEnable(glad.GL_DEPTH_TEST);
 
         const shaderProgram = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
         glad.glUseProgram(shaderProgram);
@@ -112,7 +115,9 @@ pub const Scene = struct {
         const useTextureLoc = glad.glGetUniformLocation(shaderProgram, "useTexture");
         const yTextureLoc = glad.glGetUniformLocation(shaderProgram, "yTexture");
         const uvTextureLoc = glad.glGetUniformLocation(shaderProgram, "uvTexture");
-        const useInstancingLoc = glad.glGetUniformLocation(shaderProgram, "uUseInstancing");
+        const depthTextureLoc = glad.glGetUniformLocation(shaderProgram, "depthTexture");
+        const useInstancedKeypointLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedKeypoints");
+        const uInstancedLinesLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedLines");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
@@ -135,7 +140,9 @@ pub const Scene = struct {
             .useTextureLoc = useTextureLoc,
             .yTextureLoc = yTextureLoc,
             .uvTextureLoc = uvTextureLoc,
-            .useInstancingLoc = useInstancingLoc,
+            .depthTextureLoc = depthTextureLoc,
+            .useInstancedKeypointLoc = useInstancedKeypointLoc,
+            .useInstancedLinesLoc = uInstancedLinesLoc,
         };
 
         return scene;
@@ -158,6 +165,7 @@ pub const Scene = struct {
 
         self.nodes.deinit();
         glad.glDeleteProgram(self.shaderProgram);
+        cleanupImGui();
     }
 
     pub fn setupCallbacks(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
@@ -175,16 +183,7 @@ pub const Scene = struct {
         _ = glfw.glfwSetCursorPosCallback(window, mouseCallback);
         _ = glfw.glfwSetKeyCallback(window, keyCallback);
         _ = glfw.glfwSetScrollCallback(window, scrollCallback);
-
-        const current_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
-        if (current_mode != glfw.GLFW_CURSOR_DISABLED) {
-            glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
-
-            const new_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
-            if (new_mode != glfw.GLFW_CURSOR_DISABLED) {
-                std.debug.print("Failed to disable cursor in setupCallbacks\n", .{});
-            }
-        }
+        _ = glfw.glfwSetMouseButtonCallback(window, mouseButtonCallback);
     }
 
     pub fn updateProjection(self: *Self) [16]f32 {
@@ -210,61 +209,109 @@ pub const Scene = struct {
     }
 
     pub fn render(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
+        // Start frame timing
+        const frame_start = glfw.glfwGetTime();
+
         glad.glClearColor(0.15, 0.15, 0.15, 1.0);
         glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
 
-        glad.glUseProgram(self.shaderProgram);
-
         var view = self.camera.get_view_matrix();
-
-        // Use the current projection matrix that accounts for window size
-        const currentProjection = self.updateProjection();
-
         if (self.uViewLoc != -1) {
             glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view);
         }
-        if (self.uProjectionLoc != -1) {
-            glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &currentProjection);
+
+        if (self.projection_dirty) {
+            const currentProjection = self.updateProjection();
+            if (self.uProjectionLoc != -1) {
+                glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &currentProjection);
+            }
+            self.projection_dirty = false;
         }
 
-        // Iterate through all nodes in the hash map
+        // Batch similar draw calls if possible
         var it = self.nodes.iterator();
         while (it.next()) |entry| {
             entry.value_ptr.*.update();
         }
 
+        imgui.igRender();
+        imgui.ImGui_ImplOpenGL3_RenderDrawData(imgui.igGetDrawData());
+
         glfw.glfwSwapBuffers(window);
         glfw.glfwPollEvents();
+
+        // Frame timing and FPS calculation
+        const frame_end = glfw.glfwGetTime();
+        const frame_time = frame_end - frame_start;
+
+        // Store frame time in circular buffer
+        self.frame_times[self.frame_time_index] = frame_time * 1000.0; // Convert to ms
+        self.frame_time_index = (self.frame_time_index + 1) % 120;
+
+        // Calculate and print average frame time every second
+        self.frame_count += 1;
+        if (frame_end - self.last_fps_time >= 1.0) {
+            var sum: f64 = 0;
+            for (self.frame_times) |time| {
+                sum += time;
+            }
+            const avg_frame_time = sum / @as(f64, @floatFromInt(self.frame_times.len));
+            std.debug.print("Avg Frame Time: {d:.2}ms, FPS: {d:.1}\n", .{ avg_frame_time, 1000.0 / avg_frame_time });
+
+            self.frame_count = 0;
+            self.avg_frame_time = avg_frame_time;
+            self.last_fps_time = frame_end;
+        }
     }
 
     pub fn processInput(self: *Self, debug: bool) void {
+        _ = debug;
+
         const sprinting = self.appState.keys[@as(usize, glfw.GLFW_KEY_LEFT_SHIFT)];
+        const velocity = self.camera.speed * self.appState.delta_time *
+            (if (sprinting) @as(f32, 2.0) else @as(f32, 1.0));
 
-        // Forward
+        // Pre-calculate movement vectors once per frame if needed
+        var movement = Vec3{ .x = 0, .y = 0, .z = 0 };
+
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
-            self.camera.move_forward(self.appState.delta_time, sprinting, debug);
+            movement = Vec3.add(movement, Vec3.scale(self.camera.front, velocity));
         }
-
-        // Left
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
-            self.camera.move_left(self.appState.delta_time, sprinting, debug);
-        }
-
-        // Backward
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_S)]) {
-            self.camera.move_backward(self.appState.delta_time, sprinting, debug);
+            movement = Vec3.sub(movement, Vec3.scale(self.camera.front, velocity));
         }
-
-        // Right
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
-            self.camera.move_right(self.appState.delta_time, sprinting, debug);
+            movement = Vec3.add(movement, Vec3.scale(self.camera.right, velocity));
+        }
+        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
+            movement = Vec3.sub(movement, Vec3.scale(self.camera.right, velocity));
         }
 
-        // Zoom controls can remain in the keyCallback if they are discrete actions
+        if (self.appState.fly) {
+            self.camera.position = Vec3.add(self.camera.position, movement);
+            if (self.appState.keys[@as(usize, glfw.GLFW_KEY_SPACE)]) {
+                self.camera.position.y += velocity;
+            }
+        } else {
+            self.camera.position = Vec3.add(
+                Vec3{
+                    .x = self.camera.position.x,
+                    .y = 1,
+                    .z = self.camera.position.z,
+                },
+                Vec3{
+                    .x = movement.x,
+                    .y = 0,
+                    .z = movement.z,
+                },
+            );
+        }
+
+        // Zoom controls can remain in the keyCallback since they are discrete actions
     }
 };
 
-inline fn readShaderSource(comptime path: []const u8) ![]const u8 {
+fn readShaderSource(comptime path: []const u8) ![]const u8 {
     const file: []const u8 = @embedFile(path);
     std.debug.print("Source Length: {}\n", .{file.len});
     return file;
@@ -396,12 +443,14 @@ fn getCurrentMonitor(window: ?*glfw.struct_GLFWwindow) ?*glfw.GLFWmonitor {
     return glfw.glfwGetPrimaryMonitor();
 }
 
-// Window creation with proper monitor handling
-pub fn createWindow() ?*glfw.GLFWwindow {
+pub fn createWindow() !?*glfw.GLFWwindow {
     glfw.glfwWindowHint(glfw.GLFW_FOCUSED, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_FOCUS_ON_SHOW, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_CLIENT_API, glfw.GLFW_OPENGL_API);
     glfw.glfwWindowHint(glfw.GLFW_CONTEXT_CREATION_API, glfw.GLFW_NATIVE_CONTEXT_API);
+
+    glfw.glfwWindowHint(glfw.GLFW_DOUBLEBUFFER, glfw.GLFW_TRUE);
+    glfw.glfwWindowHint(glfw.GLFW_SRGB_CAPABLE, glfw.GLFW_TRUE);
 
     const width: i32 = @intFromFloat(1920 * 0.75);
     const height: i32 = @intFromFloat(1080 * 0.75);
@@ -410,6 +459,33 @@ pub fn createWindow() ?*glfw.GLFWwindow {
 
     // Make context current immediately after window creation
     glfw.glfwMakeContextCurrent(window);
+    glfw.glfwSwapInterval(0);
+
+    // Initialize OpenGL Loader
+    std.debug.print("Loading Glad...\n", .{});
+    if (glad.gladLoadGLLoader(@ptrCast(&glfw.glfwGetProcAddress)) == 0) {
+        std.debug.print("Failed to initialize GLAD\n", .{});
+        return GSLWError.FailedToInitialize;
+    }
+
+    std.debug.print("Initializing viewport...\n\n", .{});
+    glad.glViewport(0, 0, width, height);
+    glad.glEnable(glad.GL_DEPTH_TEST);
+    glad.glDepthFunc(glad.GL_LESS);
+
+    // Initialize ImGui
+    _ = imgui.igCreateContext(null);
+    const io = imgui.igGetIO();
+    io.*.ConfigFlags |= imgui.ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+    io.*.ConfigFlags |= imgui.ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+
+    const optional_window: ?*imgui.GLFWwindow = @ptrCast(window);
+    if (!imgui.ImGui_ImplGlfw_InitForOpenGL(optional_window, false)) {
+        return null;
+    }
+    if (!imgui.ImGui_ImplOpenGL3_Init("#version 330")) {
+        return null;
+    }
 
     // Set up cursor mode BEFORE changing monitor settings
     glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
@@ -440,6 +516,12 @@ pub fn createWindow() ?*glfw.GLFWwindow {
     glfw.glfwShowWindow(window);
 
     return window;
+}
+
+pub fn cleanupImGui() void {
+    imgui.ImGui_ImplOpenGL3_Shutdown();
+    imgui.ImGui_ImplGlfw_Shutdown();
+    imgui.igDestroyContext(null);
 }
 
 fn framebufferSizeCallback(window: ?*glfw.GLFWwindow, width: c_int, height: c_int) callconv(.C) void {
@@ -483,9 +565,28 @@ fn mouseCallback(window: ?*glfw.struct_GLFWwindow, xpos: f64, ypos: f64) callcon
     scene.appState.last_mouse_x = xpos;
     scene.appState.last_mouse_y = ypos;
 
+    if (scene.appState.menu) return;
+
     const aspectRatio: f32 = scene.width / scene.height;
 
     scene.camera.process_mouse_movement(xoffset, yoffset, aspectRatio, false);
+}
+
+fn mouseButtonCallback(window: ?*glfw.struct_GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
+    if (window == null) return;
+
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.menu) {
+        imgui.ImGui_ImplGlfw_MouseButtonCallback(@ptrCast(window), button, action, mods);
+
+        const io = imgui.igGetIO();
+        if (!io.*.WantCaptureMouse) {
+            // If ImGui doesn't want it
+        }
+    } else {
+        // Menu not up
+    }
 }
 
 fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
@@ -507,6 +608,25 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
     if (action == glfw.GLFW_PRESS or action == glfw.GLFW_REPEAT) {
         switch (key) {
             glfw.GLFW_KEY_ESCAPE => {
+                scene.appState.menu = !scene.appState.menu;
+                var cursor_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+
+                switch (cursor_mode) {
+                    glfw.GLFW_CURSOR_NORMAL => {
+                        cursor_mode = glfw.GLFW_CURSOR_DISABLED;
+                    },
+                    glfw.GLFW_CURSOR_HIDDEN => {
+                        cursor_mode = glfw.GLFW_CURSOR_NORMAL;
+                    },
+                    glfw.GLFW_CURSOR_DISABLED => {
+                        cursor_mode = glfw.GLFW_CURSOR_NORMAL;
+                    },
+                    else => {},
+                }
+
+                glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, cursor_mode);
+            },
+            glfw.GLFW_KEY_M => {
                 glfw.glfwIconifyWindow(window);
             },
             glfw.GLFW_KEY_RIGHT_BRACKET => {
@@ -521,6 +641,13 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
                 // Zoom out (wider FOV)
                 scene.appState.zoom += 1.0;
             },
+            glfw.GLFW_KEY_P => {
+                scene.appState.paused = !scene.appState.paused;
+            },
+            glfw.GLFW_KEY_F => {
+                scene.appState.fly = !scene.appState.fly;
+            },
+
             else => {},
         }
     }
@@ -531,9 +658,12 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
 fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
     if (window == null) return;
 
-    _ = xoffset;
-
     const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.menu and imgui.igGetIO().*.WantCaptureMouse) {
+        imgui.ImGui_ImplGlfw_ScrollCallback(@ptrCast(window), xoffset, yoffset);
+        return;
+    }
 
     const zoomSensitivity: f32 = 0.1;
     const newZoom = scene.appState.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.appState.zoom;
@@ -546,6 +676,8 @@ fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) 
     } else {
         scene.appState.zoom = newZoom;
     }
+
+    scene.projection_dirty = true;
 
     std.debug.print("yOffset: {d}\n", .{yoffset});
     std.debug.print("Zoom Level: {d}\n", .{newZoom});

@@ -1,24 +1,26 @@
 const std = @import("std");
+const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
+const Secrets = _Secrets{};
+
 const Math = @import("Math.zig");
 const Vec3 = Math.Vec3;
+
 const Pipeline = @import("Pipeline.zig");
 const Scene = Pipeline.Scene;
 const Shape = @import("Shape.zig");
 const Node = @import("Node.zig");
 const Mesh = @import("Mesh.zig");
-const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
-const Secrets = _Secrets{};
+
 const UDP = @import("UDP.zig");
 const Sensors = @import("Sensors.zig");
+
+const KeypointManager = @import("ORB.zig").KeypointManager;
 const Video = @import("Video.zig");
+const ORB = @import("ORB.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
-const KeypointManager = @import("ORB.zig").KeypointManager;
-const ORB = @import("ORB.zig");
 
-// TODO: Look for a way to set these env variables in build script on linux
-// try std.process.setEnvVar("__NV_PRIME_RENDER_OFFLOAD", "1");
-// try std.process.setEnvVar("__GLX_VENDOR_LIBRARY_NAME", "nvidia");
+const UI = @import("UI.zig");
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -35,7 +37,7 @@ pub fn main() !void {
 
     defer glfw.glfwTerminate();
 
-    const window = Pipeline.createWindow() orelse {
+    const window = try Pipeline.createWindow() orelse {
         std.debug.print("Failed to create window\n", .{});
         return;
     };
@@ -54,40 +56,58 @@ pub fn main() !void {
     const gridNode = try Shape.Grid.init(alloc, 1000, 5);
     const axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
     const triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
-    const boxNode = try Shape.Box.init(alloc, null, null, null, null);
+    // const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
+    // const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
     const canvas_width = 12.8;
     const canvas_height = 7.2;
+    const texture_dims = [_]u32{ 1280, 720 };
 
     var canvasNode = try Node.init(alloc, null, null, null);
     canvasNode.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
 
-    var canvasNodeLeft = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
-    canvasNodeLeft.setPosition(-canvas_width, canvas_height / 2.0, -5);
+    var canvasNodeLeft = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
+    );
+    canvasNodeLeft.setPosition(-(canvas_width / 2.0) - 0.1, canvas_height / 2.0, 5);
     try canvasNode.addChild(canvasNodeLeft);
 
-    var canvasNodeRight = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
-    canvasNodeRight.setPosition(canvas_width, canvas_height / 2.0, -5);
+    var canvasNodeRight = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
+    );
+    canvasNodeRight.setPosition((canvas_width / 2.0) + 0.1, canvas_height / 2.0, 5);
     try canvasNode.addChild(canvasNodeRight);
 
-    var canvasNodeCombined = try Shape.TexturedPlane.init(alloc, null, canvas_width, canvas_height);
+    var canvasNodeCombined = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
+    );
     canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
-    canvasNodeCombined.mesh.?.setColor(.{ 50.0 / 255.0, 50.0 / 255.0, 50.0 / 255.0 });
     try canvasNode.addChild(canvasNodeCombined);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
-    var droneNode = try Node.init(alloc, null, null, null);
-    droneNode.setPosition(0, 0.5, 0);
-    try droneNode.addChild(boxNode);
-    try droneNode.addChild(droneAxis);
+    // var droneNode = try Node.init(alloc, null, null, null);
+    // droneNode.setPosition(0, 0.5, 0);
+    // try droneNode.addChild(boxNode);
+    // try droneNode.addChild(droneAxis);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null, null, null);
     try environment.addChild(gridNode);
     try environment.addChild(axisNode);
     try environment.addChild(triangleNode);
-    try environment.addChild(droneNode);
+    // try environment.addChild(droneNode);
     try environment.addChild(canvasNode);
 
     //Adding environment to scene
@@ -105,43 +125,26 @@ pub fn main() !void {
     // ======================================================= IMU Setup =======================================================
 
     //Initialize UDP servers
-    var imu_server = UDP.init(
-        Secrets.host_ip,
-        Secrets.host_port_imu,
-        Secrets.client_ip,
-        Secrets.client_port_imu,
-    );
+    // var imu_server = UDP.init(
+    //     Secrets.host_ip,
+    //     Secrets.host_port_imu,
+    //     Secrets.client_ip,
+    //     Secrets.client_port_imu,
+    // );
 
-    const pose_handler = Sensors.PoseHandler.init(droneNode);
-    var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
-    const pose_interface = pose_udp_handler.interface();
-    try imu_server.start(pose_interface);
+    // const pose_handler = Sensors.PoseHandler.init(droneNode);
+    // var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
+    // const pose_interface = pose_udp_handler.interface();
+    // try imu_server.start(pose_interface);
 
     // ================================================= Stereo Matching Setup =================================================
 
-    var right_keypoint_manager = try KeypointManager.init(
-        alloc,
-        canvasNodeRight,
-    );
-    defer right_keypoint_manager.deinit();
-
-    var left_keypoint_manager = try KeypointManager.init(
-        alloc,
-        canvasNodeLeft,
-    );
-    defer left_keypoint_manager.deinit();
-
-    const combined_keypoint_manager = try KeypointManager.init(
-        alloc,
-        canvasNodeCombined,
-    );
-    defer combined_keypoint_manager.deinit();
-
     const StereoMatcher = try ORB.StereoMatcher.init(
         alloc,
-        left_keypoint_manager,
-        right_keypoint_manager,
-        combined_keypoint_manager,
+        canvasNodeLeft,
+        canvasNodeRight,
+        canvasNodeCombined,
+        null,
     );
     defer StereoMatcher.deinit();
 
@@ -150,17 +153,6 @@ pub fn main() !void {
     try Video.initializeFFmpegNetwork();
     defer Video.deinitFFmpegNetwork();
 
-    var video_handler_right = try Video.VideoHandler.start(
-        alloc,
-        canvasNodeRight,
-        Secrets.sdp_content_right,
-        null,
-        Video.frameCallback,
-        null,
-        right_keypoint_manager,
-    );
-    defer video_handler_right.join();
-
     var video_handler_left = try Video.VideoHandler.start(
         alloc,
         canvasNodeLeft,
@@ -168,11 +160,35 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        left_keypoint_manager,
+        StereoMatcher.left,
     );
     defer video_handler_left.join();
 
+    var video_handler_right = try Video.VideoHandler.start(
+        alloc,
+        canvasNodeRight,
+        Secrets.sdp_content_right,
+        null,
+        Video.frameCallback,
+        null,
+        StereoMatcher.right,
+    );
+    defer video_handler_right.join();
+
+    // ==================================================== UI Window Setup ====================================================
+
+    const windows = [_]type{ UI.OverlayWindow, UI.StereoDebugWindow };
+    const TWindowManager = UI.WindowManager(&windows);
+    const WindowManager = try TWindowManager.init(
+        alloc,
+        .{
+            .scene = scene,
+            .StereoMatcher = StereoMatcher,
+        },
+    );
+
     // ====================================================== Render Loop ======================================================
+
     //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
@@ -187,10 +203,17 @@ pub fn main() !void {
         scene.appState.delta_time = @floatCast(current_time - scene.appState.last_frame_time);
         scene.appState.last_frame_time = current_time;
 
-        try StereoMatcher.match();
+        WindowManager.drawAll();
 
         scene.processInput(false);
         scene.render(window);
+
+        if (!scene.appState.paused) {
+            try StereoMatcher.match();
+        } else if (StereoMatcher.params_changed) {
+            try StereoMatcher.match();
+            StereoMatcher.params_changed = false;
+        }
     }
 }
 
