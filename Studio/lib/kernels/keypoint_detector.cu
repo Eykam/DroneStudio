@@ -381,7 +381,7 @@ __device__ float computeCost(
     const StereoParams &params     
 ) {
     // 1. Epipolar difference
-    float yDiff = fabsf(leftPos.y - rightPos.y);
+    float yDiff = fabsf(leftPos.z - rightPos.z);
     
     if (yDiff > params.epipolar_threshold) {
         return 1e10f;
@@ -632,6 +632,10 @@ __global__ void copySurfaceKernel(
     surf2Dwrite((float)0, dstSurf_depth, x * sizeof(float), y);
 }
 
+#define BLOCK_SIZE 16
+#define MAX_MATCHES_PER_BLOCK 64
+#define MAX_DISTANCE 25000.0f 
+
 
 __global__ void set_distance_texture(
     cudaSurfaceObject_t depth_texture,
@@ -640,30 +644,55 @@ __global__ void set_distance_texture(
     int width,
     int height
 ){
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int x = blockIdx.x * blockDim.x + tx;
+    const int y = blockIdx.y * blockDim.y + ty;
     
     if (x >= width || y >= height) return;
 
-    MatchedKeypoint nearest;
-    float current_min;
-
-    for (int i = 0; i < num_matches; i++){
-        MatchedKeypoint current_match = matches[i]; 
-        float2 current_keypoint = current_match.world.image_coords;
-        float dist = pow(current_keypoint.x - x, 2) + pow(current_keypoint.y - y, 2);
+    // Shared memory for matches
+    __shared__ float2 s_keypoints[MAX_MATCHES_PER_BLOCK];
+    __shared__ float s_depths[MAX_MATCHES_PER_BLOCK];
+    
+    float nearest_depth = 0.0f;
+    float min_dist = MAX_DISTANCE;
+    
+    // Process matches in chunks to handle cases with many matches
+    for (int chunk_start = 0; chunk_start < num_matches; chunk_start += MAX_MATCHES_PER_BLOCK) {
+        const int chunk_size = min(MAX_MATCHES_PER_BLOCK, num_matches - chunk_start);
         
-        if (i == 0) {
-            current_min = dist;
-            nearest  = current_match;
+        // Cooperatively load chunk into shared memory
+        if (tx + ty * BLOCK_SIZE < chunk_size) {
+            int match_idx = chunk_start + tx + ty * BLOCK_SIZE;
+            const MatchedKeypoint match = matches[match_idx];
+            s_keypoints[tx + ty * BLOCK_SIZE] = match.world.image_coords;
+            s_depths[tx + ty * BLOCK_SIZE] = match.world.position.y;
         }
-        else if (dist < current_min) { 
-            current_min = dist;
-            nearest = current_match;
+        __syncthreads();
+        
+        // Find nearest match in this chunk
+        #pragma unroll 4
+        for (int i = 0; i < chunk_size; i++) {
+            const float2 kp = s_keypoints[i];
+            const float dx = kp.x - x;
+            const float dy = kp.y - y;
+            const float dist = dx * dx + dy * dy;
+            
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_depth = s_depths[i];
+            }
         }
+        __syncthreads();
     }
-
-    surf2Dwrite(nearest.world.position.y, depth_texture, x * sizeof(float), y);
+    
+    // Only write depth if we found a reasonably close match
+    if (min_dist < MAX_DISTANCE) {
+        surf2Dwrite(nearest_depth, depth_texture, x * sizeof(float), y);
+    } else {
+        surf2Dwrite(0.0f, depth_texture, x * sizeof(float), y);
+    }
 }
 
 
@@ -1507,7 +1536,7 @@ float cuda_detect_keypoints(
 
     float milliseconds; 
     cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("Detection Kernel Timing (ms): %f\n", milliseconds);
+    printf("Detection Kernel Timing (ms): %.4f\n", milliseconds);
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
@@ -1649,7 +1678,7 @@ static float execute_matching(
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
         cudaEventElapsedTime(&milliseconds_cross_check, start, stop);
-        printf("Cross Checking Matches Time: %.2f ms\n", milliseconds_cross_check);
+        printf("Cross Checking Matches Time: %.4f ms\n", milliseconds_cross_check);
     }
 
     cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
@@ -1689,7 +1718,7 @@ static float execute_matching(
 
     float milliseconds_vis;
     cudaEventElapsedTime(&milliseconds_vis, start, stop);
-    printf("Visualization time: %.2f ms\n", milliseconds_vis);
+    printf("Visualization time: %.4f ms\n", milliseconds_vis);
 
     dim3 blockCopy(16, 16);
     dim3 gridCopy(
@@ -1716,7 +1745,7 @@ static float execute_matching(
 
     float milliseconds_segmentation;
     cudaEventElapsedTime(&milliseconds_segmentation, start, stop);
-    printf("Assigning Nearest keypoint Distance time: %.2f ms\n", milliseconds_segmentation);
+    printf("Assigning Nearest keypoint Distance time: %.4f ms\n", milliseconds_segmentation);
 
     cudaFree(d_bestMatchesLeft);
     cudaFree(d_bestMatchesRight);
@@ -1884,7 +1913,7 @@ int cuda_match_keypoints(
     }
 
 
-    printf("Total Pipeline Execution Time: %f\n", detection_time_left + detection_time_right + matching_time);
+    printf("Total Pipeline Execution Time: %.4f\n", detection_time_left + detection_time_right + matching_time);
 
     cleanup_resources(
         detector_id_left, 

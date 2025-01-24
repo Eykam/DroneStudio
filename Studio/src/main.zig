@@ -189,7 +189,6 @@ pub fn main() !void {
 
     // ====================================================== Render Loop ======================================================
 
-    //Render loop
     while (glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
 

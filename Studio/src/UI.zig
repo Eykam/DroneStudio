@@ -236,7 +236,7 @@ pub const StereoDebugWindow = struct {
                 "Arc Length",
                 imgui.ImGuiDataType_U32,
                 &arc_length,
-                &@as(u32, 3),
+                &@as(u32, 1),
                 &@as(u32, 16),
                 "%u",
                 imgui.ImGuiSliderFlags_None,
@@ -297,8 +297,8 @@ pub const StereoDebugWindow = struct {
             if (imgui.igSliderFloat(
                 "Max Disparity",
                 &max_disparity,
-                10.0,
-                200.0,
+                1.0,
+                300.0,
                 "%.1f",
                 imgui.ImGuiSliderFlags_None,
             )) {
@@ -311,7 +311,7 @@ pub const StereoDebugWindow = struct {
                 "Epipolar Threshold",
                 &epipolar,
                 1.0,
-                50.0,
+                100.0,
                 "%.1f",
                 imgui.ImGuiSliderFlags_None,
             )) {
@@ -336,8 +336,8 @@ pub const StereoDebugWindow = struct {
             if (imgui.igSliderFloat(
                 "Lowe's Ratio Threshold",
                 &lowe_ratio,
-                0.6,
-                0.9,
+                0.01,
+                1.0,
                 "%.2f",
                 imgui.ImGuiSliderFlags_None,
             )) {
@@ -349,8 +349,8 @@ pub const StereoDebugWindow = struct {
             if (imgui.igSliderFloat(
                 "Cost Threshold",
                 &cost_threshold,
-                0.3,
-                0.8,
+                0.01,
+                1.0,
                 "%.2f",
                 imgui.ImGuiSliderFlags_None,
             )) {
