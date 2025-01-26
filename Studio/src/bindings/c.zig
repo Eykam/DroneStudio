@@ -5,3 +5,8 @@ pub const imgui = @cImport({
     @cInclude("cimgui.h");
     @cInclude("cimgui_impl.h");
 });
+
+pub const cuda = @cImport({
+    @cInclude("cuda_wrapper.h");
+    @cInclude("kernels.h");
+});

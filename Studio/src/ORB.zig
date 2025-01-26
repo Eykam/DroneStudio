@@ -8,6 +8,28 @@ const libav = @import("bindings/libav.zig");
 const gl = @import("bindings/gl.zig");
 const video = libav.video;
 const glad = gl.glad;
+const DetectorInstance = @import("CudaGL.zig");
+// Global state
+// static DetectorInstance g_detectors[MAX_DETECTORS] = {0};
+// static int g_next_detector_id = 0;
+
+// static DetectorInstance* get_detector_instance(int id) {
+//     for (int i = 0; i < MAX_DETECTORS; i++) {
+//         if (g_detectors[i].initialized && g_detectors[i].id == id) {
+//             return &g_detectors[i];
+//         }
+//     }
+//     return NULL;
+// }
+
+// static int find_free_detector_slot(void) {
+//     for (int i = 0; i < MAX_DETECTORS; i++) {
+//         if (!g_detectors[i].initialized) {
+//             return i;
+//         }
+//     }
+//     return -1;
+// }
 
 pub const StereoMatcher = struct {
     const Self = @This();
@@ -16,6 +38,8 @@ pub const StereoMatcher = struct {
     params: *StereoParams,
     params_changed: bool,
     num_matches: *c_int,
+
+    detectors: [3]DetectorInstance,
 
     left: *KeypointManager,
     right: *KeypointManager,
@@ -52,6 +76,12 @@ pub const StereoMatcher = struct {
         matcher.params_changed = false;
         matcher.num_matches = try allocator.create(c_int);
         matcher.num_matches.* = 0;
+
+        matcher.detectors = [_]DetectorInstance{
+            DetectorInstance{},
+            DetectorInstance{},
+            DetectorInstance{},
+        };
 
         matcher.left = try KeypointManager.init(
             allocator,

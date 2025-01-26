@@ -1,7 +1,4 @@
-#include "keypoint_detector.h"
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
-#include <stdio.h>
+#include "kernels.h"
 
 #define MAX_DETECTORS 16
 
@@ -43,26 +40,26 @@ __constant__ int2 fast_offsets[16] = {
 
 
 // Global state
-static DetectorInstance g_detectors[MAX_DETECTORS] = {0};
-static int g_next_detector_id = 0;
+// static DetectorInstance g_detectors[MAX_DETECTORS] = {0};
+// static int g_next_detector_id = 0;
 
-static DetectorInstance* get_detector_instance(int id) {
-    for (int i = 0; i < MAX_DETECTORS; i++) {
-        if (g_detectors[i].initialized && g_detectors[i].id == id) {
-            return &g_detectors[i];
-        }
-    }
-    return NULL;
-}
+// static DetectorInstance* get_detector_instance(int id) {
+//     for (int i = 0; i < MAX_DETECTORS; i++) {
+//         if (g_detectors[i].initialized && g_detectors[i].id == id) {
+//             return &g_detectors[i];
+//         }
+//     }
+//     return NULL;
+// }
 
-static int find_free_detector_slot(void) {
-    for (int i = 0; i < MAX_DETECTORS; i++) {
-        if (!g_detectors[i].initialized) {
-            return i;
-        }
-    }
-    return -1;
-}
+// static int find_free_detector_slot(void) {
+//     for (int i = 0; i < MAX_DETECTORS; i++) {
+//         if (!g_detectors[i].initialized) {
+//             return i;
+//         }
+//     }
+//     return -1;
+// }
 
 
 __constant__ float d_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
@@ -619,6 +616,8 @@ __global__ void copySurfaceKernel(
     surf2Dwrite((float)0, dstSurf_depth, x * sizeof(float), y);
 }
 
+
+
 #define BLOCK_SIZE 16
 #define MAX_MATCHES_PER_BLOCK 64
 #define MAX_DISTANCE 100000.0f 
@@ -970,1200 +969,193 @@ __global__ void estimateMotionRANSAC(
         }
     }
 }
-// ============================================================= Bindings =================================================================
 
 extern "C" {
-
-//  int cudaDevice;
-//     error = cudaGetDevice(&cudaDevice);
-//     if (error != cudaSuccess) {
-//         printf("Error getting CUDA device: %s\n", cudaGetErrorString(error));
-//         return -1;
-//     }
-
-// cudaDeviceProp prop;
-//     error = cudaGetDeviceProperties(&prop, cudaDevice);
-//     if (error != cudaSuccess) {
-//         printf("Error getting CUDA device properties: %s\n", cudaGetErrorString(error));
-//         return -1;
-//     }
-
-//     printf("Using CUDA Device: %d - %s\n", cudaDevice, prop.name);
-
-int cuda_create_detector(uint max_keypoints, uint gl_ytexture, uint gl_uvtexture, uint gl_depthtexture) {
-    int slot = find_free_detector_slot();
-    if (slot < 0) {
-        return -1;
-    }    
-
-    memset(&g_detectors[slot], 0, sizeof(DetectorInstance));
-
-    if (cudaMalloc(&g_detectors[slot].d_keypoint_count, sizeof(uint)) != cudaSuccess) {
-        return -1;
+    void init_gaussian_kernel(float sigma) {
+        float h_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
+        float sum = 0.0f;
+        
+        for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
+            float x = i;
+            h_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS] = expf(-(x * x) / (2 * sigma * sigma));
+            sum += h_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
+        }
+        
+        for (int i = 0; i < GAUSSIAN_KERNEL_SIZE; i++) {
+            h_gaussian_kernel[i] /= sum;
+        }
+        
+        cudaMemcpyToSymbol(d_gaussian_kernel, h_gaussian_kernel, GAUSSIAN_KERNEL_SIZE * sizeof(float));
     }
 
-    if (cudaMalloc(&g_detectors[slot].d_descriptors, max_keypoints * sizeof(BRIEFDescriptor)) != cudaSuccess) {
-        return -1;
-    } ;
-
-    cudaError_t error = cudaMalloc((void**)&g_detectors[slot].d_world_transform, 16 * sizeof(float));
-    if (error != cudaSuccess) {
-        printf("Transform allocation failed: %s\n", cudaGetErrorString(error));
-        return -1;
-    }
-    
-    // Initialize transform to identity matrix
-    float identity[16] = {
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f
-    };
-    error = cudaMemcpy(g_detectors[slot].d_world_transform, identity, 16 * sizeof(float), cudaMemcpyHostToDevice);
-    if (error != cudaSuccess) {
-        printf("Initial transform copy failed: %s\n", cudaGetErrorString(error));
-        return -1;
+    void launch_gaussian_blur(
+        const uint8_t* input,
+        uint8_t* temp1,
+        uint8_t* temp2,
+        int width,
+        int height,
+        int pitch,
+        dim3 grid,
+        dim3 block
+    ) {
+        gaussianBlurHorizontal<<<grid, block>>>(input, temp1, width, height, pitch);
+        gaussianBlurVertical<<<grid, block>>>(temp1, temp2, width, height, pitch);
     }
 
-    g_detectors[slot].initialized = true;
-    g_detectors[slot].id = g_next_detector_id++;
-    g_detectors[slot].gl_ytexture = gl_ytexture;
-    g_detectors[slot].gl_uvtexture = gl_uvtexture;
-    g_detectors[slot].gl_depthtexture = gl_depthtexture;
-
-
-    return g_detectors[slot].id;
-}
-
-void cuda_cleanup_detector(int detector_id) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return;
-
-    cuda_unregister_buffers(detector_id);
-
-    if (detector->d_keypoint_count) cudaFree(detector->d_keypoint_count);
-    if (detector->d_descriptors) cudaFree(detector->d_descriptors);
-    detector->d_keypoint_count = nullptr;
-    detector->d_descriptors = nullptr;
-
-    if (detector->d_world_transform) {
-        cudaFree(detector->d_world_transform);
-        detector->d_world_transform = nullptr;
-    }
-}
-
-int cuda_map_transformation(int detector_id,  const float transformation[16]) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return -1;
-
-
-    memcpy(detector->world_transform, transformation, 16 * sizeof(float));
-    cudaError_t error = cudaMemcpy(detector->d_world_transform, detector->world_transform, 
-                                  16 * sizeof(float), cudaMemcpyHostToDevice);
-    if (error != cudaSuccess) {
-        printf("Transform copy to device failed: %s\n", cudaGetErrorString(error));
-        return -1;
-    }
-
-    return 0;
-}
-
-
-int cuda_register_gl_texture(int detector_id) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return -1;
-
-   
-   
-    // Allocate texture resource
-    detector->y_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
-    if (!detector->y_texture) {
-        printf("Failed to allocate Y texture resource\n");
-        return -1;
-    }
-    memset(detector->y_texture, 0, sizeof(CudaGLTextureResource));
-
-    // Register Y texture
-    cudaError_t err = cudaGraphicsGLRegisterImage(
-        &detector->y_texture->tex_resource,
-        detector->gl_ytexture,
-        GL_TEXTURE_2D,
-        cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
-    );
-    
-    if (err != cudaSuccess) {
-        printf("Failed to register Y texture: %s\n", cudaGetErrorString(err));
-        free(detector->y_texture);
-        detector->y_texture = NULL;
-        return -1;
-    }
-
-    
-    
-    
-    
-    
-    // Allocate UV texture resource
-    detector->uv_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
-    if (!detector->uv_texture) {
-        printf("Failed to allocate UV texture resource\n");
-        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        free(detector->y_texture);
-        detector->y_texture = NULL;
-        return -1;
-    }
-    memset(detector->uv_texture, 0, sizeof(CudaGLTextureResource));
-
-    // Register UV texture
-    err = cudaGraphicsGLRegisterImage(
-        &detector->uv_texture->tex_resource,
-        detector->gl_uvtexture,
-        GL_TEXTURE_2D,
-        cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
-    );
-    
-    if (err != cudaSuccess) {
-        printf("Failed to register UV texture: %s\n", cudaGetErrorString(err));
-        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        free(detector->y_texture);
-        detector->y_texture = NULL;
-        free(detector->uv_texture);
-        detector->uv_texture = NULL;
-        return -1;
-    }
-
-    
-    // Allocate Depth texture resource
-    detector->depth_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
-    if (!detector->depth_texture) {
-        printf("Failed to allocate Depth texture resource\n");
-        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        free(detector->y_texture);
-        detector->y_texture = NULL;
-        cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
-        free(detector->uv_texture);
-        detector->uv_texture = NULL;
-        return -1;
-    }
-    memset(detector->depth_texture, 0, sizeof(CudaGLTextureResource));
-
-    // Register Depth texture
-    err = cudaGraphicsGLRegisterImage(
-        &detector->depth_texture->tex_resource,
-        detector->gl_depthtexture,
-        GL_TEXTURE_2D,
-        cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
-    );
-    
-    if (err != cudaSuccess) {
-        printf("Failed to register UV texture: %s\n", cudaGetErrorString(err));
-        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        free(detector->y_texture);
-        detector->y_texture = NULL;
-        cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
-        free(detector->uv_texture);
-        detector->uv_texture = NULL;
-        free(detector->depth_texture);
-        detector->depth_texture = NULL;
-        return -1;
-    }
-
-
-    return 0;
-}
-
-void cuda_unregister_gl_texture(int detector_id) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return;
-
-    if (detector->y_texture){
-        cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        free(detector->y_texture);
-        detector->y_texture = NULL;
-    }
-
-    if (detector->uv_texture){
-        cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
-        free(detector->uv_texture);
-        detector->uv_texture = NULL;
-    }
-
-    if (detector->depth_texture){
-        cudaGraphicsUnregisterResource(detector->depth_texture->tex_resource);
-        free(detector->depth_texture);
-        detector->depth_texture = NULL;
-    }
-
-}
-
-
-int cuda_register_instance_buffer(
-    InstanceBuffer* buffer,  
-    unsigned int position_buffer,
-    unsigned int color_buffer,
-    unsigned int buffer_size
-) {
-    cudaError_t error = cudaGraphicsGLRegisterBuffer(
-        &buffer->position_resource, 
-        position_buffer,
-        cudaGraphicsRegisterFlagsWriteDiscard
-    );
-
-    if (error != cudaSuccess) {
-        printf("Error registering Line Position Buffer %d => %d\n", position_buffer, error);
-        return -1;
-    }
-
-    error = cudaGraphicsGLRegisterBuffer(
-        &buffer->color_resource,
-        color_buffer,
-        cudaGraphicsRegisterFlagsWriteDiscard
-    );
-    if (error != cudaSuccess) {
-        printf("Error registering Line Color Buffer %d => %d\n", color_buffer, error);
-        return -1;
-    }
-
-    buffer->buffer_size = buffer_size;
-
-    return 0;  // Added missing return
-}
-
-int cuda_register_buffers(
-    int detector_id,
-    int keypoint_position_buffer,
-    int keypoint_color_buffer,
-    int* left_position_buffer,
-    int* left_color_buffer,
-    int* right_position_buffer,
-    int* right_color_buffer,
-    int buffer_size
-) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return -1;
-
-    int error;
-
-    error = cuda_register_instance_buffer(
-        &detector->gl_resources.keypoints,
-        keypoint_position_buffer, 
-        keypoint_color_buffer,
-        buffer_size
-    );
-    if (error < 0) return error;
-
-    if (left_position_buffer != NULL && left_color_buffer != NULL) {
-        error = cuda_register_instance_buffer(
-            &detector->gl_resources.connections.left,
-            *left_position_buffer, 
-            *left_color_buffer,
-            buffer_size * 2
+    void launch_keypoint_detection(
+        const uint8_t* input,
+        int width,
+        int height,
+        int pitch,
+        uint8_t threshold,
+        uint32_t arc_length,
+        float4* positions,
+        float4* colors,
+        BRIEFDescriptor* descriptors,
+        uint* keypoint_count,
+        int max_keypoints,
+        float image_width,
+        float image_height,
+        dim3 grid,
+        dim3 block
+    ) {
+        detectFASTKeypoints<<<grid, block>>>(
+            input, width, height, pitch,
+            threshold, arc_length,
+            positions, colors,
+            descriptors, keypoint_count,
+            max_keypoints,
+            image_width, image_height
         );
-
-        if (error < 0) return error;
     }
 
-    if (right_position_buffer != NULL && right_color_buffer != NULL) {
-        error = cuda_register_instance_buffer(
-            &detector->gl_resources.connections.right,
-            *right_position_buffer, 
-            *right_color_buffer,
-            buffer_size * 2
-        );
-
-        if (error < 0) return error;
-    }
-
-    
-    return 0;
-}
-
-
-void cuda_unregister_buffers(int detector_id) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return;
-
-    if (detector->gl_resources.keypoints.position_resource) {
-        cudaGraphicsUnregisterResource(detector->gl_resources.keypoints.position_resource);
-    }
-    if (detector->gl_resources.keypoints.color_resource) {
-        cudaGraphicsUnregisterResource(detector->gl_resources.keypoints.color_resource);
-    }
-
-    InstanceBuffer left = detector->gl_resources.connections.left;
-    if (left.position_resource) {
-            cudaGraphicsUnregisterResource(detector->gl_resources.connections.left.position_resource);
-    }
-    if (left.color_resource) {
-            cudaGraphicsUnregisterResource(detector->gl_resources.connections.left.color_resource);
-    }
-
-    InstanceBuffer right = detector->gl_resources.connections.right;
-    if (right.position_resource) {
-            cudaGraphicsUnregisterResource(detector->gl_resources.connections.right.position_resource);
-    }
-    if (right.color_resource) {
-            cudaGraphicsUnregisterResource(detector->gl_resources.connections.right.color_resource);
-    }
-
-    detector->gl_resources = {};
-}
-
-
-
-int cuda_map_buffer_resources(InstanceBuffer* buffer) {  
-    cudaError_t error; 
-    error = cudaGraphicsMapResources(1, &buffer->position_resource);
-    if (error != cudaSuccess) {
-        printf("Failed to Map Position Resources: %d\n", error);
-        return -1;
-    }
-
-    error = cudaGraphicsMapResources(1, &buffer->color_resource);
-    if (error != cudaSuccess) {
-        printf("Failed to Map Color Resources: %d\n", error);
-        return -1;
-    }
-
-    size_t bytes;
-    error = cudaGraphicsResourceGetMappedPointer(
-        (void**)&buffer->d_positions,
-        &bytes,
-        buffer->position_resource
-    );
-
-    if (error != cudaSuccess) {
-        printf("Failed to get Positions Mapped Pointer: %d\n", error);
-        return -1;
-    }
-
-    error = cudaGraphicsResourceGetMappedPointer(
-        (void**)&buffer->d_colors,
-        &bytes,
-        buffer->color_resource
-    );
-
-    if (error != cudaSuccess) {
-        printf("Failed to get Colors Mapped Pointer: %d\n", error);
-        return -1;
-    }
-
-    return 0;
-}
-
-// int cuda_map_texture_resources(CudaGLTextureResource* texture){
-//     if (texture) {
-//         cudaError_t err = cudaGraphicsMapResources(1, &texture->tex_resource);
-//         if (err != cudaSuccess) {
-//             printf("Failed to map texture resource: %s\n", cudaGetErrorString(err));
-//             return -1;
-//         }
-
-//         err = cudaGraphicsSubResourceGetMappedArray(&texture->array,
-//                                                     texture->tex_resource,
-//                                                     0, 0);
-//         if (err != cudaSuccess) {
-//             printf("Failed to get mapped array for texture: %s\n", cudaGetErrorString(err));
-//             return -1;
-//         }
-
-//         cudaResourceDesc res_desc = {};
-//         res_desc.resType = cudaResourceTypeArray;
-//         res_desc.res.array.array = texture->array;
-
-//         err = cudaCreateSurfaceObject(&texture->surface, &res_desc);
-//         if (err != cudaSuccess) {
-//             printf("Failed to create surface object: %s\n", cudaGetErrorString(err));
-//             return -1;
-//         }
-//     }
-// }
-
-
-int cuda_map_resources(int detector_id) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return -1;   
-    
-    int error = cuda_map_buffer_resources(&detector->gl_resources.keypoints);
-    if (error < 0) printf("Failed to map keypoint buffers!\n");
-
-    if (detector->gl_resources.connections.left.position_resource){
-        error |= cuda_map_buffer_resources(&detector->gl_resources.connections.left);
-        if (error < 0)  printf("Failed to map left connection buffers!\n");
-    }
-    if (detector->gl_resources.connections.right.position_resource){
-        error |= cuda_map_buffer_resources(&detector->gl_resources.connections.right);
-        if (error < 0) printf("Failed to map right connection buffers!\n");
-    }
-
-    if (error < 0) {
-        printf("Failed to map resources!\n");
-        cuda_unmap_resources(detector_id);
-        return -1;
-    }
-
-    if (detector->y_texture) {
-        cudaError_t err = cudaGraphicsMapResources(1, &detector->y_texture->tex_resource);
-        if (err != cudaSuccess) {
-            printf("Failed to map Y texture resource: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-
-        err = cudaGraphicsSubResourceGetMappedArray(&detector->y_texture->array,
-                                                  detector->y_texture->tex_resource,
-                                                  0, 0);
-        if (err != cudaSuccess) {
-            printf("Failed to get mapped array for Y texture: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-
-        cudaResourceDesc res_desc = {};
-        res_desc.resType = cudaResourceTypeArray;
-        res_desc.res.array.array = detector->y_texture->array;
-
-        err = cudaCreateSurfaceObject(&detector->y_texture->surface, &res_desc);
-        if (err != cudaSuccess) {
-            printf("Failed to create Y surface object: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-    }
-
-    if (detector->uv_texture) {
-        cudaError_t err = cudaGraphicsMapResources(1, &detector->uv_texture->tex_resource);
-        if (err != cudaSuccess) {
-            printf("Failed to map UV texture resource: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-
-        err = cudaGraphicsSubResourceGetMappedArray(&detector->uv_texture->array,
-                                                  detector->uv_texture->tex_resource,
-                                                  0, 0);
-        if (err != cudaSuccess) {
-            printf("Failed to get mapped array for UV texture: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-
-        cudaResourceDesc res_desc = {};
-        res_desc.resType = cudaResourceTypeArray;
-        res_desc.res.array.array = detector->uv_texture->array;
-
-        err = cudaCreateSurfaceObject(&detector->uv_texture->surface, &res_desc);
-        if (err != cudaSuccess) {
-            printf("Failed to create UV surface object: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-    }
-
-    if (detector->depth_texture) {
-        cudaError_t err = cudaGraphicsMapResources(1, &detector->depth_texture->tex_resource);
-        if (err != cudaSuccess) {
-            printf("Failed to map Depth texture resource: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-
-        err = cudaGraphicsSubResourceGetMappedArray(&detector->depth_texture->array,
-                                                  detector->depth_texture->tex_resource,
-                                                  0, 0);
-        if (err != cudaSuccess) {
-            printf("Failed to get mapped array for Depth texture: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-
-        cudaResourceDesc res_desc = {};
-        res_desc.resType = cudaResourceTypeArray;
-        res_desc.res.array.array = detector->depth_texture->array;
-
-        err = cudaCreateSurfaceObject(&detector->depth_texture->surface, &res_desc);
-        if (err != cudaSuccess) {
-            printf("Failed to create Depth surface object: %s\n", cudaGetErrorString(err));
-            cuda_unmap_resources(detector_id);
-            return -1;
-        }
-    }
-
-    return error == cudaSuccess ? 0 : -1;
-}
-
-void cuda_unmap_resources(int detector_id) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    if (!detector) return;
-
-    if (detector->gl_resources.keypoints.position_resource) {
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.keypoints.position_resource);
-    }
-    if (detector->gl_resources.keypoints.color_resource) {
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.keypoints.color_resource);
-    }
-
-    // Check left connection resources
-    if (detector->gl_resources.connections.left.position_resource) {
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.connections.left.position_resource);
-    }
-    if (detector->gl_resources.connections.left.color_resource) {
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.connections.left.color_resource);
-    }
-
-    // Check right connection resources
-    if (detector->gl_resources.connections.right.position_resource) {
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.connections.right.position_resource);
-    }
-    if (detector->gl_resources.connections.right.color_resource) {
-        cudaGraphicsUnmapResources(1, &detector->gl_resources.connections.right.color_resource);
-    }
-
-    if (detector->y_texture) {
-        cudaDestroySurfaceObject(detector->y_texture->surface);
-        cudaGraphicsUnmapResources(1, &detector->y_texture->tex_resource);
-    }
-
-    if (detector->uv_texture) {
-        cudaDestroySurfaceObject(detector->uv_texture->surface);
-        cudaGraphicsUnmapResources(1, &detector->uv_texture->tex_resource);
-    }
-
-    if (detector->depth_texture) {
-        cudaDestroySurfaceObject(detector->depth_texture->surface);
-        cudaGraphicsUnmapResources(1, &detector->depth_texture->tex_resource);
-    }
-}
-
-static void cleanup_resources(
-    int detector_id_left, 
-    int detector_id_right, 
-    int detector_id_combined,
-    MatchedKeypoint* d_matches, 
-    int* d_match_count,
-    cudaEvent_t start, 
-    cudaEvent_t stop
-) {
-    if (d_matches) cudaFree(d_matches);
-    if (d_match_count) cudaFree(d_match_count);
-    
-    if (start) cudaEventDestroy(start);
-    if (stop) cudaEventDestroy(stop);
-    
-    cuda_unmap_resources(detector_id_left);
-    cuda_unmap_resources(detector_id_right);
-    cuda_unmap_resources(detector_id_combined);
-    
-    cuda_unregister_gl_texture(detector_id_left);
-    cuda_unregister_gl_texture(detector_id_right);
-    cuda_unregister_gl_texture(detector_id_combined);
-}
-
-// Helper function to set up resources
-static int setup_resources(int detector_id_left, int detector_id_right, int detector_id_combined) {
-    printf("Setting up resources for Detectors: {%d, %d, %d}\n", detector_id_left, detector_id_right, detector_id_combined);
-    if (cuda_register_gl_texture(detector_id_left) < 0 ||
-        cuda_register_gl_texture(detector_id_right) < 0 ||
-        cuda_register_gl_texture(detector_id_combined) < 0) {
-        printf("Failed to Register Textures!\n");
-        return -1;
-    }
-
-    printf("Successfully registered textures. Moving onto mapping resources...\n");
-    if (cuda_map_resources(detector_id_left) < 0 ||
-        cuda_map_resources(detector_id_right) < 0 ||
-        cuda_map_resources(detector_id_combined) < 0) {
-        printf("Failed to Map Resources!\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-// Helper function to validate detector instances
-static int validate_detectors(DetectorInstance* left, DetectorInstance* right, DetectorInstance* combined) {
-    if (!left || !right || !combined) {
-        printf("Invalid detector instances\n");
-        return -1;
-    }
-    return 0;
-}
-
-
-void initGaussianKernel(float sigma) {
-    float h_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
-    float sum = 0.0f;
-    
-    // Calculate Gaussian kernel values
-    for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
-        float x = i;
-        h_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS] = expf(-(x * x) / (2 * sigma * sigma));
-        sum += h_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
-    }
-    
-    // Normalize kernel
-    for (int i = 0; i < GAUSSIAN_KERNEL_SIZE; i++) {
-        h_gaussian_kernel[i] /= sum;
-    }
-    
-    // Copy kernel to constant memory
-    cudaMemcpyToSymbol(d_gaussian_kernel, h_gaussian_kernel, GAUSSIAN_KERNEL_SIZE * sizeof(float));
-}
-
-
-
-float cuda_detect_keypoints(
-    int detector_id,
-    StereoParams params,
-    ImageParams* image
-) {
-    DetectorInstance* detector = get_detector_instance(detector_id);
-    
-    if (!detector) return -1.0;
-    
-    cudaError_t error;
- 
-    uint8_t *d_temp1, *d_temp2;
-    cudaMalloc(&d_temp1, image->y_linesize * image->height);
-    cudaMalloc(&d_temp2, image->y_linesize * image->height);
-    
-    // Initialize Gaussian kernel
-    initGaussianKernel(params.sigma);
-    
-    // Setup kernel launch parameters
-    dim3 block(16, 16);
-    dim3 grid(
-        (image->width + block.x - 1) / block.x,
-        (image->height + block.y - 1) / block.y
-    );
-    
-    // Apply horizontal Gaussian blur
-    gaussianBlurHorizontal<<<grid, block>>>(
-        image->y_plane,
-        d_temp1,
-        image->width,
-        image->height,
-        image->y_linesize
-    );
-
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Gaussian Blur horizontal Kernel failed: %d\n", error);
-        return -1.0;
-    }
-    
-    // Apply vertical Gaussian blur
-    gaussianBlurVertical<<<grid, block>>>(
-        d_temp1,
-        d_temp2,
-        image->width,
-        image->height,
-        image->y_linesize
-    );
-
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Gaussian Blur vertical Kernel failed: %d\n", error);
-        return -1.0;
-    }
-
-    // Reset keypoint counter
-    error = cudaMemset(detector->d_keypoint_count, 0, sizeof(int));
-    if (error != cudaSuccess) {
-        printf("Failed to reset keypoint count: %d\n", error);
-        return -1.0;
-    }
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    // Launch kernel
-    cudaEventRecord(start);
-    detectFASTKeypoints<<<grid, block>>>(
-        d_temp2,
-        image->width,
-        image->height,
-        image->y_linesize,
-        params.intensity_threshold,
-        params.arc_length,
-        detector->gl_resources.keypoints.d_positions,
-        detector->gl_resources.keypoints.d_colors,
-        detector->d_descriptors,
-        detector->d_keypoint_count,
-        detector->gl_resources.keypoints.buffer_size,
-        image->image_width,
-        image->image_height
-    );
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    float milliseconds; 
-    cudaEventElapsedTime(&milliseconds, start, stop);
-    printf("Detection Kernel Timing (ms): %.4f\n", milliseconds);
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Keypoint Detection Kernel failed: %d\n", error);
-        return -1.0;
-    }
-
-    cudaFree(d_temp1);
-    cudaFree(d_temp2);
-
-    // Get keypoint count
-    error = cudaMemcpy(image->num_keypoints, detector->d_keypoint_count, sizeof(int), cudaMemcpyDeviceToHost);
-    if (error != cudaSuccess) {
-        printf("Failed to copy keypoint count: %d\n", error);
-        return -1.0;
-    }
-    
-    return error == cudaSuccess ? milliseconds : -1.0;
-}
-
-
-static int allocate_matching_resources(MatchedKeypoint** d_matches, int** d_match_count,
-                                     cudaEvent_t* start, cudaEvent_t* stop, int max_matches) {
-    cudaError_t error;
-    
-    error = cudaMalloc(d_matches, max_matches * sizeof(MatchedKeypoint));
-    if (error != cudaSuccess) return -1;
-    
-    error = cudaMalloc(d_match_count, sizeof(int));
-    if (error != cudaSuccess) {
-        cudaFree(*d_matches);
-        return -1;
-    }
-    
-    error = cudaMemset(*d_match_count, 0, sizeof(int));
-    if (error != cudaSuccess) {
-        cudaFree(*d_matches);
-        cudaFree(*d_match_count);
-        return -1;
-    }
-    
-    error = cudaEventCreate(start);
-    if (error != cudaSuccess) {
-        cudaFree(*d_matches);
-        cudaFree(*d_match_count);
-        return -1;
-    }
-    
-    error = cudaEventCreate(stop);
-    if (error != cudaSuccess) {
-        cudaEventDestroy(*start);
-        cudaFree(*d_matches);
-        cudaFree(*d_match_count);
-        return -1;
-    }
-    
-    return 0;
-}
-
-
-
-// TODO: Need to set matches to position and colors of combined keypoints
-// Not sure how combined is currently being visualized
-static float execute_matching(
-    DetectorInstance* left_detector,
-    DetectorInstance* right_detector, 
-    DetectorInstance* combined_detector,
-    MatchedKeypoint* d_matches,
-    int* d_match_count,
-    int max_matches,
-    int* num_matches,
-    StereoParams params,
-    ImageParams* left,
-    ImageParams* right,
-    cudaEvent_t start,
-    cudaEvent_t stop
-) {
-    BestMatch* d_bestMatchesLeft  = nullptr;
-    BestMatch* d_bestMatchesRight = nullptr;
-
-    cudaMalloc(&d_bestMatchesLeft,  *left->num_keypoints  * sizeof(BestMatch));
-    cudaMalloc(&d_bestMatchesRight, *right->num_keypoints * sizeof(BestMatch));
-    
-    float milliseconds_left_right;
-    float milliseconds_right_left;
-    float milliseconds_cross_check;
-    
-    {
-        dim3 block(256);
-        dim3 grid( (*left->num_keypoints + block.x - 1)/block.x );
-        cudaEventRecord(start);
+    void launch_stereo_matching(
+        const float4* left_positions,
+        const BRIEFDescriptor* left_descriptors,
+        int left_count,
+        const float4* right_positions,
+        const BRIEFDescriptor* right_descriptors,
+        int right_count,
+        StereoParams params,
+        BestMatch* matches_left,
+        BestMatch* matches_right,
+        dim3 grid,
+        dim3 block
+    ) {
         matchLeftToRight<<<grid, block>>>(
-            left_detector->gl_resources.keypoints.d_positions, left_detector->d_descriptors, *left->num_keypoints,
-            right_detector->gl_resources.keypoints.d_positions, right_detector->d_descriptors, *right->num_keypoints,
-            params,
-            d_bestMatchesLeft
-        );
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&milliseconds_left_right, start, stop);
-        printf("Matching Time Left => Right: %.2f ms\n", milliseconds_left_right);
-    }
-
-    {
-        dim3 block(256);
-        dim3 grid( (*right->num_keypoints + block.x - 1)/block.x );
-        cudaEventRecord(start);
-        matchRightToLeft<<<grid, block>>>(
-            right_detector->gl_resources.keypoints.d_positions, right_detector->d_descriptors, *right->num_keypoints,
-            left_detector->gl_resources.keypoints.d_positions, left_detector->d_descriptors, *left->num_keypoints,
-            params,
-            d_bestMatchesRight
-        );
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&milliseconds_right_left, start, stop);
-        printf("Matching Time Right => Left: %.2f ms\n", milliseconds_right_left);
-    }
-
-
-    {
-        dim3 block(256);
-        dim3 grid( (*left->num_keypoints + block.x - 1)/block.x );
-        cudaEventRecord(start);
-        crossCheckMatches<<<grid, block>>>(
-            d_bestMatchesLeft,
-            d_bestMatchesRight,
-            left_detector->gl_resources.keypoints.d_positions,
-            right_detector->gl_resources.keypoints.d_positions,
-            *left->num_keypoints,
-            *right->num_keypoints,
-            params,
-            d_matches,
-            d_match_count
-        );
-        cudaEventRecord(stop);
-        cudaEventSynchronize(stop);
-        cudaEventElapsedTime(&milliseconds_cross_check, start, stop);
-        printf("Cross Checking Matches Time: %.4f ms\n", milliseconds_cross_check);
-    }
-
-    cudaMemcpy(num_matches, d_match_count, sizeof(int), cudaMemcpyDeviceToHost);
-    printf("num_matches: %d\n", *num_matches);
-
-    if (*num_matches == 0) {
-        printf("No Matches detected!\n");
-        return milliseconds_left_right + milliseconds_right_left + milliseconds_cross_check;
-    }
-
-    // Generate visualization
-    dim3 blockVis(512);
-    dim3 gridVis((*num_matches + blockVis.x - 1) / blockVis.x);
-
-    cudaEventRecord(start);
-    visualizeTriangulation<<<gridVis, blockVis>>>(
-        d_matches,
-        *num_matches,
-        combined_detector->gl_resources.keypoints.d_positions,
-        combined_detector->gl_resources.keypoints.d_colors,
-        combined_detector->gl_resources.connections.left.d_positions,
-        combined_detector->gl_resources.connections.left.d_colors,
-        combined_detector->gl_resources.connections.right.d_positions,
-        combined_detector->gl_resources.connections.right.d_colors,
-        left_detector->d_world_transform,
-        right_detector->d_world_transform,
-        params.show_connections
-    );
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Visualization kernel failed: %s\n", cudaGetErrorString(error));
-        return -1.0;
-    }
-
-    float milliseconds_vis;
-    cudaEventElapsedTime(&milliseconds_vis, start, stop);
-    printf("Visualization time: %.4f ms\n", milliseconds_vis);
-
-    dim3 blockCopy(16, 16);
-    dim3 gridCopy(
-        (left->width + blockCopy.x - 1) / blockCopy.x,
-        (left->height + blockCopy.y - 1) / blockCopy.y
-    );
-
-    cudaEventRecord(start);
-    set_distance_texture<<<gridCopy, blockCopy>>>(
-        combined_detector->depth_texture->surface,
-        d_matches,
-        *num_matches,
-        left->image_width,
-        left->image_height
-    );
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Visualization kernel failed: %s\n", cudaGetErrorString(error));
-        return -1.0;
-    }
-
-    float milliseconds_segmentation;
-    cudaEventElapsedTime(&milliseconds_segmentation, start, stop);
-    printf("Assigning Nearest keypoint Distance time: %.4f ms\n", milliseconds_segmentation);
-
-    cudaFree(d_bestMatchesLeft);
-    cudaFree(d_bestMatchesRight);
- 
-    return milliseconds_left_right + milliseconds_right_left + milliseconds_cross_check + milliseconds_vis + milliseconds_segmentation;
-    // return milliseconds_vis + milliseconds_matching + milliseconds_segmentation;
-    
-}
-
-int cuda_match_keypoints(
-    int detector_id_left,
-    int detector_id_right,
-    int detector_id_combined,
-    StereoParams params,
-    int* num_matches,
-
-    ImageParams* left,
-    ImageParams* right
-) {
-    DetectorInstance* left_detector = get_detector_instance(detector_id_left);
-    DetectorInstance* right_detector = get_detector_instance(detector_id_right);
-    DetectorInstance* combined_detector = get_detector_instance(detector_id_combined);
-
-    if (validate_detectors(left_detector, right_detector, combined_detector) < 0) {
-        return -1;
-    }
-
-    printf("Entering Setup\n");
-    if (setup_resources(detector_id_left, detector_id_right, detector_id_combined) < 0) {
-        return -1;
-    }
-
-    // Allocate resources for matching
-    MatchedKeypoint* d_matches = NULL;
-    int* d_match_count = NULL;
-    cudaEvent_t start = NULL, stop = NULL;
-
-
-    dim3 blockCopy(16, 16);
-    dim3 gridCopy(
-        (left->width + blockCopy.x - 1) / blockCopy.x,
-        (left->height + blockCopy.y - 1) / blockCopy.y
-    );
-
-    // Set texture for left and right images
-    setTextureKernel<<<gridCopy, blockCopy>>>(
-        left_detector->y_texture->surface,
-        left_detector->uv_texture->surface,
-        left_detector->depth_texture->surface,
-        left->y_plane,
-        left->uv_plane,
-        left->width,
-        left->height,
-        left->y_linesize,
-        left->uv_linesize
-    );
-
-    setTextureKernel<<<gridCopy, blockCopy>>>(
-        right_detector->y_texture->surface,
-        right_detector->uv_texture->surface,
-        right_detector->depth_texture->surface,
-        right->y_plane,
-        right->uv_plane,
-        right->width,
-        right->height,
-        right->y_linesize,
-        right->uv_linesize
-    );
-
-     // Copy surface from left to combined detector
-    copySurfaceKernel<<<gridCopy, blockCopy>>>(
-        left_detector->y_texture->surface,
-        left_detector->uv_texture->surface,
-        combined_detector->y_texture->surface,
-        combined_detector->uv_texture->surface,
-        combined_detector->depth_texture->surface,
-        left->width,
-        left->height
-    );
-
-    cudaError_t error;
-    error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        printf("Surface copy kernel failed: %s\n", cudaGetErrorString(error));
-        cleanup_resources(detector_id_left, detector_id_right, detector_id_combined, NULL, NULL, NULL, NULL);
-    
-        return -1;
-    }
-
-    // Detect keypoints
-    float detection_time_left = cuda_detect_keypoints(detector_id_left, params, left);
-    float detection_time_right = cuda_detect_keypoints(detector_id_right, params, right);
-    
-    cudaDeviceSynchronize();
-
-    printf("Detected Left: %d <====> Detected Right: %d\n", *left->num_keypoints, *right->num_keypoints);
-
-    if (detection_time_left < 0 || detection_time_right < 0) {
-        cleanup_resources(detector_id_left, detector_id_right, detector_id_combined, NULL, NULL, NULL, NULL);
-        return -1;
-    }
-
-    
-    const int max_matches = min(*right->num_keypoints, *left->num_keypoints);
-    if (max_matches <= 0) {
-         cleanup_resources(
-            detector_id_left, 
-            detector_id_right, 
-            detector_id_combined,
-            d_matches, 
-            d_match_count, 
-            start, 
-            stop
-        );
-        printf("No matches possbile!\n");
-        return 0;
-    }
-
-    if (allocate_matching_resources(&d_matches, &d_match_count, &start, &stop, max_matches) < 0) {
-       cleanup_resources(
-            detector_id_left, 
-            detector_id_right, 
-            detector_id_combined,
-            d_matches, 
-            d_match_count, 
-            start, 
-            stop
-        );
-        return -1;
-    }
-
-    float matching_time = 0;
-    if (!params.disable_matching){
-
-        matching_time = execute_matching(
-            left_detector, 
-            right_detector, 
-            combined_detector,
-            d_matches, 
-            d_match_count, 
-            max_matches, 
-            num_matches,
-            params,
-            left, 
-            right, 
-            start, 
-            stop
+            left_positions, left_descriptors, left_count,
+            right_positions, right_descriptors, right_count,
+            params, matches_left
         );
         
-        // Perform matching
-        if (matching_time < 0) {
-            cleanup_resources(
-                detector_id_left, 
-                detector_id_right, 
-                detector_id_combined,
-                d_matches, 
-                d_match_count, 
-                start, 
-                stop
-            );
-            cudaDeviceSynchronize();
-            printf("Matching Failed!\n");
-            return -1;
-        }
+        matchRightToLeft<<<grid, block>>>(
+            right_positions, right_descriptors, right_count,
+            left_positions, left_descriptors, left_count,
+            params, matches_right
+        );
     }
 
-
-    printf("Total Pipeline Execution Time: %.4f\n", detection_time_left + detection_time_right + matching_time);
-
-    cleanup_resources(
-        detector_id_left, 
-        detector_id_right, 
-        detector_id_combined,
-        d_matches, 
-        d_match_count, 
-        start, 
-        stop
-    );
-    cudaDeviceSynchronize();
-
-    return 0;
-}
-
-
-int cuda_estimate_motion(
-    const MatchedKeypoint* prev_matches,
-    int prev_match_count,
-    const MatchedKeypoint* curr_matches,
-    int curr_match_count,
-    TemporalParams params,
-    CameraPose* camera_pose
-) {
-    // Allocate device memory for temporal matches
-    TemporalMatch* d_temporal_matches;
-    int* d_temporal_match_count;
-    int h_temporal_match_count = 0;
-    
-    cudaMalloc(&d_temporal_matches, min(prev_match_count, curr_match_count) * sizeof(TemporalMatch));
-    cudaMalloc(&d_temporal_match_count, sizeof(int));
-    cudaMemset(d_temporal_match_count, 0, sizeof(int));
-    
-    // Match keypoints between frames
-    dim3 block(256);
-    dim3 grid((curr_match_count + block.x - 1) / block.x);
-    
-    matchTemporalKeypoints<<<grid, block>>>(
-        prev_matches,
-        prev_match_count,
-        curr_matches,
-        curr_match_count,
-        d_temporal_matches,
-        d_temporal_match_count,
-        params
-    );
-    
-    // Copy match count back to host
-    cudaMemcpy(&h_temporal_match_count, d_temporal_match_count, sizeof(int), cudaMemcpyDeviceToHost);
-    
-    if (h_temporal_match_count < params.min_matches) {
-        cudaFree(d_temporal_matches);
-        cudaFree(d_temporal_match_count);
-        return -1;
+    void launch_cross_check_matches(
+        const BestMatch* matches_left,
+        const BestMatch* matches_right,
+        const float4* left_positions,
+        const float4* right_positions,
+        int left_count,
+        int right_count,
+        const StereoParams* params,
+        MatchedKeypoint* matched_pairs,
+        int* out_count,
+        dim3 grid,
+        dim3 block
+    ) {
+        crossCheckMatches<<<grid, block>>>(
+            matches_left, matches_right,
+            left_positions, right_positions,
+            left_count, right_count,
+            *params,
+            matched_pairs, out_count
+        );
     }
-    
-    // Allocate memory for RANSAC
-    CameraPose* d_best_pose;
-    float* d_inlier_count;
-    
-    cudaMalloc(&d_best_pose, sizeof(CameraPose));
-    cudaMalloc(&d_inlier_count, sizeof(float));
-    cudaMemset(d_inlier_count, 0, sizeof(float));
-    
-    // Run RANSAC
-    dim3 ransac_block(256);
-    dim3 ransac_grid(params.ransac_iterations);
-    
-    estimateMotionRANSAC<<<ransac_grid, ransac_block>>>(
-        d_temporal_matches,
-        h_temporal_match_count,
-        params,
-        d_best_pose,
-        d_inlier_count
-    );
-    
-    // Copy results back to host
-    cudaMemcpy(camera_pose, d_best_pose, sizeof(CameraPose), cudaMemcpyDeviceToHost);
-    
-    // Cleanup
-    cudaFree(d_temporal_matches);
-    cudaFree(d_temporal_match_count);
-    cudaFree(d_best_pose);
-    cudaFree(d_inlier_count);
-    
-    return 0;
-}
 
-}
+    void launch_visualization(
+        const MatchedKeypoint* matches,
+        int match_count,
+        float4* keypoint_positions,
+        float4* keypoint_colors,
+        float4* left_line_positions,
+        float4* left_line_colors,
+        float4* right_line_positions,
+        float4* right_line_colors,
+        const float* left_transform,
+        const float* right_transform,
+        bool show_connections,
+        dim3 grid,
+        dim3 block
+    ) {
+        visualizeTriangulation<<<grid, block>>>(
+            matches, match_count,
+            keypoint_positions, keypoint_colors,
+            left_line_positions, left_line_colors,
+            right_line_positions, right_line_colors,
+            left_transform, right_transform,
+            show_connections
+        );
+    }
+
+    void launch_texture_update(
+        cudaSurfaceObject_t y_surface,
+        cudaSurfaceObject_t uv_surface,
+        cudaSurfaceObject_t depth_surface,
+        const uint8_t* y_plane,
+        const uint8_t* uv_plane,
+        int width,
+        int height,
+        int y_linesize,
+        int uv_linesize,
+        dim3 grid,
+        dim3 block
+    ) {
+        setTextureKernel<<<grid, block>>>(
+            y_surface, uv_surface, depth_surface,
+            y_plane, uv_plane,
+            width, height,
+            y_linesize, uv_linesize
+        );
+    }
+
+    void launch_surface_copy(
+        cudaSurfaceObject_t src_y,
+        cudaSurfaceObject_t src_uv,
+        cudaSurfaceObject_t dst_y,
+        cudaSurfaceObject_t dst_uv,
+        cudaSurfaceObject_t dst_depth,
+        int width,
+        int height,
+        dim3 grid,
+        dim3 block
+    ) {
+        copySurfaceKernel<<<grid, block>>>(
+            src_y, src_uv,
+            dst_y, dst_uv, dst_depth,
+            width, height
+        );
+    }
+
+    void launch_depth_texture_update(
+        cudaSurfaceObject_t depth_surface,
+        MatchedKeypoint* matches,
+        int num_matches,
+        int width,
+        int height,
+        dim3 grid,
+        dim3 block
+    ) {
+        set_distance_texture<<<grid, block>>>(
+            depth_surface,
+            matches,
+            num_matches,
+            width,
+            height
+        );
+    }
+} 

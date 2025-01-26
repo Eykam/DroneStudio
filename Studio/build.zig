@@ -259,8 +259,9 @@ pub fn build(b: *std.Build) void {
         cuda_detector_artifact.step.dependOn(&cuda_detector_obj.step);
 
         exe.addObjectFile(cuda_detector_artifact.getEmittedBin());
-        exe.addIncludePath(b.path("lib/kernels"));
     }
+
+    exe.addIncludePath(b.path("lib/kernels"));
 
     // Install the executable
     b.installArtifact(exe);
@@ -277,7 +278,7 @@ pub fn build(b: *std.Build) void {
 
     // Add the test executable
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"), // Adjust if your tests are in a different file
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });

@@ -1,27 +1,37 @@
 #ifndef KEYPOINT_DETECTOR_H
 #define KEYPOINT_DETECTOR_H
 
+#include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h> 
+#include <stddef.h>
 
-#ifdef __CUDACC__
-    #include <cuda_runtime.h>
-    #include <cuda_gl_interop.h>
-#else
-    // Forward declare CUDA types when not compiling with CUDA
-    typedef struct CUgraphicsResource_st *cudaGraphicsResource_t;
-    typedef struct cudaArray *cudaArray_t;
-    typedef struct CUsurfObject_st *cudaSurfaceObject_t;
-#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+
 typedef struct KeyPoint {
     float x;
     float y;
 } KeyPoint;
+
+
+typedef struct Match {
+    float3 position;   // Position in OpenGL world coordinates
+    float2 image_coords;
+    float disparity;    // Pixel disparity between left and right views
+    float depth;
+} Match;
+
+// Structure to hold matched keypoint data
+typedef struct MatchedKeypoint {
+    float3 left_pos;
+    float3 right_pos;
+    Match world;
+} MatchedKeypoint;
+
 
 typedef struct BRIEFDescriptor {
     uint64_t descriptor[8];  // 256-bit descriptor (can be adjusted)
@@ -64,10 +74,10 @@ typedef struct CudaGLTextureResource {
 } CudaGLTextureResource;
 
 typedef struct DetectorInstance {
-    int* d_keypoint_count;
-    int gl_ytexture;
-    int gl_uvtexture;
-    int gl_depthtexture;
+    uint* d_keypoint_count;
+    uint gl_ytexture;
+    uint gl_uvtexture;
+    uint gl_depthtexture;
     float world_transform[16];
     float* d_world_transform;
     CudaGLResources gl_resources;
@@ -106,7 +116,7 @@ typedef struct StereoParams {
 
 
 // Initialize CUDA resources
-int cuda_create_detector(int max_keypoints, int gl_ytexture, int gl_uvtexture, int gl_depthtexture);
+int cuda_create_detector(uint max_keypoints, uint gl_ytexture, uint gl_uvtexture, uint gl_depthtexture);
 void cuda_cleanup_detector(int detector_id);
 
 int cuda_register_gl_texture(int detector_id);
@@ -145,6 +155,41 @@ int cuda_match_keypoints(
     ImageParams* left,
     ImageParams* right
 );
+
+
+typedef struct CameraPose {
+    float rotation[9];     // 3x3 rotation matrix
+    float translation[3];  // Translation vector
+} CameraPose;
+
+typedef struct TemporalMatch {
+    float3 prev_pos;      // 3D position in previous frame
+    float3 current_pos;   // 3D position in current frame
+    float confidence;     // Match confidence score
+} TemporalMatch;
+
+typedef struct TemporalParams {
+    float max_distance;           // Maximum distance for temporal matching
+    float min_confidence;         // Minimum confidence threshold
+    int min_matches;             // Minimum required matches
+    float ransac_threshold;      // RANSAC inlier threshold
+    int ransac_iterations;       // Number of RANSAC iterations
+} TemporalParams;
+
+typedef struct MatchHistory MatchHistory;
+typedef struct VisualOdometry VisualOdometry;
+
+MatchHistory* create_match_history(int capacity);
+void destroy_match_history(MatchHistory* history);
+void update_match_history(MatchHistory* history, MatchedKeypoint* matches, int count);
+void get_previous_matches(MatchHistory* history, MatchedKeypoint** matches, int* count);
+
+// Visual odometry management
+VisualOdometry* create_visual_odometry(int capacity, TemporalParams params);
+void destroy_visual_odometry(VisualOdometry* vo);
+int estimate_motion(VisualOdometry* vo, MatchedKeypoint* curr_matches, int count, CameraPose* out_pose);
+void get_current_pose(VisualOdometry* vo, CameraPose* out_pose);
+
 
 
 #ifdef __cplusplus
