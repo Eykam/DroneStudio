@@ -21,7 +21,7 @@ pub const StereoMatcher = struct {
     allocator: std.mem.Allocator,
     params: *StereoParams,
     params_changed: bool,
-    num_matches: *c_int,
+    num_matches: *c_uint,
 
     left: *DetectionResourceManager,
     right: *DetectionResourceManager,
@@ -72,7 +72,7 @@ pub const StereoMatcher = struct {
             .allocator = allocator,
             .params = stereo_params,
             .params_changed = false,
-            .num_matches = try allocator.create(c_int),
+            .num_matches = try allocator.create(c_uint),
             .left = undefined,
             .right = undefined,
             .combined = undefined,
@@ -189,9 +189,6 @@ pub const StereoMatcher = struct {
         params: *StereoParams,
     ) !c_uint {
         if (resource_manager.frame) |frame| {
-            try resource_manager.map_resources();
-            defer resource_manager.unmap_resources();
-
             try resource_manager.updateTransformation();
 
             const block = cuda.dim3{
@@ -288,96 +285,244 @@ pub const StereoMatcher = struct {
     }
 
     pub fn match(self: *Self) !void {
-        std.debug.print("\n\nStarting Matching...\n", .{});
+        std.debug.print("\n\nStarting Detection...\n", .{});
         self.left.mutex.lock();
         self.right.mutex.lock();
         self.combined.mutex.lock();
 
-        defer self.left.mutex.unlock();
-        defer self.right.mutex.unlock();
-        defer self.combined.mutex.unlock();
+        defer {
+            self.left.mutex.unlock();
+            self.right.mutex.unlock();
+            self.combined.mutex.unlock();
+        }
 
-        const keypoints_left = try detectKeypoints(self.left, self.params);
-        const keypoints_right = try detectKeypoints(self.right, self.params);
+        if (self.left.frame) |frame| {
+            try self.left.map_resources();
 
-        std.debug.print("Detections =>  Left : {d} | Right: {d}\n", .{ keypoints_left, keypoints_right });
+            // Copying left texture to combined
+            try self.combined.map_resources();
 
-        if (self.left.frame == null or self.right.frame == null) {
+            const src_textures = self.left.resources.gl_textures;
+            const dest_textures = self.combined.resources.gl_textures;
+
+            const block = cuda.dim3{
+                .x = 16,
+                .y = 16,
+                .z = 1,
+            };
+
+            const grid = cuda.dim3{
+                .x = @divTrunc(@as(c_uint, @intCast(frame.width)) + block.x - 1, block.x),
+                .y = @divTrunc(@as(c_uint, @intCast(frame.height)) + block.y - 1, block.y),
+                .z = 1,
+            };
+
+            try CudaGL.track("Surface_Copy", void, cuda.launch_surface_copy, .{
+                src_textures.y.?.surface,
+                src_textures.uv.?.surface,
+                dest_textures.y.?.surface,
+                dest_textures.uv.?.surface,
+                dest_textures.depth.?.surface,
+                frame.width,
+                frame.height,
+                grid,
+                block,
+            });
+        }
+
+        if (self.right.frame) |_| {
+            try self.right.map_resources();
+        }
+
+        defer {
+            if (self.left.frame) |_| {
+                self.left.unmap_resources();
+                self.combined.unmap_resources();
+            }
+
+            if (self.right.frame) |_| {
+                self.right.unmap_resources();
+            }
+        }
+
+        const num_keypoints_left = try detectKeypoints(self.left, self.params);
+        const num_keypoints_right = try detectKeypoints(self.right, self.params);
+
+        std.debug.print("Detections =>  Left : {d} | Right: {d}\n", .{ num_keypoints_left, num_keypoints_right });
+
+        const max_matches = @min(num_keypoints_left, num_keypoints_right);
+        if (max_matches == 0 or self.params.disable_matching) {
+            std.debug.print("Left / Right Frame not found or Matching Disabled. Skipping Matching...\n", .{});
             return;
         }
 
-        // const block = cuda.dim3{
-        //     .x = 256,
-        //     .y = 1,
-        //     .z = 1,
-        // };
+        std.debug.print("Starting Matching...\n", .{});
 
-        // const grid = cuda.dim3{
-        //     .x = (@as(c_uint, @intCast(self.left.num_keypoints)) + block.x - 1) / block.x,
-        //     .y = (@as(c_uint, @intCast(self.right.num_keypoints)) + block.y - 1) / block.y,
-        //     .z = 1,
-        // };
+        var d_matches_left: ?*cuda.BestMatch = null;
+        var d_matches_right: ?*cuda.BestMatch = null;
 
-        //     var matches_left: ?*cuda.BestMatch = null;
-        //     var matches_right: ?*cuda.BestMatch = null;
+        var err = cuda.cudaMalloc(@ptrCast(&d_matches_left), num_keypoints_left * @sizeOf(cuda.BestMatch));
+        err |= cuda.cudaMalloc(@ptrCast(&d_matches_right), num_keypoints_right * @sizeOf(cuda.BestMatch));
 
-        //     var err = cuda.cudaMalloc(@ptrCast(&matches_left), @sizeOf(cuda.BestMatch));
-        //     err |= cuda.cudaMalloc(@ptrCast(&matches_right), @sizeOf(cuda.BestMatch));
+        defer {
+            if (d_matches_left) |ptr| {
+                _ = cuda.cudaFree(ptr);
+            }
+            if (d_matches_right) |ptr| {
+                _ = cuda.cudaFree(ptr);
+            }
+        }
 
-        //     defer {
-        //         _ = cuda.cudaFree(@ptrCast(&matches_left));
-        //         _ = cuda.cudaFree(@ptrCast(&matches_right));
-        //     }
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to allocate memory for best matches!\n", .{});
+            return error.CudaMallocFailed;
+        }
 
-        //     if (err != cuda.cudaSuccess) {
-        //         std.debug.print("Failed to allocate memory for matches!\n", .{});
-        //         return error.CudaMallocFailed;
-        //     }
+        try CudaGL.track("Stereo_Matching", void, cuda.launch_stereo_matching, .{
+            self.left.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+            self.left.resources.d_descriptors,
+            num_keypoints_left,
+            self.right.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+            self.right.resources.d_descriptors,
+            num_keypoints_right,
+            self.params.*,
+            d_matches_left,
+            d_matches_right,
+        });
 
-        //     cuda.launch_stereo_matching(
-        //         self.left.resources.keypoint_resources.?.keypoints.positions.d_buffer,
-        //         self.left.resources.d_descriptors,
-        //         self.left.num_keypoints.*,
-        //         self.right.resources.keypoint_resources.?.keypoints.positions.d_buffer,
-        //         self.right.resources.d_descriptors,
-        //         self.right.num_keypoints.*,
-        //         self.params.*,
-        //         matches_left,
-        //         matches_right,
-        //     );
+        var d_matches: ?*cuda.MatchedKeypoint = null;
+        var d_match_count: ?*c_uint = null;
 
-        //     err = cuda.cudaGetLastError();
-        //     if (err != cuda.cudaSuccess) {
-        //         std.debug.print("Stereo Matching update Kernel failed: {s}\n", .{cuda.cudaGetErrorString(err)});
-        //         return error.CudaKernelError;
-        //     }
+        err = cuda.cudaMalloc(@ptrCast(&d_matches), max_matches * @sizeOf(cuda.MatchedKeypoint));
+        err |= cuda.cudaMalloc(@ptrCast(&d_match_count), @sizeOf(c_uint));
 
-        //     // Update visualization
-        //     self.left.target_node.texture_updated = true;
-        //     self.right.target_node.texture_updated = true;
-        //     self.combined.target_node.texture_updated = true;
+        if (d_match_count) |ptr| {
+            _ = cuda.cudaMemset(ptr, 0, @sizeOf(c_uint));
+        }
 
-        //     for (self.combined.target_node.children.items) |child| {
-        //         child.instance_data.?.count = @intCast(self.num_matches.*);
-        //     }
-        // }
+        defer {
+            if (d_matches) |ptr| {
+                _ = cuda.cudaFree(ptr);
+            }
 
-        // fn createImageParams(manager: *DetectionResourceManager) !*ImageParams {
-        //     const frame = manager.frame.?;
-        //     const image_params = try manager.allocator.create(ImageParams);
-        //     image_params.* = .{
-        //         .y_plane = frame.data[0],
-        //         .uv_plane = frame.data[1],
-        //         .width = frame.width,
-        //         .height = frame.height,
-        //         .y_linesize = frame.linesize[0],
-        //         .uv_linesize = frame.linesize[1],
-        //         .image_width = @floatFromInt(frame.width),
-        //         .image_height = @floatFromInt(frame.height),
-        //         .num_keypoints = manager.num_keypoints,
-        //     };
-        //     return image_params;
-        // }
+            if (d_match_count) |ptr| {
+                _ = cuda.cudaFree(ptr);
+            }
+        }
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to allocate memory for matches and match count! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+            return error.CudaMallocFailed;
+        }
+
+        var block = cuda.dim3{
+            .x = 512,
+            .y = 1,
+            .z = 1,
+        };
+
+        var grid = cuda.dim3{
+            .x = (num_keypoints_left + block.x - 1) / block.x,
+            .y = 1,
+            .z = 1,
+        };
+
+        try CudaGL.track("Cross_Check_Matches", void, cuda.launch_cross_check_matches, .{
+            d_matches_left,
+            d_matches_right,
+            self.left.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+            self.right.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+            num_keypoints_left,
+            num_keypoints_right,
+            self.params.*,
+            d_matches.?,
+            d_match_count.?,
+            grid,
+            block,
+        });
+
+        err = cuda.cudaMemcpy(
+            self.num_matches,
+            d_match_count.?,
+            @sizeOf(c_uint),
+            cuda.cudaMemcpyDeviceToHost,
+        );
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to copy num matches from device => host! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+            return error.CudaMallocFailed;
+        }
+
+        std.debug.print("Matches Found: {d}\n", .{self.num_matches.*});
+        if (self.num_matches.* == 0) {
+            return;
+        }
+
+        block = cuda.dim3{
+            .x = 512,
+            .y = 1,
+            .z = 1,
+        };
+
+        grid = cuda.dim3{
+            .x = @divTrunc(self.num_matches.* + block.x - 1, block.x),
+            .y = 1,
+            .z = 1,
+        };
+
+        const combined_resources = self.combined.resources;
+        const keypoint_resources = combined_resources.keypoint_resources.?.keypoints;
+        const connection_resources = combined_resources.keypoint_resources.?.connections.?;
+
+        try CudaGL.track("Visualize_Triangulation", void, cuda.launch_visualization, .{
+            d_matches,
+            self.num_matches.*,
+            keypoint_resources.positions.d_buffer,
+            keypoint_resources.colors.d_buffer,
+            connection_resources.left.positions.d_buffer,
+            connection_resources.left.colors.d_buffer,
+            connection_resources.right.positions.d_buffer,
+            connection_resources.right.colors.d_buffer,
+            self.left.resources.d_world_transform,
+            self.right.resources.d_world_transform,
+            self.params.show_connections,
+            grid,
+            block,
+        });
+
+        const frame = self.left.frame.?;
+        block = cuda.dim3{
+            .x = 16,
+            .y = 16,
+            .z = 1,
+        };
+        grid = cuda.dim3{
+            .x = @divTrunc(@as(c_uint, @intCast(frame.width)) + block.x - 1, block.x),
+            .y = @divTrunc(@as(c_uint, @intCast(frame.height)) + block.y - 1, block.y),
+            .z = 1,
+        };
+
+        try CudaGL.track("Depth_Interpolation", void, cuda.launch_depth_texture_update, .{
+            combined_resources.gl_textures.depth.?.surface,
+            d_matches,
+            self.num_matches.*,
+            frame.width,
+            frame.height,
+            grid,
+            block,
+        });
+
+        // Update visualization
+        self.combined.target_node.texture_updated = true;
+        for (self.combined.target_node.children.items) |child| {
+            child.instance_data.?.count = @intCast(self.num_matches.*);
+        }
     }
 };
 
@@ -448,6 +593,7 @@ pub const DetectionResourceManager = struct {
     }
 
     pub fn map_resources(self: *Self) !void {
+        self.num_keypoints.* = 0;
         try self.resources.map_resources();
     }
 
@@ -460,7 +606,6 @@ pub const DetectionResourceManager = struct {
             });
         }
 
-        self.num_keypoints.* = 0;
         self.resources.unmap_resources();
     }
 

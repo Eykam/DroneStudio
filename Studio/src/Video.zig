@@ -4,7 +4,6 @@ const video = libav.video;
 const Node = @import("Node.zig");
 const ORB = @import("ORB.zig");
 const DetectionResourceManager = ORB.DetectionResourceManager;
-const CudaBinds = @import("bindings/cuda.zig");
 
 const mem = std.mem;
 const fs = std.fs;

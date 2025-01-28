@@ -355,7 +355,7 @@ pub const DetectionResources = struct {
     ) !*Self {
         const self = try allocator.create(Self);
 
-        var d_keypoint_count: [*c]u32 = undefined;
+        var d_keypoint_count: [*c]c_uint = undefined;
         var d_descriptors: [*c]cuda.BRIEFDescriptor = undefined;
         var d_world_transform: [*c]f32 = undefined;
 
@@ -524,8 +524,8 @@ pub fn track(
 ) !ResultType {
     const tracked = try trackKernelExecution(kernel_name, ResultType, kernel_fn, args);
     std.debug.print("{}\n", .{tracked.stats});
-    if (tracked.stats.err != null) {
-        std.debug.print("Kernel Error Detected! {any}\n", .{tracked.stats.err});
+    if (tracked.stats.err) |err| {
+        std.debug.print("Kernel Error Detected! {s}\n", .{err});
         return error.CudaKernelError;
     }
     return tracked.result;

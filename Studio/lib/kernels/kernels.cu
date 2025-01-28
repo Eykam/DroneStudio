@@ -420,11 +420,11 @@ __global__ void matchLeftToRight(
 __global__ void matchRightToLeft(
     const float4* __restrict__ rightPositions,
     const BRIEFDescriptor* __restrict__ rightDescriptors,
-    int rightCount,
+    uint rightCount,
 
     const float4* __restrict__ leftPositions,
     const BRIEFDescriptor* __restrict__ leftDescriptors,
-    int leftCount,
+    uint leftCount,
 
     StereoParams params,
 
@@ -469,14 +469,14 @@ __global__ void crossCheckMatches(
     const float4* __restrict__ leftPositions,
     const float4* __restrict__ rightPositions,
     
-    int leftCount,
-    int rightCount,
+    uint leftCount,
+    uint rightCount,
 
     const StereoParams params,
 
     // Output arrays:
     MatchedKeypoint* __restrict__ matchedPairs, 
-    int* outCount
+    uint* outCount
 ) {
     int leftIdx = blockIdx.x * blockDim.x + threadIdx.x;
     if (leftIdx >= leftCount) return;
@@ -593,7 +593,7 @@ __global__ void copySurfaceKernel(
 __global__ void set_distance_texture(
     cudaSurfaceObject_t depth_texture,
     MatchedKeypoint* matches,
-    int num_matches,
+    uint num_matches,
     int width,
     int height
 ){
@@ -702,7 +702,7 @@ __device__ float4 transform_point(const float* transform, float4 point) {
 // Kernel to generate visualization data
 __global__ void visualizeTriangulation(
     const MatchedKeypoint* matches,
-    const int match_count,
+    const uint match_count,
     
     float4*  keypoint_positions,
     float4*  keypoint_colors,
@@ -996,10 +996,10 @@ extern "C" {
     void launch_stereo_matching(
         const float4* left_positions,
         const BRIEFDescriptor* left_descriptors,
-        int left_count,
+        uint left_count,
         const float4* right_positions,
         const BRIEFDescriptor* right_descriptors,
-        int right_count,
+        uint right_count,
         StereoParams params,
         BestMatch* matches_left,
         BestMatch* matches_right
@@ -1030,11 +1030,11 @@ extern "C" {
         const BestMatch* matches_right,
         const float4* left_positions,
         const float4* right_positions,
-        int left_count,
-        int right_count,
-        const StereoParams* params,
+        uint left_count,
+        uint right_count,
+        const StereoParams params,
         MatchedKeypoint* matched_pairs,
-        int* out_count,
+        uint* out_count,
         dim3 grid,
         dim3 block
     ) {
@@ -1042,14 +1042,14 @@ extern "C" {
             matches_left, matches_right,
             left_positions, right_positions,
             left_count, right_count,
-            *params,
+            params,
             matched_pairs, out_count
         );
     }
 
     void launch_visualization(
         const MatchedKeypoint* matches,
-        int match_count,
+        uint match_count,
         float4* keypoint_positions,
         float4* keypoint_colors,
         float4* left_line_positions,
@@ -1114,7 +1114,7 @@ extern "C" {
     void launch_depth_texture_update(
         cudaSurfaceObject_t depth_surface,
         MatchedKeypoint* matches,
-        int num_matches,
+        uint num_matches,
         int width,
         int height,
         dim3 grid,

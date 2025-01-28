@@ -113,10 +113,10 @@ void launch_keypoint_detection(
 void launch_stereo_matching(
     const float4* left_positions,
     const BRIEFDescriptor* left_descriptors,
-    int left_count,
+    uint left_count,
     const float4* right_positions,
     const BRIEFDescriptor* right_descriptors,
-    int right_count,
+    uint right_count,
     StereoParams params,
     BestMatch* matches_left,
     BestMatch* matches_right
@@ -128,11 +128,11 @@ void launch_cross_check_matches(
     const BestMatch* matches_right,
     const float4* left_positions,
     const float4* right_positions,
-    int left_count,
-    int right_count,
-    const StereoParams* params,
+    uint left_count,
+    uint right_count,
+    const StereoParams params,
     MatchedKeypoint* matched_pairs,
-    int* out_count,
+    uint* out_count,
     dim3 grid,
     dim3 block
 );
@@ -140,7 +140,7 @@ void launch_cross_check_matches(
 // Launch visualization kernel
 void launch_visualization(
     const MatchedKeypoint* matches,
-    int match_count,
+    uint match_count,
     float4* keypoint_positions,
     float4* keypoint_colors,
     float4* left_line_positions,
@@ -184,7 +184,7 @@ void launch_surface_copy(
 void launch_depth_texture_update(
     cudaSurfaceObject_t depth_surface,
     MatchedKeypoint* matches,
-    int num_matches,
+    uint num_matches,
     int width,
     int height,
     dim3 grid,
