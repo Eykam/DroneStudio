@@ -3,10 +3,8 @@ const libav = @import("bindings/libav.zig");
 const video = libav.video;
 const Node = @import("Node.zig");
 const ORB = @import("ORB.zig");
-const KeypointManager = ORB.KeypointManager;
+const DetectionResourceManager = ORB.DetectionResourceManager;
 const CudaBinds = @import("bindings/cuda.zig");
-const CudaDetector = CudaBinds.CudaKeypointDetector;
-const KeypointNode = @import("Shape.zig").KeypointDebugger;
 
 const mem = std.mem;
 const fs = std.fs;
@@ -14,7 +12,7 @@ const fs = std.fs;
 const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(video.EAGAIN));
 const AVERROR_EOF = -1 * @as(c_int, @intCast(video.EOF));
 
-const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *ORB.KeypointManager, *video.struct_AVFrame) anyerror!void;
+const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *DetectionResourceManager, *video.struct_AVFrame) anyerror!void;
 pub const StreamPollingConfig = struct {
     max_retry_attempts: u32 = 100,
     retry_delay_ms: u64 = 2000, // 2 seconds between retries
@@ -59,7 +57,7 @@ pub const VideoHandler = struct {
     buffersink: ?*video.AVFilterContext = null,
 
     // Callback for decoded RGB frames
-    keypoint_manager: ?*KeypointManager = null,
+    detection_manager: ?*DetectionResourceManager = null,
     onDecodedFrame: DecodedFrameCallback,
 
     polling_config: StreamPollingConfig,
@@ -72,7 +70,7 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
-        keypoint_manager: ?*KeypointManager,
+        detection_manager: ?*DetectionResourceManager,
     ) !Self {
         const config = polling_config orelse StreamPollingConfig{};
 
@@ -230,7 +228,7 @@ pub const VideoHandler = struct {
             .onDecodedFrame = onDecodedFrame,
             .polling_config = config,
             .is_stream_ready = true,
-            .keypoint_manager = keypoint_manager,
+            .detection_manager = detection_manager,
         };
 
         try self.initHardwareFilterGraph();
@@ -391,7 +389,7 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
-        keypoint_manager: ?*KeypointManager,
+        detection_manager: ?*DetectionResourceManager,
     ) !std.Thread {
         const spwn_config = std.Thread.SpawnConfig{
             .allocator = std.heap.page_allocator,
@@ -405,7 +403,7 @@ pub const VideoHandler = struct {
             hw_type,
             onDecodedFrame,
             polling_config,
-            keypoint_manager,
+            detection_manager,
         });
     }
 
@@ -416,7 +414,7 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
-        keypoint_manager: ?*KeypointManager,
+        detection_manager: ?*DetectionResourceManager,
     ) void {
         while (true) {
             var videoHandler: ?Self = null;
@@ -428,7 +426,7 @@ pub const VideoHandler = struct {
                     hw_type,
                     onDecodedFrame,
                     polling_config,
-                    keypoint_manager,
+                    detection_manager,
                 ) catch |err| {
                     std.debug.print("Error initializing Video Handler: {any}\n", .{err});
                     std.time.sleep(2 * std.time.ns_per_s); // Wait 2 seconds before retrying
@@ -515,7 +513,7 @@ pub const VideoHandler = struct {
                 continue;
             }
 
-            try self.onDecodedFrame(self.allocator, self.node, self.keypoint_manager.?, self.hw_frame);
+            try self.onDecodedFrame(self.allocator, self.node, self.detection_manager.?, self.hw_frame);
         }
 
         return true;
@@ -616,10 +614,10 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
     return format_context_ptr;
 }
 
-pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, keypoint_manager: *KeypointManager, frame: *video.AVFrame) !void {
+pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, detection_manager: *DetectionResourceManager, frame: *video.AVFrame) !void {
     _ = allocator;
 
     if (!node.scene.?.appState.paused) {
-        try keypoint_manager.queueFrame(frame);
+        try detection_manager.queueFrame(frame);
     }
 }

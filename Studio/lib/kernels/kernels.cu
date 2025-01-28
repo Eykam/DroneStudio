@@ -38,30 +38,6 @@ __constant__ int2 fast_offsets[16] = {
     {2, -2}
 };
 
-
-// Global state
-// static DetectorInstance g_detectors[MAX_DETECTORS] = {0};
-// static int g_next_detector_id = 0;
-
-// static DetectorInstance* get_detector_instance(int id) {
-//     for (int i = 0; i < MAX_DETECTORS; i++) {
-//         if (g_detectors[i].initialized && g_detectors[i].id == id) {
-//             return &g_detectors[i];
-//         }
-//     }
-//     return NULL;
-// }
-
-// static int find_free_detector_slot(void) {
-//     for (int i = 0; i < MAX_DETECTORS; i++) {
-//         if (!g_detectors[i].initialized) {
-//             return i;
-//         }
-//     }
-//     return -1;
-// }
-
-
 __constant__ float d_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
 
 
@@ -142,9 +118,7 @@ __global__ void detectFASTKeypoints(
     float4* colors,
     BRIEFDescriptor* descriptors,
     uint* keypoint_count,
-    int max_keypoints,
-    float image_width,
-    float image_height
+    int max_keypoints
 ) {
     __shared__ int block_counter;
     __shared__ float2 block_keypoints[256]; 
@@ -291,7 +265,7 @@ __global__ void detectFASTKeypoints(
                 float2 kp = block_keypoints[i];
                 float3 world_pos = convertPxToCanvasCoords(
                     kp.x, kp.y,
-                    image_width, image_height
+                    width, height
                 );
                 
                 positions[global_idx + i] = make_float4(world_pos.x, world_pos.y, world_pos.z, 0.0f);
@@ -304,13 +278,6 @@ __global__ void detectFASTKeypoints(
 
 
 // ============================================================= Matching =================================================================
-struct BestMatch {
-    int   bestIdx;   
-    float bestCost;   
-    //float secondBestCost; // for ratio tests
-};
-
-
 
 __device__ Match triangulatePosition(
     float3 leftWorldPos,
@@ -1014,8 +981,6 @@ extern "C" {
         BRIEFDescriptor* descriptors,
         uint* keypoint_count,
         int max_keypoints,
-        float image_width,
-        float image_height,
         dim3 grid,
         dim3 block
     ) {
@@ -1024,8 +989,7 @@ extern "C" {
             threshold, arc_length,
             positions, colors,
             descriptors, keypoint_count,
-            max_keypoints,
-            image_width, image_height
+            max_keypoints
         );
     }
 
@@ -1038,21 +1002,27 @@ extern "C" {
         int right_count,
         StereoParams params,
         BestMatch* matches_left,
-        BestMatch* matches_right,
-        dim3 grid,
-        dim3 block
+        BestMatch* matches_right
     ) {
-        matchLeftToRight<<<grid, block>>>(
-            left_positions, left_descriptors, left_count,
-            right_positions, right_descriptors, right_count,
-            params, matches_left
-        );
-        
-        matchRightToLeft<<<grid, block>>>(
-            right_positions, right_descriptors, right_count,
-            left_positions, left_descriptors, left_count,
-            params, matches_right
-        );
+        dim3 block = 256;
+
+        {
+            dim3 grid( (left_count + block.x - 1) / block.x );
+            matchLeftToRight<<<grid, block>>>(
+                left_positions, left_descriptors, left_count,
+                right_positions, right_descriptors, right_count,
+                params, matches_left
+            );
+        }
+
+        {
+            dim3 grid( (right_count + block.x - 1) / block.x );
+            matchRightToLeft<<<grid, block>>>(
+                right_positions, right_descriptors, right_count,
+                left_positions, left_descriptors, left_count,
+                params, matches_right
+            );
+        }
     }
 
     void launch_cross_check_matches(

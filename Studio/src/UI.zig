@@ -345,7 +345,7 @@ pub const StereoDebugWindow = struct {
                 params_changed = true;
             }
 
-            var cost_threshold = params.cost_ratio;
+            var cost_threshold = params.cost_threshold;
             if (imgui.igSliderFloat(
                 "Cost Threshold",
                 &cost_threshold,
@@ -354,7 +354,7 @@ pub const StereoDebugWindow = struct {
                 "%.2f",
                 imgui.ImGuiSliderFlags_None,
             )) {
-                params.cost_ratio = cost_threshold;
+                params.cost_threshold = cost_threshold;
                 params_changed = true;
             }
 

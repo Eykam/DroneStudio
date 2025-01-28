@@ -1,44 +1,247 @@
 const std = @import("std");
 const c = @import("bindings/c.zig");
 const glad = @import("bindings/gl.zig").glad;
-const cuda = c.cuda;
+pub const cuda = c.cuda;
 
-pub const InstanceBuffer = struct {
-    position_resource: cuda.cudaGraphicsResource_t,
-    color_resource: cuda.cudaGraphicsResource_t,
-    d_positions: *cuda.float4,
-    d_colors: *cuda.float4,
+pub const StereoParams = cuda.StereoParams;
+pub const ImageParams = cuda.ImageParams;
+
+pub const BufferResource = struct {
+    resource: cuda.cudaGraphicsResource_t,
+    d_buffer: *cuda.float4,
+
+    pub fn init(buffer_id: glad.GLuint) !BufferResource {
+        var resource: BufferResource = BufferResource{};
+        const err = cuda.cudaGraphicsGLRegisterBuffer(
+            &resource.resource,
+            buffer_id,
+            cuda.cudaGraphicsRegisterFlagsWriteDiscard,
+        );
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to register buffer resource: {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+
+            return error.FailedToRegisterBuffer;
+        }
+
+        return resource;
+    }
+
+    pub fn deinit(self: *BufferResource) void {
+        self.unmap();
+        _ = cuda.cudaGraphicsUnregisterResource(self.resource);
+    }
+
+    pub fn map(self: *BufferResource) !void {
+        const err = cuda.cudaGraphicsMapResources(1, &self.resource, null);
+        if (err != cuda.cudaSuccess) {
+            return error.FailedToMapBUfferResource;
+        }
+
+        var bytes: usize = undefined;
+        const ptr_err = cuda.cudaGraphicsResourceGetMappedPointer(
+            @ptrCast(&self.d_buffer),
+            &bytes,
+            self.resource,
+        );
+
+        if (ptr_err != cuda.cudaSuccess) {
+            return error.FailedToGetMappedBufferPointer;
+        }
+    }
+
+    pub fn unmap(self: *BufferResource) void {
+        _ = cuda.cudaGraphicsUnmapResources(1, &self.resource, null);
+    }
 };
 
-pub const ConnectedKeypoint = struct {
-    left: InstanceBuffer,
-    right: InstanceBuffer,
-};
-
-pub const CudaGLResources = struct {
-    connections: ConnectedKeypoint,
-    keypoints: InstanceBuffer,
-};
-
-pub const CudaGLTextureResource = struct {
+pub const TextureResource = struct {
     tex_resource: cuda.cudaGraphicsResource_t,
     array: cuda.cudaArray_t,
     surface: cuda.cudaSurfaceObject_t,
+
+    pub fn init(texture_id: glad.GLuint) !TextureResource {
+        var resource: TextureResource = undefined;
+        const err = cuda.cudaGraphicsGLRegisterImage(
+            &resource.tex_resource,
+            texture_id,
+            cuda.GL_TEXTURE_2D,
+            cuda.cudaGraphicsRegisterFlagsSurfaceLoadStore | cuda.cudaGraphicsRegisterFlagsWriteDiscard,
+        );
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to register GL texture with id: {}!\n", .{texture_id});
+            return error.FailedToRegisterGLTexture;
+        }
+        return resource;
+    }
+
+    pub fn deinit(self: *TextureResource) void {
+        self.unmap();
+        _ = cuda.cudaGraphicsUnregisterResource(self.tex_resource);
+    }
+
+    pub fn map(self: *TextureResource) !void {
+        // Map the texture resource
+        var err = cuda.cudaGraphicsMapResources(1, &self.tex_resource, null);
+        if (err != cuda.cudaSuccess) {
+            return error.FailedToMapTextureResource;
+        }
+
+        // Get the mapped array
+        err = cuda.cudaGraphicsSubResourceGetMappedArray(
+            &self.array,
+            self.tex_resource,
+            0,
+            0,
+        );
+        if (err != cuda.cudaSuccess) {
+            return error.FailedToGetMappedTextureArray;
+        }
+
+        // Create surface object
+        var res_desc: cuda.cudaResourceDesc = std.mem.zeroes(cuda.cudaResourceDesc);
+        res_desc.resType = cuda.cudaResourceTypeArray;
+        res_desc.res.array.array = self.array;
+
+        err = cuda.cudaCreateSurfaceObject(&self.surface, &res_desc);
+        if (err != cuda.cudaSuccess) {
+            return error.FailedToCreateSurfaceObject;
+        }
+    }
+
+    pub fn unmap(self: *TextureResource) void {
+        _ = cuda.cudaDestroySurfaceObject(self.surface);
+        _ = cuda.cudaGraphicsUnmapResources(1, &self.tex_resource, null);
+    }
 };
 
-pub const DetectorInstance = struct {
+pub const BufferParams = struct {
+    position: glad.GLuint,
+    color: glad.GLuint,
+    size: u32,
+};
+
+pub const Buffers = struct {
+    positions: BufferResource,
+    colors: BufferResource,
+    buffer_size: u32,
+
+    pub fn init(buffer_ids: BufferParams) !Buffers {
+        return Buffers{
+            .positions = try BufferResource.init(buffer_ids.position),
+            .colors = try BufferResource.init(buffer_ids.color),
+            .buffer_size = buffer_ids.size,
+        };
+    }
+
+    pub fn deinit(self: *Buffers) void {
+        self.positions.deinit();
+        self.colors.deinit();
+    }
+
+    pub fn map(self: *Buffers) !void {
+        try self.positions.map();
+        try self.colors.map();
+    }
+
+    pub fn unmap(self: *Buffers) void {
+        self.positions.unmap();
+        self.colors.unmap();
+    }
+};
+
+pub const ConnectionResources = struct {
+    left: Buffers,
+    right: Buffers,
+
+    pub fn init(left: BufferParams, right: BufferParams) !ConnectionResources {
+        return ConnectionResources{
+            .left = try Buffers.init(left),
+            .right = try Buffers.init(right),
+        };
+    }
+
+    pub fn deinit(self: *ConnectionResources) void {
+        self.left.deinit();
+        self.right.deinit();
+    }
+
+    pub fn map(self: *ConnectionResources) !void {
+        try self.left.map();
+        try self.right.map();
+    }
+
+    pub fn unmap(self: *ConnectionResources) void {
+        self.left.unmap();
+        self.right.unmap();
+    }
+};
+
+pub const KeypointResources = struct {
+    connections: ?ConnectionResources,
+    keypoints: Buffers,
+
+    pub fn init(keypoint_buffers: BufferParams, left: ?BufferParams, right: ?BufferParams) !KeypointResources {
+        var resources = KeypointResources{
+            .keypoints = try Buffers.init(keypoint_buffers),
+            .connections = null,
+        };
+
+        if (left != null and right != null) {
+            resources.connections = try ConnectionResources.init(left.?, right.?);
+        }
+
+        return resources;
+    }
+
+    pub fn deinit(self: *KeypointResources) void {
+        if (self.connections) |*conn| {
+            conn.deinit();
+        }
+        self.keypoints.deinit();
+    }
+
+    pub fn map(self: *KeypointResources) !void {
+        try self.keypoints.map();
+        if (self.connections) |*conn| {
+            try conn.map();
+        }
+    }
+
+    pub fn unmap(self: *KeypointResources) void {
+        self.keypoints.unmap();
+        if (self.connections) |*conn| {
+            conn.unmap();
+        }
+    }
+};
+
+pub const TextureIDs = struct {
+    y: glad.GLuint,
+    uv: glad.GLuint,
+    depth: glad.GLuint,
+};
+
+pub const Textures = struct {
+    y: ?TextureResource,
+    uv: ?TextureResource,
+    depth: ?TextureResource,
+};
+
+pub const DetectionResources = struct {
     const Self = @This();
 
+    allocator: std.mem.Allocator,
     d_keypoint_count: [*c]u32,
-    gl_ytexture: u32,
-    gl_uvtexture: u32,
-    gl_depthtexture: u32,
+    gl_texture_ids: TextureIDs,
+    gl_textures: Textures,
     world_transform: [16]f32,
     d_world_transform: [*c]f32,
-    gl_resources: CudaGLResources,
-    y_texture: ?*CudaGLTextureResource,
-    uv_texture: ?*CudaGLTextureResource,
-    depth_texture: ?*CudaGLTextureResource,
+    keypoint_resources: ?KeypointResources,
     d_descriptors: [*c]cuda.BRIEFDescriptor,
     id: u32,
     initialized: bool,
@@ -47,58 +250,97 @@ pub const DetectorInstance = struct {
         allocator: std.mem.Allocator,
         id: u32,
         max_keypoints: u32,
-        y_texture: glad.GLuint,
-        uv_texture: glad.GLuint,
-        depth_texture: glad.GLuint,
-    ) *Self {
-        const detector = try allocator.create(Self);
+        y_texture_id: glad.GLuint,
+        uv_texture_id: glad.GLuint,
+        depth_texture_id: glad.GLuint,
+        buffer_ids: BufferParams,
+        left_connection: ?BufferParams,
+        right_connection: ?BufferParams,
+    ) !*Self {
+        const self = try allocator.create(Self);
 
-        var err = cuda.cudaMalloc(detector.d_keypoint_count, @sizeOf(u32));
-        err |= cuda.cudaMalloc(detector.d_descriptors, max_keypoints * @sizeOf(cuda.BRIEFDescriptor));
-        err |= cuda.cudaMalloc(detector.d_world_transform, 16 * @sizeOf(f32));
+        var d_keypoint_count: [*c]u32 = undefined;
+        var d_descriptors: [*c]cuda.BRIEFDescriptor = undefined;
+        var d_world_transform: [*c]f32 = undefined;
 
-        const identity = [16]f32{
+        var err = cuda.cudaMalloc(@ptrCast(&d_keypoint_count), @sizeOf(u32));
+        err |= cuda.cudaMalloc(@ptrCast(&d_descriptors), max_keypoints * @sizeOf(cuda.BRIEFDescriptor));
+        err |= cuda.cudaMalloc(@ptrCast(&d_world_transform), 16 * @sizeOf(f32));
+
+        if (err != cuda.cudaSuccess) {
+            return error.CudaAllocationFailed;
+        }
+
+        var identity = [_]f32{
             1.0, 0.0, 0.0, 0.0,
             0.0, 1.0, 0.0, 0.0,
             0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0,
         };
 
-        err |= cuda.cudaMemcpy(detector.d_world_transform, identity, identity.len * @sizeOf(f32), cuda.cudaMemcpyHostToDevice);
+        err = cuda.cudaMemcpy(
+            d_world_transform,
+            &identity,
+            16 * @sizeOf(f32),
+            cuda.cudaMemcpyHostToDevice,
+        );
 
-        detector.initialized = true;
-        detector.id = id;
-        detector.gl_ytexture = y_texture;
-        detector.gl_uvtexture = uv_texture;
-        detector.gl_depthtexture = depth_texture;
+        if (err != cuda.cudaSuccess) {
+            // Clean up already allocated memory
+            std.debug.print("Error Copying Identity matrix! Err => {s}: {s}\n", .{ cuda.cudaGetErrorName(err), cuda.cudaGetErrorString(err) });
 
-        return detector;
+            _ = cuda.cudaFree(d_keypoint_count);
+            _ = cuda.cudaFree(d_descriptors);
+            _ = cuda.cudaFree(d_world_transform);
+
+            return error.CudaMemcpyFailed;
+        }
+
+        self.* = .{
+            .allocator = allocator,
+            .initialized = true,
+            .id = id,
+            .gl_texture_ids = .{
+                .y = y_texture_id,
+                .uv = uv_texture_id,
+                .depth = depth_texture_id,
+            },
+            .gl_textures = .{
+                .y = null,
+                .uv = null,
+                .depth = null,
+            },
+            .world_transform = identity,
+            .d_keypoint_count = d_keypoint_count,
+            .d_world_transform = d_world_transform,
+            .keypoint_resources = null,
+            .d_descriptors = d_descriptors,
+        };
+
+        try self.register_textures();
+        try self.register_buffers(buffer_ids, left_connection, right_connection);
+
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
-        //         void cuda_cleanup_detector(int detector_id) {
-        //     DetectorInstance* detector = get_detector_instance(detector_id);
-        //     if (!detector) return;
+        if (self.gl_textures.y) |*tex| tex.deinit();
+        if (self.gl_textures.uv) |*tex| tex.deinit();
+        if (self.gl_textures.depth) |*tex| tex.deinit();
 
-        //     cuda_unregister_buffers(detector_id);
+        if (self.keypoint_resources) |*res| res.deinit();
 
-        //     if (detector->d_keypoint_count) cudaFree(detector->d_keypoint_count);
-        //     if (detector->d_descriptors) cudaFree(detector->d_descriptors);
-        //     detector->d_keypoint_count = nullptr;
-        //     detector->d_descriptors = nullptr;
+        _ = cuda.cudaFree(self.d_keypoint_count);
+        _ = cuda.cudaFree(self.d_descriptors);
+        _ = cuda.cudaFree(self.d_world_transform);
 
-        //     if (detector->d_world_transform) {
-        //         cudaFree(detector->d_world_transform);
-        //         detector->d_world_transform = nullptr;
-        //     }
-        // }
-        _ = self;
+        self.allocator.destroy(self);
     }
 
     pub fn map_transformation(self: *Self, transformation: [16]f32) !void {
         const err = cuda.cudaMemcpy(
-            self.world_transform,
-            transformation,
+            self.d_world_transform,
+            &transformation,
             transformation.len * @sizeOf(f32),
             cuda.cudaMemcpyHostToDevice,
         );
@@ -109,128 +351,29 @@ pub const DetectorInstance = struct {
         }
     }
 
-    fn register_texture(self: *Self, texture: CudaGLTextureResource) void {
-        self.y
+    pub fn register_textures(self: *Self) !void {
+        self.gl_textures.y = try TextureResource.init(self.gl_texture_ids.y);
+        self.gl_textures.uv = try TextureResource.init(self.gl_texture_ids.uv);
+        self.gl_textures.depth = try TextureResource.init(self.gl_texture_ids.depth);
     }
 
-    pub fn register_textures(self: *Self) void {
-
-        //         int cuda_register_gl_texture(int detector_id) {
-        //     DetectorInstance* detector = get_detector_instance(detector_id);
-        //     if (!detector) return -1;
-
-        //     // Allocate texture resource
-        //     detector->y_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
-        //     if (!detector->y_texture) {
-        //         printf("Failed to allocate Y texture resource\n");
-        //         return -1;
-        //     }
-        //     memset(detector->y_texture, 0, sizeof(CudaGLTextureResource));
-
-        //     // Register Y texture
-        //     cudaError_t err = cudaGraphicsGLRegisterImage(
-        //         &detector->y_texture->tex_resource,
-        //         detector->gl_ytexture,
-        //         GL_TEXTURE_2D,
-        //         cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
-        //     );
-
-        //     if (err != cudaSuccess) {
-        //         printf("Failed to register Y texture: %s\n", cudaGetErrorString(err));
-        //         free(detector->y_texture);
-        //         detector->y_texture = NULL;
-        //         return -1;
-        //     }
-
-        //     // Allocate UV texture resource
-        //     detector->uv_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
-        //     if (!detector->uv_texture) {
-        //         printf("Failed to allocate UV texture resource\n");
-        //         cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        //         free(detector->y_texture);
-        //         detector->y_texture = NULL;
-        //         return -1;
-        //     }
-        //     memset(detector->uv_texture, 0, sizeof(CudaGLTextureResource));
-
-        //     // Register UV texture
-        //     err = cudaGraphicsGLRegisterImage(
-        //         &detector->uv_texture->tex_resource,
-        //         detector->gl_uvtexture,
-        //         GL_TEXTURE_2D,
-        //         cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
-        //     );
-
-        //     if (err != cudaSuccess) {
-        //         printf("Failed to register UV texture: %s\n", cudaGetErrorString(err));
-        //         cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        //         free(detector->y_texture);
-        //         detector->y_texture = NULL;
-        //         free(detector->uv_texture);
-        //         detector->uv_texture = NULL;
-        //         return -1;
-        //     }
-
-        //     // Allocate Depth texture resource
-        //     detector->depth_texture = (CudaGLTextureResource*)malloc(sizeof(CudaGLTextureResource));
-        //     if (!detector->depth_texture) {
-        //         printf("Failed to allocate Depth texture resource\n");
-        //         cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        //         free(detector->y_texture);
-        //         detector->y_texture = NULL;
-        //         cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
-        //         free(detector->uv_texture);
-        //         detector->uv_texture = NULL;
-        //         return -1;
-        //     }
-        //     memset(detector->depth_texture, 0, sizeof(CudaGLTextureResource));
-
-        //     // Register Depth texture
-        //     err = cudaGraphicsGLRegisterImage(
-        //         &detector->depth_texture->tex_resource,
-        //         detector->gl_depthtexture,
-        //         GL_TEXTURE_2D,
-        //         cudaGraphicsRegisterFlagsSurfaceLoadStore | cudaGraphicsRegisterFlagsWriteDiscard
-        //     );
-
-        //     if (err != cudaSuccess) {
-        //         printf("Failed to register UV texture: %s\n", cudaGetErrorString(err));
-        //         cudaGraphicsUnregisterResource(detector->y_texture->tex_resource);
-        //         free(detector->y_texture);
-        //         detector->y_texture = NULL;
-        //         cudaGraphicsUnregisterResource(detector->uv_texture->tex_resource);
-        //         free(detector->uv_texture);
-        //         detector->uv_texture = NULL;
-        //         free(detector->depth_texture);
-        //         detector->depth_texture = NULL;
-        //         return -1;
-        //     }
-
-        //     return 0;
-        // }
+    pub fn register_buffers(self: *Self, own: BufferParams, left: ?BufferParams, right: ?BufferParams) !void {
+        self.keypoint_resources = try KeypointResources.init(own, left, right);
     }
 
-    pub fn unregister_texture(self: *Self) void {
-        _ = self;
-    }
+    pub fn map_resources(self: *Self) !void {
+        if (self.gl_textures.y) |*tex| try tex.map();
+        if (self.gl_textures.uv) |*tex| try tex.map();
+        if (self.gl_textures.depth) |*tex| try tex.map();
 
-    pub fn register_instance_buffer(self: *Self) void {
-        _ = self;
-    }
-
-    pub fn register_buffers(self: *Self) void {
-        _ = self;
-    }
-
-    pub fn unregister_buffers(self: *Self) void {
-        _ = self;
-    }
-
-    pub fn map_resources(self: *Self) void {
-        _ = self;
+        if (self.keypoint_resources) |*res| try res.map();
     }
 
     pub fn unmap_resources(self: *Self) void {
-        _ = self;
+        if (self.gl_textures.y) |*tex| tex.unmap();
+        if (self.gl_textures.uv) |*tex| tex.unmap();
+        if (self.gl_textures.depth) |*tex| tex.unmap();
+
+        if (self.keypoint_resources) |*res| res.unmap();
     }
 };

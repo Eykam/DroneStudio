@@ -77,7 +77,6 @@ typedef struct StereoParams {
     bool disable_matching;
 } StereoParams;
 
-
 // Initialize Gaussian kernel in constant memory
 void init_gaussian_kernel(float sigma);
 
@@ -106,8 +105,6 @@ void launch_keypoint_detection(
     BRIEFDescriptor* descriptors,
     uint* keypoint_count,
     int max_keypoints,
-    float image_width,
-    float image_height,
     dim3 grid,
     dim3 block
 );
@@ -122,9 +119,7 @@ void launch_stereo_matching(
     int right_count,
     StereoParams params,
     BestMatch* matches_left,
-    BestMatch* matches_right,
-    dim3 grid,
-    dim3 block
+    BestMatch* matches_right
 );
 
 // Launch cross-check matches kernel

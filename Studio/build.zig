@@ -244,18 +244,18 @@ pub fn build(b: *std.Build) void {
             "--compiler-options",
             "'-fPIC'",
             "-c",
-            "lib/kernels/keypoint_detector.cu",
+            "lib/kernels/kernels.cu",
             "-o",
-            "lib/kernels/keypoint_detector.o",
+            "lib/kernels/kernels.o",
         });
 
         const cuda_detector_artifact = b.addObject(.{
-            .name = "cuda_keypoint_detector",
+            .name = "cuda_kernels",
             .root_source_file = null,
             .target = target,
             .optimize = optimize,
         });
-        cuda_detector_artifact.addObjectFile(b.path("lib/kernels/keypoint_detector.o"));
+        cuda_detector_artifact.addObjectFile(b.path("lib/kernels/kernels.o"));
         cuda_detector_artifact.step.dependOn(&cuda_detector_obj.step);
 
         exe.addObjectFile(cuda_detector_artifact.getEmittedBin());
