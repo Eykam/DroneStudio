@@ -7,19 +7,30 @@ pub const StereoParams = cuda.StereoParams;
 pub const ImageParams = cuda.ImageParams;
 
 pub const BufferResource = struct {
+    const Self = @This();
+
     resource: cuda.cudaGraphicsResource_t,
     d_buffer: *cuda.float4,
 
-    pub fn init(buffer_id: glad.GLuint) !BufferResource {
-        var resource: BufferResource = BufferResource{};
+    pub fn init(allocator: std.mem.Allocator, buffer_id: glad.GLuint) !*Self {
+        var buffer_resource = try allocator.create(Self);
+
+        buffer_resource.* = Self{
+            .resource = undefined,
+            .d_buffer = undefined,
+        };
+
         const err = cuda.cudaGraphicsGLRegisterBuffer(
-            &resource.resource,
+            &buffer_resource.resource,
             buffer_id,
             cuda.cudaGraphicsRegisterFlagsWriteDiscard,
         );
 
         if (err != cuda.cudaSuccess) {
-            std.debug.print("Failed to register buffer resource: {s} => {s}\n", .{
+            allocator.destroy(buffer_resource);
+
+            std.debug.print("Failed to register buffer resource {d}: {s} => {s}\n", .{
+                buffer_id,
                 cuda.cudaGetErrorName(err),
                 cuda.cudaGetErrorString(err),
             });
@@ -27,17 +38,29 @@ pub const BufferResource = struct {
             return error.FailedToRegisterBuffer;
         }
 
-        return resource;
+        std.debug.print("Successfully registed Buffer with ID: {d}\n", .{buffer_id});
+
+        return buffer_resource;
     }
 
-    pub fn deinit(self: *BufferResource) void {
-        self.unmap();
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        self.unmap() catch |err| {
+            std.debug.print("Failed To Deinitalize BufferResource! {any}\n", .{err});
+        };
         _ = cuda.cudaGraphicsUnregisterResource(self.resource);
+        allocator.destroy(self);
     }
 
-    pub fn map(self: *BufferResource) !void {
+    pub fn map(self: *Self) !void {
+        // std.debug.print("Mapping Buffer Resource...\n", .{});
+
         const err = cuda.cudaGraphicsMapResources(1, &self.resource, null);
         if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to map Buffer Resource! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+
             return error.FailedToMapBUfferResource;
         }
 
@@ -49,45 +72,84 @@ pub const BufferResource = struct {
         );
 
         if (ptr_err != cuda.cudaSuccess) {
+            std.debug.print("Failed to get mapped Buffer Pointer! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
             return error.FailedToGetMappedBufferPointer;
         }
     }
 
-    pub fn unmap(self: *BufferResource) void {
-        _ = cuda.cudaGraphicsUnmapResources(1, &self.resource, null);
+    pub fn unmap(self: *Self) !void {
+        const err = cuda.cudaGraphicsUnmapResources(1, &self.resource, null);
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to unmap BufferResource! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+
+            return error.FailedToUnmapBufferResource;
+        }
     }
 };
 
 pub const TextureResource = struct {
+    const Self = @This();
+
     tex_resource: cuda.cudaGraphicsResource_t,
     array: cuda.cudaArray_t,
     surface: cuda.cudaSurfaceObject_t,
 
-    pub fn init(texture_id: glad.GLuint) !TextureResource {
-        var resource: TextureResource = undefined;
+    pub fn init(allocator: std.mem.Allocator, texture_id: glad.GLuint) !*Self {
+        var texture_resource = try allocator.create(Self);
+        texture_resource.* = Self{
+            .tex_resource = undefined,
+            .array = undefined,
+            .surface = undefined,
+        };
+
         const err = cuda.cudaGraphicsGLRegisterImage(
-            &resource.tex_resource,
+            &texture_resource.tex_resource,
             texture_id,
             cuda.GL_TEXTURE_2D,
             cuda.cudaGraphicsRegisterFlagsSurfaceLoadStore | cuda.cudaGraphicsRegisterFlagsWriteDiscard,
         );
 
         if (err != cuda.cudaSuccess) {
-            std.debug.print("Failed to register GL texture with id: {}!\n", .{texture_id});
+            allocator.destroy(texture_resource);
+
+            std.debug.print("Failed to register Texture with ID {d}: {s} => {s}\n", .{
+                texture_id,
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
             return error.FailedToRegisterGLTexture;
         }
-        return resource;
+
+        std.debug.print("Successfully registed Texture with ID: {d}\n", .{texture_id});
+
+        return texture_resource;
     }
 
-    pub fn deinit(self: *TextureResource) void {
-        self.unmap();
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        self.unmap() catch |err| {
+            std.debug.print("Failed To Deinitalize TextureResource! {any}\n", .{err});
+        };
         _ = cuda.cudaGraphicsUnregisterResource(self.tex_resource);
+        allocator.destroy(self);
     }
 
-    pub fn map(self: *TextureResource) !void {
+    pub fn map(self: *Self) !void {
         // Map the texture resource
+        // std.debug.print("Mapping Texture Resources...\n", .{});
+
         var err = cuda.cudaGraphicsMapResources(1, &self.tex_resource, null);
         if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to map Texture Resources Object! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
             return error.FailedToMapTextureResource;
         }
 
@@ -99,6 +161,10 @@ pub const TextureResource = struct {
             0,
         );
         if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to get Texture Mapped Array Object! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
             return error.FailedToGetMappedTextureArray;
         }
 
@@ -109,13 +175,35 @@ pub const TextureResource = struct {
 
         err = cuda.cudaCreateSurfaceObject(&self.surface, &res_desc);
         if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to create Surface Object! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
             return error.FailedToCreateSurfaceObject;
         }
     }
 
-    pub fn unmap(self: *TextureResource) void {
-        _ = cuda.cudaDestroySurfaceObject(self.surface);
-        _ = cuda.cudaGraphicsUnmapResources(1, &self.tex_resource, null);
+    pub fn unmap(self: *Self) !void {
+        var err = cuda.cudaDestroySurfaceObject(self.surface);
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to Destroy Surface Object! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+
+            return error.FailedToDestroySurfaceObject;
+        }
+
+        err = cuda.cudaGraphicsUnmapResources(1, &self.tex_resource, null);
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to Unmap TextureResource! {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+
+            return error.FailedToUnmapTextureResource;
+        }
     }
 };
 
@@ -126,96 +214,102 @@ pub const BufferParams = struct {
 };
 
 pub const Buffers = struct {
-    positions: BufferResource,
-    colors: BufferResource,
+    const Self = @This();
+
+    positions: *BufferResource,
+    colors: *BufferResource,
     buffer_size: u32,
 
-    pub fn init(buffer_ids: BufferParams) !Buffers {
-        return Buffers{
-            .positions = try BufferResource.init(buffer_ids.position),
-            .colors = try BufferResource.init(buffer_ids.color),
+    pub fn init(allocator: std.mem.Allocator, buffer_ids: BufferParams) !Self {
+        return Self{
+            .positions = try BufferResource.init(allocator, buffer_ids.position),
+            .colors = try BufferResource.init(allocator, buffer_ids.color),
             .buffer_size = buffer_ids.size,
         };
     }
 
-    pub fn deinit(self: *Buffers) void {
-        self.positions.deinit();
-        self.colors.deinit();
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        self.positions.deinit(allocator);
+        self.colors.deinit(allocator);
     }
 
-    pub fn map(self: *Buffers) !void {
+    pub fn map(self: *Self) !void {
         try self.positions.map();
         try self.colors.map();
     }
 
-    pub fn unmap(self: *Buffers) void {
-        self.positions.unmap();
-        self.colors.unmap();
+    pub fn unmap(self: *Self) !void {
+        try self.positions.unmap();
+        try self.colors.unmap();
     }
 };
 
 pub const ConnectionResources = struct {
+    const Self = @This();
+
     left: Buffers,
     right: Buffers,
 
-    pub fn init(left: BufferParams, right: BufferParams) !ConnectionResources {
-        return ConnectionResources{
-            .left = try Buffers.init(left),
-            .right = try Buffers.init(right),
+    pub fn init(allocator: std.mem.Allocator, left: BufferParams, right: BufferParams) !Self {
+        return Self{
+            .left = try Buffers.init(allocator, left),
+            .right = try Buffers.init(allocator, right),
         };
     }
 
-    pub fn deinit(self: *ConnectionResources) void {
-        self.left.deinit();
-        self.right.deinit();
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        self.left.deinit(allocator);
+        self.right.deinit(allocator);
     }
 
-    pub fn map(self: *ConnectionResources) !void {
+    pub fn map(self: *Self) !void {
         try self.left.map();
         try self.right.map();
     }
 
-    pub fn unmap(self: *ConnectionResources) void {
-        self.left.unmap();
-        self.right.unmap();
+    pub fn unmap(self: *Self) !void {
+        try self.left.unmap();
+        try self.right.unmap();
     }
 };
 
 pub const KeypointResources = struct {
+    const Self = @This();
+
     connections: ?ConnectionResources,
     keypoints: Buffers,
 
-    pub fn init(keypoint_buffers: BufferParams, left: ?BufferParams, right: ?BufferParams) !KeypointResources {
-        var resources = KeypointResources{
-            .keypoints = try Buffers.init(keypoint_buffers),
+    pub fn init(allocator: std.mem.Allocator, keypoint_buffers: BufferParams, left: ?BufferParams, right: ?BufferParams) !Self {
+        var resources = Self{
+            .keypoints = try Buffers.init(allocator, keypoint_buffers),
             .connections = null,
         };
 
         if (left != null and right != null) {
-            resources.connections = try ConnectionResources.init(left.?, right.?);
+            resources.connections = try ConnectionResources.init(allocator, left.?, right.?);
         }
 
         return resources;
     }
 
-    pub fn deinit(self: *KeypointResources) void {
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         if (self.connections) |*conn| {
-            conn.deinit();
+            conn.deinit(allocator);
         }
-        self.keypoints.deinit();
+        self.keypoints.deinit(allocator);
     }
 
-    pub fn map(self: *KeypointResources) !void {
+    pub fn map(self: *Self) !void {
         try self.keypoints.map();
         if (self.connections) |*conn| {
             try conn.map();
         }
     }
 
-    pub fn unmap(self: *KeypointResources) void {
-        self.keypoints.unmap();
+    pub fn unmap(self: *Self) !void {
+        try self.keypoints.unmap();
         if (self.connections) |*conn| {
-            conn.unmap();
+            try conn.unmap();
         }
     }
 };
@@ -227,24 +321,26 @@ pub const TextureIDs = struct {
 };
 
 pub const Textures = struct {
-    y: ?TextureResource,
-    uv: ?TextureResource,
-    depth: ?TextureResource,
+    y: ?*TextureResource,
+    uv: ?*TextureResource,
+    depth: ?*TextureResource,
 };
 
 pub const DetectionResources = struct {
     const Self = @This();
 
-    allocator: std.mem.Allocator,
-    d_keypoint_count: [*c]u32,
-    gl_texture_ids: TextureIDs,
-    gl_textures: Textures,
-    world_transform: [16]f32,
-    d_world_transform: [*c]f32,
-    keypoint_resources: ?KeypointResources,
-    d_descriptors: [*c]cuda.BRIEFDescriptor,
     id: u32,
+    allocator: std.mem.Allocator,
     initialized: bool,
+
+    keypoint_resources: ?KeypointResources,
+    gl_textures: Textures,
+    gl_texture_ids: TextureIDs,
+    world_transform: [16]f32,
+
+    d_keypoint_count: [*c]c_uint,
+    d_world_transform: [*c]f32,
+    d_descriptors: [*c]cuda.BRIEFDescriptor,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -263,7 +359,7 @@ pub const DetectionResources = struct {
         var d_descriptors: [*c]cuda.BRIEFDescriptor = undefined;
         var d_world_transform: [*c]f32 = undefined;
 
-        var err = cuda.cudaMalloc(@ptrCast(&d_keypoint_count), @sizeOf(u32));
+        var err = cuda.cudaMalloc(@ptrCast(&d_keypoint_count), @sizeOf(c_uint));
         err |= cuda.cudaMalloc(@ptrCast(&d_descriptors), max_keypoints * @sizeOf(cuda.BRIEFDescriptor));
         err |= cuda.cudaMalloc(@ptrCast(&d_world_transform), 16 * @sizeOf(f32));
 
@@ -324,11 +420,11 @@ pub const DetectionResources = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.gl_textures.y) |*tex| tex.deinit();
-        if (self.gl_textures.uv) |*tex| tex.deinit();
-        if (self.gl_textures.depth) |*tex| tex.deinit();
+        if (self.gl_textures.y) |tex| tex.deinit(self.allocator);
+        if (self.gl_textures.uv) |tex| tex.deinit(self.allocator);
+        if (self.gl_textures.depth) |tex| tex.deinit(self.allocator);
 
-        if (self.keypoint_resources) |*res| res.deinit();
+        if (self.keypoint_resources) |*res| res.deinit(self.allocator);
 
         _ = cuda.cudaFree(self.d_keypoint_count);
         _ = cuda.cudaFree(self.d_descriptors);
@@ -352,28 +448,147 @@ pub const DetectionResources = struct {
     }
 
     pub fn register_textures(self: *Self) !void {
-        self.gl_textures.y = try TextureResource.init(self.gl_texture_ids.y);
-        self.gl_textures.uv = try TextureResource.init(self.gl_texture_ids.uv);
-        self.gl_textures.depth = try TextureResource.init(self.gl_texture_ids.depth);
+        std.debug.print("Registering Resources for y texture plane!\n", .{});
+        self.gl_textures.y = try TextureResource.init(self.allocator, self.gl_texture_ids.y);
+        std.debug.print("Registering Resources for uv texture plane!\n", .{});
+        self.gl_textures.uv = try TextureResource.init(self.allocator, self.gl_texture_ids.uv);
+        std.debug.print("Registering Resources for depth texture plane!\n", .{});
+        self.gl_textures.depth = try TextureResource.init(self.allocator, self.gl_texture_ids.depth);
     }
 
     pub fn register_buffers(self: *Self, own: BufferParams, left: ?BufferParams, right: ?BufferParams) !void {
-        self.keypoint_resources = try KeypointResources.init(own, left, right);
+        self.keypoint_resources = try KeypointResources.init(self.allocator, own, left, right);
     }
 
     pub fn map_resources(self: *Self) !void {
-        if (self.gl_textures.y) |*tex| try tex.map();
-        if (self.gl_textures.uv) |*tex| try tex.map();
-        if (self.gl_textures.depth) |*tex| try tex.map();
+        // std.debug.print("Mapping Resources...\n", .{});
+
+        if (self.gl_textures.y) |tex| try tex.map();
+        if (self.gl_textures.uv) |tex| try tex.map();
+        if (self.gl_textures.depth) |tex| try tex.map();
 
         if (self.keypoint_resources) |*res| try res.map();
     }
 
     pub fn unmap_resources(self: *Self) void {
-        if (self.gl_textures.y) |*tex| tex.unmap();
-        if (self.gl_textures.uv) |*tex| tex.unmap();
-        if (self.gl_textures.depth) |*tex| tex.unmap();
+        // std.debug.print("Unmapping Resources...\n", .{});
 
-        if (self.keypoint_resources) |*res| res.unmap();
+        if (self.gl_textures.y) |tex| tex.unmap() catch |err| {
+            std.debug.print("Failed to unmap Y Texture plane!  {any}\n", .{err});
+        };
+
+        if (self.gl_textures.uv) |tex| tex.unmap() catch |err| {
+            std.debug.print("Failed to unmap UV Texture plane!  {any}\n", .{err});
+        };
+
+        if (self.gl_textures.depth) |tex| tex.unmap() catch |err| {
+            std.debug.print("Failed to unmap Depth Texture Plane!  {any}\n", .{err});
+        };
+
+        if (self.keypoint_resources) |*res| res.unmap() catch |err| {
+            std.debug.print("Failed to unmap Keypoint Buffer Resources! {any}\n", .{err});
+        };
     }
 };
+
+pub fn CudaKernelError(comptime prefix: []const u8) type {
+    return struct {
+        kernel_name: []const u8,
+        duration_ms: f32,
+        err: ?[*:0]const u8,
+
+        pub fn format(
+            self: @This(),
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+
+            try writer.print("{s}[{s}] ", .{ prefix, self.kernel_name });
+            if (self.err) |err| {
+                try writer.print("failed: {s}", .{err});
+            } else {
+                try writer.print("took {d:.3} ms", .{self.duration_ms});
+            }
+        }
+    };
+}
+
+pub fn track(
+    comptime kernel_name: []const u8,
+    comptime ResultType: type,
+    kernel_fn: anytype,
+    args: anytype,
+) !ResultType {
+    const tracked = try trackKernelExecution(kernel_name, ResultType, kernel_fn, args);
+    std.debug.print("{}\n", .{tracked.stats});
+    if (tracked.stats.err != null) {
+        std.debug.print("Kernel Error Detected! {any}\n", .{tracked.stats.err});
+        return error.CudaKernelError;
+    }
+    return tracked.result;
+}
+
+pub fn trackKernelExecution(
+    comptime kernel_name: []const u8,
+    comptime ResultType: type,
+    kernel_fn: anytype,
+    args: anytype,
+) !struct { result: ResultType, stats: CudaKernelError("CUDA") } {
+    var start: cuda.cudaEvent_t = undefined;
+    var stop: cuda.cudaEvent_t = undefined;
+
+    // Create timing events
+    var err = cuda.cudaEventCreate(&start);
+    if (err != cuda.cudaSuccess) {
+        return error.CudaEventCreateFailed;
+    }
+    err = cuda.cudaEventCreate(&stop);
+    if (err != cuda.cudaSuccess) {
+        _ = cuda.cudaEventDestroy(start);
+        return error.CudaEventCreateFailed;
+    }
+    defer _ = cuda.cudaEventDestroy(start);
+    defer _ = cuda.cudaEventDestroy(stop);
+
+    // Record start time
+    err = cuda.cudaEventRecord(start, null);
+    if (err != cuda.cudaSuccess) {
+        return error.CudaEventRecordFailed;
+    }
+
+    const result = @call(.auto, kernel_fn, args);
+
+    // Record stop time
+    err = cuda.cudaEventRecord(stop, null);
+    if (err != cuda.cudaSuccess) {
+        return error.CudaEventRecordFailed;
+    }
+
+    err = cuda.cudaEventSynchronize(stop);
+    if (err != cuda.cudaSuccess) {
+        return error.CudaEventSyncFailed;
+    }
+
+    // Calculate elapsed time
+    var ms: f32 = undefined;
+    err = cuda.cudaEventElapsedTime(&ms, start, stop);
+    if (err != cuda.cudaSuccess) {
+        return error.CudaEventElapsedTimeFailed;
+    }
+
+    // Check for kernel errors
+    err = cuda.cudaGetLastError();
+    const error_str = if (err != cuda.cudaSuccess) cuda.cudaGetErrorString(err) else null;
+
+    return .{
+        .result = result,
+        .stats = .{
+            .kernel_name = kernel_name,
+            .duration_ms = ms,
+            .err = error_str,
+        },
+    };
+}

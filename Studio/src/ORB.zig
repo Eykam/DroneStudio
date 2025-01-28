@@ -51,6 +51,21 @@ pub const StereoMatcher = struct {
             .focal_length_mm = focal_length_mm,
             .focal_length_px = focal_length_mm * (@as(f32, @floatFromInt(left_node.width.?)) / sensor_width_mm),
             .sensor_width_mm = sensor_width_mm,
+            .intensity_threshold = 15,
+            .circle_radius = 3,
+            .arc_length = 9,
+            .max_keypoints = 50000,
+            .sigma = 1.0,
+            .max_disparity = 100,
+            .epipolar_threshold = 15,
+            .max_hamming_dist = 1.0,
+            .cost_threshold = 0.7,
+            .lowes_ratio = 0.8,
+            .epipolar_weight = 0.3,
+            .disparity_weight = 0.2,
+            .hamming_dist_weight = 0.5,
+            .show_connections = true,
+            .disable_matching = false,
         };
 
         matcher.* = .{
@@ -172,12 +187,12 @@ pub const StereoMatcher = struct {
     fn detectKeypoints(
         resource_manager: *DetectionResourceManager,
         params: *StereoParams,
-    ) !void {
+    ) !c_uint {
         if (resource_manager.frame) |frame| {
-            try resource_manager.updateTransformation();
+            try resource_manager.map_resources();
+            defer resource_manager.unmap_resources();
 
-            try resource_manager.resources.map_resources();
-            defer resource_manager.resources.unmap_resources();
+            try resource_manager.updateTransformation();
 
             const block = cuda.dim3{
                 .x = 16,
@@ -190,6 +205,8 @@ pub const StereoMatcher = struct {
                 .y = (@as(c_uint, @intCast(frame.height)) + block.y - 1) / block.y,
                 .z = 1,
             };
+
+            cuda.init_gaussian_kernel(params.sigma);
 
             var d_temp1: [*]u8 = undefined;
             var d_temp2: [*]u8 = undefined;
@@ -206,7 +223,7 @@ pub const StereoMatcher = struct {
             defer _ = cuda.cudaFree(d_temp1);
             defer _ = cuda.cudaFree(d_temp2);
 
-            cuda.launch_gaussian_blur(
+            try CudaGL.track("Gaussian_Blur", void, cuda.launch_gaussian_blur, .{
                 frame.data[0],
                 d_temp1,
                 d_temp2,
@@ -215,16 +232,10 @@ pub const StereoMatcher = struct {
                 frame.linesize[0],
                 grid,
                 block,
-            );
+            });
 
-            var err = cuda.cudaGetLastError();
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Gaussian Blur horizontal Kernel failed: {s}\n", .{cuda.cudaGetErrorString(err)});
-                return error.CudaKernelError;
-            }
-
-            cuda.launch_keypoint_detection(
-                frame.data[0],
+            try CudaGL.track("Keypoint_Detection", void, cuda.launch_keypoint_detection, .{
+                d_temp2,
                 frame.width,
                 frame.height,
                 frame.linesize[0],
@@ -233,32 +244,25 @@ pub const StereoMatcher = struct {
                 resource_manager.resources.keypoint_resources.?.keypoints.positions.d_buffer,
                 resource_manager.resources.keypoint_resources.?.keypoints.colors.d_buffer,
                 resource_manager.resources.d_descriptors,
-                @ptrCast(resource_manager.num_keypoints),
-                @intCast(params.max_keypoints),
+                resource_manager.resources.d_keypoint_count,
+                @as(c_int, @intCast(params.max_keypoints)),
                 grid,
                 block,
-            );
+            });
 
-            err = cuda.cudaGetLastError();
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Gaussian Blur vertical Kernel failed: {s}\n", .{cuda.cudaGetErrorString(err)});
-                return error.CudaKernelError;
-            }
-
-            err = cuda.cudaMemcpy(
+            const err = cuda.cudaMemcpy(
                 resource_manager.num_keypoints,
                 resource_manager.resources.d_keypoint_count,
-                @sizeOf(u32),
+                @sizeOf(c_uint),
                 cuda.cudaMemcpyDeviceToHost,
             );
 
             if (err != cuda.cudaSuccess) {
+                std.debug.print("Copying num keypoints device => host failed: {s}\n", .{cuda.cudaGetErrorString(err)});
                 return error.CudaMemcpyFailed;
             }
 
-            std.debug.print("Keypoints detected Successfully!\n", .{});
-
-            cuda.launch_texture_update(
+            try CudaGL.track("Texture_Update", void, cuda.launch_texture_update, .{
                 resource_manager.resources.gl_textures.y.?.surface,
                 resource_manager.resources.gl_textures.uv.?.surface,
                 resource_manager.resources.gl_textures.depth.?.surface,
@@ -270,38 +274,35 @@ pub const StereoMatcher = struct {
                 frame.linesize[1],
                 grid,
                 block,
-            );
-
-            err = cuda.cudaGetLastError();
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Texture update Kernel failed: {s}\n", .{cuda.cudaGetErrorString(err)});
-                return error.CudaKernelError;
-            }
+            });
 
             resource_manager.target_node.texture_updated = true;
             for (resource_manager.target_node.children.items) |child| {
                 child.instance_data.?.count = @intCast(resource_manager.num_keypoints.*);
             }
+
+            return resource_manager.num_keypoints.*;
         }
+
+        return 0;
     }
 
     pub fn match(self: *Self) !void {
+        std.debug.print("\n\nStarting Matching...\n", .{});
         self.left.mutex.lock();
         self.right.mutex.lock();
         self.combined.mutex.lock();
 
-        defer {
-            self.left.mutex.unlock();
-            self.right.mutex.unlock();
-            self.combined.mutex.unlock();
-        }
+        defer self.left.mutex.unlock();
+        defer self.right.mutex.unlock();
+        defer self.combined.mutex.unlock();
 
-        // Detect keypoints in both images
-        try detectKeypoints(self.left, self.params);
-        try detectKeypoints(self.right, self.params);
+        const keypoints_left = try detectKeypoints(self.left, self.params);
+        const keypoints_right = try detectKeypoints(self.right, self.params);
+
+        std.debug.print("Detections =>  Left : {d} | Right: {d}\n", .{ keypoints_left, keypoints_right });
 
         if (self.left.frame == null or self.right.frame == null) {
-            std.debug.print("Missing frames for stereo matching\n", .{});
             return;
         }
 
@@ -317,61 +318,67 @@ pub const StereoMatcher = struct {
         //     .z = 1,
         // };
 
-        const matches_left: ?*cuda.BestMatch = null;
-        const matches_right: ?*cuda.BestMatch = null;
+        //     var matches_left: ?*cuda.BestMatch = null;
+        //     var matches_right: ?*cuda.BestMatch = null;
 
-        var err = cuda.cudaMalloc(@ptrCast(@constCast(&matches_left)), @sizeOf(cuda.BestMatch));
-        err |= cuda.cudaMalloc(@ptrCast(@constCast(&matches_right)), @sizeOf(cuda.BestMatch));
+        //     var err = cuda.cudaMalloc(@ptrCast(&matches_left), @sizeOf(cuda.BestMatch));
+        //     err |= cuda.cudaMalloc(@ptrCast(&matches_right), @sizeOf(cuda.BestMatch));
 
-        if (err != cuda.cudaSuccess) {
-            std.debug.print("Failed to allocate memory for matches!\n", .{});
-            return error.CudaMallocFailed;
-        }
+        //     defer {
+        //         _ = cuda.cudaFree(@ptrCast(&matches_left));
+        //         _ = cuda.cudaFree(@ptrCast(&matches_right));
+        //     }
 
-        cuda.launch_stereo_matching(
-            self.left.resources.keypoint_resources.?.keypoints.positions.d_buffer,
-            self.left.resources.d_descriptors,
-            self.left.num_keypoints.*,
-            self.right.resources.keypoint_resources.?.keypoints.positions.d_buffer,
-            self.right.resources.d_descriptors,
-            self.right.num_keypoints.*,
-            self.params.*,
-            matches_left,
-            matches_right,
-        );
+        //     if (err != cuda.cudaSuccess) {
+        //         std.debug.print("Failed to allocate memory for matches!\n", .{});
+        //         return error.CudaMallocFailed;
+        //     }
 
-        err = cuda.cudaGetLastError();
-        if (err != cuda.cudaSuccess) {
-            std.debug.print("Stereo Matching update Kernel failed: {s}\n", .{cuda.cudaGetErrorString(err)});
-            return error.CudaKernelError;
-        }
+        //     cuda.launch_stereo_matching(
+        //         self.left.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+        //         self.left.resources.d_descriptors,
+        //         self.left.num_keypoints.*,
+        //         self.right.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+        //         self.right.resources.d_descriptors,
+        //         self.right.num_keypoints.*,
+        //         self.params.*,
+        //         matches_left,
+        //         matches_right,
+        //     );
 
-        // Update visualization
-        self.left.target_node.texture_updated = true;
-        self.right.target_node.texture_updated = true;
-        self.combined.target_node.texture_updated = true;
+        //     err = cuda.cudaGetLastError();
+        //     if (err != cuda.cudaSuccess) {
+        //         std.debug.print("Stereo Matching update Kernel failed: {s}\n", .{cuda.cudaGetErrorString(err)});
+        //         return error.CudaKernelError;
+        //     }
 
-        for (self.combined.target_node.children.items) |child| {
-            child.instance_data.?.count = @intCast(self.num_matches.*);
-        }
+        //     // Update visualization
+        //     self.left.target_node.texture_updated = true;
+        //     self.right.target_node.texture_updated = true;
+        //     self.combined.target_node.texture_updated = true;
+
+        //     for (self.combined.target_node.children.items) |child| {
+        //         child.instance_data.?.count = @intCast(self.num_matches.*);
+        //     }
+        // }
+
+        // fn createImageParams(manager: *DetectionResourceManager) !*ImageParams {
+        //     const frame = manager.frame.?;
+        //     const image_params = try manager.allocator.create(ImageParams);
+        //     image_params.* = .{
+        //         .y_plane = frame.data[0],
+        //         .uv_plane = frame.data[1],
+        //         .width = frame.width,
+        //         .height = frame.height,
+        //         .y_linesize = frame.linesize[0],
+        //         .uv_linesize = frame.linesize[1],
+        //         .image_width = @floatFromInt(frame.width),
+        //         .image_height = @floatFromInt(frame.height),
+        //         .num_keypoints = manager.num_keypoints,
+        //     };
+        //     return image_params;
+        // }
     }
-
-    // fn createImageParams(manager: *DetectionResourceManager) !*ImageParams {
-    //     const frame = manager.frame.?;
-    //     const image_params = try manager.allocator.create(ImageParams);
-    //     image_params.* = .{
-    //         .y_plane = frame.data[0],
-    //         .uv_plane = frame.data[1],
-    //         .width = frame.width,
-    //         .height = frame.height,
-    //         .y_linesize = frame.linesize[0],
-    //         .uv_linesize = frame.linesize[1],
-    //         .image_width = @floatFromInt(frame.width),
-    //         .image_height = @floatFromInt(frame.height),
-    //         .num_keypoints = manager.num_keypoints,
-    //     };
-    //     return image_params;
-    // }
 };
 
 pub const DetectionResourceManager = struct {
@@ -382,7 +389,7 @@ pub const DetectionResourceManager = struct {
     resources: *DetectionResources,
     target_node: *Node,
     frame: ?*video.AVFrame,
-    num_keypoints: *c_int,
+    num_keypoints: *c_uint,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -399,7 +406,7 @@ pub const DetectionResourceManager = struct {
             .mutex = std.Thread.Mutex{},
             .target_node = target_node,
             .frame = null,
-            .num_keypoints = try allocator.create(c_int),
+            .num_keypoints = try allocator.create(c_uint),
             .resources = undefined,
         };
         manager.num_keypoints.* = 0;
@@ -440,13 +447,21 @@ pub const DetectionResourceManager = struct {
         self.frame = video.av_frame_clone(frame);
     }
 
-    pub fn registerBuffers(
-        self: *Self,
-        own_buffers: CudaGL.BufferParams,
-        left_buffers: ?CudaGL.BufferParams,
-        right_buffers: ?CudaGL.BufferParams,
-    ) !void {
-        try self.resources.register_buffers(own_buffers, left_buffers, right_buffers);
+    pub fn map_resources(self: *Self) !void {
+        try self.resources.map_resources();
+    }
+
+    pub fn unmap_resources(self: *Self) void {
+        const err = cuda.cudaMemset(self.resources.d_keypoint_count, 0, @sizeOf(c_uint));
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to reset keypoint count: {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+        }
+
+        self.num_keypoints.* = 0;
+        self.resources.unmap_resources();
     }
 
     pub fn updateTransformation(self: *Self) !void {

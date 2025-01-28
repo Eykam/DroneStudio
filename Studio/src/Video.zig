@@ -12,7 +12,7 @@ const fs = std.fs;
 const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(video.EAGAIN));
 const AVERROR_EOF = -1 * @as(c_int, @intCast(video.EOF));
 
-const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *DetectionResourceManager, *video.struct_AVFrame) anyerror!void;
+const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *DetectionResourceManager, *video.struct_AVFrame) void;
 pub const StreamPollingConfig = struct {
     max_retry_attempts: u32 = 100,
     retry_delay_ms: u64 = 2000, // 2 seconds between retries
@@ -513,7 +513,7 @@ pub const VideoHandler = struct {
                 continue;
             }
 
-            try self.onDecodedFrame(self.allocator, self.node, self.detection_manager.?, self.hw_frame);
+            self.onDecodedFrame(self.allocator, self.node, self.detection_manager.?, self.hw_frame);
         }
 
         return true;
@@ -614,10 +614,13 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
     return format_context_ptr;
 }
 
-pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, detection_manager: *DetectionResourceManager, frame: *video.AVFrame) !void {
+pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, detection_manager: *DetectionResourceManager, frame: *video.AVFrame) void {
     _ = allocator;
 
     if (!node.scene.?.appState.paused) {
-        try detection_manager.queueFrame(frame);
+        detection_manager.queueFrame(frame) catch |err| {
+            std.debug.print("Failed to queue frame! Err => {any}\n", .{err});
+            return;
+        };
     }
 }
