@@ -258,7 +258,6 @@ __global__ void detectFASTKeypoints(
     // Store keypoints globally
     if (threadIdx.x == 0 && threadIdx.y == 0 && block_counter > 0) {
         int global_idx = atomicAdd(keypoint_count, block_counter);
-        // printf("globalIdx: %d, block_counter: %d => max_keypoints: %d\n", global_idx, block_counter, max_keypoints);
 
         if (global_idx + block_counter <= max_keypoints) {
             for (int i = 0; i < block_counter; i++) {
@@ -783,69 +782,279 @@ __device__ float dot_product(float3 a, float3 b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
+__device__ float computeTemporalCost(
+    const MatchedKeypoint &prev,
+    const MatchedKeypoint &curr,
+    const TemporalParams &params
+) {
+    float3 world_diff;
+    world_diff.x = prev.world.position.x - curr.world.position.x;
+    world_diff.y = prev.world.position.y - curr.world.position.y;
+    world_diff.z = prev.world.position.z - curr.world.position.z;
+    float spatial_dist = sqrtf(world_diff.x * world_diff.x + 
+                              world_diff.y * world_diff.y + 
+                              world_diff.z * world_diff.z);
+    
+    if (spatial_dist > params.max_distance) {
+        return 1e10f;
+    }
+
+    // 2. Descriptor distance
+    int descDistance = hammingDistance(prev.left_desc, curr.left_desc);
+    float descCost = (float)descDistance / 512.0f;
+
+    if (descCost > params.stereo_params.max_hamming_dist) {
+        return 1e10f;
+    }
+
+    // 3. Compare image space positions
+    float2 prev_img = prev.world.image_coords;
+    float2 curr_img = curr.world.image_coords;
+    float img_dist = sqrtf((prev_img.x - curr_img.x) * (prev_img.x - curr_img.x) +
+                          (prev_img.y - curr_img.y) * (prev_img.y - curr_img.y));
+
+    float img_cost = img_dist / params.max_pixel_distance;
+
+    // Combine costs with weights
+    return params.spatial_weight * spatial_dist / params.max_distance +
+           params.hamming_weight * descCost +
+           params.img_weight * img_cost;
+}
+
+
 // Kernel to match keypoints between temporal frames
 __global__ void matchTemporalKeypoints(
     const MatchedKeypoint* prev_matches,
-    int prev_match_count,
+    uint prev_match_count,
     const MatchedKeypoint* curr_matches, 
-    int curr_match_count,
+    uint curr_match_count,
     TemporalMatch* temporal_matches,
-    int* temporal_match_count,
+    uint* temporal_match_count,
     TemporalParams params
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= curr_match_count) return;
 
     const MatchedKeypoint curr = curr_matches[idx];
-    float min_dist = params.max_distance;
-    int best_match = -1;
     
+    float best_cost = 1e9f;
+    float second_best_cost = 1e9f;
+    int best_match = -1;
+
     // Search for the closest match in previous frame
     for (int i = 0; i < prev_match_count; i++) {
         const MatchedKeypoint prev = prev_matches[i];
         
-        float3 diff;
-        diff.x = curr.world.position.x - prev.world.position.x;
-        diff.y = curr.world.position.y - prev.world.position.y;
-        diff.z = curr.world.position.z - prev.world.position.z;
-        
-        float dist = sqrtf(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
-        
-        if (dist < min_dist) {
-            min_dist = dist;
+        // Use left camera descriptors for matching
+        float cost = computeTemporalCost(
+            prev,
+            curr,
+            params
+        );
+
+        if (cost < best_cost) {
+            second_best_cost = best_cost;
+            best_cost = cost;
             best_match = i;
         }
+        else if (cost < second_best_cost) {
+            second_best_cost = cost;
+        }
     }
-    
-    if (best_match >= 0) {
+
+    // Apply Lowe's ratio test and absolute threshold
+    if (best_match >= 0 && 
+        best_cost < params.stereo_params.cost_threshold &&
+        (second_best_cost >= 1e9f || best_cost < params.stereo_params.lowes_ratio * second_best_cost)) {
+        
         int match_idx = atomicAdd(temporal_match_count, 1);
         temporal_matches[match_idx].prev_pos = prev_matches[best_match].world.position;
         temporal_matches[match_idx].current_pos = curr.world.position;
-        temporal_matches[match_idx].confidence = params.max_distance - min_dist;
+        temporal_matches[match_idx].confidence = 1.0f / (best_cost + 1e-5f);
     }
 }
 
-// Kernel to estimate motion using RANSAC
+
+__device__ void svd_sort(float* u, float* v, float* w, int n) {
+    // Sort singular values in descending order
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (w[j] < w[j + 1]) {
+                // Swap singular values
+                float temp = w[j];
+                w[j] = w[j + 1];
+                w[j + 1] = temp;
+                
+                // Swap corresponding columns in u and v
+                for (int k = 0; k < n; k++) {
+                    temp = u[k * n + j];
+                    u[k * n + j] = u[k * n + j + 1];
+                    u[k * n + j + 1] = temp;
+                    
+                    temp = v[k * n + j];
+                    v[k * n + j] = v[k * n + j + 1];
+                    v[k * n + j + 1] = temp;
+                }
+            }
+        }
+    }
+}
+
+__device__ bool compute_svd(
+    float* H,        // Input 3x3 matrix in row-major order
+    float* u,        // Output U matrix
+    float* v,        // Output V matrix
+    float* w,        // Output singular values
+    const float eps = 1e-10f  // Numerical threshold
+) {
+    const int n = 3;  // Matrix size
+    const int max_iter = 30;  // Maximum iterations
+    
+    // Initialize U as identity
+    for (int i = 0; i < n * n; i++) {
+        u[i] = (i % (n + 1) == 0) ? 1.0f : 0.0f;
+    }
+    
+    // Copy H to V
+    for (int i = 0; i < n * n; i++) {
+        v[i] = H[i];
+    }
+    
+    // Check input matrix for NaN/Inf
+    for (int i = 0; i < n * n; i++) {
+        if (!isfinite(H[i])) return false;
+    }
+    
+    // Main Jacobi SVD iteration
+    bool converged = false;
+    for (int iter = 0; iter < max_iter && !converged; iter++) {
+        float sum_offdiag = 0.0f;
+        
+        // Compute sum of off-diagonal elements
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                if (i != j) {
+                    sum_offdiag += fabs(v[i * n + j]);
+                }
+            }
+        }
+        
+        if (sum_offdiag < eps) {
+            converged = true;
+            break;
+        }
+        
+        // Process all upper diagonal elements
+        for (int p = 0; p < n - 1; p++) {
+            for (int q = p + 1; q < n; q++) {
+                float app = v[p * n + p];
+                float apq = v[p * n + q];
+                float aqq = v[q * n + q];
+                
+                float diff = aqq - app;
+                if (fabs(apq) < eps * (fabs(app) + fabs(aqq))) {
+                    continue;
+                }
+                
+                // Compute Jacobi rotation
+                float theta = 0.5f * atan2(2.0f * apq, diff + copysignf(
+                    sqrtf(diff * diff + 4.0f * apq * apq), diff));
+                float c = cosf(theta);
+                float s = sinf(theta);
+                
+                if (!isfinite(c) || !isfinite(s)) return false;
+                
+                // Apply rotation to V
+                for (int i = 0; i < n; i++) {
+                    float vip = v[i * n + p];
+                    float viq = v[i * n + q];
+                    v[i * n + p] = vip * c - viq * s;
+                    v[i * n + q] = vip * s + viq * c;
+                }
+                
+                // Apply rotation to U
+                for (int i = 0; i < n; i++) {
+                    float uip = u[i * n + p];
+                    float uiq = u[i * n + q];
+                    u[i * n + p] = uip * c - uiq * s;
+                    u[i * n + q] = uip * s + uiq * c;
+                }
+            }
+        }
+    }
+    
+    if (!converged) return false;
+    
+    // Extract singular values and normalize
+    for (int i = 0; i < n; i++) {
+        w[i] = sqrtf(v[i * n + i] * v[i * n + i]);
+        
+        // Check for near-zero singular values
+        if (w[i] < eps) return false;
+        
+        // Normalize column in V
+        float norm = 1.0f / w[i];
+        for (int j = 0; j < n; j++) {
+            v[j * n + i] *= norm;
+        }
+    }
+    
+    // Sort singular values in descending order
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (w[j] < w[j + 1]) {
+                // Swap singular values
+                float temp = w[j];
+                w[j] = w[j + 1];
+                w[j + 1] = temp;
+                
+                // Swap corresponding columns in u and v
+                for (int k = 0; k < n; k++) {
+                    temp = u[k * n + j];
+                    u[k * n + j] = u[k * n + j + 1];
+                    u[k * n + j + 1] = temp;
+                    
+                    temp = v[k * n + j];
+                    v[k * n + j] = v[k * n + j + 1];
+                    v[k * n + j + 1] = temp;
+                }
+            }
+        }
+    }
+    
+    return true;
+}
+
 __global__ void estimateMotionRANSAC(
     const TemporalMatch* matches,
-    int match_count,
+    uint match_count,
     TemporalParams params,
     CameraPose* best_pose,
     float* inlier_count
 ) {
-    __shared__ float s_rotation[9];
-    __shared__ float s_translation[3];
+    // Local variables instead of shared memory
+    float l_rotation[9];
+    float l_translation[3];
     __shared__ int s_inliers;
     
-    // Initialize shared memory
+    // Initialize shared memory and best pose
     if (threadIdx.x == 0) {
         s_inliers = 0;
-        for (int i = 0; i < 9; i++) s_rotation[i] = (i % 4 == 0) ? 1.0f : 0.0f;
-        for (int i = 0; i < 3; i++) s_translation[i] = 0.0f;
+        
+        if (blockIdx.x == 0) {
+            *inlier_count = 0.0f;
+            // Initialize best_pose to identity
+            for (int i = 0; i < 9; i++) {
+                best_pose->rotation[i] = (i % 4 == 0) ? 1.0f : 0.0f;
+            }
+            for (int i = 0; i < 3; i++) {
+                best_pose->translation[i] = 0.0f;
+            }
+        }
     }
+    
     __syncthreads();
     
-    // Each block handles one RANSAC iteration
     if (match_count < params.min_matches) return;
     
     // Randomly select 3 matches
@@ -854,6 +1063,18 @@ __global__ void estimateMotionRANSAC(
     int idx3 = (blockIdx.x * 31 + 11) % match_count;
     
     if (idx1 == idx2 || idx2 == idx3 || idx1 == idx3) return;
+    
+    // Check if points form a valid triangle
+    float3 p1 = matches[idx1].prev_pos;
+    float3 p2 = matches[idx2].prev_pos;
+    float3 p3 = matches[idx3].prev_pos;
+    
+    float3 v1 = make_float3(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+    float3 v2 = make_float3(p3.x - p1.x, p3.y - p1.y, p3.z - p1.z);
+    float3 cross = cross_product(v1, v2);
+    float area = sqrtf(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z) * 0.5f;
+    
+    if (area < 1e-7f) return;  // Points are nearly collinear
     
     // Calculate centroid of points
     float3 centroid_prev = make_float3(0, 0, 0);
@@ -867,6 +1088,12 @@ __global__ void estimateMotionRANSAC(
     centroid_curr.y = (matches[idx1].current_pos.y + matches[idx2].current_pos.y + matches[idx3].current_pos.y) / 3.0f;
     centroid_curr.z = (matches[idx1].current_pos.z + matches[idx2].current_pos.z + matches[idx3].current_pos.z) / 3.0f;
     
+    // Check centroids for validity
+    if (!isfinite(centroid_prev.x) || !isfinite(centroid_prev.y) || !isfinite(centroid_prev.z) ||
+        !isfinite(centroid_curr.x) || !isfinite(centroid_curr.y) || !isfinite(centroid_curr.z)) {
+        return;
+    }
+    
     // Calculate correlation matrix
     float H[9] = {0};
     
@@ -878,34 +1105,65 @@ __global__ void estimateMotionRANSAC(
         p.x -= centroid_prev.x; p.y -= centroid_prev.y; p.z -= centroid_prev.z;
         c.x -= centroid_curr.x; c.y -= centroid_curr.y; c.z -= centroid_curr.z;
         
+        if (!isfinite(p.x) || !isfinite(p.y) || !isfinite(p.z) ||
+            !isfinite(c.x) || !isfinite(c.y) || !isfinite(c.z)) {
+        }
+        
         H[0] += p.x * c.x; H[1] += p.x * c.y; H[2] += p.x * c.z;
         H[3] += p.y * c.x; H[4] += p.y * c.y; H[5] += p.y * c.z;
         H[6] += p.z * c.x; H[7] += p.z * c.y; H[8] += p.z * c.z;
     }
-    
-    // Compute SVD (simplified version for 3x3 matrix)
+        
+    // Compute SVD
     float u[9], v[9], w[3];
-    // ... SVD computation here (simplified for brevity)
+    if (!compute_svd(H, u, v, w, 1E-12f)) return;
     
     // Compute rotation matrix R = V * U^T
-    for (int i = 0; i < 9; i++) {
-        s_rotation[i] = v[i/3] * u[i%3] + v[3+i/3] * u[3+i%3] + v[6+i/3] * u[6+i%3];
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            l_rotation[i * 3 + j] = 0;
+            for (int k = 0; k < 3; k++) {
+                l_rotation[i * 3 + j] += v[i * 3 + k] * u[j * 3 + k];
+            }
+        }
     }
     
-    // Compute translation
-    float3 rotated_centroid = matmul3x3(s_rotation, centroid_prev);
-    s_translation[0] = centroid_curr.x - rotated_centroid.x;
-    s_translation[1] = centroid_curr.y - rotated_centroid.y;
-    s_translation[2] = centroid_curr.z - rotated_centroid.z;
+    // Ensure proper orientation (determinant = 1)
+    float det = l_rotation[0] * (l_rotation[4] * l_rotation[8] - l_rotation[5] * l_rotation[7]) -
+                l_rotation[1] * (l_rotation[3] * l_rotation[8] - l_rotation[5] * l_rotation[6]) +
+                l_rotation[2] * (l_rotation[3] * l_rotation[7] - l_rotation[4] * l_rotation[6]);
     
-    __syncthreads();
+    if (det < 0) {
+        // Flip the sign of the last column of V
+        for (int i = 0; i < 3; i++) {
+            v[i * 3 + 2] = -v[i * 3 + 2];
+        }
+        
+        // Recompute rotation matrix
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                l_rotation[i * 3 + j] = 0;
+                for (int k = 0; k < 3; k++) {
+                    l_rotation[i * 3 + j] += v[i * 3 + k] * u[j * 3 + k];
+                }
+            }
+        }
+    }
+    
+    
+    // Compute translation
+    float3 rotated_centroid = matmul3x3(l_rotation, centroid_prev);
+    l_translation[0] = centroid_curr.x - rotated_centroid.x;
+    l_translation[1] = centroid_curr.y - rotated_centroid.y;
+    l_translation[2] = centroid_curr.z - rotated_centroid.z;
     
     // Count inliers
+    s_inliers = 0;
     for (int i = threadIdx.x; i < match_count; i += blockDim.x) {
-        float3 transformed = matmul3x3(s_rotation, matches[i].prev_pos);
-        transformed.x += s_translation[0];
-        transformed.y += s_translation[1];
-        transformed.z += s_translation[2];
+        float3 transformed = matmul3x3(l_rotation, matches[i].prev_pos);
+        transformed.x += l_translation[0];
+        transformed.y += l_translation[1];
+        transformed.z += l_translation[2];
         
         float3 diff;
         diff.x = transformed.x - matches[i].current_pos.x;
@@ -921,21 +1179,21 @@ __global__ void estimateMotionRANSAC(
     
     __syncthreads();
     
-    // Update best pose if we found more inliers
     if (threadIdx.x == 0) {
         float current_inliers = (float)s_inliers / match_count;
         if (current_inliers > *inlier_count) {
             *inlier_count = current_inliers;
             
             for (int i = 0; i < 9; i++) {
-                best_pose->rotation[i] = s_rotation[i];
+                best_pose->rotation[i] = l_rotation[i];
             }
             for (int i = 0; i < 3; i++) {
-                best_pose->translation[i] = s_translation[i];
-            }
+                best_pose->translation[i] = l_translation[i];
+            }          
         }
     }
 }
+
 
 extern "C" {
     void init_gaussian_kernel(float sigma) {
@@ -1004,7 +1262,7 @@ extern "C" {
         BestMatch* matches_left,
         BestMatch* matches_right
     ) {
-        dim3 block = 256;
+        dim3 block = 512;
 
         {
             dim3 grid( (left_count + block.x - 1) / block.x );
@@ -1126,6 +1384,45 @@ extern "C" {
             num_matches,
             width,
             height
+        );
+    }
+
+    void launch_temporal_matching(
+        const MatchedKeypoint* prev_matches,
+        uint prev_match_count,
+        const MatchedKeypoint* curr_matches,
+        uint curr_match_count,
+        TemporalMatch* temporal_matches,
+        uint* temporal_match_count,
+        TemporalParams params,
+        dim3 grid,
+        dim3 block
+    ) {
+
+        matchTemporalKeypoints<<<grid, block>>>(
+            prev_matches, prev_match_count,
+            curr_matches, curr_match_count,
+            temporal_matches, temporal_match_count,
+            params
+        );
+    }
+
+    void launch_motion_estimation(
+        const TemporalMatch* d_matches,
+        uint match_count,
+        TemporalParams params,
+        CameraPose* best_pose,
+        float* inlier_count,
+        dim3 grid,
+        dim3 block
+    ) {
+    
+        estimateMotionRANSAC<<<1, 1>>>(
+            d_matches,
+            match_count,
+            params,
+            best_pose,
+            inlier_count
         );
     }
 } 

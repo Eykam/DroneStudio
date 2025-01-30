@@ -28,17 +28,19 @@ typedef struct Match {
     float depth;
 } Match;
 
-// Structure to hold matched keypoint data
-typedef struct MatchedKeypoint {
-    float3 left_pos;
-    float3 right_pos;
-    Match world;
-} MatchedKeypoint;
 
 
 typedef struct BRIEFDescriptor {
     uint64_t descriptor[8];  // 256-bit descriptor (can be adjusted)
 } BRIEFDescriptor;
+
+// Structure to hold matched keypoint data
+typedef struct MatchedKeypoint {
+    float3 left_pos;
+    float3 right_pos;
+    Match world;
+    BRIEFDescriptor left_desc; 
+} MatchedKeypoint;
 
 typedef struct ImageParams {
     const uint8_t* y_plane;
@@ -75,6 +77,8 @@ typedef struct StereoParams {
     float hamming_dist_weight;
     bool show_connections;
     bool disable_matching;
+    bool disable_depth;
+    bool disable_spatial_tracking;
 } StereoParams;
 
 // Initialize Gaussian kernel in constant memory
@@ -191,7 +195,7 @@ void launch_depth_texture_update(
     dim3 block
 );
 
-
+// =================================================================== Visual Odometry =================================================================
 
 typedef struct CameraPose {
     float rotation[9];     // 3x3 rotation matrix
@@ -206,15 +210,37 @@ typedef struct TemporalMatch {
 
 typedef struct TemporalParams {
     float max_distance;           // Maximum distance for temporal matching
+    float max_pixel_distance;
     float min_confidence;         // Minimum confidence threshold
-    int min_matches;             // Minimum required matches
+    uint min_matches;             // Minimum required matches
     float ransac_threshold;      // RANSAC inlier threshold
-    int ransac_iterations;       // Number of RANSAC iterations
+    uint ransac_iterations;       // Number of RANSAC iterations
+    StereoParams stereo_params;
+    float spatial_weight;    // Weight for spatial distance term
+    float hamming_weight;
+    float img_weight;  
 } TemporalParams;
 
-
-
-
+void launch_temporal_matching(
+    const MatchedKeypoint* prev_matches, 
+    uint prev_match_count, 
+    const MatchedKeypoint* curr_matches, 
+    uint curr_match_count,
+    TemporalMatch* temporal_matches,
+    uint* temporal_match_count,
+    TemporalParams params,
+    dim3 grid,
+    dim3 block
+);
+void launch_motion_estimation(
+    const TemporalMatch* d_matches,
+    uint match_count,
+    TemporalParams params,
+    CameraPose* best_pose,
+    float* inlier_count,
+    dim3 grid,
+    dim3 block
+);
 
 
 #ifdef __cplusplus

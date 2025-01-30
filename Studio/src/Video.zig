@@ -2,8 +2,8 @@ const std = @import("std");
 const libav = @import("bindings/libav.zig");
 const video = libav.video;
 const Node = @import("Node.zig");
-const ORB = @import("ORB.zig");
-const DetectionResourceManager = ORB.DetectionResourceManager;
+const Vision = @import("Vision.zig");
+const DetectionResourceManager = Vision.DetectionResourceManager;
 
 const mem = std.mem;
 const fs = std.fs;

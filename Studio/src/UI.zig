@@ -1,11 +1,11 @@
 const std = @import("std");
 const imgui = @import("bindings/c.zig").imgui;
 const Scene = @import("Pipeline.zig").Scene;
-const StereoMatcher = @import("ORB.zig").StereoMatcher;
+const StereoVO = @import("Vision.zig").StereoVO;
 
 const UIContext = struct {
     scene: *Scene,
-    StereoMatcher: *StereoMatcher,
+    StereoVO: *StereoVO,
 };
 
 fn createWindowsStructType(Windows: []const type) type {
@@ -177,19 +177,19 @@ pub const StereoDebugWindow = struct {
         const window_flags = imgui.ImGuiWindowFlags_None;
         imgui.igSetNextWindowSize(.{ .x = 400, .y = 600 }, imgui.ImGuiCond_FirstUseEver);
 
-        if (imgui.igBegin("Stereo Matching Debug", &self.visible, window_flags)) {
+        if (imgui.igBegin("StereoVO Debug", &self.visible, window_flags)) {
             // Statistics Section
             imgui.igText("Statistics");
             imgui.igSeparator();
-            imgui.igText("Current Matches: %d", ctx.StereoMatcher.num_matches.*);
-            imgui.igText("Left Keypoints: %d", ctx.StereoMatcher.left.num_keypoints.*);
-            imgui.igText("Right Keypoints: %d", ctx.StereoMatcher.right.num_keypoints.*);
-            if (ctx.StereoMatcher.left.frame) |frame| {
+            imgui.igText("Current Matches: %d", ctx.StereoVO.num_matches.*);
+            imgui.igText("Left Keypoints: %d", ctx.StereoVO.left.num_keypoints.*);
+            imgui.igText("Right Keypoints: %d", ctx.StereoVO.right.num_keypoints.*);
+            if (ctx.StereoVO.left.frame) |frame| {
                 imgui.igText("Frame dimensions: %dx%d", frame.width, frame.height);
             }
             imgui.igNewLine();
 
-            var params = ctx.StereoMatcher.params;
+            var params = ctx.StereoVO.params;
             var params_changed = false;
 
             // Camera Parameters Section
@@ -197,6 +197,39 @@ pub const StereoDebugWindow = struct {
             imgui.igSeparator();
             imgui.igText("Baseline (mm): %.2f", params.baseline_mm);
             imgui.igText("Focal Length (mm): %.2f", params.focal_length_mm);
+            imgui.igNewLine();
+
+            imgui.igText("Current Pose");
+            imgui.igSeparator();
+
+            const pose = ctx.scene.appState.pose;
+
+            // Translation
+            const pos = pose.translation;
+            imgui.igText("Position:");
+            imgui.igText("  X: %.3f", pos[0]);
+            imgui.igText("  Y: %.3f", pos[1]);
+            imgui.igText("  Z: %.3f", pos[2]);
+
+            // Convert rotation matrix to Euler angles
+            const rot = pose.rotation;
+
+            const pitch = std.math.atan2(-rot[2], @sqrt(rot[6] * rot[6] + rot[8] * rot[8]));
+            const yaw = std.math.atan2(rot[6], rot[8]);
+            const roll = std.math.atan2(rot[1], rot[0]);
+
+            // Convert radians to degrees
+            const rad_to_deg = 180.0 / std.math.pi;
+            imgui.igText("Rotation (degrees):");
+            imgui.igText("  Roll:  %.2f", roll * rad_to_deg);
+            imgui.igText("  Pitch: %.2f", pitch * rad_to_deg);
+            imgui.igText("  Yaw:   %.2f", yaw * rad_to_deg);
+
+            var disable_spatial_tracking = params.disable_spatial_tracking;
+            if (imgui.igCheckbox("Disable Spatial Tracking", &disable_spatial_tracking)) {
+                params.disable_spatial_tracking = disable_spatial_tracking;
+                params_changed = true;
+            }
             imgui.igNewLine();
 
             // Keypoint Detection Parameters Section
@@ -279,6 +312,7 @@ pub const StereoDebugWindow = struct {
 
             var disable_matching = params.disable_matching;
             var show_connections = params.show_connections;
+            var disable_depth = params.disable_depth;
 
             if (imgui.igCheckbox("Disable Matching", &disable_matching)) {
                 show_connections = false;
@@ -289,6 +323,11 @@ pub const StereoDebugWindow = struct {
 
             if (imgui.igCheckbox("Show Connections", &show_connections)) {
                 params.show_connections = show_connections;
+                params_changed = true;
+            }
+
+            if (imgui.igCheckbox("Disable Depth", &disable_depth)) {
+                params.disable_depth = disable_depth;
                 params_changed = true;
             }
             imgui.igSeparator();
@@ -407,7 +446,7 @@ pub const StereoDebugWindow = struct {
                 imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "Warning: Weights should sum to 1.0");
             }
 
-            ctx.StereoMatcher.params_changed = params_changed;
+            ctx.StereoVO.params_changed = params_changed;
         }
         imgui.igEnd();
     }

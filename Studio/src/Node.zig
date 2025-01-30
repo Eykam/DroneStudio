@@ -91,6 +91,24 @@ pub fn deinit(self: *Self) void {
     backing_allocator.destroy(arena);
 }
 
+pub fn rotateWithQuaternion(self: *Self, q: Quaternion) void {
+    _ = q;
+    self.updateLocalTransform();
+}
+
+pub fn rotateWithEuler(self: *Self, pitch: f32, yaw: f32, roll: f32) void {
+    _ = pitch;
+    _ = yaw;
+    _ = roll;
+
+    self.updateLocalTransform();
+}
+
+pub fn translate(self: *Self, position: Vec3) void {
+    _ = position;
+    self.updateLocalTransform();
+}
+
 pub fn setPosition(self: *Self, x: f32, y: f32, z: f32) void {
     self.position = .{ x, y, z };
     self.updateLocalTransform();
@@ -188,7 +206,7 @@ pub fn update(self: *Self) void {
     }
 }
 
-pub fn bindTexture(self: *Self) !void {
+fn bindTexture(self: *Self) !void {
     if (!self.texture_updated) return;
 
     const mesh = self.*.mesh.?;

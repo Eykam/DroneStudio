@@ -3,14 +3,17 @@ const std = @import("std");
 const Shape = @import("Shape.zig");
 const Math = @import("Math.zig");
 const Node = @import("Node.zig");
+const gl = @import("bindings/gl.zig");
+const c = @import("bindings/c.zig");
+const Camera = @import("Camera.zig");
+const Vision = @import("Vision.zig");
+
 const Vec3 = Math.Vec3;
 const File = std.fs.File;
-const Camera = @import("Camera.zig");
-const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 const glad = gl.glad;
-const c = @import("bindings/c.zig");
 const imgui = c.imgui;
+const Pose = Vision.CameraPose;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
@@ -26,6 +29,14 @@ pub const AppState = struct {
     paused: bool = false,
     fly: bool = false,
     menu: bool = false,
+    pose: Pose = Pose.init(),
+};
+
+// Timing for operations to debug in UI
+pub const timing = struct {
+    match_timing: f32,
+    detection_timing: f32,
+    draw_timing: f32,
 };
 
 pub const Scene = struct {

@@ -14,9 +14,8 @@ const Mesh = @import("Mesh.zig");
 const UDP = @import("UDP.zig");
 const Sensors = @import("Sensors.zig");
 
-const KeypointManager = @import("ORB.zig").KeypointManager;
 const Video = @import("Video.zig");
-const ORB = @import("ORB.zig");
+const Vision = @import("Vision.zig");
 const gl = @import("bindings/gl.zig");
 const glfw = gl.glfw;
 
@@ -139,14 +138,14 @@ pub fn main() !void {
 
     // ================================================= Stereo Matching Setup =================================================
 
-    const StereoMatcher = try ORB.StereoMatcher.init(
+    const StereoVO = try Vision.StereoVO.init(
         alloc,
         canvasNodeLeft,
         canvasNodeRight,
         canvasNodeCombined,
         null,
     );
-    defer StereoMatcher.deinit();
+    defer StereoVO.deinit();
 
     // ============================================= FFMPEG Video Processing Setup =============================================
 
@@ -160,7 +159,7 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        StereoMatcher.left,
+        StereoVO.left,
     );
     defer video_handler_left.join();
 
@@ -171,7 +170,7 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        StereoMatcher.right,
+        StereoVO.right,
     );
     defer video_handler_right.join();
 
@@ -183,7 +182,7 @@ pub fn main() !void {
         alloc,
         .{
             .scene = scene,
-            .StereoMatcher = StereoMatcher,
+            .StereoVO = StereoVO,
         },
     );
 
@@ -208,10 +207,10 @@ pub fn main() !void {
         scene.render(window);
 
         if (!scene.appState.paused) {
-            try StereoMatcher.match();
-        } else if (StereoMatcher.params_changed) {
-            try StereoMatcher.match();
-            StereoMatcher.params_changed = false;
+            try StereoVO.update();
+        } else if (StereoVO.params_changed) {
+            try StereoVO.match();
+            StereoVO.params_changed = false;
         }
     }
 }
