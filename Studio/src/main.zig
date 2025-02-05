@@ -210,6 +210,7 @@ pub fn main() !void {
             try StereoVO.update();
         } else if (StereoVO.params_changed) {
             try StereoVO.match();
+            StereoVO.free_matches();
             StereoVO.params_changed = false;
         }
     }

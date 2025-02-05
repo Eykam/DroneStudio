@@ -109,7 +109,7 @@ pub const CameraPose = struct {
     }
 };
 
-pub fn TemporalParams(stereo_params: StereoParams) cuda.TemporalParams {
+pub fn TemporalParams() cuda.TemporalParams {
     return cuda.TemporalParams{
         .max_distance = 1.0, // Maximum distance for temporal matching
         .max_pixel_distance = 50.0, // Maximum pixel distance
@@ -117,10 +117,12 @@ pub fn TemporalParams(stereo_params: StereoParams) cuda.TemporalParams {
         .min_matches = 10, // Minimum required matches
         .ransac_threshold = 0.05, // RANSAC inlier threshold
         .ransac_iterations = 256, // Number of RANSAC iterations
-        .stereo_params = stereo_params, // Stereo matching parameters
         .spatial_weight = 0.4, // Weight for spatial distance term
         .hamming_weight = 0.4, // Weight for descriptor distance
         .img_weight = 0.2, // Weight for image space distance
+        .max_hamming_dist = 1.0,
+        .cost_threshold = 0.7,
+        .lowes_ratio = 0.8,
     };
 }
 
@@ -142,7 +144,7 @@ pub const StereoVO = struct {
     d_matches: ?*cuda.MatchedKeypoint = null,
     prev_num_matches: c_uint = 0,
     d_prev_matches: ?*cuda.MatchedKeypoint = null,
-    temporal_params: cuda.TemporalParams,
+    temporal_params: *cuda.TemporalParams,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -184,6 +186,9 @@ pub const StereoVO = struct {
             .disable_spatial_tracking = false,
         };
 
+        const temporal_params = try allocator.create(cuda.TemporalParams);
+        temporal_params.* = TemporalParams();
+
         matcher.* = Self{
             .allocator = allocator,
             .params = stereo_params,
@@ -194,7 +199,7 @@ pub const StereoVO = struct {
             .combined = undefined,
             .left_to_combined = undefined,
             .right_to_combined = undefined,
-            .temporal_params = TemporalParams(stereo_params.*),
+            .temporal_params = temporal_params,
         };
         matcher.num_matches.* = 0;
 
@@ -653,27 +658,18 @@ pub const StereoVO = struct {
         for (self.combined.target_node.children.items) |child| {
             child.instance_data.?.count = @intCast(self.num_matches.*);
         }
-    }
-
-    pub fn update(self: *Self) !void {
-        try self.match();
 
         _ = cuda.cudaDeviceSynchronize();
+    }
 
-        defer {
-            if (self.d_matches) |ptr| {
-                _ = cuda.cudaFree(ptr);
-                self.d_matches = null;
-            }
-        }
-
+    pub fn estimate_pose(self: *Self) !void {
         if (self.num_matches.* == 0) {
-            std.debug.print("No matches found. Skipping Visual Odometry...\n", .{});
+            std.debug.print("No matches found. Skipping Pose Estimation...\n", .{});
             return;
         }
 
         if (self.d_prev_matches == null) {
-            std.debug.print("No Previous Matches Found. Starting Visual Odometry on next frame...\n", .{});
+            std.debug.print("No Previous Matches Found. Starting Pose Estimation on next frame...\n", .{});
             self.prev_num_matches = self.num_matches.*;
 
             var err = cuda.cudaMalloc(
@@ -706,13 +702,13 @@ pub const StereoVO = struct {
             return;
         }
 
-        std.debug.print("\nStarting Visual Odometry...\n", .{});
+        std.debug.print("\nStarting Pose Estimation...\n", .{});
 
         // Allocate device memory for temporal matching
         var d_temporal_matches: ?*cuda.TemporalMatch = null;
         var d_temporal_match_count: ?*c_uint = null;
         var d_best_pose: ?*cuda.CameraPose = null;
-        var d_inlier_count: ?*f32 = null;
+        var d_inlier_count: ?*c_uint = null;
 
         var err = cuda.cudaMalloc(
             @ptrCast(&d_temporal_matches),
@@ -721,7 +717,7 @@ pub const StereoVO = struct {
         );
         err |= cuda.cudaMalloc(@ptrCast(&d_temporal_match_count), @sizeOf(c_uint));
         err |= cuda.cudaMalloc(@ptrCast(&d_best_pose), @sizeOf(cuda.CameraPose));
-        err |= cuda.cudaMalloc(@ptrCast(&d_inlier_count), @sizeOf(f32));
+        err |= cuda.cudaMalloc(@ptrCast(&d_inlier_count), @sizeOf(c_uint));
 
         if (err != cuda.cudaSuccess) {
             std.debug.print("Failed to allocate memory for Temporal Matching! {s} => {s}\n", .{
@@ -739,8 +735,17 @@ pub const StereoVO = struct {
         }
 
         // Reset counters
-        _ = cuda.cudaMemset(d_temporal_match_count, 0, @sizeOf(c_uint));
-        _ = cuda.cudaMemset(d_inlier_count, 0, @sizeOf(f32));
+        err = cuda.cudaMemset(d_temporal_match_count, 0, @sizeOf(c_uint));
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to reset temporal match count: {s}\n", .{cuda.cudaGetErrorString(err)});
+            return error.CudaMemsetFailed;
+        }
+
+        err = cuda.cudaMemset(d_inlier_count, 0, @sizeOf(c_uint));
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Failed to reset inlier count: {s}\n", .{cuda.cudaGetErrorString(err)});
+            return error.CudaMemsetFailed;
+        }
 
         // Launch temporal matching kernel
         const block = cuda.dim3{ .x = 128, .y = 1, .z = 1 };
@@ -757,13 +762,13 @@ pub const StereoVO = struct {
             self.num_matches.*,
             d_temporal_matches.?,
             d_temporal_match_count.?,
-            self.temporal_params,
+            self.temporal_params.*,
             grid,
             block,
         });
 
         var host_match_count: c_uint = undefined;
-        err = cuda.cudaMemcpy(&host_match_count, d_temporal_match_count, @sizeOf(c_uint), cuda.cudaMemcpyDeviceToHost);
+        err = cuda.cudaMemcpy(&host_match_count, d_temporal_match_count.?, @sizeOf(c_uint), cuda.cudaMemcpyDeviceToHost);
 
         if (err != cuda.cudaSuccess) {
             std.debug.print("Failed to copy match count: {s}\n", .{cuda.cudaGetErrorString(err)});
@@ -813,12 +818,13 @@ pub const StereoVO = struct {
 
         // Launch RANSAC kernel for motion estimation
         const ransac_block = cuda.dim3{
-            .x = 1,
+            .x = 128,
             .y = 1,
             .z = 1,
         };
+
         const ransac_grid = cuda.dim3{
-            .x = self.temporal_params.ransac_iterations,
+            .x = self.temporal_params.ransac_iterations, // Use local value
             .y = 1,
             .z = 1,
         };
@@ -826,14 +832,12 @@ pub const StereoVO = struct {
         try CudaGL.track("Motion_Estimation", void, cuda.launch_motion_estimation, .{
             d_temporal_matches.?,
             host_match_count,
-            self.temporal_params,
             d_best_pose.?,
             d_inlier_count.?,
+            self.temporal_params,
             ransac_grid,
             ransac_block,
         });
-
-        _ = cuda.cudaDeviceSynchronize();
 
         std.debug.print("Motion Estimation complete. Copying Pose back to host...\n", .{});
         // Copy results back
@@ -889,6 +893,22 @@ pub const StereoVO = struct {
                 cuda.cudaGetErrorString(err),
             });
             return error.FailedToCopyMatchedToPrev;
+        }
+    }
+
+    pub fn update(self: *Self) !void {
+        defer {
+            self.free_matches();
+        }
+
+        try self.match();
+        try self.estimate_pose();
+    }
+
+    pub fn free_matches(self: *Self) void {
+        if (self.d_matches) |ptr| {
+            _ = cuda.cudaFree(ptr);
+            self.d_matches = null;
         }
     }
 };

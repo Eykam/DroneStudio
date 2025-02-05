@@ -215,10 +215,13 @@ typedef struct TemporalParams {
     uint min_matches;             // Minimum required matches
     float ransac_threshold;      // RANSAC inlier threshold
     uint ransac_iterations;       // Number of RANSAC iterations
-    StereoParams stereo_params;
     float spatial_weight;    // Weight for spatial distance term
     float hamming_weight;
     float img_weight;  
+    float max_hamming_dist;
+    float cost_threshold;
+    float lowes_ratio;
+
 } TemporalParams;
 
 void launch_temporal_matching(
@@ -228,16 +231,16 @@ void launch_temporal_matching(
     uint curr_match_count,
     TemporalMatch* temporal_matches,
     uint* temporal_match_count,
-    TemporalParams params,
+    TemporalParams t_params,
     dim3 grid,
     dim3 block
 );
 void launch_motion_estimation(
     const TemporalMatch* d_matches,
     uint match_count,
-    TemporalParams params,
-    CameraPose* best_pose,
-    float* inlier_count,
+    CameraPose* d_best_pose,
+    uint* d_inlier_count,
+    TemporalParams* params,
     dim3 grid,
     dim3 block
 );
