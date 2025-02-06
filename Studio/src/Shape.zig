@@ -768,6 +768,9 @@ pub const InstancedKeypointDebugger = struct {
             // Draw points instead of line loop
             glad.glDrawArraysInstanced(glad.GL_POINTS, 0, 1, @intCast(node.instance_data.?.count));
 
+            glad.glBindVertexArray(0);
+            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+
             glad.glDisable(glad.GL_POINT_SPRITE);
             glad.glDisable(glad.GL_PROGRAM_POINT_SIZE);
             glad.glDisable(glad.GL_BLEND);
@@ -912,8 +915,10 @@ pub const InstancedLine = struct {
             // Draw lines
             glad.glDrawArraysInstanced(glad.GL_LINES, 0, 2, @intCast(node.instance_data.?.count));
 
+            glad.glBindVertexArray(0);
+            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
             glad.glDisable(glad.GL_BLEND);
-            glad.glLineWidth(1.0); // Reset line width
+            glad.glLineWidth(1.0);
 
             if (node.scene) |scene| {
                 glad.glUniform1i(scene.useInstancedLinesLoc, @as(c_int, 0));

@@ -154,6 +154,7 @@ void launch_visualization(
     const float* left_transform,
     const float* right_transform,
     bool show_connections,
+    bool disable_depth,
     dim3 grid,
     dim3 block
 );
@@ -176,6 +177,7 @@ void launch_texture_update(
 void launch_surface_copy(
     cudaSurfaceObject_t src_y,
     cudaSurfaceObject_t src_uv,
+    cudaSurfaceObject_t src_depth,
     cudaSurfaceObject_t dst_y,
     cudaSurfaceObject_t dst_uv,
     cudaSurfaceObject_t dst_depth,
@@ -224,17 +226,40 @@ typedef struct TemporalParams {
 
 } TemporalParams;
 
-void launch_temporal_matching(
-    const MatchedKeypoint* prev_matches, 
-    uint prev_match_count, 
-    const MatchedKeypoint* curr_matches, 
+void launch_temporal_match_current_to_prev(
+    const MatchedKeypoint* curr_matches,
     uint curr_match_count,
-    TemporalMatch* temporal_matches,
-    uint* temporal_match_count,
-    TemporalParams t_params,
+    const MatchedKeypoint* prev_matches, 
+    uint prev_match_count,
+    BestMatch* curr_to_prev_matches,
+    TemporalParams params,
     dim3 grid,
     dim3 block
 );
+void launch_temporal_match_prev_to_current(
+    const MatchedKeypoint* prev_matches,
+    uint prev_match_count,
+    const MatchedKeypoint* curr_matches,
+    uint curr_match_count,
+    BestMatch* prev_to_curr_matches,
+    TemporalParams params,
+    dim3 grid,
+    dim3 block
+);
+void launch_temporal_cross_check(
+    const BestMatch* curr_to_prev_matches,
+    const BestMatch* prev_to_curr_matches,
+    const MatchedKeypoint* curr_matches,
+    const MatchedKeypoint* prev_matches,
+    uint curr_match_count,
+    uint prev_match_count,
+    TemporalMatch* temporal_matches,
+    uint* temporal_match_count,
+    TemporalParams params,
+    dim3 grid,
+    dim3 block
+);
+
 void launch_motion_estimation(
     const TemporalMatch* d_matches,
     uint match_count,
@@ -244,6 +269,21 @@ void launch_motion_estimation(
     dim3 grid,
     dim3 block
 );
+
+void launch_temporal_visualization(
+    const TemporalMatch* matches,
+    uint match_count,
+    float4* keypoint_positions,
+    float4* keypoint_colors,
+    float4* connection_positions,
+    float4* connection_colors,
+    const float* prev_transform,
+    const float* curr_transform,
+    bool disable_depth,
+    dim3 grid,
+    dim3 block
+);
+
 
 
 #ifdef __cplusplus

@@ -109,6 +109,77 @@ __device__ float2 convertCanvasToPxCoords(float x, float z, float imageWidth, fl
 }
 
 
+__device__ float computeCornerScore(
+    const uint8_t* __restrict__ y_plane,
+    int x, int y, 
+    int linesize,
+    uint8_t center,
+    uint8_t threshold
+) {
+    float score = 0.0f;
+    float darker_score = 0.0f;
+    float brighter_score = 0.0f;
+    
+    // Calculate weighted score for both brighter and darker pixels
+    #pragma unroll
+    for (int i = 0; i < 16; i++) {
+        const int2 offset = fast_offsets[i];
+        const uint8_t pixel = y_plane[(y + offset.y) * linesize + (x + offset.x)];
+        
+        // Weight based on distance from center
+        float dist = sqrtf(float(offset.x * offset.x + offset.y * offset.y));
+        float weight = expf(-dist / 3.0f);  // Exponential falloff
+        
+        if (pixel > center + threshold) {
+            brighter_score += weight * float(pixel - center);
+        } 
+        else if (pixel < center - threshold) {
+            darker_score += weight * float(center - pixel);
+        }
+    }
+    
+    // Use maximum of brighter or darker score
+    score = fmaxf(brighter_score, darker_score);
+    
+    return score;
+}
+
+__device__ bool isLocalMaximum(
+    const uint8_t* __restrict__ y_plane,
+    int x, int y,
+    int linesize,
+    float score,
+    uint8_t threshold,
+    int width,
+    int height
+) {
+    const int window_size = 3;  // Increased window size for more stable maxima
+    
+    // Check larger neighborhood for more stable maxima
+    for (int dy = -window_size; dy <= window_size; dy++) {
+        for (int dx = -window_size; dx <= window_size; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            
+            const int nx = x + dx;
+            const int ny = y + dy;
+            
+            if (nx >= 3 && nx < width - 3 && ny >= 3 && ny < height - 3) {
+                const uint8_t neighbor_center = y_plane[ny * linesize + nx];
+                float neighbor_score = computeCornerScore(
+                    y_plane, nx, ny, linesize, 
+                    neighbor_center, threshold
+                );
+                
+                if (neighbor_score >= score) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+// Modified FAST detection kernel incorporating the new scoring:
 __global__ void detectFASTKeypoints(
     const uint8_t* __restrict__ y_plane,
     int width,
@@ -125,6 +196,7 @@ __global__ void detectFASTKeypoints(
     __shared__ int block_counter;
     __shared__ float2 block_keypoints[256]; 
     __shared__ BRIEFDescriptor block_descriptors[256];
+    __shared__ float block_scores[256];
     
     // Initialize block counter
     if (threadIdx.x == 0 && threadIdx.y == 0) {
@@ -132,11 +204,9 @@ __global__ void detectFASTKeypoints(
     }
     __syncthreads();
 
-    // Calculate global pixel coordinates
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    // Early exit for border pixels
     if (x < 3 || y < 3 || x >= width - 3 || y >= height - 3) {
         return;
     }
@@ -194,73 +264,44 @@ __global__ void detectFASTKeypoints(
     // Check if point is a corner
     bool is_keypoint = (max_consecutive_brighter >= arc_length || max_consecutive_darker >= arc_length);
 
-    // Non-maximum suppression
     if (is_keypoint) {
-        // Simple score based on absolute difference from center
-        BRIEFDescriptor desc = {0};  // Initialize all bits to 0
+        // Compute corner score
+        float score = computeCornerScore(y_plane, x, y, linesize, center, threshold);
         
-        #pragma unroll
-        for (int i = 0; i < 512; i += 2) {
-            int2 offset1 = brief_pattern[i];
-            int2 offset2 = brief_pattern[i+1];
+        // Non-maximum suppression with new scoring
+        if (isLocalMaximum(y_plane, x, y, linesize, score, threshold, width, height)) {
+            BRIEFDescriptor desc = {0};  // Initialize all bits to 0
             
-            uint8_t p1 = y_plane[(y + offset1.y) * linesize + (x + offset1.x)];
-            uint8_t p2 = y_plane[(y + offset2.y) * linesize + (x + offset2.x)];
-            
-            // Set bit if first point is brighter than second
-            if (p1 > p2) {
-                int bitIdx = i / 2;
-                desc.descriptor[bitIdx / 64] |= (1ULL << (bitIdx % 64));
-            }
-        }
-
-        float score = 0.0f;
-        for (int i = 0; i < 16; i++) {
-            const int2 offset = fast_offsets[i];
-            const uint8_t pixel = y_plane[(y + offset.y) * linesize + (x + offset.x)];
-            score += abs(pixel - center);
-        }
-        
-        // Check 3x3 neighborhood for non-maximum suppression
-        bool is_local_maximum = true;
-        for (int dy = -1; dy <= 1 && is_local_maximum; dy++) {
-            for (int dx = -1; dx <= 1; dx++) {
-                if (dx == 0 && dy == 0) continue;
+            #pragma unroll
+            for (int i = 0; i < 512; i += 2) {
+                int2 offset1 = brief_pattern[i];
+                int2 offset2 = brief_pattern[i+1];
                 
-                float neighbor_score = 0.0f;
-                const int nx = x + dx;
-                const int ny = y + dy;
+                uint8_t p1 = y_plane[(y + offset1.y) * linesize + (x + offset1.x)];
+                uint8_t p2 = y_plane[(y + offset2.y) * linesize + (x + offset2.x)];
                 
-                if (nx >= 3 && nx < width - 3 && ny >= 3 && ny < height - 3) {
-                    const uint8_t neighbor_center = y_plane[ny * linesize + nx];
-                    for (int i = 0; i < 16; i++) {
-                        const int2 offset = fast_offsets[i];
-                        const uint8_t pixel = y_plane[(ny + offset.y) * linesize + (nx + offset.x)];
-                        neighbor_score += abs(pixel - neighbor_center);
-                    }
-                    if (neighbor_score >= score) {
-                        is_local_maximum = false;
-                        break;
-                    }
+                if (p1 > p2) {
+                    int bitIdx = i / 2;
+                    desc.descriptor[bitIdx / 64] |= (1ULL << (bitIdx % 64));
                 }
             }
-        }
-        
-        if (is_local_maximum) {
+
             int local_idx = atomicAdd(&block_counter, 1);
             if (local_idx < 256) {
                 block_keypoints[local_idx] = make_float2(x, y);
                 block_descriptors[local_idx] = desc;
+                block_scores[local_idx] = score;
             }
         }
     }
     
     __syncthreads();
     
-    // Store keypoints globally
+
+    // Store keypoints globally with score-based filtering
     if (threadIdx.x == 0 && threadIdx.y == 0 && block_counter > 0) {
         int global_idx = atomicAdd(keypoint_count, block_counter);
-
+        
         if (global_idx + block_counter <= max_keypoints) {
             for (int i = 0; i < block_counter; i++) {
                 float2 kp = block_keypoints[i];
@@ -558,6 +599,7 @@ __global__ void setTextureKernel(
 __global__ void copySurfaceKernel(
     cudaSurfaceObject_t srcSurf_y,
     cudaSurfaceObject_t srcSurf_uv,
+    cudaSurfaceObject_t srcSurf_depth, 
     cudaSurfaceObject_t dstSurf_y,
     cudaSurfaceObject_t dstSurf_uv,
     cudaSurfaceObject_t dstSurf_depth,
@@ -568,22 +610,24 @@ __global__ void copySurfaceKernel(
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     
     if (x >= width || y >= height) return;
-    
- 
-   
+
+    // Copy Y plane
     unsigned char pixel;
     surf2Dread(&pixel, srcSurf_y, x, y);
     surf2Dwrite(pixel, dstSurf_y, x * sizeof(u_char), y);
 
+    // Copy UV plane
     if (x < width / 2 && y < height / 2) { 
         uchar2 uv;
         surf2Dread(&uv, srcSurf_uv, x * sizeof(uchar2), y);
         surf2Dwrite(uv, dstSurf_uv, x * sizeof(uchar2), y);
     }
     
-    surf2Dwrite((float)0, dstSurf_depth, x * sizeof(float), y);
+    // Copy or clear depth
+    float depth;
+    surf2Dread(&depth, srcSurf_depth, x * sizeof(float), y);
+    surf2Dwrite(depth, dstSurf_depth, x * sizeof(float), y);
 }
-
 
 
 #define BLOCK_SIZE 16
@@ -717,7 +761,8 @@ __global__ void visualizeTriangulation(
     const float* left_transform,
     const float* right_transform,
 
-    bool show_connections
+    bool show_connections,
+    bool disable_depth
 ) {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= match_count) return;
@@ -727,7 +772,7 @@ __global__ void visualizeTriangulation(
     float4 match_color = generate_unique_color(idx, 0.5f);
     
     // Transform the world position
-    keypoint_positions[idx] = make_float4(match.world.position.x, match.world.position.y - 0.01, match.world.position.z, 0.0f);
+    keypoint_positions[idx] = make_float4(match.world.position.x, !disable_depth ? match.world.position.y - 0.01 : -0.01, match.world.position.z, 0.0f);
     keypoint_colors[idx] = make_float4(1.0f, 0.0f, 1.0f, 1.0f);
 
     if (show_connections){
@@ -824,6 +869,142 @@ __device__ float computeTemporalCost(
 }
 
 
+__global__ void matchCurrentToPrev(
+    const MatchedKeypoint* curr_matches,
+    uint curr_match_count,
+    const MatchedKeypoint* prev_matches, 
+    uint prev_match_count,
+    BestMatch* curr_to_prev_matches,  // [curr_match_count]
+    TemporalParams params
+) {
+    int curr_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (curr_idx >= curr_match_count) return;
+
+    const MatchedKeypoint curr = curr_matches[curr_idx];
+    
+    float best_cost = 1e9f;
+    float second_best_cost = 1e9f;
+    int best_match = -1;
+
+    // Search for the best match in previous frame
+    for (int prev_idx = 0; prev_idx < prev_match_count; prev_idx++) {
+        const MatchedKeypoint prev = prev_matches[prev_idx];
+        
+        float cost = computeTemporalCost(prev, curr, params);
+
+        if (cost < best_cost) {
+            second_best_cost = best_cost;
+            best_cost = cost;
+            best_match = prev_idx;
+        }
+        else if (cost < second_best_cost) {
+            second_best_cost = cost;
+        }
+    }
+
+    // Apply ratio test
+    if (second_best_cost < 1e9f && best_cost >= params.lowes_ratio * second_best_cost) {
+        best_match = -1;  // Reject ambiguous matches
+        best_cost = 1e9f;
+    }
+
+    // Apply absolute threshold
+    if (best_cost >= params.cost_threshold) {
+        best_match = -1;
+        best_cost = 1e9f;
+    }
+
+    curr_to_prev_matches[curr_idx].bestIdx = best_match;
+    curr_to_prev_matches[curr_idx].bestCost = best_cost;
+}
+
+__global__ void matchPrevToCurrent(
+    const MatchedKeypoint* prev_matches,
+    uint prev_match_count,
+    const MatchedKeypoint* curr_matches,
+    uint curr_match_count,
+    BestMatch* prev_to_curr_matches,  // [prev_match_count]
+    TemporalParams params
+) {
+    int prev_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (prev_idx >= prev_match_count) return;
+
+    const MatchedKeypoint prev = prev_matches[prev_idx];
+    
+    float best_cost = 1e9f;
+    float second_best_cost = 1e9f;
+    int best_match = -1;
+
+    // Search for the best match in current frame
+    for (int curr_idx = 0; curr_idx < curr_match_count; curr_idx++) {
+        const MatchedKeypoint curr = curr_matches[curr_idx];
+        
+        float cost = computeTemporalCost(prev, curr, params);
+
+        if (cost < best_cost) {
+            second_best_cost = best_cost;
+            best_cost = cost;
+            best_match = curr_idx;
+        }
+        else if (cost < second_best_cost) {
+            second_best_cost = cost;
+        }
+    }
+
+    // Apply ratio test
+    if (second_best_cost < 1e9f && best_cost >= params.lowes_ratio * second_best_cost) {
+        best_match = -1;  // Reject ambiguous matches
+        best_cost = 1e9f;
+    }
+
+    // Apply absolute threshold
+    if (best_cost >= params.cost_threshold) {
+        best_match = -1;
+        best_cost = 1e9f;
+    }
+
+    prev_to_curr_matches[prev_idx].bestIdx = best_match;
+    prev_to_curr_matches[prev_idx].bestCost = best_cost;
+}
+
+__global__ void crossCheckTemporalMatches(
+    const BestMatch* curr_to_prev_matches,
+    const BestMatch* prev_to_curr_matches,
+    const MatchedKeypoint* curr_matches,
+    const MatchedKeypoint* prev_matches,
+    uint curr_match_count,
+    uint prev_match_count,
+    TemporalMatch* temporal_matches,
+    uint* temporal_match_count,
+    TemporalParams params
+) {
+    int curr_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (curr_idx >= curr_match_count) return;
+
+    // Get the matched index in previous frame
+    int prev_idx = curr_to_prev_matches[curr_idx].bestIdx;
+    if (prev_idx < 0 || prev_idx >= prev_match_count) return;
+
+    // Cross check - verify that prev_idx matches back to curr_idx
+    if (prev_to_curr_matches[prev_idx].bestIdx == curr_idx) {
+        // We have a consistent match
+
+        // Calculate match confidence from costs
+        float curr_to_prev_cost = curr_to_prev_matches[curr_idx].bestCost;
+        float prev_to_curr_cost = prev_to_curr_matches[prev_idx].bestCost;
+        float confidence = 1.0f / (0.5f * (curr_to_prev_cost + prev_to_curr_cost) + 1e-5f);
+
+        if (confidence > params.min_confidence) {
+            int match_idx = atomicAdd(temporal_match_count, 1);
+            if (match_idx < min(curr_match_count, prev_match_count)) {
+                temporal_matches[match_idx].prev_pos = prev_matches[prev_idx].world.position;
+                temporal_matches[match_idx].current_pos = curr_matches[curr_idx].world.position;
+                temporal_matches[match_idx].confidence = confidence;
+            }
+        }
+    }
+}
+
 // Kernel to match keypoints between temporal frames
 __global__ void matchTemporalKeypoints(
     const MatchedKeypoint* prev_matches,
@@ -876,6 +1057,46 @@ __global__ void matchTemporalKeypoints(
             temporal_matches[match_idx].confidence = 1.0f / (best_cost + 1e-5f);
         }
     }
+}
+
+__global__ void visualizeTemporalMatches(
+    const TemporalMatch* matches,
+    uint match_count,
+    float4* keypoint_positions,
+    float4* keypoint_colors,
+    float4* connection_positions,
+    float4* connection_colors,
+    const float* prev_transform,
+    const float* curr_transform,
+    bool disable_depth
+) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= match_count) return;
+
+    const TemporalMatch match = matches[idx];
+    
+    // Draw keypoint at prev position
+    keypoint_positions[idx] = make_float4(
+        match.prev_pos.x,
+        !disable_depth ? match.prev_pos.y - 0.01 : -0.01,
+        match.prev_pos.z,
+        0.0f
+    );
+    keypoint_colors[idx] = make_float4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow
+
+    // Draw connection line between prev and current positions
+    float4 prev_pos = make_float4(
+        match.prev_pos.x,
+        !disable_depth ? match.prev_pos.y - 0.01 : -0.01,
+        match.prev_pos.z,
+        0.0f
+    );
+    float4 curr_pos = transform_point(curr_transform, 
+        make_float4(match.current_pos.x, !disable_depth ? match.current_pos.y - 0.01 : -0.01 , match.current_pos.z, 0.0f));
+
+    connection_positions[idx * 2 + 1] = prev_pos;
+    connection_positions[idx * 2 ] = make_float4(curr_pos.x, curr_pos.y, curr_pos.z, 0);
+    connection_colors[idx] = make_float4(0.0f, 1.0f, 1.0f, 0.5f); // Semi-transparent cyan
 }
 
 // ------------------------------------------------------------------
@@ -1384,6 +1605,7 @@ extern "C" {
         const float* left_transform,
         const float* right_transform,
         bool show_connections,
+        bool disable_depth,
         dim3 grid,
         dim3 block
     ) {
@@ -1393,7 +1615,7 @@ extern "C" {
             left_line_positions, left_line_colors,
             right_line_positions, right_line_colors,
             left_transform, right_transform,
-            show_connections
+            show_connections, disable_depth
         );
     }
 
@@ -1421,6 +1643,7 @@ extern "C" {
     void launch_surface_copy(
         cudaSurfaceObject_t src_y,
         cudaSurfaceObject_t src_uv,
+        cudaSurfaceObject_t src_depth,
         cudaSurfaceObject_t dst_y,
         cudaSurfaceObject_t dst_uv,
         cudaSurfaceObject_t dst_depth,
@@ -1430,7 +1653,7 @@ extern "C" {
         dim3 block
     ) {
         copySurfaceKernel<<<grid, block>>>(
-            src_y, src_uv,
+            src_y, src_uv, src_depth,
             dst_y, dst_uv, dst_depth,
             width, height
         );
@@ -1454,24 +1677,63 @@ extern "C" {
         );
     }
 
-    void launch_temporal_matching(
+  
+    void launch_temporal_match_current_to_prev(
+        const MatchedKeypoint* curr_matches,
+        uint curr_match_count,
+        const MatchedKeypoint* prev_matches, 
+        uint prev_match_count,
+        BestMatch* curr_to_prev_matches,
+        TemporalParams params,
+        dim3 grid,
+        dim3 block
+    ){
+        matchCurrentToPrev<<<grid, block>>>(
+            curr_matches, curr_match_count,
+            prev_matches, prev_match_count,
+            curr_to_prev_matches, params
+        );
+    }
+
+    void launch_temporal_match_prev_to_current(
         const MatchedKeypoint* prev_matches,
         uint prev_match_count,
         const MatchedKeypoint* curr_matches,
         uint curr_match_count,
-        TemporalMatch* temporal_matches,
-        uint* temporal_match_count,
-        TemporalParams t_params,
+        BestMatch* prev_to_curr_matches,
+        TemporalParams params,
         dim3 grid,
         dim3 block
-    ) {
-        matchTemporalKeypoints<<<grid, block>>>(
+    ){
+        matchPrevToCurrent<<<grid, block>>>(
             prev_matches, prev_match_count,
             curr_matches, curr_match_count,
-            temporal_matches, temporal_match_count,
-            t_params
+            prev_to_curr_matches, params
         );
     }
+
+    void launch_temporal_cross_check(
+        const BestMatch* curr_to_prev_matches,
+        const BestMatch* prev_to_curr_matches,
+        const MatchedKeypoint* curr_matches,
+        const MatchedKeypoint* prev_matches,
+        uint curr_match_count,
+        uint prev_match_count,
+        TemporalMatch* temporal_matches,
+        uint* temporal_match_count,
+        TemporalParams params,
+        dim3 grid,
+        dim3 block
+    ){
+        crossCheckTemporalMatches<<<grid, block>>>(
+            curr_to_prev_matches, prev_to_curr_matches,
+            curr_matches, prev_matches,
+            curr_match_count, prev_match_count,
+            temporal_matches, temporal_match_count,
+            params
+        );
+    }
+
 
     void launch_motion_estimation(
         const TemporalMatch* d_matches,
@@ -1490,4 +1752,31 @@ extern "C" {
             d_inlier_count
         );
     }
+
+    void launch_temporal_visualization(
+        const TemporalMatch* matches,
+        uint match_count,
+        float4* keypoint_positions,
+        float4* keypoint_colors,
+        float4* connection_positions,
+        float4* connection_colors,
+        const float* prev_transform,
+        const float* curr_transform,
+        bool disable_depth,
+        dim3 grid,
+        dim3 block
+    ) {
+        visualizeTemporalMatches<<<grid, block>>>(
+            matches,
+            match_count,
+            keypoint_positions,
+            keypoint_colors,
+            connection_positions,
+            connection_colors,
+            prev_transform,
+            curr_transform,
+            disable_depth
+        );
+    }
+
 } 

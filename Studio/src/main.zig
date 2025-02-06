@@ -95,6 +95,17 @@ pub fn main() !void {
     canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
     try canvasNode.addChild(canvasNodeCombined);
 
+    var canvasNodeTemporal = try Shape.TexturedPlane.init(
+        alloc,
+        null,
+        canvas_width,
+        canvas_height,
+        .{ .w = texture_dims[0], .h = texture_dims[1] },
+    );
+    // Position it next to the combined canvas
+    canvasNodeTemporal.setPosition(0, (3.0 * canvas_height / 2.0) + 0.2, -10);
+    try canvasNode.addChild(canvasNodeTemporal);
+
     //Initializing drone node group (axis & box rotated by PoseHandler)
     // var droneNode = try Node.init(alloc, null, null, null);
     // droneNode.setPosition(0, 0.5, 0);
@@ -143,6 +154,7 @@ pub fn main() !void {
         canvasNodeLeft,
         canvasNodeRight,
         canvasNodeCombined,
+        canvasNodeTemporal,
         null,
     );
     defer StereoVO.deinit();

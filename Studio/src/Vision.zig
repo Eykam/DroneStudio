@@ -27,16 +27,46 @@ pub const CameraPose = struct {
     }
     pub fn fromCType(c_pose: cuda.CameraPose) CameraPose {
         var pose = CameraPose.init();
-        // Copy rotation matrix
-        for (0..9) |i| {
-            pose.rotation[i] = c_pose.rotation[i];
-        }
-        // Copy translation vector
+
+        const conv = [9]f32{
+            1.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, -1.0,
+        };
+
+        // Convert rotation: R_opengl = conv * R_camera * conv^T
+        // First multiply conv * R_camera
+        var temp: [9]f32 = undefined;
+
         for (0..3) |i| {
-            pose.translation[i] = c_pose.translation[i];
+            for (0..3) |j| {
+                var sum: f32 = 0;
+                for (0..3) |k| {
+                    sum += conv[i * 3 + k] * c_pose.rotation[k * 3 + j];
+                }
+                temp[i * 3 + j] = sum;
+            }
         }
+
+        // Then multiply by conv^T
+        for (0..3) |i| {
+            for (0..3) |j| {
+                var sum: f32 = 0;
+                for (0..3) |k| {
+                    sum += temp[i * 3 + k] * conv[j * 3 + k]; // Note: conv^T means swapped indices
+                }
+                pose.rotation[i * 3 + j] = sum;
+            }
+        }
+
+        // Convert translation
+        pose.translation[0] = c_pose.translation[0];
+        pose.translation[1] = c_pose.translation[1];
+        pose.translation[2] = -c_pose.translation[2]; // Flip Z for OpenGL
+
         return pose;
     }
+
     pub fn multiply(self: CameraPose, other: CameraPose) CameraPose {
         var result = CameraPose.init();
         // Multiply rotation matrices
@@ -136,9 +166,7 @@ pub const StereoVO = struct {
     left: *DetectionResourceManager,
     right: *DetectionResourceManager,
     combined: *DetectionResourceManager,
-
-    left_to_combined: *Node,
-    right_to_combined: *Node,
+    temporal: *DetectionResourceManager,
 
     num_matches: *c_uint,
     d_matches: ?*cuda.MatchedKeypoint = null,
@@ -151,6 +179,7 @@ pub const StereoVO = struct {
         left_node: *Node,
         right_node: *Node,
         combined_node: *Node,
+        temporal_node: *Node,
         params: ?StereoParams,
     ) !*Self {
         var matcher = try allocator.create(Self);
@@ -183,7 +212,7 @@ pub const StereoVO = struct {
             .show_connections = true,
             .disable_matching = false,
             .disable_depth = false,
-            .disable_spatial_tracking = false,
+            .disable_spatial_tracking = true,
         };
 
         const temporal_params = try allocator.create(cuda.TemporalParams);
@@ -197,8 +226,7 @@ pub const StereoVO = struct {
             .left = undefined,
             .right = undefined,
             .combined = undefined,
-            .left_to_combined = undefined,
-            .right_to_combined = undefined,
+            .temporal = undefined,
             .temporal_params = temporal_params,
         };
         matcher.num_matches.* = 0;
@@ -219,9 +247,16 @@ pub const StereoVO = struct {
             stereo_params.max_keypoints,
         );
 
+        const temporal_keypoints = try KeypointDebugger.init(
+            allocator,
+            .{ 1.0, 1.0, 0.0 }, // Yellow color for temporal keypoints
+            stereo_params.max_keypoints,
+        );
+
         try left_node.addChild(left_keypoints);
         try right_node.addChild(right_keypoints);
         try combined_node.addChild(combined_keypoints);
+        try temporal_node.addChild(temporal_keypoints);
 
         // Initialize connection lines
         const left_to_combined = try InstancedLine.init(
@@ -234,15 +269,25 @@ pub const StereoVO = struct {
             [_]f32{ 0.0, 0.0, 1.0 },
             stereo_params.max_keypoints,
         );
+        // Initialize connection lines between temporal matches
+        const temporal_to_combined = try InstancedLine.init(
+            matcher.allocator,
+            [_]f32{ 0.0, 1.0, 1.0 }, // Cyan color for temporal match lines
+            stereo_params.max_keypoints,
+        );
 
         try combined_node.addChild(left_to_combined);
         try combined_node.addChild(right_to_combined);
+        try temporal_node.addChild(temporal_to_combined);
 
         const left_instance = left_keypoints.instance_data.?;
         const right_instance = right_keypoints.instance_data.?;
         const combined_instance = combined_keypoints.instance_data.?;
+        const temporal_instance = temporal_keypoints.instance_data.?;
+
         const left_line = left_to_combined.instance_data.?;
         const right_line = right_to_combined.instance_data.?;
+        const temporal_line = temporal_to_combined.instance_data.?;
 
         matcher.left = try DetectionResourceManager.init(
             allocator,
@@ -292,6 +337,24 @@ pub const StereoVO = struct {
                 .color = right_line.color_buffer,
                 .size = stereo_params.max_keypoints,
             },
+        );
+
+        matcher.temporal = try DetectionResourceManager.init(
+            allocator,
+            temporal_node,
+            3,
+            stereo_params.max_keypoints,
+            .{
+                .position = temporal_instance.position_buffer,
+                .color = temporal_instance.color_buffer,
+                .size = stereo_params.max_keypoints,
+            },
+            .{
+                .position = temporal_line.position_buffer,
+                .color = temporal_line.color_buffer,
+                .size = stereo_params.max_keypoints,
+            },
+            null,
         );
 
         return matcher;
@@ -423,55 +486,6 @@ pub const StereoVO = struct {
             self.left.mutex.unlock();
             self.right.mutex.unlock();
             self.combined.mutex.unlock();
-        }
-
-        if (self.left.frame) |frame| {
-            try self.left.map_resources();
-
-            // Copying left texture to combined
-            try self.combined.map_resources();
-
-            const src_textures = self.left.resources.gl_textures;
-            const dest_textures = self.combined.resources.gl_textures;
-
-            const block = cuda.dim3{
-                .x = 16,
-                .y = 16,
-                .z = 1,
-            };
-
-            const grid = cuda.dim3{
-                .x = @divTrunc(@as(c_uint, @intCast(frame.width)) + block.x - 1, block.x),
-                .y = @divTrunc(@as(c_uint, @intCast(frame.height)) + block.y - 1, block.y),
-                .z = 1,
-            };
-
-            try CudaGL.track("Surface_Copy", void, cuda.launch_surface_copy, .{
-                src_textures.y.?.surface,
-                src_textures.uv.?.surface,
-                dest_textures.y.?.surface,
-                dest_textures.uv.?.surface,
-                dest_textures.depth.?.surface,
-                frame.width,
-                frame.height,
-                grid,
-                block,
-            });
-        }
-
-        if (self.right.frame) |_| {
-            try self.right.map_resources();
-        }
-
-        defer {
-            if (self.left.frame) |_| {
-                self.left.unmap_resources();
-                self.combined.unmap_resources();
-            }
-
-            if (self.right.frame) |_| {
-                self.right.unmap_resources();
-            }
         }
 
         const num_keypoints_left = try detectKeypoints(self.left, self.params);
@@ -611,20 +625,21 @@ pub const StereoVO = struct {
 
         const combined_resources = self.combined.resources;
         const keypoint_resources = combined_resources.keypoint_resources.?.keypoints;
-        const connection_resources = combined_resources.keypoint_resources.?.connections.?;
+        const connection_resources = combined_resources.keypoint_resources.?.connections;
 
         try CudaGL.track("Visualize_Triangulation", void, cuda.launch_visualization, .{
             self.d_matches,
             self.num_matches.*,
             keypoint_resources.positions.d_buffer,
             keypoint_resources.colors.d_buffer,
-            connection_resources.left.positions.d_buffer,
-            connection_resources.left.colors.d_buffer,
-            connection_resources.right.positions.d_buffer,
-            connection_resources.right.colors.d_buffer,
+            connection_resources.left.?.positions.d_buffer,
+            connection_resources.left.?.colors.d_buffer,
+            connection_resources.right.?.positions.d_buffer,
+            connection_resources.right.?.colors.d_buffer,
             self.left.resources.d_world_transform,
             self.right.resources.d_world_transform,
             self.params.show_connections,
+            self.params.disable_depth,
             grid,
             block,
         });
@@ -641,6 +656,36 @@ pub const StereoVO = struct {
             .z = 1,
         };
 
+        // Copy current frame textures to temporal view
+        try CudaGL.track("Copy_Temporal_Texture", void, cuda.launch_surface_copy, .{
+            self.combined.resources.gl_textures.y.?.surface,
+            self.combined.resources.gl_textures.uv.?.surface,
+            self.combined.resources.gl_textures.depth.?.surface,
+            self.temporal.resources.gl_textures.y.?.surface,
+            self.temporal.resources.gl_textures.uv.?.surface,
+            self.temporal.resources.gl_textures.depth.?.surface,
+            frame.width,
+            frame.height,
+            grid,
+            block,
+        });
+
+        const src_textures = self.left.resources.gl_textures;
+        const dest_textures = self.combined.resources.gl_textures;
+
+        try CudaGL.track("Surface_Copy", void, cuda.launch_surface_copy, .{
+            src_textures.y.?.surface,
+            src_textures.uv.?.surface,
+            src_textures.depth.?.surface,
+            dest_textures.y.?.surface,
+            dest_textures.uv.?.surface,
+            dest_textures.depth.?.surface,
+            frame.width,
+            frame.height,
+            grid,
+            block,
+        });
+
         if (!self.params.disable_depth) {
             try CudaGL.track("Depth_Interpolation", void, cuda.launch_depth_texture_update, .{
                 combined_resources.gl_textures.depth.?.surface,
@@ -654,6 +699,7 @@ pub const StereoVO = struct {
         }
 
         // Update visualization
+        self.temporal.target_node.texture_updated = true;
         self.combined.target_node.texture_updated = true;
         for (self.combined.target_node.children.items) |child| {
             child.instance_data.?.count = @intCast(self.num_matches.*);
@@ -670,35 +716,10 @@ pub const StereoVO = struct {
 
         if (self.d_prev_matches == null) {
             std.debug.print("No Previous Matches Found. Starting Pose Estimation on next frame...\n", .{});
-            self.prev_num_matches = self.num_matches.*;
 
-            var err = cuda.cudaMalloc(
-                @ptrCast(&self.d_prev_matches),
-                self.num_matches.* * @sizeOf(cuda.MatchedKeypoint),
-            );
+            // Store current matches as previous
+            try self.store_current_as_previous();
 
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Error Allocating mem for prev matches! {s} => {s}", .{
-                    cuda.cudaGetErrorName(err),
-                    cuda.cudaGetErrorString(err),
-                });
-                return error.FailedToAllocatePrevMatches;
-            }
-
-            err = cuda.cudaMemcpy(
-                self.d_prev_matches.?,
-                self.d_matches.?,
-                self.num_matches.* * @sizeOf(cuda.MatchedKeypoint),
-                cuda.cudaMemcpyDeviceToDevice,
-            );
-
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Error Copying Matches to prev! {s} => {s}", .{
-                    cuda.cudaGetErrorName(err),
-                    cuda.cudaGetErrorString(err),
-                });
-                return error.FailedToCopyMatchedToPrev;
-            }
             return;
         }
 
@@ -709,12 +730,13 @@ pub const StereoVO = struct {
         var d_temporal_match_count: ?*c_uint = null;
         var d_best_pose: ?*cuda.CameraPose = null;
         var d_inlier_count: ?*c_uint = null;
+        var d_curr_to_prev_matches: ?*cuda.BestMatch = null;
+        var d_prev_to_curr_matches: ?*cuda.BestMatch = null;
 
-        var err = cuda.cudaMalloc(
-            @ptrCast(&d_temporal_matches),
-            @min(self.num_matches.*, self.prev_num_matches) *
-                @sizeOf(cuda.TemporalMatch),
-        );
+        // Allocate all required device memory
+        var err = cuda.cudaMalloc(@ptrCast(&d_curr_to_prev_matches), self.num_matches.* * @sizeOf(cuda.BestMatch));
+        err |= cuda.cudaMalloc(@ptrCast(&d_prev_to_curr_matches), self.prev_num_matches * @sizeOf(cuda.BestMatch));
+        err |= cuda.cudaMalloc(@ptrCast(&d_temporal_matches), @min(self.num_matches.*, self.prev_num_matches) * @sizeOf(cuda.TemporalMatch));
         err |= cuda.cudaMalloc(@ptrCast(&d_temporal_match_count), @sizeOf(c_uint));
         err |= cuda.cudaMalloc(@ptrCast(&d_best_pose), @sizeOf(cuda.CameraPose));
         err |= cuda.cudaMalloc(@ptrCast(&d_inlier_count), @sizeOf(c_uint));
@@ -732,6 +754,8 @@ pub const StereoVO = struct {
             if (d_temporal_match_count) |ptr| _ = cuda.cudaFree(ptr);
             if (d_best_pose) |ptr| _ = cuda.cudaFree(ptr);
             if (d_inlier_count) |ptr| _ = cuda.cudaFree(ptr);
+            if (d_curr_to_prev_matches) |ptr| _ = cuda.cudaFree(ptr);
+            if (d_prev_to_curr_matches) |ptr| _ = cuda.cudaFree(ptr);
         }
 
         // Reset counters
@@ -747,23 +771,54 @@ pub const StereoVO = struct {
             return error.CudaMemsetFailed;
         }
 
-        // Launch temporal matching kernel
         const block = cuda.dim3{ .x = 128, .y = 1, .z = 1 };
-        const grid = cuda.dim3{
+        const curr_grid = cuda.dim3{
             .x = (self.num_matches.* + block.x - 1) / block.x,
             .y = 1,
             .z = 1,
         };
+        const prev_grid = cuda.dim3{
+            .x = (self.prev_num_matches + block.x - 1) / block.x,
+            .y = 1,
+            .z = 1,
+        };
 
-        try CudaGL.track("Temporal_Matching", void, cuda.launch_temporal_matching, .{
+        // Match current to previous
+        try CudaGL.track("Temporal_Match_Current_To_Prev", void, cuda.launch_temporal_match_current_to_prev, .{
+            self.d_matches.?,
+            self.num_matches.*,
+            self.d_prev_matches.?,
+            self.prev_num_matches,
+            d_curr_to_prev_matches.?,
+            self.temporal_params.*,
+            curr_grid,
+            block,
+        });
+
+        // Match previous to current
+        try CudaGL.track("Temporal_Match_Prev_To_Current", void, cuda.launch_temporal_match_prev_to_current, .{
             self.d_prev_matches.?,
             self.prev_num_matches,
             self.d_matches.?,
             self.num_matches.*,
+            d_prev_to_curr_matches.?,
+            self.temporal_params.*,
+            prev_grid,
+            block,
+        });
+
+        // Cross check matches
+        try CudaGL.track("Temporal_Cross_Check", void, cuda.launch_temporal_cross_check, .{
+            d_curr_to_prev_matches.?,
+            d_prev_to_curr_matches.?,
+            self.d_matches.?,
+            self.d_prev_matches.?,
+            self.num_matches.*,
+            self.prev_num_matches,
             d_temporal_matches.?,
             d_temporal_match_count.?,
             self.temporal_params.*,
-            grid,
+            curr_grid,
             block,
         });
 
@@ -780,39 +835,16 @@ pub const StereoVO = struct {
         if (host_match_count < self.temporal_params.min_matches) {
             std.debug.print("Not enough matches for RANSAC (need {d})\n", .{self.temporal_params.min_matches});
 
-            // Free prev_matches to make room for current
-            if (self.d_prev_matches) |matches| {
-                _ = cuda.cudaFree(matches);
-                self.d_prev_matches = null; // Important to null this out
+            // Update temporal visualization counts
+            for (self.temporal.target_node.children.items, 0..) |child, ind| {
+                switch (ind) {
+                    0 => child.instance_data.?.count = @intCast(self.prev_num_matches),
+                    1 => child.instance_data.?.count = @intCast(host_match_count),
+                    else => {},
+                }
             }
 
-            // Store current matches as prev_matches for next iteration
-            self.prev_num_matches = self.num_matches.*;
-            err = cuda.cudaMalloc(
-                @ptrCast(&self.d_prev_matches),
-                self.num_matches.* * @sizeOf(cuda.MatchedKeypoint),
-            );
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Error Allocating mem for prev matches! {s} => {s}", .{
-                    cuda.cudaGetErrorName(err),
-                    cuda.cudaGetErrorString(err),
-                });
-                return error.FailedToAllocatePrevMatches;
-            }
-
-            err = cuda.cudaMemcpy(
-                self.d_prev_matches.?,
-                self.d_matches.?,
-                self.num_matches.* * @sizeOf(cuda.MatchedKeypoint),
-                cuda.cudaMemcpyDeviceToDevice,
-            );
-            if (err != cuda.cudaSuccess) {
-                std.debug.print("Error Copying Matches to prev! {s} => {s}", .{
-                    cuda.cudaGetErrorName(err),
-                    cuda.cudaGetErrorString(err),
-                });
-                return error.FailedToCopyMatchedToPrev;
-            }
+            try self.store_current_as_previous();
             return;
         }
 
@@ -868,41 +900,96 @@ pub const StereoVO = struct {
             try self.combined.updateTransformation();
         }
 
-        // Free prev_matches to make room for current
+        const visualize_block = cuda.dim3{
+            .x = 512,
+            .y = 1,
+            .z = 1,
+        };
+        const visualize_grid = cuda.dim3{
+            .x = @divTrunc(host_match_count + block.x - 1, block.x),
+            .y = 1,
+            .z = 1,
+        };
+
+        try self.combined.updateTransformation();
+        try CudaGL.track("Visualize_Temporal_Matches", void, cuda.launch_temporal_visualization, .{
+            d_temporal_matches.?,
+            host_match_count,
+            self.temporal.resources.keypoint_resources.?.keypoints.positions.d_buffer,
+            self.temporal.resources.keypoint_resources.?.keypoints.colors.d_buffer,
+            self.temporal.resources.keypoint_resources.?.connections.left.?.positions.d_buffer,
+            self.temporal.resources.keypoint_resources.?.connections.left.?.colors.d_buffer,
+            self.temporal.resources.d_world_transform,
+            self.combined.resources.d_world_transform,
+            self.params.disable_depth,
+            visualize_grid,
+            visualize_block,
+        });
+
+        // Update temporal visualization counts
+        for (self.temporal.target_node.children.items, 0..) |child, ind| {
+            switch (ind) {
+                0 => child.instance_data.?.count = @intCast(self.prev_num_matches),
+                1 => child.instance_data.?.count = @intCast(host_match_count),
+                else => {},
+            }
+        }
+
+        try self.store_current_as_previous();
+    }
+
+    pub fn update(self: *Self) !void {
+        try self.right.map_resources();
+        try self.left.map_resources();
+        try self.combined.map_resources();
+        try self.temporal.map_resources();
+
+        defer self.right.unmap_resources();
+        defer self.left.unmap_resources();
+        defer self.combined.unmap_resources();
+        defer self.temporal.unmap_resources();
+
+        try self.match();
+        try self.estimate_pose();
+    }
+
+    fn store_current_as_previous(self: *Self) !void {
+        // Free previous matches
         if (self.d_prev_matches) |matches| {
             _ = cuda.cudaFree(matches);
             self.d_prev_matches = null;
         }
 
-        // Allocate new prev_matches and copy current matches
+        // Store current matches as previous
         self.prev_num_matches = self.num_matches.*;
-        err = cuda.cudaMalloc(
+        var err = cuda.cudaMalloc(
             @ptrCast(&self.d_prev_matches),
             self.num_matches.* * @sizeOf(cuda.MatchedKeypoint),
         );
+
+        if (err != cuda.cudaSuccess) {
+            std.debug.print("Error Allocating mem for prev matches! {s} => {s}", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
+            return error.FailedToAllocatePrevMatches;
+        }
+
         err = cuda.cudaMemcpy(
             self.d_prev_matches.?,
             self.d_matches.?,
             self.num_matches.* * @sizeOf(cuda.MatchedKeypoint),
             cuda.cudaMemcpyDeviceToDevice,
         );
+        defer self.free_matches();
 
         if (err != cuda.cudaSuccess) {
-            std.debug.print("Error Copying Matches to prev for next iteration! {s} => {s}", .{
+            std.debug.print("Error Copying Matches to prev! {s} => {s}", .{
                 cuda.cudaGetErrorName(err),
                 cuda.cudaGetErrorString(err),
             });
             return error.FailedToCopyMatchedToPrev;
         }
-    }
-
-    pub fn update(self: *Self) !void {
-        defer {
-            self.free_matches();
-        }
-
-        try self.match();
-        try self.estimate_pose();
     }
 
     pub fn free_matches(self: *Self) void {

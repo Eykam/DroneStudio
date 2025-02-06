@@ -247,70 +247,75 @@ pub const Buffers = struct {
 pub const ConnectionResources = struct {
     const Self = @This();
 
-    left: Buffers,
-    right: Buffers,
+    left: ?Buffers,
+    right: ?Buffers,
 
-    pub fn init(allocator: std.mem.Allocator, left: BufferParams, right: BufferParams) !Self {
+    pub fn init(allocator: std.mem.Allocator, _left: ?BufferParams, _right: ?BufferParams) !Self {
         return Self{
-            .left = try Buffers.init(allocator, left),
-            .right = try Buffers.init(allocator, right),
+            .left = if (_left) |left| try Buffers.init(allocator, left) else null,
+            .right = if (_right) |right| try Buffers.init(allocator, right) else null,
         };
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-        self.left.deinit(allocator);
-        self.right.deinit(allocator);
+        if (self.left) |*left| {
+            left.deinit(allocator);
+        }
+
+        if (self.right) |*right| {
+            right.deinit(allocator);
+        }
     }
 
     pub fn map(self: *Self) !void {
-        try self.left.map();
-        try self.right.map();
+        if (self.left) |*left| {
+            try left.map();
+        }
+
+        if (self.right) |*right| {
+            try right.map();
+        }
     }
 
     pub fn unmap(self: *Self) !void {
-        try self.left.unmap();
-        try self.right.unmap();
+        if (self.left) |*left| {
+            try left.unmap();
+        }
+
+        if (self.right) |*right| {
+            try right.unmap();
+        }
     }
 };
 
 pub const KeypointResources = struct {
     const Self = @This();
 
-    connections: ?ConnectionResources,
+    connections: ConnectionResources,
     keypoints: Buffers,
 
     pub fn init(allocator: std.mem.Allocator, keypoint_buffers: BufferParams, left: ?BufferParams, right: ?BufferParams) !Self {
-        var resources = Self{
+        const resources = Self{
             .keypoints = try Buffers.init(allocator, keypoint_buffers),
-            .connections = null,
+            .connections = try ConnectionResources.init(allocator, left, right),
         };
-
-        if (left != null and right != null) {
-            resources.connections = try ConnectionResources.init(allocator, left.?, right.?);
-        }
 
         return resources;
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-        if (self.connections) |*conn| {
-            conn.deinit(allocator);
-        }
+        self.connections.deinit(allocator);
         self.keypoints.deinit(allocator);
     }
 
     pub fn map(self: *Self) !void {
         try self.keypoints.map();
-        if (self.connections) |*conn| {
-            try conn.map();
-        }
+        try self.connections.map();
     }
 
     pub fn unmap(self: *Self) !void {
         try self.keypoints.unmap();
-        if (self.connections) |*conn| {
-            try conn.unmap();
-        }
+        try self.connections.unmap();
     }
 };
 
@@ -364,6 +369,10 @@ pub const DetectionResources = struct {
         err |= cuda.cudaMalloc(@ptrCast(&d_world_transform), 16 * @sizeOf(f32));
 
         if (err != cuda.cudaSuccess) {
+            std.debug.print("Error initializing memory for DetectionResources: {s} => {s}\n", .{
+                cuda.cudaGetErrorName(err),
+                cuda.cudaGetErrorString(err),
+            });
             return error.CudaAllocationFailed;
         }
 
