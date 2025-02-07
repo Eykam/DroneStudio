@@ -1242,6 +1242,39 @@ __device__ inline void pick3DistinctIndices(curandStatePhilox4_32_10_t &rng,
 }
 
 
+// Picks N distinct random indices in [0..maxval-1].
+__device__ inline void pickNDistinctIndices(
+    curandStatePhilox4_32_10_t &rng,
+    int maxval,
+    int *out_idx,
+    int N
+)
+{
+    for (int i = 0; i < N; i++) {
+        out_idx[i] = (int)(curand_uniform(&rng) * maxval);
+        // Try a few times to ensure distinctness
+        for (int tries = 0; tries < 5; tries++) {
+            // Check against previously picked
+            bool collision = false;
+            for (int j = 0; j < i; j++) {
+                if (out_idx[i] == out_idx[j]) {
+                    collision = true;
+                    break;
+                }
+            }
+            if (collision) {
+                out_idx[i] = (int)(curand_uniform(&rng) * maxval);
+            }
+            else {
+                // no collision => done
+                break;
+            }
+        }
+    }
+}
+
+
+
 // ------------------------------------------------------------------
 // Kabsch-based RANSAC kernel
 //  * Everything (including RNG init) is inside the kernel
@@ -1262,13 +1295,14 @@ __global__ void estimateMotionRANSAC(
     // We want one RANSAC iteration per block:
     int blockId = blockIdx.x;
     int threadId = threadIdx.x;
+    uint subset_size = params.ransac_points;
     
     // Shared memory for counting inliers and intermediate computations
     __shared__ int s_inliers;
     __shared__ double s_H[9];  // Cross-covariance matrix
     __shared__ double s_B[9];  // B = H^T * H
     __shared__ double3 s_centroidP, s_centroidC;
-    __shared__ int s_idx[3];   // Random indices
+    __shared__ int s_idx[16];   // Random indices
     
     // Initialize shared memory
     if (threadId == 0) {
@@ -1295,40 +1329,35 @@ __global__ void estimateMotionRANSAC(
 
     // Thread 0 picks random indices
     if (threadId == 0) {
-        pick3DistinctIndices(rngState, match_count, s_idx[0], s_idx[1], s_idx[2]);
+        pickNDistinctIndices(rngState, match_count, s_idx, subset_size);
     }
     __syncthreads();
+    
+    double3 sumPrev = make_double3(0.0, 0.0, 0.0);
+    double3 sumCurr = make_double3(0.0, 0.0, 0.0);
 
     // Gather the points
-    double3 p1 = make_d3(matches[s_idx[0]].prev_pos);
-    double3 p2 = make_d3(matches[s_idx[1]].prev_pos);
-    double3 p3 = make_d3(matches[s_idx[2]].prev_pos);
-
-    double3 c1 = make_d3(matches[s_idx[0]].current_pos);
-    double3 c2 = make_d3(matches[s_idx[1]].current_pos);
-    double3 c3 = make_d3(matches[s_idx[2]].current_pos);
-
-    // Check for collinearity (only thread 0)
     if (threadId == 0) {
-        double3 v1 = dsub(p2, p1);
-        double3 v2 = dsub(p3, p1);
-        double3 crossv = cross_d(v1, v2);
-        double area = 0.5 * length_d(crossv);
-        if(area < 1e-12){
-            s_inliers = -1; // Mark as degenerate case
+        for (int i = 0; i < subset_size; i++) {
+            const int mIdx = s_idx[i];
+            double3 p = make_double3(
+                (double)matches[mIdx].prev_pos.x,
+                (double)matches[mIdx].prev_pos.y,
+                (double)matches[mIdx].prev_pos.z
+            );
+            double3 c = make_double3(
+                (double)matches[mIdx].current_pos.x,
+                (double)matches[mIdx].current_pos.y,
+                (double)matches[mIdx].current_pos.z
+            );
+            sumPrev.x += p.x; sumPrev.y += p.y; sumPrev.z += p.z;
+            sumCurr.x += c.x; sumCurr.y += c.y; sumCurr.z += c.z;
         }
-    }
-    __syncthreads();
-
-    if (s_inliers == -1) {
-        return; // Degenerate case
+        double invN = 1.0 / (double)subset_size;
+        s_centroidP = make_double3(sumPrev.x*invN, sumPrev.y*invN, sumPrev.z*invN);
+        s_centroidC = make_double3(sumCurr.x*invN, sumCurr.y*invN, sumCurr.z*invN);
     }
 
-    // Compute centroids (thread 0)
-    if (threadId == 0) {
-        s_centroidP = dscale(dadd(dadd(p1,p2), p3), 1.0/3.0);
-        s_centroidC = dscale(dadd(dadd(c1,c2), c3), 1.0/3.0);
-    }
     __syncthreads();
 
     // Initialize H matrix to zero
@@ -1339,55 +1368,62 @@ __global__ void estimateMotionRANSAC(
 
     // Compute cross-covariance matrix H (thread 0)
     if (threadId == 0) {
-        auto accumulateH = [&](double3 pp, double3 cc) {
-            double3 p_centered = dsub(pp, s_centroidP);
-            double3 c_centered = dsub(cc, s_centroidC);
-            s_H[0] += p_centered.x * c_centered.x;
-            s_H[1] += p_centered.x * c_centered.y;
-            s_H[2] += p_centered.x * c_centered.z;
-            s_H[3] += p_centered.y * c_centered.x;
-            s_H[4] += p_centered.y * c_centered.y;
-            s_H[5] += p_centered.y * c_centered.z;
-            s_H[6] += p_centered.z * c_centered.x;
-            s_H[7] += p_centered.z * c_centered.y;
-            s_H[8] += p_centered.z * c_centered.z;
+        auto accumulateH = [&](double3 pp, double3 cc)
+        {
+            double3 pC = make_double3(pp.x - s_centroidP.x, 
+                                      pp.y - s_centroidP.y, 
+                                      pp.z - s_centroidP.z);
+            double3 cC = make_double3(cc.x - s_centroidC.x, 
+                                      cc.y - s_centroidC.y, 
+                                      cc.z - s_centroidC.z);
+
+            s_H[0] += pC.x * cC.x;  s_H[1] += pC.x * cC.y;  s_H[2] += pC.x * cC.z;
+            s_H[3] += pC.y * cC.x;  s_H[4] += pC.y * cC.y;  s_H[5] += pC.y * cC.z;
+            s_H[6] += pC.z * cC.x;  s_H[7] += pC.z * cC.y;  s_H[8] += pC.z * cC.z;
         };
 
-        accumulateH(p1, c1);
-        accumulateH(p2, c2);
-        accumulateH(p3, c3);
+        for (int i = 0; i < subset_size; i++) {
+            int mIdx = s_idx[i];
+            double3 pp = make_double3(
+                (double)matches[mIdx].prev_pos.x,
+                (double)matches[mIdx].prev_pos.y,
+                (double)matches[mIdx].prev_pos.z
+            );
+            double3 cc = make_double3(
+                (double)matches[mIdx].current_pos.x,
+                (double)matches[mIdx].current_pos.y,
+                (double)matches[mIdx].current_pos.z
+            );
+            accumulateH(pp, cc);
+        }
     }
     __syncthreads();
 
     // Compute B = H^T * H (thread 0)
     if (threadId == 0) {
-        // B is symmetric, so we only need to compute upper triangle
-        for (int i = 0; i < 3; i++) {
-            for (int j = i; j < 3; j++) {
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
                 double sum = 0.0;
                 for (int k = 0; k < 3; k++) {
-                    sum += s_H[k * 3 + i] * s_H[k * 3 + j];
+                    // H^T => swap (r,k) => (k,r)
+                    sum += s_H[k * 3 + r] * s_H[k * 3 + c];
                 }
-                s_B[i * 3 + j] = sum;
-                if (i != j) {
-                    s_B[j * 3 + i] = sum; // Symmetric part
-                }
+                s_B[r * 3 + c] = sum;
             }
         }
     }
-    __syncthreads();
 
-    // Compute eigendecomposition (thread 0)
-    double eigVal[3], V[9];
-    if (threadId == 0) {
-        eigenDecomposeSym3Double(s_B, eigVal, V);
-    }
     __syncthreads();
 
     // Compute rotation matrix R and translation vector t (thread 0)
-    double R_d[9];
-    double3 t_d;
+    double eigVal[3], V[9];
+    __shared__ double R_d[9];
+    __shared__ double3 t_d;
+
     if (threadId == 0) {
+        // Decompose s_B => V
+        eigenDecomposeSym3Double(s_B, eigVal, V);
+
         // Compute singular values and U matrix
         double sigma[3];
         for(int i=0; i<3; i++) {
@@ -1437,10 +1473,18 @@ __global__ void estimateMotionRANSAC(
         }
 
         // Compute translation
-        double tx = R_d[0]*s_centroidP.x + R_d[1]*s_centroidP.y + R_d[2]*s_centroidP.z;
-        double ty = R_d[3]*s_centroidP.x + R_d[4]*s_centroidP.y + R_d[5]*s_centroidP.z;
-        double tz = R_d[6]*s_centroidP.x + R_d[7]*s_centroidP.y + R_d[8]*s_centroidP.z;
-        t_d = make_double3(s_centroidC.x - tx, s_centroidC.y - ty, s_centroidC.z - tz);
+        double xT = R_d[0]*s_centroidP.x + R_d[1]*s_centroidP.y + R_d[2]*s_centroidP.z;
+        double yT = R_d[3]*s_centroidP.x + R_d[4]*s_centroidP.y + R_d[5]*s_centroidP.z;
+        double zT = R_d[6]*s_centroidP.x + R_d[7]*s_centroidP.y + R_d[8]*s_centroidP.z;
+      
+        t_d.x = s_centroidC.x - xT;
+        t_d.y = s_centroidC.y - yT;
+        t_d.z = s_centroidC.z - zT;
+    }
+    __syncthreads();
+
+    if (threadId == 0) {
+        s_inliers = 0;
     }
     __syncthreads();
 
@@ -1452,13 +1496,17 @@ __global__ void estimateMotionRANSAC(
         double yT = R_d[3]*ptP.x + R_d[4]*ptP.y + R_d[5]*ptP.z + t_d.y;
         double zT = R_d[6]*ptP.x + R_d[7]*ptP.y + R_d[8]*ptP.z + t_d.z;
 
-        double3 diff = make_double3(
-            xT - matches[i].current_pos.x,
-            yT - matches[i].current_pos.y,
-            zT - matches[i].current_pos.z
+        double3 cP = make_double3(
+            (double)matches[i].current_pos.x,
+            (double)matches[i].current_pos.y,
+            (double)matches[i].current_pos.z
         );
-        double err = length_d(diff);
-        if(err < params.ransac_threshold) {
+        double dx = xT - cP.x;
+        double dy = yT - cP.y;
+        double dz = zT - cP.z;
+        double dist = sqrt(dx*dx + dy*dy + dz*dz);
+
+        if (dist < params.ransac_threshold) {
             atomicAdd(&s_inliers, 1);
         }
     }
@@ -1466,14 +1514,14 @@ __global__ void estimateMotionRANSAC(
 
     // Update best pose if we found more inliers (thread 0)
     if(threadId == 0) {
-        float block_inliers = (float)s_inliers;
+        int block_inliers = s_inliers;
         float ratio = block_inliers / (float)match_count;
 
         // Atomic update of best result
-        float oldBest = atomicMax((int*)inlier_count, __float_as_int(ratio));
-        if (__int_as_float((int)oldBest) < ratio) {
-            // Store new best pose
-            for(int i=0; i<9; i++) {
+        int oldVal = atomicMax((int*)inlier_count, block_inliers);
+        if (block_inliers > oldVal) {
+            // store R, t into best_pose
+            for(int i=0; i<9; i++){
                 best_pose->rotation[i] = (float)R_d[i];
             }
             best_pose->translation[0] = (float)t_d.x;

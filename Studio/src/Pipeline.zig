@@ -29,7 +29,6 @@ pub const AppState = struct {
     paused: bool = false,
     fly: bool = false,
     menu: bool = false,
-    pose: Pose = Pose.init(),
 };
 
 // Timing for operations to debug in UI

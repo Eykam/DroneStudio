@@ -144,15 +144,16 @@ pub fn TemporalParams() cuda.TemporalParams {
         .max_distance = 1.0, // Maximum distance for temporal matching
         .max_pixel_distance = 50.0, // Maximum pixel distance
         .min_confidence = 0.7, // Minimum confidence threshold
-        .min_matches = 10, // Minimum required matches
-        .ransac_threshold = 0.05, // RANSAC inlier threshold
+        .min_matches = 30, // Minimum required matches
+        .ransac_threshold = 0.01, // RANSAC inlier threshold
         .ransac_iterations = 256, // Number of RANSAC iterations
+        .ransac_points = 5,
         .spatial_weight = 0.4, // Weight for spatial distance term
         .hamming_weight = 0.4, // Weight for descriptor distance
         .img_weight = 0.2, // Weight for image space distance
         .max_hamming_dist = 1.0,
         .cost_threshold = 0.7,
-        .lowes_ratio = 0.8,
+        .lowes_ratio = 0.7,
     };
 }
 
@@ -173,6 +174,9 @@ pub const StereoVO = struct {
     prev_num_matches: c_uint = 0,
     d_prev_matches: ?*cuda.MatchedKeypoint = null,
     temporal_params: *cuda.TemporalParams,
+
+    global_pose: CameraPose = CameraPose.init(),
+    delta_pose: ?CameraPose = null,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -724,6 +728,7 @@ pub const StereoVO = struct {
         }
 
         std.debug.print("\nStarting Pose Estimation...\n", .{});
+        std.debug.print("Temporal Matching Keypoint Count => Previous Frame: {d} | Current Frame {d}\n", .{ self.prev_num_matches, self.num_matches.* });
 
         // Allocate device memory for temporal matching
         var d_temporal_matches: ?*cuda.TemporalMatch = null;
@@ -838,8 +843,8 @@ pub const StereoVO = struct {
             // Update temporal visualization counts
             for (self.temporal.target_node.children.items, 0..) |child, ind| {
                 switch (ind) {
-                    0 => child.instance_data.?.count = @intCast(self.prev_num_matches),
-                    1 => child.instance_data.?.count = @intCast(host_match_count),
+                    0 => child.instance_data.?.count = @intCast(self.prev_num_matches), //Keypoints
+                    1 => child.instance_data.?.count = @intCast(0), //Connections
                     else => {},
                 }
             }
@@ -884,15 +889,14 @@ pub const StereoVO = struct {
             return error.CudaMemcpyFailed;
         }
 
-        std.debug.print("Best Pose:\nTranslation:{d}\nRotation:{d}\n", .{ c_best_pose.translation, c_best_pose.rotation });
-
         const best_pose = CameraPose.fromCType(c_best_pose);
-        self.combined.target_node.scene.?.appState.pose = best_pose;
+        self.delta_pose = best_pose;
+        self.global_pose = self.global_pose.multiply(best_pose);
 
         if (!self.params.disable_spatial_tracking) {
             // Update current pose
-            const rotation_quaternion = best_pose.toQuaternion();
-            const translation_vec3 = best_pose.toVec3();
+            const rotation_quaternion = self.global_pose.toQuaternion();
+            const translation_vec3 = self.global_pose.toVec3();
 
             // Apply the new transform to the combined target node
             self.combined.target_node.setRotation(rotation_quaternion);
@@ -949,6 +953,13 @@ pub const StereoVO = struct {
         defer self.combined.unmap_resources();
         defer self.temporal.unmap_resources();
 
+        for (self.temporal.target_node.children.items) |child| {
+            child.instance_data.?.count = 0;
+        }
+        for (self.combined.target_node.children.items) |child| {
+            child.instance_data.?.count = 0;
+        }
+
         try self.match();
         try self.estimate_pose();
     }
@@ -990,6 +1001,21 @@ pub const StereoVO = struct {
             });
             return error.FailedToCopyMatchedToPrev;
         }
+    }
+
+    pub fn resetPose(self: *Self) !void {
+        // Reset the global_pose
+        self.global_pose = CameraPose.init();
+        self.delta_pose = CameraPose.init();
+
+        // If you also want to reset the actual scene node transform visually:
+        if (!self.params.disable_spatial_tracking) {
+            self.combined.target_node.setRotation(Math.Quaternion.identity());
+            self.combined.target_node.setPosition(0, 0, 0);
+            _ = try self.combined.updateTransformation();
+        }
+
+        std.debug.print("Pose has been reset.\n", .{});
     }
 
     pub fn free_matches(self: *Self) void {

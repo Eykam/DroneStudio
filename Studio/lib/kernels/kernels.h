@@ -217,6 +217,7 @@ typedef struct TemporalParams {
     uint min_matches;             // Minimum required matches
     float ransac_threshold;      // RANSAC inlier threshold
     uint ransac_iterations;       // Number of RANSAC iterations
+    uint ransac_points;         
     float spatial_weight;    // Weight for spatial distance term
     float hamming_weight;
     float img_weight;  

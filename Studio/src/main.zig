@@ -219,7 +219,13 @@ pub fn main() !void {
         scene.render(window);
 
         if (!scene.appState.paused) {
+            const start = try std.time.Instant.now();
             try StereoVO.update();
+            const end = try std.time.Instant.now();
+            const debug_str = "= Total Stereo Pipeline Execution Time: {d:.3} ms =\n";
+            std.debug.print("\n{s}\n", .{"=" ** (debug_str.len - 1)});
+            std.debug.print(debug_str, .{@as(f64, @floatFromInt(end.since(start))) / 1e6});
+            std.debug.print("{s}\n", .{"=" ** (debug_str.len - 1)});
         } else if (StereoVO.params_changed) {
             try StereoVO.match();
             StereoVO.free_matches();
