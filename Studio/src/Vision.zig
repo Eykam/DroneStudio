@@ -147,7 +147,7 @@ pub fn TemporalParams() cuda.TemporalParams {
         .min_matches = 30, // Minimum required matches
         .ransac_threshold = 0.01, // RANSAC inlier threshold
         .ransac_iterations = 256, // Number of RANSAC iterations
-        .ransac_points = 5,
+        .ransac_points = 8, // Number of randomly sampled temporal matches to estimate essential matrix with
         .spatial_weight = 0.4, // Weight for spatial distance term
         .hamming_weight = 0.4, // Weight for descriptor distance
         .img_weight = 0.2, // Weight for image space distance
@@ -896,11 +896,11 @@ pub const StereoVO = struct {
         if (!self.params.disable_spatial_tracking) {
             // Update current pose
             const rotation_quaternion = self.global_pose.toQuaternion();
-            const translation_vec3 = self.global_pose.toVec3();
+            // const translation_vec3 = self.global_pose.toVec3();
 
             // Apply the new transform to the combined target node
             self.combined.target_node.setRotation(rotation_quaternion);
-            self.combined.target_node.setPosition(translation_vec3.x, translation_vec3.y, translation_vec3.z);
+            // self.combined.target_node.setPosition(translation_vec3.x, translation_vec3.y, translation_vec3.z);
             try self.combined.updateTransformation();
         }
 

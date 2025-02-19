@@ -1,5 +1,4 @@
 const std = @import("std");
-const net = std.net;
 
 //Move to Config.zig
 const CLIENT_IP: []const u8 = "192.168.1.171";
@@ -14,7 +13,7 @@ fn intToBytesBE(value: i128) [16]u8 {
     return bytes;
 }
 
-pub fn main() !void {
+pub fn StreamVideo() !void {
     const allocator = std.heap.page_allocator;
     const socket = try std.posix.socket(
         std.posix.AF.INET,

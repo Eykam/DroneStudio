@@ -2,6 +2,10 @@ const std = @import("std");
 const imgui = @import("bindings/c.zig").imgui;
 const Scene = @import("Pipeline.zig").Scene;
 const Vision = @import("Vision.zig");
+const Drone = @import("Drone.zig");
+
+const DroneConfig = Drone.DroneConfig;
+const MotorController = Drone.MotorController;
 const StereoVO = Vision.StereoVO;
 const CameraPose = Vision.CameraPose;
 
@@ -85,6 +89,36 @@ pub fn WindowManager(comptime Windows: []const type) type {
         }
     };
 }
+
+const Styles = struct {
+    const StyleState = struct {
+        normal: imgui.ImVec4,
+        hovered: imgui.ImVec4,
+        active: imgui.ImVec4,
+    };
+
+    const selected: StyleState = StyleState{
+        .normal = .{ .x = 0.2, .y = 0.6, .z = 0.2, .w = 1.0 },
+        .hovered = .{ .x = 0.3, .y = 0.7, .z = 0.3, .w = 1.0 },
+        .active = .{ .x = 0.4, .y = 0.8, .z = 0.4, .w = 1.0 },
+    };
+    const unselected = StyleState{
+        .normal = .{ .x = 0.5, .y = 0.5, .z = 0.5, .w = 0.6 },
+        .hovered = .{ .x = 0.6, .y = 0.6, .z = 0.6, .w = 0.7 },
+        .active = .{ .x = 0.7, .y = 0.7, .z = 0.7, .w = 0.8 },
+    };
+
+    fn pushButtonColors(is_selected: bool) void {
+        const style = if (is_selected) Styles.selected else Styles.unselected;
+        imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_Button, style.normal);
+        imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_ButtonHovered, style.hovered);
+        imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_ButtonActive, style.active);
+    }
+
+    fn popButtonColors() void {
+        imgui.igPopStyleColor(3);
+    }
+};
 
 pub const OverlayWindow = struct {
     visible: bool,
@@ -673,6 +707,659 @@ pub const StereoDebugWindow = struct {
             ctx.StereoVO.params_changed = params_changed;
         }
         imgui.igEnd();
+    }
+
+    pub fn show(self: *Self) void {
+        self.visible = true;
+    }
+
+    pub fn hide(self: *Self) void {
+        self.visible = false;
+    }
+
+    pub fn toggle(self: *Self) void {
+        self.visible = !self.visible;
+    }
+};
+
+pub const DroneConfigWindow = struct {
+    const Self = @This();
+
+    const max_ip_len = 16;
+    const max_path_len = 256;
+    const max_cwd_len = 4096;
+
+    local_ip_buffer: [max_ip_len]u8 = undefined,
+    controller_ip_buffer: [max_ip_len]u8 = undefined,
+    config_path_buffer: [max_path_len]u8 = undefined,
+    cwd_buffer: [max_cwd_len]u8 = undefined,
+
+    visible: bool,
+    show_save_modal: bool = false,
+    show_load_modal: bool = false,
+
+    selected_motor: MotorController.Motors,
+    global_testing: bool = true,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) !*Self {
+        const self = try allocator.create(Self);
+        self.* = .{
+            .visible = true,
+            .selected_motor = MotorController.Motors.Motor_1,
+            .allocator = allocator,
+        };
+
+        @memset(&self.local_ip_buffer, 0);
+        @memset(&self.controller_ip_buffer, 0);
+        @memset(&self.config_path_buffer, 0);
+        @memset(&self.cwd_buffer, 0);
+
+        // const local_ip = DroneConfig.default_local_ip;
+        // const controller_ip = DroneConfig.default_controller_ip;
+        // const config_path = DroneConfig.default_config_path;
+
+        // @memcpy(self.local_ip_buffer[0..local_ip.len], local_ip);
+        // @memcpy(self.controller_ip_buffer[0..controller_ip.len], controller_ip);
+        // @memcpy(self.config_path_buffer[0..config_path.len], config_path);
+        // Copy IP to buffer
+        // std.mem.copyForwards(u8, &self.ip_buffer, self.config.ip);
+
+        // // Try to load saved config
+        // self.config.loadFromFile() catch |err| {
+        //     std.debug.print("Failed to load config: {}\n", .{err});
+        // };
+
+        return self;
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        self.allocator.free(self.local_ip_buffer);
+        self.allocator.free(self.controller_ip_buffer);
+        self.allocator.free(self.config_path_buffer);
+        allocator.destroy(self);
+    }
+
+    pub fn draw(self: *Self, ctx: *const UIContext) void {
+        if (!self.visible) return;
+
+        const window_size = imgui.ImVec2{ .x = 400.0, .y = 600.0 };
+        imgui.igSetNextWindowSize(window_size, imgui.ImGuiCond_FirstUseEver);
+
+        const PAD = 250.0;
+        const viewport = imgui.igGetMainViewport();
+        const work_pos = viewport.*.WorkPos;
+        const work_size = viewport.*.WorkSize;
+
+        // Calculate position for top right
+        const window_pos = imgui.ImVec2{
+            .x = work_pos.x + work_size.x - (window_size.x + PAD),
+            .y = work_pos.y + (work_size.y / 2) - (window_size.y / 2),
+        };
+
+        const window_pos_pivot = imgui.ImVec2{ .x = 0.0, .y = 0.0 };
+
+        imgui.igSetNextWindowPos(window_pos, imgui.ImGuiCond_Always, window_pos_pivot);
+        imgui.igSetNextWindowViewport(viewport.*.ID);
+
+        if (imgui.igBegin("Drone Configuration", &self.visible, imgui.ImGuiWindowFlags_None)) {
+            // Fixed Header Section
+            self.drawFixedHeader(ctx);
+            imgui.igSeparator();
+
+            // Server Configuration Section
+            if (imgui.igCollapsingHeader_BoolPtr("Server Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                self.drawServerConfig(ctx);
+            }
+
+            imgui.igNewLine();
+            imgui.igSeparator();
+
+            // Protocol Configuration Section
+            if (imgui.igCollapsingHeader_BoolPtr("Protocol Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                self.drawProtocolConfig(ctx);
+            }
+
+            imgui.igNewLine();
+            imgui.igSeparator();
+
+            // Motor Configuration Section
+            if (imgui.igCollapsingHeader_BoolPtr("Motor Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                self.drawMotorConfig(ctx);
+            }
+
+            imgui.igNewLine();
+            imgui.igSeparator();
+
+            // Throttle Testing Section
+            if (imgui.igCollapsingHeader_BoolPtr("Throttle Testing", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                self.drawThrottleTesting(ctx);
+            }
+
+            // Modal Windows
+            self.drawSaveModal(ctx);
+            self.drawLoadModal(ctx);
+        }
+        imgui.igEnd();
+    }
+
+    inline fn drawFixedHeader(self: *Self, ctx: *const UIContext) void {
+        // Config Path Display
+        const curr_path = std.mem.sliceTo(&self.config_path_buffer, 0);
+        imgui.igText("Config Path: %s", @as([*c]const u8, curr_path.ptr));
+
+        // Save/Load Buttons
+        const button_disabled = ctx.scene.motor_controller.getConnectionState() == .Running;
+
+        if (button_disabled) {
+            imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
+        }
+
+        if (imgui.igButton("Save Configuration", imgui.ImVec2{ .x = 120, .y = 0 }) and !button_disabled) {
+            self.show_save_modal = true;
+        }
+        imgui.igSameLine(0, 4);
+        if (imgui.igButton("Load Configuration", imgui.ImVec2{ .x = 120, .y = 0 }) and !button_disabled) {
+            self.show_load_modal = true;
+        }
+
+        if (button_disabled) {
+            imgui.igPopStyleVar(1);
+        }
+
+        imgui.igNewLine();
+
+        // Connection Status and Controls
+        const conn_state = ctx.scene.motor_controller.getConnectionState();
+        const state_str = conn_state.toString();
+
+        // Color-coded status
+        const status_color = switch (conn_state) {
+            .Disconnected => imgui.ImVec4{ .x = 0.7, .y = 0.7, .z = 0.7, .w = 1.0 },
+            .Connecting => imgui.ImVec4{ .x = 1.0, .y = 0.7, .z = 0.0, .w = 1.0 },
+            .Connected, .ConfigSync => imgui.ImVec4{ .x = 0.0, .y = 0.7, .z = 1.0, .w = 1.0 },
+            .Ready => imgui.ImVec4{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 },
+            .Running => imgui.ImVec4{ .x = 0.0, .y = 0.8, .z = 0.0, .w = 1.0 },
+            .Failed => imgui.ImVec4{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 },
+        };
+
+        imgui.igTextColored(status_color, "Status: %s", state_str.ptr);
+        imgui.igSameLine(0, 10);
+
+        // Connection control buttons
+        switch (conn_state) {
+            .Disconnected => {
+                if (imgui.igButton("Connect", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    ctx.scene.motor_controller.connect() catch |err| {
+                        std.debug.print("Failed to connect: {}\n", .{err});
+                    };
+                }
+            },
+            .Failed => {
+                if (imgui.igButton("Retry", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    ctx.scene.motor_controller.*.retryConnection() catch |err| {
+                        std.debug.print("Failed to retry connection: {}\n", .{err});
+                    };
+                }
+            },
+            .Connected, .ConfigSync, .Ready, .Running => {
+                if (imgui.igButton("Disconnect", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    ctx.scene.motor_controller.disconnect();
+                }
+            },
+            else => {},
+        }
+
+        // Config editing lock warning
+        if (conn_state == .Running) {
+            imgui.igSameLine(0, 10);
+            imgui.igTextColored(
+                imgui.ImVec4{ .x = 1.0, .y = 0.7, .z = 0.0, .w = 1.0 },
+                "(Configuration locked while running)",
+            );
+        }
+        const config = ctx.scene.motor_controller.config;
+
+        const local_ip = self.allocator.dupeZ(u8, config.local_ip) catch {
+            std.debug.print("Failed to allocate mem for local ip string\n", .{});
+            return;
+        };
+        defer self.allocator.free(local_ip);
+
+        const controller_ip = self.allocator.dupeZ(u8, config.controller_ip) catch {
+            std.debug.print("Failed to allocate mem for controller ip string\n", .{});
+            return;
+        };
+        defer self.allocator.free(controller_ip);
+
+        imgui.igText("Local Address: %s:%d", local_ip.ptr, config.local_port);
+        imgui.igText("Controller Address: %s:%d", controller_ip.ptr, config.controller_port);
+    }
+
+    inline fn drawThrottleTesting(self: *Self, ctx: *const UIContext) void {
+        if (ctx.scene.motor_controller.getConnectionState() != .Running and ctx.scene.motor_controller.getConnectionState() != .Ready) {
+            imgui.igText("Please connect to controller to initiate testing!");
+            return;
+        }
+
+        // Testing Mode Toggle Button
+        const is_global = self.global_testing;
+        Styles.pushButtonColors(is_global);
+        if (imgui.igButton(
+            "Global Testing",
+            imgui.ImVec2{ .x = 120, .y = 0 },
+        )) {
+            self.global_testing = true;
+        }
+        Styles.popButtonColors();
+
+        imgui.igSameLine(0, 10);
+
+        Styles.pushButtonColors(!is_global);
+        if (imgui.igButton(
+            "Per Motor Testing",
+            imgui.ImVec2{ .x = 120, .y = 0 },
+        )) {
+            self.global_testing = false;
+        }
+        Styles.popButtonColors();
+
+        imgui.igNewLine();
+        imgui.igSpacing();
+
+        const motor_states = ctx.scene.motor_controller.motor_states;
+
+        if (self.global_testing) {
+            // Single slider for all motors
+            var throttle: f32 = 0.0;
+            if (imgui.igSliderFloat(
+                "All Motors Throttle (%)",
+                &throttle,
+                0.0,
+                ctx.scene.motor_controller.config.global_max_throttle,
+                "%.1f",
+                imgui.ImGuiSliderFlags_None,
+            )) {
+                inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+                    if (motor_states[motor.value].armed) {
+                        const command = MotorController.Command{
+                            .kind = .SetSpeed,
+                            .speed = throttle,
+                            .motor = @enumFromInt(motor.value),
+                        };
+                        _ = ctx.scene.motor_controller.command_queue.push(command);
+                    }
+                }
+            }
+
+            // Add global arm/disarm buttons
+            if (imgui.igButton(
+                "Arm All",
+                imgui.ImVec2{ .x = 120, .y = 0 },
+            )) {
+                inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+                    if (!motor_states[motor.value].armed) {
+                        const command = MotorController.Command{
+                            .kind = .Arm,
+                            .speed = 0,
+                            .motor = @enumFromInt(motor.value),
+                        };
+                        _ = ctx.scene.motor_controller.command_queue.push(command);
+                    }
+                }
+            }
+
+            imgui.igSameLine(0, 10);
+
+            if (imgui.igButton(
+                "Disarm All",
+                imgui.ImVec2{ .x = 120, .y = 0 },
+            )) {
+                inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+                    if (motor_states[motor.value].armed) {
+                        const command = MotorController.Command{
+                            .kind = .Disarm,
+                            .speed = 0,
+                            .motor = @enumFromInt(motor.value),
+                        };
+                        _ = ctx.scene.motor_controller.command_queue.push(command);
+                    }
+                }
+            }
+        } else {
+            // Individual sliders for each motor
+            inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+                const motor_enum = @as(MotorController.Motors, @enumFromInt(motor.value));
+                const motor_state = &motor_states[motor.value];
+
+                // Motor header with status
+                const status_color = if (motor_state.armed)
+                    imgui.ImVec4{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }
+                else
+                    imgui.ImVec4{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 };
+
+                const armed_status = if (motor_state.armed) std.fmt.comptimePrint("{s} Armed", .{
+                    @tagName(motor_enum).ptr,
+                }) else std.fmt.comptimePrint("{s} Disarmed", .{
+                    @tagName(motor_enum).ptr,
+                });
+
+                imgui.igTextColored(status_color, armed_status);
+
+                // Arm/Disarm button
+                const button_label = if (motor_state.armed) std.fmt.comptimePrint("Disarm {d}", .{
+                    motor.value + 1,
+                }) else std.fmt.comptimePrint("Arm {d}", .{
+                    motor.value + 1,
+                });
+
+                if (imgui.igButton(
+                    button_label,
+                    imgui.ImVec2{ .x = 80, .y = 0 },
+                )) {
+                    const command = MotorController.Command{
+                        .kind = if (motor_state.armed) .Disarm else .Arm,
+                        .speed = 0,
+                        .motor = motor_enum,
+                    };
+                    _ = ctx.scene.motor_controller.command_queue.push(command);
+                }
+
+                imgui.igSameLine(0, 10);
+
+                // Throttle slider (only enabled if armed)
+                if (!motor_state.armed) {
+                    imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
+                }
+
+                var throttle = motor_state.throttle;
+                if (imgui.igSliderFloat(
+                    std.fmt.comptimePrint("{s} Throttle (%)", .{@tagName(motor_enum)}),
+                    &throttle,
+                    0.0,
+                    ctx.scene.motor_controller.config.global_max_throttle,
+                    "%.1f",
+                    imgui.ImGuiSliderFlags_None,
+                )) {
+                    if (motor_state.armed) {
+                        const command = MotorController.Command{
+                            .kind = .SetSpeed,
+                            .speed = throttle,
+                            .motor = motor_enum,
+                        };
+                        _ = ctx.scene.motor_controller.command_queue.push(command);
+                    }
+                }
+
+                if (!motor_state.armed) {
+                    imgui.igPopStyleVar(1);
+                }
+
+                imgui.igSpacing();
+            }
+        }
+    }
+
+    inline fn drawServerConfig(self: *Self, ctx: *const UIContext) void {
+        const conn_state = ctx.scene.motor_controller.getConnectionState();
+        const config_locked = conn_state == .Running or conn_state == .Ready;
+
+        if (config_locked) {
+            imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
+        }
+
+        // Local Server Configuration
+        imgui.igText("Local Server");
+        if (imgui.igInputText(
+            "Local IP Address",
+            &self.local_ip_buffer,
+            self.local_ip_buffer.len,
+            imgui.ImGuiInputTextFlags_None |
+                imgui.ImGuiInputTextFlags_CharsNoBlank |
+                imgui.ImGuiInputTextFlags_EnterReturnsTrue |
+                if (config_locked) imgui.ImGuiInputTextFlags_ReadOnly else 0,
+            null,
+            null,
+        )) {
+            if (!config_locked) {
+                const ip_len = std.mem.indexOfScalar(u8, &self.local_ip_buffer, 0) orelse self.local_ip_buffer.len;
+                ctx.scene.motor_controller.config.allocator.free(ctx.scene.motor_controller.config.local_ip);
+                ctx.scene.motor_controller.config.local_ip = ctx.scene.motor_controller.config.allocator.dupe(u8, self.local_ip_buffer[0..ip_len]) catch |err| {
+                    std.debug.print("Failed to allocate memory for IP: {}\n", .{err});
+                    return;
+                };
+            }
+        }
+
+        var local_port = @as(c_int, ctx.scene.motor_controller.config.local_port);
+        if (imgui.igInputInt(
+            "Local Port",
+            &local_port,
+            0,
+            0,
+            if (config_locked) imgui.ImGuiInputTextFlags_ReadOnly else imgui.ImGuiInputTextFlags_None,
+        )) {
+            if (!config_locked) {
+                ctx.scene.motor_controller.config.local_port = @intCast(@max(0, @min(local_port, 65535)));
+            }
+        }
+
+        // Controller Server Configuration
+        imgui.igNewLine();
+        imgui.igText("Controller Server");
+        if (imgui.igInputText(
+            "Controller's IP Address",
+            &self.controller_ip_buffer,
+            self.controller_ip_buffer.len,
+            imgui.ImGuiInputTextFlags_None |
+                if (config_locked) imgui.ImGuiInputTextFlags_ReadOnly else 0,
+            null,
+            null,
+        )) {
+            if (!config_locked) {
+                const ip_len = std.mem.indexOfScalar(u8, &self.controller_ip_buffer, 0) orelse self.controller_ip_buffer.len;
+                ctx.scene.motor_controller.config.allocator.free(ctx.scene.motor_controller.config.controller_ip);
+                ctx.scene.motor_controller.config.controller_ip = ctx.scene.motor_controller.config.allocator.dupe(u8, self.controller_ip_buffer[0..ip_len]) catch |err| {
+                    std.debug.print("Failed to allocate memory for IP: {}\n", .{err});
+                    return;
+                };
+            }
+        }
+
+        var controller_port = @as(c_int, ctx.scene.motor_controller.config.controller_port);
+        if (imgui.igInputInt(
+            "Controller Port",
+            &controller_port,
+            0,
+            0,
+            if (config_locked) imgui.ImGuiInputTextFlags_ReadOnly else imgui.ImGuiInputTextFlags_None,
+        )) {
+            if (!config_locked) {
+                ctx.scene.motor_controller.config.controller_port = @intCast(@max(0, @min(controller_port, 65535)));
+            }
+        }
+
+        if (config_locked) {
+            imgui.igPopStyleVar(1);
+        }
+    }
+
+    inline fn drawProtocolConfig(self: *Self, ctx: *const UIContext) void {
+        // DShot Protocol Selection
+
+        inline for (@typeInfo(MotorController.Protocols).@"enum".fields) |protocol| {
+            if (protocol.value > 0) {
+                imgui.igSameLine(0, 4);
+            }
+
+            const is_selected = protocol.value == @intFromEnum(ctx.scene.motor_controller.config.dshot_protocol);
+            Styles.pushButtonColors(is_selected);
+
+            const protocol_str = std.fmt.allocPrintZ(self.allocator, "DShot {s}", .{@tagName(@as(MotorController.Protocols, @enumFromInt(protocol.value)))}) catch unreachable;
+            defer self.allocator.free(protocol_str);
+
+            if (imgui.igButton(
+                protocol_str,
+                imgui.ImVec2{ .x = 90, .y = 0 },
+            )) {
+                ctx.scene.motor_controller.config.dshot_protocol = @enumFromInt(protocol.value);
+            }
+
+            Styles.popButtonColors();
+        }
+
+        imgui.igNewLine();
+
+        // Global Max Throttle
+        var global_max = ctx.scene.motor_controller.config.global_max_throttle;
+        if (imgui.igSliderFloat(
+            "Global Max Throttle (%)",
+            &global_max,
+            0.0,
+            100.0,
+            "%.1f",
+            imgui.ImGuiSliderFlags_None,
+        )) {
+            ctx.scene.motor_controller.config.global_max_throttle = global_max;
+        }
+    }
+
+    inline fn drawMotorConfig(self: *Self, ctx: *const UIContext) void {
+        // Motor Selection Buttons
+        imgui.igText("Select Motor:");
+        inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+            if (motor.value > 0) {
+                imgui.igSameLine(0, 4);
+            }
+
+            Styles.pushButtonColors(motor.value == @intFromEnum(self.selected_motor));
+
+            const motor_string = motor.name;
+            if (imgui.igButton(
+                motor_string,
+                imgui.ImVec2{ .x = 80, .y = 0 },
+            )) {
+                self.selected_motor = @enumFromInt(motor.value);
+            }
+
+            Styles.popButtonColors();
+        }
+
+        imgui.igNewLine();
+        imgui.igSeparator();
+
+        // Selected Motor Configuration
+        const motor = &ctx.scene.motor_controller.config.motors[@intFromEnum(self.selected_motor)];
+        var pin = @as(c_int, motor.pin);
+        if (imgui.igInputInt("GPIO Pin", &pin, 0, 0, imgui.ImGuiInputTextFlags_CharsDecimal)) {
+            motor.pin = @intCast(@max(0, @min(pin, 27)));
+        }
+
+        var direction: c_int = @intFromEnum(motor.direction);
+        if (imgui.igCombo_Str(
+            "Direction",
+            &direction,
+            "Clockwise\x00Counterclockwise\x00",
+            2,
+        )) {
+            motor.direction = @enumFromInt(direction);
+        }
+
+        var max_throttle = motor.max_throttle;
+        if (imgui.igSliderFloat(
+            "Max Throttle (%)",
+            &max_throttle,
+            0.0,
+            @min(100.0, ctx.scene.motor_controller.config.global_max_throttle),
+            "%.1f",
+            imgui.ImGuiSliderFlags_None,
+        )) {
+            motor.max_throttle = max_throttle;
+        }
+    }
+
+    inline fn drawSaveModal(self: *Self, ctx: *const UIContext) void {
+        if (self.show_save_modal) {
+            imgui.igSetNextWindowSize(.{ .x = 400, .y = 150 }, imgui.ImGuiCond_FirstUseEver);
+            if (imgui.igBegin("Save Configuration##modal", &self.show_save_modal, imgui.ImGuiWindowFlags_Modal)) {
+                imgui.igText("Save configuration to:");
+                _ = imgui.igInputText(
+                    "##path",
+                    &self.config_path_buffer,
+                    self.config_path_buffer.len,
+                    imgui.ImGuiInputTextFlags_None,
+                    null,
+                    null,
+                );
+
+                imgui.igText("File will be saved in the configs folder:");
+                imgui.igText("%s", @as([*c]const u8, &self.cwd_buffer));
+
+                imgui.igSpacing();
+                if (imgui.igButton("Save", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    ctx.scene.motor_controller.config.saveToFile(self.config_path_buffer[0 .. std.mem.indexOfScalar(u8, &self.config_path_buffer, 0) orelse self.config_path_buffer.len]) catch |err| {
+                        std.debug.print("Failed to save config: {}\n", .{err});
+                    };
+                    self.show_save_modal = false;
+                }
+                imgui.igSameLine(0, 10);
+                if (imgui.igButton("Cancel", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    self.show_save_modal = false;
+                }
+            }
+            imgui.igEnd();
+        }
+    }
+
+    inline fn drawLoadModal(self: *Self, ctx: *const UIContext) void {
+        if (self.show_load_modal) {
+            imgui.igSetNextWindowSize(.{ .x = 400, .y = 300 }, imgui.ImGuiCond_FirstUseEver);
+            if (imgui.igBegin("Load Configuration##modal", &self.show_load_modal, imgui.ImGuiWindowFlags_Modal)) {
+                // Show current directory contents
+                imgui.igText("Select configuration file:");
+                imgui.igSeparator();
+                imgui.igNewLine();
+
+                if (std.fs.cwd().openDir(DroneConfig.default_config_folder, .{ .iterate = true })) |dir_handle| {
+                    var dir = dir_handle;
+                    var iter = dir.iterate();
+                    while (iter.next() catch null) |entry| {
+                        if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".json")) {
+                            if (imgui.igSelectable_Bool(
+                                entry.name.ptr,
+                                std.mem.eql(u8, entry.name, self.config_path_buffer[0 .. std.mem.indexOfScalar(u8, &self.config_path_buffer, 0) orelse 0]),
+                                imgui.ImGuiSelectableFlags_None,
+                                imgui.ImVec2{ .x = 0, .y = 0 },
+                            )) {
+                                @memcpy(self.config_path_buffer[0..@min(entry.name.len, self.config_path_buffer.len - 1)], entry.name);
+                                self.config_path_buffer[entry.name.len] = 0;
+                            }
+                        }
+                    }
+                    dir.close();
+                } else |_| {
+                    imgui.igText("Could not read directory contents");
+                }
+
+                imgui.igSpacing();
+                if (imgui.igButton("Load", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    const path = self.config_path_buffer[0 .. std.mem.indexOfScalar(u8, &self.config_path_buffer, 0) orelse self.config_path_buffer.len];
+                    ctx.scene.motor_controller.config = DroneConfig.loadFromFile(
+                        ctx.scene.motor_controller.config.allocator,
+                        path,
+                    ) catch |err| {
+                        std.debug.print("Failed to load config: {}\n", .{err});
+                        return;
+                    };
+                    self.show_load_modal = false;
+                }
+                imgui.igSameLine(0, 10);
+                if (imgui.igButton("Cancel", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                    self.show_load_modal = false;
+                }
+            }
+            imgui.igEnd();
+        }
     }
 
     pub fn show(self: *Self) void {

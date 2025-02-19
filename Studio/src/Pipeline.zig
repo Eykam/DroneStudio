@@ -7,6 +7,8 @@ const gl = @import("bindings/gl.zig");
 const c = @import("bindings/c.zig");
 const Camera = @import("Camera.zig");
 const Vision = @import("Vision.zig");
+const Sensors = @import("Sensors.zig");
+const Drone = @import("Drone.zig");
 
 const Vec3 = Math.Vec3;
 const File = std.fs.File;
@@ -14,6 +16,7 @@ const glfw = gl.glfw;
 const glad = gl.glad;
 const imgui = c.imgui;
 const Pose = Vision.CameraPose;
+const MotorController = Drone.MotorController;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
@@ -48,6 +51,7 @@ pub const Scene = struct {
     height: f32,
     appState: AppState,
     camera: Camera,
+    motor_controller: *MotorController,
 
     uModelLoc: glad.GLint,
     uViewLoc: glad.GLint,
@@ -153,6 +157,7 @@ pub const Scene = struct {
             .depthTextureLoc = depthTextureLoc,
             .useInstancedKeypointLoc = useInstancedKeypointLoc,
             .useInstancedLinesLoc = uInstancedLinesLoc,
+            .motor_controller = try MotorController.init(allocator, null),
         };
 
         return scene;
@@ -191,6 +196,7 @@ pub const Scene = struct {
 
         _ = glfw.glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
         _ = glfw.glfwSetCursorPosCallback(window, mouseCallback);
+        _ = glfw.glfwSetCharCallback(window, charCallback);
         _ = glfw.glfwSetKeyCallback(window, keyCallback);
         _ = glfw.glfwSetScrollCallback(window, scrollCallback);
         _ = glfw.glfwSetMouseButtonCallback(window, mouseButtonCallback);
@@ -276,6 +282,12 @@ pub const Scene = struct {
 
     pub fn processInput(self: *Self, debug: bool) void {
         _ = debug;
+
+        // const up_pressed = self.appState.keys[@as(usize, glfw.GLFW_KEY_UP)];
+        // self.motor_handler.handleInput(up_pressed);
+
+        const io = imgui.igGetIO();
+        if (io.*.WantCaptureKeyboard) return;
 
         const sprinting = self.appState.keys[@as(usize, glfw.GLFW_KEY_LEFT_SHIFT)];
         const velocity = self.camera.speed * self.appState.delta_time *
@@ -599,13 +611,30 @@ fn mouseButtonCallback(window: ?*glfw.struct_GLFWwindow, button: c_int, action: 
     }
 }
 
+fn charCallback(window: ?*glfw.struct_GLFWwindow, character: c_uint) callconv(.C) void {
+    if (window == null) return;
+
+    const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.menu) {
+        imgui.ImGui_ImplGlfw_CharCallback(@ptrCast(window), character);
+    }
+}
+
 fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.C) void {
     if (window == null) return;
 
-    _ = scancode;
-    _ = mods;
-
     const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+
+    if (scene.appState.menu) {
+        imgui.ImGui_ImplGlfw_KeyCallback(@ptrCast(window), key, scancode, action, mods);
+
+        // Check if ImGui wants to capture keyboard input
+        const io = imgui.igGetIO();
+        if (io.*.WantCaptureKeyboard) {
+            return; // Let ImGui handle the input exclusively
+        }
+    }
 
     if (key < 0 or key >= 1024) return;
 
@@ -642,15 +671,10 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
             glfw.GLFW_KEY_RIGHT_BRACKET => {
                 glfw.glfwDestroyWindow(window);
             },
-            glfw.GLFW_KEY_UP => {
-                // Zoom in (narrower FOV)
-                scene.appState.zoom -= 1.0;
-                if (scene.appState.zoom < 1.0) scene.appState.zoom = 1.0;
-            },
-            glfw.GLFW_KEY_DOWN => {
-                // Zoom out (wider FOV)
-                scene.appState.zoom += 1.0;
-            },
+            // glfw.GLFW_KEY_O => {
+            //     const command = Drone.CommandQueue.Command{ .kind = .Arm, .speed = 0.0 };
+            //     _ = scene.motor_handler.command_queue.push(command);
+            // },
             glfw.GLFW_KEY_P => {
                 scene.appState.paused = !scene.appState.paused;
             },
