@@ -3,6 +3,8 @@ const imgui = @import("bindings/c.zig").imgui;
 const Scene = @import("Pipeline.zig").Scene;
 const Vision = @import("Vision.zig");
 const Drone = @import("Drone.zig");
+const Sensors = @import("Sensors.zig");
+const Math = @import("Math.zig");
 
 const DroneConfig = Drone.DroneConfig;
 const MotorController = Drone.MotorController;
@@ -12,6 +14,7 @@ const CameraPose = Vision.CameraPose;
 const UIContext = struct {
     scene: *Scene,
     StereoVO: *StereoVO,
+    pose_handler: *Sensors.PoseHandler,
 };
 
 fn createWindowsStructType(Windows: []const type) type {
@@ -739,7 +742,8 @@ pub const DroneConfigWindow = struct {
     show_load_modal: bool = false,
 
     selected_motor: MotorController.Motors,
-    global_testing: bool = true,
+    global_throttle: f32,
+
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
@@ -747,6 +751,7 @@ pub const DroneConfigWindow = struct {
         self.* = .{
             .visible = true,
             .selected_motor = MotorController.Motors.Motor_1,
+            .global_throttle = 0,
             .allocator = allocator,
         };
 
@@ -754,21 +759,6 @@ pub const DroneConfigWindow = struct {
         @memset(&self.controller_ip_buffer, 0);
         @memset(&self.config_path_buffer, 0);
         @memset(&self.cwd_buffer, 0);
-
-        // const local_ip = DroneConfig.default_local_ip;
-        // const controller_ip = DroneConfig.default_controller_ip;
-        // const config_path = DroneConfig.default_config_path;
-
-        // @memcpy(self.local_ip_buffer[0..local_ip.len], local_ip);
-        // @memcpy(self.controller_ip_buffer[0..controller_ip.len], controller_ip);
-        // @memcpy(self.config_path_buffer[0..config_path.len], config_path);
-        // Copy IP to buffer
-        // std.mem.copyForwards(u8, &self.ip_buffer, self.config.ip);
-
-        // // Try to load saved config
-        // self.config.loadFromFile() catch |err| {
-        //     std.debug.print("Failed to load config: {}\n", .{err});
-        // };
 
         return self;
     }
@@ -803,44 +793,231 @@ pub const DroneConfigWindow = struct {
         imgui.igSetNextWindowViewport(viewport.*.ID);
 
         if (imgui.igBegin("Drone Configuration", &self.visible, imgui.ImGuiWindowFlags_None)) {
-            // Fixed Header Section
-            self.drawFixedHeader(ctx);
-            imgui.igSeparator();
+            if (imgui.igBeginTabBar("DroneConfigTabs", imgui.ImGuiTabBarFlags_None)) {
+                if (imgui.igBeginTabItem("Motor Controller", null, 0)) {
+                    // Fixed Header Section
+                    self.drawFixedHeader(ctx);
+                    imgui.igSeparator();
 
-            // Server Configuration Section
-            if (imgui.igCollapsingHeader_BoolPtr("Server Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
-                self.drawServerConfig(ctx);
+                    // Server Configuration Section
+                    if (imgui.igCollapsingHeader_BoolPtr("Server Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                        self.drawServerConfig(ctx);
+                    }
+
+                    imgui.igNewLine();
+                    imgui.igSeparator();
+
+                    // Protocol Configuration Section
+                    if (imgui.igCollapsingHeader_BoolPtr("Protocol Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                        self.drawProtocolConfig(ctx);
+                    }
+
+                    imgui.igNewLine();
+                    imgui.igSeparator();
+
+                    // Motor Configuration Section
+                    if (imgui.igCollapsingHeader_BoolPtr("Motor Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                        self.drawMotorConfig(ctx);
+                    }
+
+                    imgui.igNewLine();
+                    imgui.igSeparator();
+
+                    // Throttle Testing Section
+                    if (imgui.igCollapsingHeader_BoolPtr("Throttle Testing", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                        self.drawThrottleTesting(ctx);
+                    }
+
+                    imgui.igEndTabItem();
+                }
+
+                if (imgui.igBeginTabItem("Sensors", null, 0)) {
+                    self.drawSensorConfig(ctx);
+                    imgui.igEndTabItem();
+                }
             }
 
-            imgui.igNewLine();
-            imgui.igSeparator();
-
-            // Protocol Configuration Section
-            if (imgui.igCollapsingHeader_BoolPtr("Protocol Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
-                self.drawProtocolConfig(ctx);
-            }
-
-            imgui.igNewLine();
-            imgui.igSeparator();
-
-            // Motor Configuration Section
-            if (imgui.igCollapsingHeader_BoolPtr("Motor Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
-                self.drawMotorConfig(ctx);
-            }
-
-            imgui.igNewLine();
-            imgui.igSeparator();
-
-            // Throttle Testing Section
-            if (imgui.igCollapsingHeader_BoolPtr("Throttle Testing", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
-                self.drawThrottleTesting(ctx);
-            }
+            imgui.igEndTabBar();
 
             // Modal Windows
             self.drawSaveModal(ctx);
             self.drawLoadModal(ctx);
         }
         imgui.igEnd();
+    }
+
+    pub fn drawSensorConfig(self: *Self, ctx: *const UIContext) void {
+        _ = self;
+
+        const sensor_state = ctx.pose_handler.sensor_state;
+        const pose = ctx.pose_handler.prev_pose orelse Sensors.Pose{
+            .accel = .{ .x = 0, .y = 0, .z = 0 },
+            .gyro = .{ .x = 0, .y = 0, .z = 0 },
+            .mag = .{ .x = 0, .y = 0, .z = 0 },
+            .timestamp = 0,
+        };
+
+        imgui.igText("IMU Status");
+        imgui.igSeparator();
+
+        const is_receiving = (ctx.pose_handler.accel_gyro_freq > 0);
+        if (is_receiving) {
+            imgui.igTextColored(.{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }, "Status: Receiving Data");
+        } else {
+            imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "Status: No Data");
+        }
+
+        imgui.igText("Accel & Gyro Throughput: %d packets/s", ctx.pose_handler.accel_gyro_freq);
+        imgui.igText("Magnetometer Throughput: %d packets/s", ctx.pose_handler.mag_freq);
+        imgui.igText("Stale Packets: %d", ctx.pose_handler.stale_count);
+        imgui.igNewLine();
+
+        // Current Orientation
+        if (sensor_state.filter) |filter| {
+            const q = filter.q;
+            const euler = q.toEuler();
+            const rad_to_deg = 180.0 / std.math.pi;
+
+            imgui.igText("Orientation (deg):");
+            imgui.igText("  Roll:  %.2f", euler[0] * rad_to_deg);
+            imgui.igText("  Pitch: %.2f", euler[1] * rad_to_deg);
+            imgui.igText("  Yaw:   %.2f", euler[2] * rad_to_deg);
+            imgui.igNewLine();
+
+            if (imgui.igButton("Reset Orientation", .{ .x = 0, .y = 0 })) {
+                sensor_state.filter.?.q = Sensors.computeInitialOrientation(pose.accel, pose.mag, 0);
+            }
+        } else {
+            imgui.igText("Orientation: Not available (filter null)");
+        }
+        imgui.igNewLine();
+
+        // Magnetometer Section
+        if (imgui.igCollapsingHeader_BoolPtr("Magnetometer Calibration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Show last raw reading (approx)
+            const mag = pose.mag;
+            imgui.igText("Raw Magnetometer (NED or pre-rotated):");
+            imgui.igText("  X: %.2f", mag.x);
+            imgui.igText("  Y: %.2f", mag.y);
+            imgui.igText("  Z: %.2f", mag.z);
+
+            // Show current calibration values
+            imgui.igText("Hard Iron: [%.2f, %.2f, %.2f]", sensor_state.mag_hard_iron.x, sensor_state.mag_hard_iron.y, sensor_state.mag_hard_iron.z);
+            imgui.igText("Soft Iron: [%.2f, %.2f, %.2f]", sensor_state.mag_soft_iron.x, sensor_state.mag_soft_iron.y, sensor_state.mag_soft_iron.z);
+
+            // If we are in magnetometer calibration mode, show countdown
+            if (sensor_state.calibration_type == .Magnetometer and sensor_state.calibrating) {
+                const samples = ctx.pose_handler.sensor_state.samples;
+                const sample_count = ctx.pose_handler.sensor_state.sample_count;
+                const percentage = @as(f32, @floatFromInt(sample_count)) / @as(f32, @floatFromInt(samples));
+
+                const freq = ctx.pose_handler.mag_freq;
+                const remaining_secs = @as(f32, @floatFromInt(samples - sample_count)) / @as(f32, @floatFromInt(freq));
+
+                imgui.igTextColored(.{ .x = 1.0, .y = 0.65, .z = 0.0, .w = 1.0 }, "Calibrating... Approx. %.1f seconds left", remaining_secs);
+                imgui.igProgressBar(percentage, .{ .x = -1.0, .y = 0.0 }, null);
+            }
+
+            // "Calibrate" button
+            const calibrating = sensor_state.calibrating;
+            if (calibrating) {
+                imgui.igBeginDisabled(true);
+            }
+
+            if (imgui.igButton("Calibrate Magnetometer", .{ .x = 200, .y = 0 })) {
+                if (!sensor_state.calibrating) {
+                    sensor_state.start_calibration(.Magnetometer);
+                }
+            }
+
+            if (calibrating) {
+                imgui.igEndDisabled();
+            }
+
+            imgui.igNewLine();
+        }
+
+        // Accelerometer & Gyro Calibration
+        if (imgui.igCollapsingHeader_BoolPtr("Accelerometer & Gyro Calibration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Raw readings
+            imgui.igText("Raw Accel:");
+            imgui.igText("  X: %.2f", pose.accel.x);
+            imgui.igText("  Y: %.2f", pose.accel.y);
+            imgui.igText("  Z: %.2f", pose.accel.z);
+
+            imgui.igText("Raw Gyro:");
+            imgui.igText("  X: %.2f", pose.gyro.x);
+            imgui.igText("  Y: %.2f", pose.gyro.y);
+            imgui.igText("  Z: %.2f", pose.gyro.z);
+
+            // Show offsets
+            imgui.igText(
+                "Accel Offset: [%.2f, %.2f, %.2f]",
+                sensor_state.accel_offset.x,
+                sensor_state.accel_offset.y,
+                sensor_state.accel_offset.z,
+            );
+            imgui.igText(
+                "Gyro Offset: [%.2f, %.2f, %.2f]",
+                sensor_state.gyro_offset.x,
+                sensor_state.gyro_offset.y,
+                sensor_state.gyro_offset.z,
+            );
+
+            // +/- 90° rotation test buttons (stubs)
+            imgui.igText("Rotation Test:");
+            if (imgui.igButton("X +90°", .{ .x = 60, .y = 0 })) {
+                // TODO: implement manual rotate
+            }
+            imgui.igSameLine(0, 4);
+            if (imgui.igButton("X -90°", .{ .x = 60, .y = 0 })) {
+                // ...
+            }
+            imgui.igSameLine(0, 10);
+            if (imgui.igButton("Y +90°", .{ .x = 60, .y = 0 })) {
+                // ...
+            }
+            imgui.igSameLine(0, 4);
+            if (imgui.igButton("Y -90°", .{ .x = 60, .y = 0 })) {
+                // ...
+            }
+            imgui.igSameLine(0, 10);
+            if (imgui.igButton("Z +90°", .{ .x = 60, .y = 0 })) {
+                // ...
+            }
+            imgui.igSameLine(0, 4);
+            if (imgui.igButton("Z -90°", .{ .x = 60, .y = 0 })) {
+                // ...
+            }
+
+            // If currently calibrating Accel/Gyro, show countdown
+            if (sensor_state.calibration_type == .AccelGyro and sensor_state.calibrating) {
+                const samples = ctx.pose_handler.sensor_state.samples;
+                const sample_count = ctx.pose_handler.sensor_state.sample_count;
+                const percentage = @as(f32, @floatFromInt(sample_count)) / @as(f32, @floatFromInt(samples));
+
+                const accel_gyro_freq = ctx.pose_handler.accel_gyro_freq;
+                const remaining_secs = @as(f32, @floatFromInt(samples - sample_count)) / @as(f32, @floatFromInt(accel_gyro_freq));
+
+                imgui.igTextColored(.{ .x = 1.0, .y = 0.65, .z = 0.0, .w = 1.0 }, "Calibrating... Approx. %.1f seconds left", remaining_secs);
+                imgui.igProgressBar(percentage, .{ .x = -1.0, .y = 0.0 }, null);
+            }
+
+            const calibrating = sensor_state.calibrating;
+            if (calibrating) {
+                imgui.igBeginDisabled(true);
+            }
+            // Calibrate button
+            if (imgui.igButton("Calibrate Accel & Gyro", .{ .x = 200, .y = 0 })) {
+                if (!sensor_state.calibrating) {
+                    sensor_state.start_calibration(.AccelGyro);
+                }
+            }
+
+            if (calibrating) {
+                imgui.igEndDisabled();
+            }
+        }
     }
 
     inline fn drawFixedHeader(self: *Self, ctx: *const UIContext) void {
@@ -942,160 +1119,112 @@ pub const DroneConfigWindow = struct {
             return;
         }
 
-        // Testing Mode Toggle Button
-        const is_global = self.global_testing;
-        Styles.pushButtonColors(is_global);
-        if (imgui.igButton(
-            "Global Testing",
-            imgui.ImVec2{ .x = 120, .y = 0 },
-        )) {
-            self.global_testing = true;
-        }
-        Styles.popButtonColors();
-
-        imgui.igSameLine(0, 10);
-
-        Styles.pushButtonColors(!is_global);
-        if (imgui.igButton(
-            "Per Motor Testing",
-            imgui.ImVec2{ .x = 120, .y = 0 },
-        )) {
-            self.global_testing = false;
-        }
-        Styles.popButtonColors();
-
-        imgui.igNewLine();
-        imgui.igSpacing();
-
         const motor_states = ctx.scene.motor_controller.motor_states;
 
-        if (self.global_testing) {
-            // Single slider for all motors
-            var throttle: f32 = 0.0;
+        // Individual sliders for each motor
+        inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+            const motor_enum = @as(MotorController.Motors, @enumFromInt(motor.value));
+            const motor_state = &motor_states[motor.value];
+
+            // Motor header with status
+            const status_color = if (motor_state.armed)
+                imgui.ImVec4{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }
+            else
+                imgui.ImVec4{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 };
+
+            const armed_status = if (motor_state.armed) std.fmt.comptimePrint("{s} Armed", .{
+                @tagName(motor_enum).ptr,
+            }) else std.fmt.comptimePrint("{s} Disarmed", .{
+                @tagName(motor_enum).ptr,
+            });
+
+            imgui.igTextColored(status_color, armed_status);
+
+            // Direction buttons (only enabled when disarmed)
+            if (!motor_state.armed) {
+                if (imgui.igButton(
+                    std.fmt.comptimePrint("Reverse###{d}", .{motor.value}),
+                    imgui.ImVec2{ .x = 80, .y = 0 },
+                )) {
+                    const command = MotorController.Command{
+                        .kind = .ReverseDirection,
+                        .speed = 0,
+                        .motor = motor_enum,
+                    };
+                    _ = ctx.scene.motor_controller.command_queue.push(command);
+                }
+                imgui.igSameLine(0, 10);
+            }
+
+            // Arm/Disarm button
+            const button_label = if (motor_state.armed) std.fmt.comptimePrint("Disarm {d}", .{
+                motor.value + 1,
+            }) else std.fmt.comptimePrint("Arm {d}", .{
+                motor.value + 1,
+            });
+
+            if (imgui.igButton(
+                button_label,
+                imgui.ImVec2{ .x = 80, .y = 0 },
+            )) {
+                const command = MotorController.Command{
+                    .kind = if (motor_state.armed) .Disarm else .Arm,
+                    .speed = 0,
+                    .motor = motor_enum,
+                };
+                _ = ctx.scene.motor_controller.command_queue.push(command);
+            }
+
+            imgui.igSameLine(0, 10);
+
+            // Throttle slider (only enabled if armed)
+            if (!motor_state.armed) {
+                imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
+            }
+
+            var throttle = motor_state.throttle;
             if (imgui.igSliderFloat(
-                "All Motors Throttle (%)",
+                std.fmt.comptimePrint("{s} Throttle (%)", .{@tagName(motor_enum)}),
                 &throttle,
                 0.0,
                 ctx.scene.motor_controller.config.global_max_throttle,
                 "%.1f",
                 imgui.ImGuiSliderFlags_None,
             )) {
-                inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
-                    if (motor_states[motor.value].armed) {
-                        const command = MotorController.Command{
-                            .kind = .SetSpeed,
-                            .speed = throttle,
-                            .motor = @enumFromInt(motor.value),
-                        };
-                        _ = ctx.scene.motor_controller.command_queue.push(command);
-                    }
-                }
-            }
-
-            // Add global arm/disarm buttons
-            if (imgui.igButton(
-                "Arm All",
-                imgui.ImVec2{ .x = 120, .y = 0 },
-            )) {
-                inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
-                    if (!motor_states[motor.value].armed) {
-                        const command = MotorController.Command{
-                            .kind = .Arm,
-                            .speed = 0,
-                            .motor = @enumFromInt(motor.value),
-                        };
-                        _ = ctx.scene.motor_controller.command_queue.push(command);
-                    }
-                }
-            }
-
-            imgui.igSameLine(0, 10);
-
-            if (imgui.igButton(
-                "Disarm All",
-                imgui.ImVec2{ .x = 120, .y = 0 },
-            )) {
-                inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
-                    if (motor_states[motor.value].armed) {
-                        const command = MotorController.Command{
-                            .kind = .Disarm,
-                            .speed = 0,
-                            .motor = @enumFromInt(motor.value),
-                        };
-                        _ = ctx.scene.motor_controller.command_queue.push(command);
-                    }
-                }
-            }
-        } else {
-            // Individual sliders for each motor
-            inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
-                const motor_enum = @as(MotorController.Motors, @enumFromInt(motor.value));
-                const motor_state = &motor_states[motor.value];
-
-                // Motor header with status
-                const status_color = if (motor_state.armed)
-                    imgui.ImVec4{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }
-                else
-                    imgui.ImVec4{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 };
-
-                const armed_status = if (motor_state.armed) std.fmt.comptimePrint("{s} Armed", .{
-                    @tagName(motor_enum).ptr,
-                }) else std.fmt.comptimePrint("{s} Disarmed", .{
-                    @tagName(motor_enum).ptr,
-                });
-
-                imgui.igTextColored(status_color, armed_status);
-
-                // Arm/Disarm button
-                const button_label = if (motor_state.armed) std.fmt.comptimePrint("Disarm {d}", .{
-                    motor.value + 1,
-                }) else std.fmt.comptimePrint("Arm {d}", .{
-                    motor.value + 1,
-                });
-
-                if (imgui.igButton(
-                    button_label,
-                    imgui.ImVec2{ .x = 80, .y = 0 },
-                )) {
+                if (motor_state.armed) {
                     const command = MotorController.Command{
-                        .kind = if (motor_state.armed) .Disarm else .Arm,
-                        .speed = 0,
+                        .kind = .SetSpeed,
+                        .speed = throttle,
                         .motor = motor_enum,
                     };
                     _ = ctx.scene.motor_controller.command_queue.push(command);
                 }
+            }
 
-                imgui.igSameLine(0, 10);
+            if (!motor_state.armed) {
+                imgui.igPopStyleVar(1);
+            }
 
-                // Throttle slider (only enabled if armed)
-                if (!motor_state.armed) {
-                    imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
+            imgui.igSpacing();
+        }
+
+        if (imgui.igSliderFloat(
+            "All Armed Motors Throttle (%)",
+            &self.global_throttle,
+            0.0,
+            ctx.scene.motor_controller.config.global_max_throttle,
+            "%.1f",
+            imgui.ImGuiSliderFlags_None,
+        )) {
+            inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+                if (motor_states[motor.value].armed) {
+                    const command = MotorController.Command{
+                        .kind = .SetSpeed,
+                        .speed = self.global_throttle,
+                        .motor = @enumFromInt(motor.value),
+                    };
+                    _ = ctx.scene.motor_controller.command_queue.push(command);
                 }
-
-                var throttle = motor_state.throttle;
-                if (imgui.igSliderFloat(
-                    std.fmt.comptimePrint("{s} Throttle (%)", .{@tagName(motor_enum)}),
-                    &throttle,
-                    0.0,
-                    ctx.scene.motor_controller.config.global_max_throttle,
-                    "%.1f",
-                    imgui.ImGuiSliderFlags_None,
-                )) {
-                    if (motor_state.armed) {
-                        const command = MotorController.Command{
-                            .kind = .SetSpeed,
-                            .speed = throttle,
-                            .motor = motor_enum,
-                        };
-                        _ = ctx.scene.motor_controller.command_queue.push(command);
-                    }
-                }
-
-                if (!motor_state.armed) {
-                    imgui.igPopStyleVar(1);
-                }
-
-                imgui.igSpacing();
             }
         }
     }
@@ -1255,6 +1384,7 @@ pub const DroneConfigWindow = struct {
             motor.pin = @intCast(@max(0, @min(pin, 27)));
         }
 
+        imgui.igBeginDisabled(true);
         var direction: c_int = @intFromEnum(motor.direction);
         if (imgui.igCombo_Str(
             "Direction",
@@ -1264,8 +1394,9 @@ pub const DroneConfigWindow = struct {
         )) {
             motor.direction = @enumFromInt(direction);
         }
+        imgui.igEndDisabled();
 
-        var max_throttle = motor.max_throttle;
+        var max_throttle = @min(motor.max_throttle, ctx.scene.motor_controller.config.global_max_throttle);
         if (imgui.igSliderFloat(
             "Max Throttle (%)",
             &max_throttle,

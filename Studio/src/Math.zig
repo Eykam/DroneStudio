@@ -4,6 +4,10 @@ const SensorState = Sensors.SensorState;
 
 pub const Mat4 = [16]f32;
 
+pub fn clamp(x: f32, low: f32, high: f32) f32 {
+    return if (x < low) low else if (x > high) high else x;
+}
+
 // Todo: Use @Vector instead for SIMD
 pub const Quaternion = struct {
     x: f32,
@@ -31,20 +35,52 @@ pub const Quaternion = struct {
         };
     }
 
-    pub fn fromEuler(pitch: f32, yaw: f32, roll: f32) Quaternion {
-        const cy = @cos(yaw * 0.5);
-        const sy = @sin(yaw * 0.5);
-        const cp = @cos(pitch * 0.5);
-        const sp = @sin(pitch * 0.5);
-        const cr = @cos(roll * 0.5);
-        const sr = @sin(roll * 0.5);
+    pub fn toEuler(self: Quaternion) [3]f32 {
+        // Pitch (rotation around X-axis)
+        const sinp = 2.0 * (self.w * self.x + self.y * self.z);
+        const cosp = 1.0 - 2.0 * (self.x * self.x + self.y * self.y);
+        const pitch = std.math.atan2(sinp, cosp);
 
-        return Quaternion{
-            .w = cr * cp * cy + sr * sp * sy,
-            .x = sr * cp * cy - cr * sp * sy,
-            .y = cr * sp * cy + sr * cp * sy,
-            .z = cr * cp * sy - sr * sp * cy,
+        // Yaw (rotation around Y-axis)
+        const siny = 2.0 * (self.w * self.y - self.z * self.x);
+        // Clamp siny to ensure the value is in the valid range for asin
+        const yaw = std.math.asin(clamp(siny, -1.0, 1.0));
+
+        // Roll (rotation around Z-axis)
+        const sinr = 2.0 * (self.w * self.z + self.x * self.y);
+        const cosr = 1.0 - 2.0 * (self.y * self.y + self.z * self.z);
+        const roll = std.math.atan2(sinr, cosr);
+
+        return [3]f32{ pitch, yaw, roll };
+    }
+
+    pub fn fromEuler(pitch: f32, yaw: f32, roll: f32) Quaternion {
+        const qx = Quaternion{
+            .x = @sin(roll / 2.0),
+            .y = 0,
+            .z = 0,
+            .w = @cos(roll / 2.0),
         };
+
+        // Create rotation around y-axis (pitch)
+        const qy = Quaternion{
+            .x = 0,
+            .y = @sin(pitch / 2.0),
+            .z = 0,
+            .w = @cos(pitch / 2.0),
+        };
+
+        // Create rotation around z-axis (yaw)
+        const qz = Quaternion{
+            .x = 0,
+            .y = 0,
+            .z = @sin(yaw / 2.0),
+            .w = @cos(yaw / 2.0),
+        };
+
+        // Combine rotations in ZYX order (yaw, pitch, roll)
+        // This means roll first, then pitch, then yaw
+        return qz.multiply(qy).multiply(qx).normalize();
     }
 
     pub fn normalize(q: Quaternion) Quaternion {
@@ -60,6 +96,55 @@ pub const Quaternion = struct {
             .y = q.y / mag,
             .z = q.z / mag,
             .w = q.w / mag,
+        };
+    }
+
+    pub fn fromMat3(mat: [9]f32) Quaternion {
+        const trace = mat[0] + mat[4] + mat[8];
+        var result = Quaternion{
+            .w = 0,
+            .x = 0,
+            .y = 0,
+            .z = 0,
+        };
+
+        if (trace > 0) {
+            const S = @sqrt(trace + 1.0) * 2;
+            result.w = 0.25 * S;
+            result.x = (mat[7] - mat[5]) / S;
+            result.y = (mat[2] - mat[6]) / S;
+            result.z = (mat[3] - mat[1]) / S;
+        } else if ((mat[0] > mat[4]) and (mat[0] > mat[8])) {
+            const S = @sqrt(1.0 + mat[0] - mat[4] - mat[8]) * 2;
+            result.w = (mat[7] - mat[5]) / S;
+            result.x = 0.25 * S;
+            result.y = (mat[1] + mat[3]) / S;
+            result.z = (mat[2] + mat[6]) / S;
+        } else if (mat[4] > mat[8]) {
+            const S = @sqrt(1.0 + mat[4] - mat[0] - mat[8]) * 2;
+            result.w = (mat[2] - mat[6]) / S;
+            result.x = (mat[1] + mat[3]) / S;
+            result.y = 0.25 * S;
+            result.z = (mat[5] + mat[7]) / S;
+        } else {
+            const S = @sqrt(1.0 + mat[8] - mat[0] - mat[4]) * 2;
+            result.w = (mat[3] - mat[1]) / S;
+            result.x = (mat[2] + mat[6]) / S;
+            result.y = (mat[5] + mat[7]) / S;
+            result.z = 0.25 * S;
+        }
+
+        // Normalize the quaternion
+        const length = @sqrt(result.w * result.w +
+            result.x * result.x +
+            result.y * result.y +
+            result.z * result.z);
+
+        return .{
+            .w = result.w / length,
+            .x = result.x / length,
+            .y = result.y / length,
+            .z = result.z / length,
         };
     }
 
@@ -158,17 +243,25 @@ pub const Vec3 = struct {
     z: f32,
 
     pub fn normalize(self: Vec3) Vec3 {
-        const length = @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
+        const _length = self.length();
 
-        if (length == 0) {
+        if (_length == 0) {
             std.debug.print("Vec3 with 0 Length Detected", .{});
             return self;
         }
 
         return Vec3{
-            .x = self.x / length,
-            .y = self.y / length,
-            .z = self.z / length,
+            .x = self.x / _length,
+            .y = self.y / _length,
+            .z = self.z / _length,
+        };
+    }
+
+    pub fn zero() Vec3 {
+        return Vec3{
+            .x = 0.0,
+            .y = 0.0,
+            .z = 0.0,
         };
     }
 
@@ -218,6 +311,10 @@ pub const Vec3 = struct {
             .z = @sin(yaw) * @cos(pitch),
         };
         return Vec3.normalize(front);
+    }
+
+    pub fn length(self: Vec3) f32 {
+        return @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
     }
 };
 

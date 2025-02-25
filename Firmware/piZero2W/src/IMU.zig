@@ -29,9 +29,56 @@ const Readings = struct { x: f32, y: f32, z: f32 };
 
 const ReadingsPacket = [44]u8;
 
+const I2C = struct {
+    const I2C_RDWR = 0x0707;
+    const I2C_M_RD = 0x0001;
+
+    const I2C_Msg = extern struct {
+        addr: u16,
+        flags: u16,
+        len: u16,
+        buf: [*]u8,
+    };
+
+    const I2C_Rdwr_Ioctl_Data = extern struct {
+        msgs: [*]I2C_Msg,
+        nmsgs: u32,
+    };
+
+    pub fn readBlock(fd: i32, addr: u8, reg: u8, buffer: []u8) !void {
+        var msgs: [2]I2C_Msg = undefined;
+
+        // Write register address
+        msgs[0] = .{
+            .addr = addr,
+            .flags = 0,
+            .len = 1,
+            .buf = @ptrCast(@constCast(&reg)),
+        };
+
+        // Read data
+        msgs[1] = .{
+            .addr = addr,
+            .flags = I2C_M_RD,
+            .len = @intCast(buffer.len),
+            .buf = buffer.ptr,
+        };
+
+        var data = I2C_Rdwr_Ioctl_Data{
+            .msgs = &msgs,
+            .nmsgs = 2,
+        };
+
+        if (std.os.linux.ioctl(fd, I2C_RDWR, @intFromPtr(&data)) < 0) {
+            return error.I2CTransferFailed;
+        }
+    }
+};
+
 pub const Mpu9250 = struct {
     i2c_fd: i32,
     mag_scale: [3]f32,
+    mag_counter: u32 = 0,
     prev_mag: Readings = .{
         .x = 0.0,
         .y = 0.0,
@@ -96,11 +143,20 @@ pub const Mpu9250 = struct {
         try self.writeByte(MPU9250_ADDR, PWR_MGMT_1, 0x00);
         std.time.sleep(100 * std.time.ns_per_ms); // 100ms delay
 
+        // Disable all FIFOs and DMP
+        try self.writeByte(MPU9250_ADDR, 0x6A, 0x00);
+
+        // Configure low pass filter - DLPF_CFG = 1 (184Hz bandwidth)
+        try self.writeByte(MPU9250_ADDR, CONFIG, 0x00);
+
         // Configure gyro (±250 dps)
         try self.writeByte(MPU9250_ADDR, GYRO_CONFIG, 0x00);
 
         // Configure accelerometer (±2g)
         try self.writeByte(MPU9250_ADDR, ACCEL_CONFIG, 0x00);
+        try self.writeByte(MPU9250_ADDR, 0x1D, 0x00);
+
+        try self.writeByte(MPU9250_ADDR, 0x19, 0x00);
     }
 
     fn initMagnetometer(self: *Self) !void {
@@ -142,36 +198,25 @@ pub const Mpu9250 = struct {
         std.time.sleep(10 * std.time.ns_per_ms);
     }
 
-    pub fn readAccel(self: Self) !Readings {
-        var buffer: [6]u8 = undefined;
-        try self.readBytes(MPU9250_ADDR, ACCEL_XOUT_H, &buffer);
+    pub fn readAccelGyro(self: Self) !struct { accel: Readings, gyro: Readings } {
+        var buffer: [14]u8 = undefined; // 6 bytes accel + 2 bytes temp + 6 bytes gyro
 
-        // Convert to g's (±2g scale)
-        const raw_x = @as(i16, @bitCast([2]u8{ buffer[1], buffer[0] }));
-        const raw_y = @as(i16, @bitCast([2]u8{ buffer[3], buffer[2] }));
-        const raw_z = @as(i16, @bitCast([2]u8{ buffer[5], buffer[4] }));
+        // Read from ACCEL_XOUT_H through GYRO_ZOUT_L in one transaction
+        try I2C.readBlock(self.i2c_fd, MPU9250_ADDR, ACCEL_XOUT_H, &buffer);
 
-        return .{
-            .x = @as(f32, @floatFromInt(raw_x)) / 16384.0,
-            .y = @as(f32, @floatFromInt(raw_y)) / 16384.0,
-            .z = @as(f32, @floatFromInt(raw_z)) / 16384.0,
+        const accel = Readings{
+            .x = @as(f32, @floatFromInt(@as(i16, @bitCast([2]u8{ buffer[1], buffer[0] })))) / 16384.0,
+            .y = @as(f32, @floatFromInt(@as(i16, @bitCast([2]u8{ buffer[3], buffer[2] })))) / 16384.0,
+            .z = @as(f32, @floatFromInt(@as(i16, @bitCast([2]u8{ buffer[5], buffer[4] })))) / 16384.0,
         };
-    }
 
-    pub fn readGyro(self: Self) !Readings {
-        var buffer: [6]u8 = undefined;
-        try self.readBytes(MPU9250_ADDR, GYRO_XOUT_H, &buffer);
-
-        // Convert to degrees per second (±250 dps scale)
-        const raw_x = @as(i16, @bitCast([2]u8{ buffer[1], buffer[0] }));
-        const raw_y = @as(i16, @bitCast([2]u8{ buffer[3], buffer[2] }));
-        const raw_z = @as(i16, @bitCast([2]u8{ buffer[5], buffer[4] }));
-
-        return .{
-            .x = @as(f32, @floatFromInt(raw_x)) / 131.0,
-            .y = @as(f32, @floatFromInt(raw_y)) / 131.0,
-            .z = @as(f32, @floatFromInt(raw_z)) / 131.0,
+        const gyro = Readings{
+            .x = @as(f32, @floatFromInt(@as(i16, @bitCast([2]u8{ buffer[9], buffer[8] })))) / 131.0,
+            .y = @as(f32, @floatFromInt(@as(i16, @bitCast([2]u8{ buffer[11], buffer[10] })))) / 131.0,
+            .z = @as(f32, @floatFromInt(@as(i16, @bitCast([2]u8{ buffer[13], buffer[12] })))) / 131.0,
         };
+
+        return .{ .accel = accel, .gyro = gyro };
     }
 
     pub fn readMag(self: Self) !Readings {
@@ -199,48 +244,36 @@ pub const Mpu9250 = struct {
     }
 
     pub fn read(self: *Self) !ReadingsPacket {
-        const accel = try self.readAccel();
-        const gyro = try self.readGyro();
-        const mag = self.readMag() catch |err| switch (err) {
-            error.MagDataNotReady => blk: {
-                std.debug.print("Mag Data not ready!\n", .{});
-                break :blk self.prev_mag;
-            },
-            error.MagOverflow => blk: {
-                std.debug.print("Mag Overflow Detected!\n", .{});
-                break :blk self.prev_mag;
-            },
-            else => {
-                std.debug.print("Unknown error reading from Magnetometer => {any}\n", .{err});
-                return err;
-            },
-        };
-        self.prev_mag = mag;
+        const readings = try self.readAccelGyro();
 
-        // std.debug.print(
-        //     \\Accel: X={d:6.2} Y={d:6.2} Z={d:6.2} (g)
-        //     \\Gyro:  X={d:6.2} Y={d:6.2} Z={d:6.2} (deg/s)
-        //     \\Mag:   X={d:6.2} Y={d:6.2} Z={d:6.2} (uT)
-        //     \\
-        //     \\
-        // , .{
-        //     accel.x, accel.y, accel.z,
-        //     gyro.x,  gyro.y,  gyro.z,
-        //     mag.x,   mag.y,   mag.z,
-        // });
+        self.mag_counter +%= 1;
+
+        if (self.mag_counter % 10 == 0) {
+            self.prev_mag = self.readMag() catch |err| switch (err) {
+                error.MagDataNotReady => self.prev_mag,
+                error.MagOverflow => blk: {
+                    std.debug.print("Mag Overflow Detected!\n", .{});
+                    break :blk self.prev_mag;
+                },
+                else => {
+                    std.debug.print("Unknown error reading from Magnetometer => {any}\n", .{err});
+                    return err;
+                },
+            };
+        }
 
         var packet: ReadingsPacket = undefined;
-        std.mem.writeInt(u32, packet[0..4], @bitCast(accel.x), .little);
-        std.mem.writeInt(u32, packet[4..8], @bitCast(accel.y), .little);
-        std.mem.writeInt(u32, packet[8..12], @bitCast(accel.z), .little);
+        std.mem.writeInt(u32, packet[0..4], @bitCast(readings.accel.x), .little);
+        std.mem.writeInt(u32, packet[4..8], @bitCast(readings.accel.y), .little);
+        std.mem.writeInt(u32, packet[8..12], @bitCast(readings.accel.z), .little);
 
-        std.mem.writeInt(u32, packet[12..16], @bitCast(gyro.x), .little);
-        std.mem.writeInt(u32, packet[16..20], @bitCast(gyro.y), .little);
-        std.mem.writeInt(u32, packet[20..24], @bitCast(gyro.z), .little);
+        std.mem.writeInt(u32, packet[12..16], @bitCast(readings.gyro.x), .little);
+        std.mem.writeInt(u32, packet[16..20], @bitCast(readings.gyro.y), .little);
+        std.mem.writeInt(u32, packet[20..24], @bitCast(readings.gyro.z), .little);
 
-        std.mem.writeInt(u32, packet[24..28], @bitCast(mag.x), .little);
-        std.mem.writeInt(u32, packet[28..32], @bitCast(mag.y), .little);
-        std.mem.writeInt(u32, packet[32..36], @bitCast(mag.z), .little);
+        std.mem.writeInt(u32, packet[24..28], @bitCast(self.prev_mag.x), .little);
+        std.mem.writeInt(u32, packet[28..32], @bitCast(self.prev_mag.y), .little);
+        std.mem.writeInt(u32, packet[32..36], @bitCast(self.prev_mag.z), .little);
 
         return packet;
     }
@@ -256,10 +289,13 @@ pub const UDP_Provider = struct {
     dest_addr: std.posix.sockaddr,
     dest_addr_len: std.posix.socklen_t,
     start_time: i64,
+    packet_count: u32 = 0,
+    last_stats_time: i64,
 
     const Self = @This();
 
     pub fn init(server_ip: []const u8, server_port: u16) !Self {
+        const current_time = std.time.milliTimestamp();
         const socket = try std.posix.socket(
             std.posix.AF.INET,
             std.posix.SOCK.DGRAM,
@@ -273,16 +309,18 @@ pub const UDP_Provider = struct {
             .socket = socket,
             .dest_addr = dest_addr,
             .dest_addr_len = @sizeOf(std.posix.sockaddr),
-            .start_time = std.time.milliTimestamp(),
+            .start_time = current_time,
+            .last_stats_time = current_time,
+            .packet_count = 0,
         };
     }
 
     pub fn send(self: *Self) !void {
         var packet = try self.imu.read();
+        const current_time = std.time.milliTimestamp();
 
         // Add timestamp
-        const timestamp: i64 = std.time.milliTimestamp() * 1000; // Convert to microseconds
-        std.mem.writeInt(i64, packet[36..44], timestamp, .little);
+        std.mem.writeInt(i64, packet[36..44], current_time * 1000, .little);
 
         _ = try std.posix.sendto(
             self.socket,
@@ -291,14 +329,25 @@ pub const UDP_Provider = struct {
             &self.dest_addr,
             self.dest_addr_len,
         );
+
+        // Update stats
+        self.packet_count += 1;
+
+        // Print stats every second without blocking
+        if (current_time - self.last_stats_time >= 1000) {
+            const rate = @as(f32, @floatFromInt(self.packet_count)) /
+                (@as(f32, @floatFromInt(current_time - self.last_stats_time)) / 1000.0);
+            std.debug.print("Rate: {d:.1} Hz\n", .{rate});
+
+            // Reset counters
+            self.packet_count = 0;
+            self.last_stats_time = current_time;
+        }
     }
 
     pub fn run(self: *Self) !void {
-        std.debug.print("Starting IMU test data transmission at 1000Hz to {s}...\n", .{"192.168.1.171"});
-
         while (true) {
             try self.send();
-            std.time.sleep(1 * std.time.ns_per_ms); // 1ms delay
         }
     }
 

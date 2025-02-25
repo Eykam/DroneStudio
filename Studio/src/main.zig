@@ -142,8 +142,8 @@ pub fn main() !void {
         Secrets.client_port_imu,
     );
 
-    const pose_handler = Sensors.PoseHandler.init(droneNode);
-    var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(pose_handler);
+    var pose_handler = try Sensors.PoseHandler.init(alloc, droneNode, scene.motor_controller.config);
+    var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(&pose_handler);
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
 
@@ -195,6 +195,7 @@ pub fn main() !void {
         .{
             .scene = scene,
             .StereoVO = StereoVO,
+            .pose_handler = &pose_handler,
         },
     );
 

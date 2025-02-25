@@ -1,4 +1,6 @@
 const std = @import("std");
+const Math = @import("Math.zig");
+const Vec3 = Math.Vec3;
 
 pub const DroneConfig = struct {
     const Self = @This();
@@ -12,13 +14,24 @@ pub const DroneConfig = struct {
     pub const default_controller_ip = "192.168.1.1";
     pub const default_controller_port = 5000;
 
+    pub const SensorCalibration = struct {
+        mag_hard_iron: Vec3,
+        mag_soft_iron: Vec3,
+        accel_offset: Vec3,
+        gyro_offset: Vec3,
+    };
+
     local_ip: []const u8,
     local_port: u16,
+
     controller_ip: []const u8,
     controller_port: u16,
+
     dshot_protocol: MotorController.Protocols,
     global_max_throttle: f32,
     motors: [@typeInfo(MotorController.Motors).@"enum".fields.len]MotorConfig,
+
+    sensor_calibration: SensorCalibration,
     allocator: std.mem.Allocator,
 
     pub const MotorConfig = struct {
@@ -60,6 +73,12 @@ pub const DroneConfig = struct {
                     .max_throttle = global_max_throttle,
                 },
             },
+            .sensor_calibration = .{
+                .mag_hard_iron = .{ .x = 0, .y = 0, .z = 0 },
+                .mag_soft_iron = .{ .x = 1, .y = 1, .z = 1 },
+                .accel_offset = .{ .x = 0, .y = 0, .z = 0 },
+                .gyro_offset = .{ .x = 0, .y = 0, .z = 0 },
+            },
             .allocator = allocator,
         };
 
@@ -96,6 +115,28 @@ pub const DroneConfig = struct {
                 }
                 break :blk motors;
             },
+            .sensor_calibration = .{
+                .mag_hard_iron = .{
+                    .x = self.sensor_calibration.mag_hard_iron.x,
+                    .y = self.sensor_calibration.mag_hard_iron.y,
+                    .z = self.sensor_calibration.mag_hard_iron.z,
+                },
+                .mag_soft_iron = .{
+                    .x = self.sensor_calibration.mag_soft_iron.x,
+                    .y = self.sensor_calibration.mag_soft_iron.y,
+                    .z = self.sensor_calibration.mag_soft_iron.z,
+                },
+                .accel_offset = .{
+                    .x = self.sensor_calibration.accel_offset.x,
+                    .y = self.sensor_calibration.accel_offset.y,
+                    .z = self.sensor_calibration.accel_offset.z,
+                },
+                .gyro_offset = .{
+                    .x = self.sensor_calibration.gyro_offset.x,
+                    .y = self.sensor_calibration.gyro_offset.y,
+                    .z = self.sensor_calibration.gyro_offset.z,
+                },
+            },
         }, .{});
     }
 
@@ -131,6 +172,28 @@ pub const DroneConfig = struct {
                     };
                 }
                 break :blk motors;
+            },
+            .sensor_calibration = .{
+                .mag_hard_iron = .{
+                    .x = self.sensor_calibration.mag_hard_iron.x,
+                    .y = self.sensor_calibration.mag_hard_iron.y,
+                    .z = self.sensor_calibration.mag_hard_iron.z,
+                },
+                .mag_soft_iron = .{
+                    .x = self.sensor_calibration.mag_soft_iron.x,
+                    .y = self.sensor_calibration.mag_soft_iron.y,
+                    .z = self.sensor_calibration.mag_soft_iron.z,
+                },
+                .accel_offset = .{
+                    .x = self.sensor_calibration.accel_offset.x,
+                    .y = self.sensor_calibration.accel_offset.y,
+                    .z = self.sensor_calibration.accel_offset.z,
+                },
+                .gyro_offset = .{
+                    .x = self.sensor_calibration.gyro_offset.x,
+                    .y = self.sensor_calibration.gyro_offset.y,
+                    .z = self.sensor_calibration.gyro_offset.z,
+                },
             },
         }, .{}, file.writer());
     }
@@ -174,6 +237,44 @@ pub const DroneConfig = struct {
                 .pin = @intCast(motor.object.get("pin").?.integer),
                 .direction = @enumFromInt(motor.object.get("direction").?.integer),
                 .max_throttle = @floatCast(motor.object.get("max_throttle").?.float),
+            };
+        }
+
+        if (parsed.value.object.get("sensor_calibration")) |calibration| {
+            const mag_hard_iron = calibration.object.get("mag_hard_iron").?.object;
+            const mag_soft_iron = calibration.object.get("mag_soft_iron").?.object;
+            const accel_offset = calibration.object.get("accel_offset").?.object;
+            const gyro_offset = calibration.object.get("gyro_offset").?.object;
+
+            config.sensor_calibration = .{
+                .mag_hard_iron = .{
+                    .x = @floatCast(mag_hard_iron.get("x").?.float),
+                    .y = @floatCast(mag_hard_iron.get("y").?.float),
+                    .z = @floatCast(mag_hard_iron.get("z").?.float),
+                },
+                .mag_soft_iron = .{
+                    .x = @floatCast(mag_soft_iron.get("x").?.float),
+                    .y = @floatCast(mag_soft_iron.get("y").?.float),
+                    .z = @floatCast(mag_soft_iron.get("z").?.float),
+                },
+                .accel_offset = .{
+                    .x = @floatCast(accel_offset.get("x").?.float),
+                    .y = @floatCast(accel_offset.get("y").?.float),
+                    .z = @floatCast(accel_offset.get("z").?.float),
+                },
+                .gyro_offset = .{
+                    .x = @floatCast(gyro_offset.get("x").?.float),
+                    .y = @floatCast(gyro_offset.get("y").?.float),
+                    .z = @floatCast(gyro_offset.get("z").?.float),
+                },
+            };
+        } else {
+            // Set default calibration values if not found in config
+            config.sensor_calibration = .{
+                .mag_hard_iron = .{ .x = 0, .y = 0, .z = 0 },
+                .mag_soft_iron = .{ .x = 1, .y = 1, .z = 1 },
+                .accel_offset = .{ .x = 0, .y = 0, .z = 0 },
+                .gyro_offset = .{ .x = 0, .y = 0, .z = 0 },
             };
         }
 
@@ -561,7 +662,7 @@ pub const MotorController = struct {
 
     pub const Commands = enum {
         SetSpeed,
-        SetDirection,
+        ReverseDirection,
         Arm,
         Disarm,
     };
@@ -578,11 +679,9 @@ pub const MotorController = struct {
                     // Check for NaN and a "reasonable" speed range
                     return self.speed >= 0 and self.speed <= 100.0;
                 },
-                .SetDirection => {
-                    @panic("Not implemented yet!\n");
-                },
-                .Arm => return true, // no special fields
-                .Disarm => return true, // no special fields
+                .ReverseDirection => return true,
+                .Arm => return true,
+                .Disarm => return true,
             }
         }
     };
@@ -731,6 +830,8 @@ pub const MotorController = struct {
     pub fn disconnect(self: *Self) void {
         if (self.udp_thread) |_| {
             self.connection_handler.stop();
+            self.udp_thread.?.join();
+            self.udp_thread = null;
         }
     }
 
@@ -782,8 +883,15 @@ pub const MotorController = struct {
                     return false;
                 };
             },
-            .SetDirection => {
-                @panic("Not implemented yet!");
+            .ReverseDirection => blk: {
+                break :blk std.fmt.allocPrint(
+                    self.allocator,
+                    "ReverseDirection {d}\n",
+                    .{@intFromEnum(command.motor)},
+                ) catch |err| {
+                    std.debug.print("Failed to format ReverseDirection: {}\n", .{err});
+                    return false;
+                };
             },
             .Arm => blk: {
                 break :blk std.fmt.allocPrint(

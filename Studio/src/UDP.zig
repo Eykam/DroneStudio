@@ -36,9 +36,9 @@ pub const HandlerInterface = struct {
 
 pub fn Handler(comptime T: type) type {
     return struct {
-        inner: T,
+        inner: *T,
 
-        pub fn init(inner: T) @This() {
+        pub fn init(inner: *T) @This() {
             return .{ .inner = inner };
         }
 
