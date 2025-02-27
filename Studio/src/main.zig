@@ -188,7 +188,13 @@ pub fn main() !void {
 
     // ==================================================== UI Window Setup ====================================================
 
-    const windows = [_]type{ UI.OverlayWindow, UI.StereoDebugWindow, UI.DroneConfigWindow };
+    const windows = [_]type{
+        UI.OverlayWindow,
+        UI.StereoDebugWindow,
+        UI.DroneConfigWindow,
+        UI.BatteryStatusWindow,
+    };
+
     const TWindowManager = UI.WindowManager(&windows);
     const WindowManager = try TWindowManager.init(
         alloc,

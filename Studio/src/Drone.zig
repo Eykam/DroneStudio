@@ -2,6 +2,29 @@ const std = @import("std");
 const Math = @import("Math.zig");
 const Vec3 = Math.Vec3;
 
+pub const Battery = enum(u8) {
+    Lipo_2S = 2, // 2 cells in series (7.4V nominal)
+    Lipo_3S = 3, // 3 cells in series (11.1V nominal)
+    Lipo_4S = 4, // 4 cells in series (14.8V nominal)
+    Lipo_5S = 5, // 5 cells in series (18.5V nominal)
+    Lipo_6S = 6, // 6 cells in series (22.2V nominal)
+
+    // Get cell count for voltage calculations
+    pub fn cellCount(self: Battery) u8 {
+        return @intFromEnum(self);
+    }
+
+    // Get minimum safe voltage (3.4V per cell)
+    pub fn minVoltage(self: Battery) f32 {
+        return 3.4 * @as(f32, @floatFromInt(self.cellCount()));
+    }
+
+    // Get maximum voltage (4.2V per cell when fully charged)
+    pub fn maxVoltage(self: Battery) f32 {
+        return 4.2 * @as(f32, @floatFromInt(self.cellCount()));
+    }
+};
+
 pub const DroneConfig = struct {
     const Self = @This();
 
@@ -30,7 +53,7 @@ pub const DroneConfig = struct {
     dshot_protocol: MotorController.Protocols,
     global_max_throttle: f32,
     motors: [@typeInfo(MotorController.Motors).@"enum".fields.len]MotorConfig,
-
+    battery: Battery,
     sensor_calibration: SensorCalibration,
     allocator: std.mem.Allocator,
 
@@ -73,6 +96,7 @@ pub const DroneConfig = struct {
                     .max_throttle = global_max_throttle,
                 },
             },
+            .battery = Battery.Lipo_4S,
             .sensor_calibration = .{
                 .mag_hard_iron = .{ .x = 0, .y = 0, .z = 0 },
                 .mag_soft_iron = .{ .x = 1, .y = 1, .z = 1 },
@@ -114,6 +138,10 @@ pub const DroneConfig = struct {
                     };
                 }
                 break :blk motors;
+            },
+            .battery = .{
+                .cells = @intFromEnum(self.battery),
+                .type = "LiPo",
             },
             .sensor_calibration = .{
                 .mag_hard_iron = .{
@@ -173,6 +201,10 @@ pub const DroneConfig = struct {
                 }
                 break :blk motors;
             },
+            .battery = .{
+                .cells = @intFromEnum(self.battery),
+                .type = "LiPo",
+            },
             .sensor_calibration = .{
                 .mag_hard_iron = .{
                     .x = self.sensor_calibration.mag_hard_iron.x,
@@ -230,6 +262,19 @@ pub const DroneConfig = struct {
         config.dshot_protocol = @enumFromInt(parsed.value.object.get("dshot_protocol").?.integer);
         config.global_max_throttle = @floatCast(parsed.value.object.get("global_max_throttle").?.float);
         config.allocator = allocator;
+
+        config.battery = Battery.Lipo_4S;
+
+        // Parse battery configuration if present
+        if (parsed.value.object.get("battery")) |battery_config| {
+            if (battery_config.object.get("cells")) |cells_value| {
+                const cells = @as(u8, @intCast(cells_value.integer));
+                // Validate cell count (2-6 cells supported)
+                if (cells >= 2 and cells <= 6) {
+                    config.battery = @enumFromInt(cells);
+                }
+            }
+        }
 
         const motors_array = parsed.value.object.get("motors").?.array;
         for (motors_array.items, 0..) |motor, i| {
@@ -324,12 +369,20 @@ pub const ConnectionHandler = struct {
         InvalidState,
     };
 
+    pub const BatteryInfo = struct {
+        voltage: f32 = 0.0,
+        percentage: f32 = 0.0,
+        failsafe_active: bool = true,
+        type: Battery,
+    };
+
     socket: ?std.posix.socket_t,
     local_addr: std.net.Address,
     server_addr: std.net.Address,
     state: std.atomic.Value(ConnectionState),
     motor_states: *[@typeInfo(MotorController.Motors).@"enum".fields.len]MotorController.MotorState,
     config: *DroneConfig,
+    battery_info: BatteryInfo,
     running: bool,
     retries: u8,
     failures: u8,
@@ -347,6 +400,7 @@ pub const ConnectionHandler = struct {
             .motor_states = motor_states,
             .state = std.atomic.Value(ConnectionState).init(.Disconnected),
             .config = config,
+            .battery_info = BatteryInfo{ .type = config.battery },
             .running = false,
             .retries = 0,
             .failures = 0,
@@ -588,10 +642,58 @@ pub const ConnectionHandler = struct {
         }
     }
 
+    fn parseBatteryStatus(self: *Self, status_msg: []const u8) void {
+        if (std.mem.indexOf(u8, status_msg, "BATTERY")) |battery_idx| {
+            const battery_part = status_msg[battery_idx..];
+
+            var iter = std.mem.splitSequence(u8, battery_part, " ");
+            _ = iter.next();
+
+            if (iter.next()) |voltage_str| {
+                self.battery_info.voltage = std.fmt.parseFloat(f32, voltage_str) catch |err| {
+                    std.debug.print("Failed to parse voltage_str {s}! Err => {any}\n", .{ voltage_str, err });
+                    return;
+                };
+            }
+
+            // Parse percentage
+            if (iter.next()) |percentage_str| {
+                self.battery_info.percentage = std.fmt.parseFloat(f32, percentage_str) catch |err| {
+                    std.debug.print("Failed to parse percentage_str {s}! Err => {any}\n", .{ percentage_str, err });
+                    return;
+                };
+            }
+
+            // Parse failsafe status
+            if (iter.next()) |raw_failsafe_str| {
+                const failsafe_str = std.mem.trim(u8, raw_failsafe_str, &std.ascii.whitespace);
+                const failsafe_val = std.fmt.parseInt(u8, failsafe_str, 10) catch |err| {
+                    std.debug.print("Failed to parse failsafe_val {s}! Err => {any}\n", .{ failsafe_str, err });
+                    return;
+                };
+
+                self.battery_info.failsafe_active = switch (failsafe_val) {
+                    1 => true,
+                    else => false,
+                };
+            }
+
+            // Log battery status if percentage is below critical threshold or failsafe is active
+            if (self.battery_info.percentage < 15.0 or self.battery_info.failsafe_active) {
+                std.debug.print("BATTERY ALERT: {d:.2}V / {d:.1}% - Failsafe: {}\n", .{
+                    self.battery_info.voltage,
+                    self.battery_info.percentage,
+                    self.battery_info.failsafe_active,
+                });
+            }
+        }
+    }
+
     fn handleHeartbeatResponse(self: *Self, response: []const u8) !void {
         std.debug.print("Heartbeat response: {s}\n", .{response});
         if (std.mem.startsWith(u8, response, "STATUS ")) {
             self.updateMotorStates(response);
+            self.parseBatteryStatus(response);
         } else if (!std.mem.eql(u8, response, "ACK\n")) {
             return error.InvalidResponse;
         }

@@ -21,12 +21,26 @@ const AK8963_ASAX = 0x10;
 const AK8963_ST1 = 0x02;
 const AK8963_HXL = 0x03;
 
+const INA219_ADDR = 0x40; // Default I2C address
+const INA219_CONFIG_REG = 0x00;
+const INA219_SHUNT_VOLTAGE_REG = 0x01;
+const INA219_BUS_VOLTAGE_REG = 0x02;
+const INA219_POWER_REG = 0x03;
+const INA219_CURRENT_REG = 0x04;
+const INA219_CALIBRATION_REG = 0x05;
+
+// Configuration values
+const INA219_CONFIG_BVOLTAGERANGE_32V = 0x2000; // 0-32V Range
+const INA219_CONFIG_GAIN_8_320MV = 0x1800; // Gain 8, Range +/- 320mV
+const INA219_CONFIG_BADCRES_12BIT = 0x0400; // 12-bit bus res = 0..4097
+const INA219_CONFIG_SADCRES_12BIT_1S_532US = 0x0018; // 1 x 12-bit shunt sample
+const INA219_CONFIG_MODE_SANDBVOLT_CONTINUOUS = 0x0007; // Continuous sampling
+
 // I2C Config
 const I2C_PATH = "/dev/i2c-1";
 const I2C_SLAVE = 0x0703;
 
 const Readings = struct { x: f32, y: f32, z: f32 };
-
 const ReadingsPacket = [44]u8;
 
 const I2C = struct {
@@ -73,6 +87,30 @@ const I2C = struct {
             return error.I2CTransferFailed;
         }
     }
+
+    fn openI2C() !i32 {
+        const fd = try std.posix.open(I2C_PATH, std.posix.O{ .ACCMODE = .RDWR }, 0);
+        if (fd < 0) {
+            std.debug.print("Failed to open I2C bus\n", .{});
+            return error.I2COpenFailed;
+        }
+        return fd;
+    }
+
+    // Helper function to check if a device is present on the I2C bus
+    fn isDevicePresent(fd: i32, addr: u8) bool {
+        if (std.os.linux.ioctl(fd, I2C_SLAVE, addr) < 0) {
+            return false;
+        }
+
+        // Try to read a single byte
+        var buf: [1]u8 = undefined;
+        const bytes_read = std.posix.read(fd, &buf) catch {
+            return false;
+        };
+
+        return bytes_read == 1;
+    }
 };
 
 pub const Mpu9250 = struct {
@@ -87,19 +125,34 @@ pub const Mpu9250 = struct {
 
     const Self = @This();
 
-    pub fn init() !Self {
-        const fd = try std.posix.open(I2C_PATH, std.posix.O{ .ACCMODE = .RDWR }, 0);
-        if (fd < 0) {
-            std.debug.print("Failed to open I2C bus\n", .{});
-            return error.I2COpenFailed;
+    pub fn init() !?Self {
+        const fd = I2C.openI2C() catch |err| {
+            std.debug.print("Failed to open I2C for MPU9250: {any}\n", .{err});
+            return null;
+        };
+
+        if (!I2C.isDevicePresent(fd, MPU9250_ADDR)) {
+            std.debug.print("MPU9250 not detected on I2C bus\n", .{});
+            _ = std.posix.close(fd);
+            return null;
         }
 
         var self = Self{
             .i2c_fd = fd,
             .mag_scale = .{ 1.0, 1.0, 1.0 },
         };
-        try self.initSensor();
-        try self.initMagnetometer();
+
+        self.initSensor() catch |err| {
+            std.debug.print("Failed to initialize MPU9250: {any}\n", .{err});
+            _ = std.posix.close(fd);
+            return null;
+        };
+
+        self.initMagnetometer() catch |err| {
+            std.debug.print("Failed to initialize Magnetometer: {any}\n", .{err});
+            // Continue even if magnetometer fails
+        };
+
         return self;
     }
 
@@ -283,8 +336,113 @@ pub const Mpu9250 = struct {
     }
 };
 
+pub const Ina219 = struct {
+    i2c_fd: i32,
+
+    const Self = @This();
+
+    pub fn init() !?Self {
+        const fd = I2C.openI2C() catch |err| {
+            std.debug.print("Failed to open I2C for INA219: {any}\n", .{err});
+            return null;
+        };
+
+        // Check if INA219 is present
+        if (!I2C.isDevicePresent(fd, INA219_ADDR)) {
+            std.debug.print("INA219 not detected on I2C bus\n", .{});
+            _ = std.posix.close(fd);
+            return null;
+        }
+
+        var self = Self{
+            .i2c_fd = fd,
+        };
+
+        self.initSensor() catch |err| {
+            std.debug.print("Failed to initialize INA219: {any}\n", .{err});
+            _ = std.posix.close(fd);
+            return null;
+        };
+
+        return self;
+    }
+
+    fn initSensor(self: Self) !void {
+        // Configure INA219 with default settings
+        const config: u16 = INA219_CONFIG_BVOLTAGERANGE_32V |
+            INA219_CONFIG_GAIN_8_320MV |
+            INA219_CONFIG_BADCRES_12BIT |
+            INA219_CONFIG_SADCRES_12BIT_1S_532US |
+            INA219_CONFIG_MODE_SANDBVOLT_CONTINUOUS;
+
+        try self.writeRegister16(INA219_CONFIG_REG, config);
+
+        // Wait for ADC ready
+        std.time.sleep(1 * std.time.ns_per_ms);
+    }
+
+    fn writeRegister16(self: Self, reg: u8, value: u16) !void {
+        if (std.os.linux.ioctl(self.i2c_fd, I2C_SLAVE, INA219_ADDR) < 0) {
+            return error.I2CSlaveSelectFailed;
+        }
+
+        var buf = [_]u8{
+            reg,
+            @intCast((value >> 8) & 0xFF), // High byte
+            @intCast(value & 0xFF), // Low byte
+        };
+
+        if (try std.posix.write(self.i2c_fd, &buf) != 3) {
+            return error.I2CWriteFailed;
+        }
+    }
+
+    fn readRegister16(self: Self, reg: u8) !u16 {
+        if (std.os.linux.ioctl(self.i2c_fd, I2C_SLAVE, INA219_ADDR) < 0) {
+            return error.I2CSlaveSelectFailed;
+        }
+
+        // Write register address
+        if (try std.posix.write(self.i2c_fd, &[_]u8{reg}) != 1) {
+            return error.I2CWriteFailed;
+        }
+
+        // Read data
+        var buf: [2]u8 = undefined;
+        if (try std.posix.read(self.i2c_fd, &buf) != 2) {
+            return error.I2CReadFailed;
+        }
+
+        // Convert from big-endian (INA219 format)
+        return (@as(u16, buf[0]) << 8) | buf[1];
+    }
+
+    pub fn readBusVoltage(self: Self) !f32 {
+        var raw_voltage = try self.readRegister16(INA219_BUS_VOLTAGE_REG);
+
+        // The bus voltage register gives value in 4mV units, with first 3 bits being status flags
+        raw_voltage = (raw_voltage >> 3) & 0x1FFF; // Shift right 3 and mask with 0x1FFF
+
+        // Convert to volts
+        return @as(f32, @floatFromInt(raw_voltage)) * 0.004;
+    }
+
+    pub fn readShuntVoltage(self: Self) !f32 {
+        const raw_voltage = try self.readRegister16(INA219_SHUNT_VOLTAGE_REG);
+
+        // The shunt voltage is a signed value in 10µV units
+        const signed_value: i16 = @bitCast(raw_voltage);
+
+        // Convert to volts
+        return @as(f32, @floatFromInt(signed_value)) * 0.00001;
+    }
+
+    // Add current and power reading functions if needed
+};
+
 pub const UDP_Provider = struct {
-    imu: Mpu9250,
+    imu: ?Mpu9250,
+    ina219: ?Ina219,
     socket: std.posix.socket_t,
     dest_addr: std.posix.sockaddr,
     dest_addr_len: std.posix.socklen_t,
@@ -304,8 +462,12 @@ pub const UDP_Provider = struct {
 
         const dest_addr = (try std.net.Address.parseIp4(server_ip, server_port)).any;
 
+        const imu = try Mpu9250.init();
+        const ina219 = try Ina219.init();
+
         return Self{
-            .imu = try Mpu9250.init(),
+            .imu = imu,
+            .ina219 = ina219,
             .socket = socket,
             .dest_addr = dest_addr,
             .dest_addr_len = @sizeOf(std.posix.sockaddr),
@@ -315,9 +477,41 @@ pub const UDP_Provider = struct {
         };
     }
 
+    pub fn sendBatteryCommand(battery_voltage: f32, server_ip: []const u8, server_port: u16) !void {
+        // Create a UDP socket for sending commands
+        const socket = try std.posix.socket(
+            std.posix.AF.INET,
+            std.posix.SOCK.DGRAM,
+            0,
+        );
+        defer std.posix.close(socket);
+
+        // Set up destination address (motor controller server)
+        const dest_addr = (try std.net.Address.parseIp4(server_ip, server_port)).any;
+
+        // Format battery command
+        var cmd_buf: [64]u8 = undefined;
+        const cmd_len = try std.fmt.bufPrint(&cmd_buf, "Battery {d:.3}", .{battery_voltage});
+
+        // Send command
+        _ = try std.posix.sendto(
+            socket,
+            cmd_len,
+            0,
+            &dest_addr,
+            @sizeOf(std.posix.sockaddr),
+        );
+    }
+
     pub fn send(self: *Self) !void {
-        var packet = try self.imu.read();
         const current_time = std.time.milliTimestamp();
+        var packet = std.mem.zeroes(ReadingsPacket);
+        if (self.imu) |*imu| {
+            packet = imu.read() catch |err| blk: {
+                std.debug.print("Error reading from IMU: {any}, continuing...\n", .{err});
+                break :blk std.mem.zeroes(ReadingsPacket);
+            };
+        }
 
         // Add timestamp
         std.mem.writeInt(i64, packet[36..44], current_time * 1000, .little);
@@ -335,9 +529,35 @@ pub const UDP_Provider = struct {
 
         // Print stats every second without blocking
         if (current_time - self.last_stats_time >= 1000) {
+            if (self.ina219) |ina219| {
+                const bus_voltage = ina219.readBusVoltage() catch |err| blk: {
+                    std.debug.print("Error reading bus voltage: {any}\n", .{err});
+                    break :blk 0.0;
+                };
+
+                const shunt_voltage = ina219.readShuntVoltage() catch |err| blk: {
+                    std.debug.print("Error reading shunt voltage: {any}\n", .{err});
+                    break :blk 0.0;
+                };
+
+                std.debug.print("Battery: {d:.3} V, Shunt: {d:.6} V\n", .{ bus_voltage, shunt_voltage });
+
+                sendBatteryCommand(bus_voltage, "10.42.0.219", 5000) catch |err| {
+                    std.debug.print("Failed to send battery command: {any}\n", .{err});
+                };
+            } else {
+                std.debug.print("INA219 not available\n", .{});
+            }
+
             const rate = @as(f32, @floatFromInt(self.packet_count)) /
                 (@as(f32, @floatFromInt(current_time - self.last_stats_time)) / 1000.0);
+
             std.debug.print("Rate: {d:.1} Hz\n", .{rate});
+
+            // Status update about sensors
+            if (self.imu == null) {
+                std.debug.print("IMU not connected\n", .{});
+            }
 
             // Reset counters
             self.packet_count = 0;
@@ -346,12 +566,29 @@ pub const UDP_Provider = struct {
     }
 
     pub fn run(self: *Self) !void {
+        if (self.imu == null and self.ina219 == null) {
+            std.debug.print("No sensors detected. Exiting...\n", .{});
+            return error.NoSensorsDetected;
+        }
+
+        std.debug.print("Starting UDP Provider with:\n", .{});
+        if (self.imu != null) std.debug.print("- MPU9250 IMU active\n", .{});
+        if (self.ina219 != null) std.debug.print("- INA219 voltage sensor active\n", .{});
+
         while (true) {
             try self.send();
         }
     }
 
     pub fn deinit(self: *Self) void {
+        if (self.imu) |imu| {
+            imu.deinit();
+        }
+
+        if (self.ina219) |ina219| {
+            ina219.deinit();
+        }
+
         std.os.close(self.socket);
     }
 };

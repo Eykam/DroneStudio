@@ -793,12 +793,12 @@ pub const DroneConfigWindow = struct {
         imgui.igSetNextWindowViewport(viewport.*.ID);
 
         if (imgui.igBegin("Drone Configuration", &self.visible, imgui.ImGuiWindowFlags_None)) {
+            // Fixed Header Section
+            self.drawFixedHeader(ctx);
+            imgui.igSeparator();
+
             if (imgui.igBeginTabBar("DroneConfigTabs", imgui.ImGuiTabBarFlags_None)) {
                 if (imgui.igBeginTabItem("Motor Controller", null, 0)) {
-                    // Fixed Header Section
-                    self.drawFixedHeader(ctx);
-                    imgui.igSeparator();
-
                     // Server Configuration Section
                     if (imgui.igCollapsingHeader_BoolPtr("Server Configuration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
                         self.drawServerConfig(ctx);
@@ -857,38 +857,11 @@ pub const DroneConfigWindow = struct {
             .timestamp = 0,
         };
 
-        imgui.igText("IMU Status");
-        imgui.igSeparator();
-
-        const is_receiving = (ctx.pose_handler.accel_gyro_freq > 0);
-        if (is_receiving) {
-            imgui.igTextColored(.{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }, "Status: Receiving Data");
-        } else {
-            imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "Status: No Data");
-        }
-
-        imgui.igText("Accel & Gyro Throughput: %d packets/s", ctx.pose_handler.accel_gyro_freq);
-        imgui.igText("Magnetometer Throughput: %d packets/s", ctx.pose_handler.mag_freq);
-        imgui.igText("Stale Packets: %d", ctx.pose_handler.stale_count);
+        const curr_beta = if (sensor_state.filter) |filter| filter.beta else 0.0;
+        imgui.igText("Current Beta: %.3f", curr_beta);
         imgui.igNewLine();
-
-        // Current Orientation
-        if (sensor_state.filter) |filter| {
-            const q = filter.q;
-            const euler = q.toEuler();
-            const rad_to_deg = 180.0 / std.math.pi;
-
-            imgui.igText("Orientation (deg):");
-            imgui.igText("  Roll:  %.2f", euler[0] * rad_to_deg);
-            imgui.igText("  Pitch: %.2f", euler[1] * rad_to_deg);
-            imgui.igText("  Yaw:   %.2f", euler[2] * rad_to_deg);
-            imgui.igNewLine();
-
-            if (imgui.igButton("Reset Orientation", .{ .x = 0, .y = 0 })) {
-                sensor_state.filter.?.q = Sensors.computeInitialOrientation(pose.accel, pose.mag, 0);
-            }
-        } else {
-            imgui.igText("Orientation: Not available (filter null)");
+        if (imgui.igButton("Reset Orientation", .{ .x = 0, .y = 0 })) {
+            sensor_state.filter.?.q = Sensors.computeInitialOrientation(pose.accel, pose.mag, 0);
         }
         imgui.igNewLine();
 
@@ -1021,33 +994,14 @@ pub const DroneConfigWindow = struct {
     }
 
     inline fn drawFixedHeader(self: *Self, ctx: *const UIContext) void {
-        // Config Path Display
-        const curr_path = std.mem.sliceTo(&self.config_path_buffer, 0);
-        imgui.igText("Config Path: %s", @as([*c]const u8, curr_path.ptr));
+        imgui.igSeparator();
 
-        // Save/Load Buttons
-        const button_disabled = ctx.scene.motor_controller.getConnectionState() == .Running;
-
-        if (button_disabled) {
-            imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
-        }
-
-        if (imgui.igButton("Save Configuration", imgui.ImVec2{ .x = 120, .y = 0 }) and !button_disabled) {
-            self.show_save_modal = true;
-        }
-        imgui.igSameLine(0, 4);
-        if (imgui.igButton("Load Configuration", imgui.ImVec2{ .x = 120, .y = 0 }) and !button_disabled) {
-            self.show_load_modal = true;
-        }
-
-        if (button_disabled) {
-            imgui.igPopStyleVar(1);
-        }
-
+        imgui.igText("Motor Controller ");
         imgui.igNewLine();
 
         // Connection Status and Controls
-        const conn_state = ctx.scene.motor_controller.getConnectionState();
+        const motor_controller = ctx.scene.motor_controller;
+        const conn_state = motor_controller.getConnectionState();
         const state_str = conn_state.toString();
 
         // Color-coded status
@@ -1061,27 +1015,26 @@ pub const DroneConfigWindow = struct {
         };
 
         imgui.igTextColored(status_color, "Status: %s", state_str.ptr);
-        imgui.igSameLine(0, 10);
 
         // Connection control buttons
         switch (conn_state) {
             .Disconnected => {
                 if (imgui.igButton("Connect", imgui.ImVec2{ .x = 120, .y = 0 })) {
-                    ctx.scene.motor_controller.connect() catch |err| {
+                    motor_controller.connect() catch |err| {
                         std.debug.print("Failed to connect: {}\n", .{err});
                     };
                 }
             },
             .Failed => {
                 if (imgui.igButton("Retry", imgui.ImVec2{ .x = 120, .y = 0 })) {
-                    ctx.scene.motor_controller.*.retryConnection() catch |err| {
+                    motor_controller.retryConnection() catch |err| {
                         std.debug.print("Failed to retry connection: {}\n", .{err});
                     };
                 }
             },
             .Connected, .ConfigSync, .Ready, .Running => {
                 if (imgui.igButton("Disconnect", imgui.ImVec2{ .x = 120, .y = 0 })) {
-                    ctx.scene.motor_controller.disconnect();
+                    motor_controller.disconnect();
                 }
             },
             else => {},
@@ -1111,6 +1064,65 @@ pub const DroneConfigWindow = struct {
 
         imgui.igText("Local Address: %s:%d", local_ip.ptr, config.local_port);
         imgui.igText("Controller Address: %s:%d", controller_ip.ptr, config.controller_port);
+        imgui.igNewLine();
+        imgui.igSeparator();
+
+        imgui.igText("IMU Status");
+        const sensor_state = ctx.pose_handler.sensor_state;
+
+        const is_receiving = (ctx.pose_handler.accel_gyro_freq > 0);
+        if (is_receiving) {
+            imgui.igTextColored(.{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }, "Status: Receiving Data");
+        } else {
+            imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "Status: No Data");
+        }
+
+        imgui.igText("Accel & Gyro Throughput: %d packets/s", ctx.pose_handler.accel_gyro_freq);
+        imgui.igText("Magnetometer Throughput: %d packets/s", ctx.pose_handler.mag_freq);
+        imgui.igText("Stale Packets: %d", ctx.pose_handler.stale_count);
+        imgui.igNewLine();
+
+        // Current Orientation
+        if (sensor_state.filter) |filter| {
+            const q = filter.q;
+            const euler = q.toEuler();
+            const rad_to_deg = 180.0 / std.math.pi;
+
+            imgui.igText("Orientation (deg):");
+            imgui.igText("  Roll:  %.2f", euler[0] * rad_to_deg);
+            imgui.igText("  Pitch: %.2f", euler[1] * rad_to_deg);
+            imgui.igText("  Yaw:   %.2f", euler[2] * rad_to_deg);
+            imgui.igNewLine();
+        } else {
+            imgui.igText("Orientation: Not available (filter null)");
+        }
+
+        imgui.igSeparator();
+
+        // Config Path Display
+        const curr_path = std.mem.sliceTo(&self.config_path_buffer, 0);
+        imgui.igText("Config Path: %s", @as([*c]const u8, curr_path.ptr));
+
+        // Save/Load Buttons
+        const button_disabled = ctx.scene.motor_controller.getConnectionState() == .Running;
+
+        if (button_disabled) {
+            imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
+        }
+
+        if (imgui.igButton("Save Configuration", imgui.ImVec2{ .x = 120, .y = 0 }) and !button_disabled) {
+            self.show_save_modal = true;
+        }
+        imgui.igSameLine(0, 4);
+        if (imgui.igButton("Load Configuration", imgui.ImVec2{ .x = 120, .y = 0 }) and !button_disabled) {
+            self.show_load_modal = true;
+        }
+
+        if (button_disabled) {
+            imgui.igPopStyleVar(1);
+        }
+
+        imgui.igNewLine();
     }
 
     inline fn drawThrottleTesting(self: *Self, ctx: *const UIContext) void {
@@ -1491,6 +1503,214 @@ pub const DroneConfigWindow = struct {
             }
             imgui.igEnd();
         }
+    }
+
+    pub fn show(self: *Self) void {
+        self.visible = true;
+    }
+
+    pub fn hide(self: *Self) void {
+        self.visible = false;
+    }
+
+    pub fn toggle(self: *Self) void {
+        self.visible = !self.visible;
+    }
+};
+
+pub const BatteryStatusWindow = struct {
+    visible: bool,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator) !*Self {
+        const self = try allocator.create(Self);
+        self.* = .{
+            .visible = true,
+        };
+        return self;
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.destroy(self);
+    }
+
+    pub fn draw(self: *Self, ctx: *const UIContext) void {
+        if (!self.visible) return;
+
+        // Window flags setup
+        var window_flags = imgui.ImGuiWindowFlags_NoDecoration |
+            imgui.ImGuiWindowFlags_NoDocking |
+            imgui.ImGuiWindowFlags_AlwaysAutoResize |
+            imgui.ImGuiWindowFlags_NoSavedSettings |
+            imgui.ImGuiWindowFlags_NoFocusOnAppearing |
+            imgui.ImGuiWindowFlags_NoNav;
+
+        // Window positioning
+        const PAD = 10.0;
+        const viewport = imgui.igGetMainViewport();
+        const work_pos = viewport.*.WorkPos;
+        const work_size = viewport.*.WorkSize;
+
+        // Position in top right
+        const window_pos = imgui.ImVec2{
+            .x = work_pos.x + work_size.x - PAD,
+            .y = work_pos.y + PAD,
+        };
+        const window_pos_pivot = imgui.ImVec2{
+            .x = 1.0, // Right-aligned
+            .y = 0.0, // Top-aligned
+        };
+
+        // Window setup
+        imgui.igSetNextWindowPos(window_pos, imgui.ImGuiCond_Always, window_pos_pivot);
+        imgui.igSetNextWindowViewport(viewport.*.ID);
+        window_flags |= imgui.ImGuiWindowFlags_NoMove;
+        imgui.igSetNextWindowBgAlpha(0.35); // Semi-transparent background
+        imgui.igSetNextWindowSize(
+            .{ .x = 185, .y = 115 }, // Fixed window dimensions
+            imgui.ImGuiCond_Always,
+        );
+
+        // Window content
+        if (imgui.igBegin("Battery Status", &self.visible, window_flags)) {
+            const motor_controller = ctx.scene.motor_controller;
+            const battery_info = motor_controller.connection_handler.battery_info;
+
+            // Get the draw list for custom rendering
+            const draw_list = imgui.igGetWindowDrawList();
+
+            // Calculate dimensions for battery icon
+            const battery_height = 30.0;
+            const battery_width = 150.0;
+            var cursor_pos: imgui.ImVec2 = undefined;
+            imgui.igGetCursorScreenPos(&cursor_pos);
+            const battery_x = cursor_pos.x + 10.0;
+            const battery_y = cursor_pos.y + 5.0;
+
+            const battery_outline_color = imgui.igColorConvertFloat4ToU32(
+                .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1.0 },
+            );
+
+            // Battery body outline (using individual coordinates for clarity)
+            const body_min_x = battery_x;
+            const body_min_y = battery_y;
+            const body_max_x = battery_x + battery_width;
+            const body_max_y = battery_y + battery_height;
+
+            imgui.ImDrawList_AddRectFilled(
+                draw_list,
+                .{ .x = body_min_x, .y = body_min_y },
+                .{ .x = body_max_x, .y = body_max_y },
+                battery_outline_color,
+                5.0,
+                imgui.ImDrawFlags_RoundCornersAll,
+            );
+
+            // Battery cap (positive terminal)
+            const cap_width = 6.0;
+            const cap_height = 12.0;
+            const cap_min_x = battery_x + battery_width;
+            const cap_min_y = battery_y + (battery_height - cap_height) * 0.5;
+            const cap_max_x = battery_x + battery_width + cap_width;
+            const cap_max_y = battery_y + (battery_height + cap_height) * 0.5;
+
+            imgui.ImDrawList_AddRectFilled(
+                draw_list,
+                .{ .x = cap_min_x, .y = cap_min_y },
+                .{ .x = cap_max_x, .y = cap_max_y },
+                battery_outline_color,
+                2.0,
+                imgui.ImDrawFlags_RoundCornersRight,
+            );
+
+            const fill_color_vec4: imgui.ImVec4 = if (battery_info.percentage > 75.0)
+                .{ .x = 0.0, .y = 0.8, .z = 0.2, .w = 1.0 } // Green
+            else if (battery_info.percentage > 25.0)
+                .{ .x = 0.9, .y = 0.7, .z = 0.0, .w = 1.0 } // Yellow
+            else
+                .{ .x = 1.0, .y = 0.2, .z = 0.2, .w = 1.0 }; // Red
+
+            const fill_color = imgui.igColorConvertFloat4ToU32(fill_color_vec4);
+
+            // Calculate fill width based on percentage
+            const padding = 3.0;
+            const fill_width = @max(0.0, (battery_width - padding * 2.0) * (battery_info.percentage / 100.0));
+
+            // Draw battery fill level
+            if (fill_width > 0) {
+                const fill_min_x = battery_x + padding;
+                const fill_min_y = battery_y + padding;
+                const fill_max_x = battery_x + padding + fill_width;
+                const fill_max_y = battery_y + battery_height - padding;
+
+                imgui.ImDrawList_AddRectFilled(
+                    draw_list,
+                    .{ .x = fill_min_x, .y = fill_min_y },
+                    .{ .x = fill_max_x, .y = fill_max_y },
+                    fill_color,
+                    3.0,
+                    imgui.ImDrawFlags_RoundCornersAll,
+                );
+            }
+
+            // Add battery percentage text centered on the battery
+            var text_buf: [16]u8 = undefined;
+            const text = std.fmt.bufPrintZ(&text_buf, "{d:.1}%", .{battery_info.percentage}) catch "??%";
+
+            var text_size: imgui.ImVec2 = undefined;
+            imgui.igCalcTextSize(
+                &text_size,
+                text,
+                null,
+                false,
+                0,
+            );
+            const text_x = battery_x + (battery_width - text_size.x) * 0.5;
+            const text_y = battery_y + (battery_height - text_size.y) * 0.5;
+
+            const text_shadow_color = imgui.igColorConvertFloat4ToU32(.{ .x = 0.0, .y = 0.0, .z = 0.0, .w = 0.5 });
+            const text_color = imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 });
+
+            // Draw text shadow for better readability
+            imgui.ImDrawList_AddText_Vec2(
+                draw_list,
+                .{ .x = text_x + 1, .y = text_y + 1 },
+                text_shadow_color,
+                text,
+                null,
+            );
+
+            // Draw main text
+            imgui.ImDrawList_AddText_Vec2(
+                draw_list,
+                .{ .x = text_x, .y = text_y },
+                text_color,
+                text,
+                null,
+            );
+
+            // Make space for the battery visual
+            imgui.igDummy(.{ .x = 0, .y = battery_height + 10 });
+
+            // Battery information
+            const cell_count = @intFromEnum(battery_info.type);
+            imgui.igText("%dS LiPo - %.2fV", cell_count, battery_info.voltage);
+
+            // Failsafe status
+            if (battery_info.failsafe_active) {
+                imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "FAILSAFE ACTIVE");
+            } else {
+                imgui.igTextColored(.{ .x = 0.0, .y = 0.8, .z = 0.2, .w = 1.0 }, "Failsafe: Inactive");
+            }
+
+            // Warning message for low battery
+            if (battery_info.percentage <= 25.0) {
+                imgui.igSpacing();
+                imgui.igTextColored(.{ .x = 1.0, .y = 0.0, .z = 0.0, .w = 1.0 }, "WARNING: Low battery!");
+            }
+        }
+        imgui.igEnd();
     }
 
     pub fn show(self: *Self) void {

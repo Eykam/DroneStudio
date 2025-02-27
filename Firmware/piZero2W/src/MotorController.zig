@@ -53,6 +53,39 @@ fn pinToCore(core: u32) !void {
     try std.os.linux.sched_setaffinity(0, &set);
 }
 
+pub const Battery = enum(u8) {
+    Lipo_2S = 2, // 2 cells in series (7.4V nominal)
+    Lipo_3S = 3, // 3 cells in series (11.1V nominal)
+    Lipo_4S = 4, // 4 cells in series (14.8V nominal)
+    Lipo_5S = 5, // 5 cells in series (18.5V nominal)
+    Lipo_6S = 6, // 6 cells in series (22.2V nominal)
+
+    // Get cell count for voltage calculations
+    pub fn cellCount(self: Battery) u8 {
+        return @intFromEnum(self);
+    }
+
+    // Get minimum safe voltage (3.4V per cell)
+    pub fn minVoltage(self: Battery) f32 {
+        return 3.4 * @as(f32, @floatFromInt(self.cellCount()));
+    }
+
+    // Get maximum voltage (4.2V per cell when fully charged)
+    pub fn maxVoltage(self: Battery) f32 {
+        return 4.2 * @as(f32, @floatFromInt(self.cellCount()));
+    }
+
+    // Calculate battery percentage based on current voltage
+    pub fn calculatePercentage(self: Battery, voltage: f32) f32 {
+        const min_v = self.minVoltage();
+        const max_v = self.maxVoltage();
+
+        // Normalize between min and max voltages
+        const percentage = (voltage - min_v) / (max_v - min_v) * 100.0;
+        return @max(0.0, @min(100.0, percentage)); // Clamp between 0-100%
+    }
+};
+
 const DSHOT_CMD = struct {
     const SPIN_DIRECTION_1: u16 = 7; // Set spin direction 1 (normal)
     const SPIN_DIRECTION_2: u16 = 8; // Set spin direction 2 (reversed)
@@ -75,6 +108,12 @@ pub const MotorController = struct {
     gpio_mem: *volatile GpioRegs,
     running: Atomic.Value(bool),
     allocator: std.mem.Allocator,
+
+    battery_type: Battery,
+    battery_voltage: Atomic.Value(f32),
+    battery_percentage: Atomic.Value(f32),
+    low_battery_failsafe: Atomic.Value(bool),
+    battery_mutex: Mutex,
 
     // Motor Configuration
     const Motor = struct {
@@ -102,7 +141,7 @@ pub const MotorController = struct {
 
     pub const Config = struct { pin: u8, direction: RotationDirection };
 
-    pub fn init(allocator: std.mem.Allocator, config: []Config) !*Self {
+    pub fn init(allocator: std.mem.Allocator, config: []Config, battery_type: Battery) !*Self {
         // try setRealtimePriority();
         // try pinToCore(3);
 
@@ -138,13 +177,54 @@ pub const MotorController = struct {
             .gpio_mem = @ptrCast(@alignCast(gpio_mem)),
             .running = Atomic.Value(bool).init(true),
             .allocator = allocator,
+            .battery_type = battery_type,
+            .battery_voltage = Atomic.Value(f32).init(0.0),
+            .battery_percentage = Atomic.Value(f32).init(0.0),
+            .low_battery_failsafe = Atomic.Value(bool).init(true),
+            .battery_mutex = Mutex{},
         };
 
-        // for (config, 0..) |motor_config, i| {
-        //     try controller.setMotorDirection(i, motor_config.direction);
-        // }
+        std.debug.print(
+            "Motor controller initialized with {d} Motors and battery type: {s} ({d} cells)\n",
+            .{ config.len, @tagName(battery_type), battery_type.cellCount() },
+        );
 
         return controller;
+    }
+
+    pub fn updateBatteryVoltage(self: *Self, voltage: f32) void {
+        self.battery_mutex.lock();
+        defer self.battery_mutex.unlock();
+
+        self.battery_voltage.store(voltage, .release);
+
+        // Calculate battery percentage
+        const percentage = self.battery_type.calculatePercentage(voltage);
+        self.battery_percentage.store(percentage, .release);
+
+        // Check for low battery condition
+        if (voltage <= self.battery_type.minVoltage() and !self.low_battery_failsafe.load(.acquire)) {
+            self.low_battery_failsafe.store(true, .release);
+
+            std.debug.print("LOW BATTERY ALERT! {d:.2}V / {d:.1}% - Triggering Failsafe\n", .{ voltage, percentage });
+
+            // Disarm all motors as failsafe
+            for (0..self.motors.len) |i| {
+                self.disarmMotor(i) catch |err| {
+                    std.debug.print("Failed to disarm motor {d} during low battery failsafe: {any}\n", .{ i, err });
+                };
+            }
+        }
+
+        if (voltage > self.battery_type.minVoltage() and self.low_battery_failsafe.load(.acquire)) {
+            std.debug.print("Turning off Failsafe - Battery raised above threshold! {d}V\n", .{voltage});
+            self.low_battery_failsafe.store(false, .release);
+        }
+
+        // Log battery status periodically
+        if (@mod(@as(u64, @intFromFloat(voltage * 100)), 25) < 2) { // Log roughly every 0.5V change
+            std.debug.print("Battery: {d:.2}V / {d:.1}%\n", .{ voltage, percentage });
+        }
     }
 
     pub fn deinit(self: *Self) void {
@@ -338,6 +418,18 @@ pub const MotorController = struct {
 
     fn motorControlThread(self: *Self) void {
         while (self.running.load(.acquire)) {
+            if (self.low_battery_failsafe.load(.acquire)) {
+                // In failsafe mode, ensure all motors remain disarmed
+                for (self.motors) |*motor| {
+                    if (motor.armed.load(.acquire)) {
+                        motor.armed.store(false, .release);
+                    }
+                }
+                // Still sleep to prevent CPU hogging
+                std.time.sleep(10 * time.ns_per_ms);
+                continue;
+            }
+
             for (self.motors) |*motor| {
                 if (motor.armed.load(.acquire)) {
                     const throttle = motor.throttle.load(.acquire);
@@ -347,33 +439,6 @@ pub const MotorController = struct {
             }
         }
     }
-
-    // pub fn testPinOutput(self: *MotorController, pin: u8, frequency: u32, duration_ms: u32) !void {
-    //     _ = duration_ms;
-    //     // Calculate one full period in nanoseconds (1s / frequency).
-    //     const period_ns = 1_000_000_000 / frequency;
-    //     const half_period_ns = period_ns / 2;
-
-    //     // Determine when to stop toggling (monotonic time).
-
-    //     const reg_idx = @divFloor(pin, 32);
-    //     const bit_mask = @as(u32, 1) << @as(u5, @intCast(@mod(pin, 32)));
-
-    //     // Toggle until we reach end_time
-    //     while (true) {
-    //         // Set GPIO pin high
-    //         self.gpio_mem.gpset[reg_idx] = bit_mask;
-    //         nanosleep(half_period_ns);
-
-    //         // Set GPIO pin low
-    //         self.gpio_mem.gpclr[reg_idx] = bit_mask;
-    //         nanosleep(half_period_ns);
-    //     }
-
-    //     // Once done, ensure pin is cleared
-    //     self.gpio_mem.gpclr[reg_idx] = bit_mask;
-    //     std.debug.print("Finished toggling pin {d}\n", .{pin});
-    // }
 };
 
 const Commands = enum {
@@ -381,6 +446,7 @@ const Commands = enum {
     Disarm,
     SetSpeed,
     ReverseDirection,
+    Battery,
 };
 
 // TCP Server for remote control
@@ -532,6 +598,16 @@ const Server = struct {
                 });
             }
 
+            const voltage = controller.battery_voltage.load(.acquire);
+            const percentage = controller.battery_percentage.load(.acquire);
+            const failsafe = controller.low_battery_failsafe.load(.acquire);
+
+            try std.fmt.format(status.writer(), "BATTERY {d:.2} {d:.1} {d}", .{
+                voltage,
+                percentage,
+                @intFromBool(failsafe),
+            });
+
             try status.appendSlice("\n");
             return try status.toOwnedSlice();
         } else {
@@ -607,6 +683,12 @@ const Server = struct {
             };
         }
 
+        var battery_type = Battery.Lipo_4S; // Default to 3S if not specified
+        if (parsed.value.object.get("battery")) |battery_config| {
+            const cells = @as(u8, @intCast(battery_config.object.get("cells").?.integer));
+            battery_type = @as(Battery, @enumFromInt(cells));
+        }
+
         // TODO: Implement different ability to select protocols
         // const protocol = parsed.value.object.get("").?.
 
@@ -615,7 +697,7 @@ const Server = struct {
             controller.deinit();
         }
 
-        self.motor_controller = try MotorController.init(self.allocator, config);
+        self.motor_controller = try MotorController.init(self.allocator, config, battery_type);
         // Start motor control thread
         _ = try Thread.spawn(.{}, MotorController.motorControlThread, .{self.motor_controller.?});
     }
@@ -627,24 +709,60 @@ const Server = struct {
         const cmd: ?Commands = std.meta.stringToEnum(Commands, parsed_cmd);
         if (cmd == null) return error.InvalidCommand;
 
-        const motor_idx = try std.fmt.parseInt(
-            usize,
-            iterator.next() orelse return error.InvalidCommand,
-            10,
-        );
-
         // TODO: Implement SetDirection & conditions to only allow certain commands only during specific states
         switch (cmd.?) {
-            .Arm => try self.motor_controller.?.armMotor(motor_idx),
-            .Disarm => try self.motor_controller.?.disarmMotor(motor_idx),
+            .Arm => {
+                const motor_idx = try std.fmt.parseInt(
+                    usize,
+                    iterator.next() orelse return error.InvalidCommand,
+                    10,
+                );
+
+                try self.motor_controller.?.armMotor(motor_idx);
+            },
+            .Disarm => {
+                const motor_idx = try std.fmt.parseInt(
+                    usize,
+                    iterator.next() orelse return error.InvalidCommand,
+                    10,
+                );
+
+                try self.motor_controller.?.disarmMotor(motor_idx);
+            },
             .SetSpeed => {
+                const motor_idx = try std.fmt.parseInt(
+                    usize,
+                    iterator.next() orelse return error.InvalidCommand,
+                    10,
+                );
+
                 const speed = try std.fmt.parseFloat(
                     f32,
                     iterator.next() orelse return error.InvalidCommand,
                 );
                 try self.motor_controller.?.setMotorSpeed(motor_idx, speed);
             },
-            .ReverseDirection => try self.motor_controller.?.reverseMotorDirection(motor_idx),
+            .ReverseDirection => {
+                const motor_idx = try std.fmt.parseInt(
+                    usize,
+                    iterator.next() orelse return error.InvalidCommand,
+                    10,
+                );
+
+                try self.motor_controller.?.reverseMotorDirection(motor_idx);
+            },
+            .Battery => {
+                const voltage_str = iterator.next() orelse return error.InvalidCommand;
+                const voltage = std.fmt.parseFloat(f32, voltage_str) catch |err| {
+                    std.debug.print("Failed to parse voltage str: {s}. Err => {any}\n", .{ voltage_str, err });
+                    return;
+                };
+
+                if (self.motor_controller) |controller| {
+                    controller.updateBatteryVoltage(voltage);
+                }
+                return;
+            },
         }
     }
 

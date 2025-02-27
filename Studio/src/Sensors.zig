@@ -360,9 +360,9 @@ pub const MadgwickFilter = struct {
     allocator: std.mem.Allocator,
     beta: f32, // algorithm gain
     beta_default: f32 = 0.03,
-    beta_high: f32 = 2.0, // Higher gain for faster convergence
+    beta_high: f32 = 1.0, // Higher gain for faster convergence
     beta_accel_only: f32, // gain when using only accel (no mag)
-    convergence_threshold: f32 = 0.5, // Threshold to detect convergence
+    convergence_threshold: f32 = 0.005, // Threshold to detect convergence
     convergence_counter: u32 = 0,
     previous_quaternion: Math.Quaternion = Math.Quaternion.identity(),
     q: Math.Quaternion, // current orientation estimate
@@ -373,6 +373,7 @@ pub const MadgwickFilter = struct {
         self.* = Self{
             .allocator = allocator,
             .beta = self.beta_high,
+            .beta_default = beta,
             .beta_accel_only = beta * 0.5,
             .q = if (initial_orientation) |init_q| init_q else Math.Quaternion.identity(),
         };
@@ -406,6 +407,8 @@ pub const MadgwickFilter = struct {
             self.convergence_counter = 0;
             self.beta = self.beta_high;
         }
+
+        self.beta_accel_only = self.beta * 0.5;
     }
 
     /// Update the orientation estimate given calibrated gyro, accel, mag data and time step dt (seconds).
@@ -809,24 +812,8 @@ pub fn updateModelMatrix(
     }
 
     const q = sensor_state.filter.?.q;
-    // std.debug.print("Orientation: {any}\n", .{q});
 
-    // Used if we want initial orientation as the 0 point
-    // const initQ = computeInitialOrientation(accel, mag, 0);
-    // const initial_conj = sensor_state.filter.?.initial_orientation.?.conjugate();
-    // q = initial_conj.multiply(q);
-
-    // const initQ = computeInitialOrientation(accel, calibrated_mag, -12.46);
-    // const rotation_NED_to_GL = [_]f32{
-    //     0, 0,  -1,
-    //     1, 0,  0,
-    //     0, -1, 0,
-    // };
-
-    // const q_NED_to_GL = Math.Quaternion.fromMat3(rotation_NED_to_GL);
-    // const q_gl = q.multiply(q_NED_to_GL);
     const euler_gl = q.toEuler();
-
     const q_gl2 = Math.Quaternion.fromAxisAngle(.{ .x = -1, .y = 0, .z = 0 }, euler_gl[1] - Math.radians(180.0));
     const q_gl3 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = -1, .z = 0 }, euler_gl[2]);
     const q_gl4 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = 0, .z = 1 }, euler_gl[0]);
