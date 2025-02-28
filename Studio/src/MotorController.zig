@@ -1,4 +1,7 @@
+//MotorController.zig
 const std = @import("std");
+const Drone = @import("core/Drone.zig");
+
 const time = std.time;
 const fs = std.fs;
 const net = std.net;
@@ -8,90 +11,13 @@ const Thread = std.Thread;
 const Mutex = std.Thread.Mutex;
 const Atomic = std.atomic;
 
+const Protocol = Drone.Protocol;
+const Battery = Drone.Battery;
+const DSHOT = Drone.DSHOT;
+const Timing = Drone.TimingUtils;
+
 // DShot Constants
-const DSHOT_MIN_THROTTLE: u16 = 48;
-const DSHOT_MAX_THROTTLE: u16 = 2047;
 const GPIO_BASE: usize = 0x3F200000; // Raspberry Pi zero 2W GPIO base address
-
-// DShot300 Timing (in nanoseconds)
-const DSHOT_BIT_TIME: u64 = 2700; // Overall bit time for DShot300
-const T0H_TIME: u64 = DSHOT_BIT_TIME * 3 / 9; // High time for 0 bit
-const FRAME_RESET_TIME: u64 = 30000; // Time between frames
-
-// Precise timing sleep function using nanosleep
-fn getNanoTime() u64 {
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC_RAW, &ts);
-    return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
-}
-
-fn busyWaitUntil(target_time: u64) void {
-    while (getNanoTime() < target_time) {
-        // Tight loop for precise timing
-        std.atomic.spinLoopHint();
-    }
-}
-
-// Set real-time priority
-fn setRealtimePriority() !void {
-    var sched = std.os.linux.sched_param{ .priority = 99 };
-    const ret = std.os.linux.sched_setscheduler(0, std.os.linux.SCHED{ .mode = .FIFO }, &sched);
-
-    if (ret != 0) {
-        return error.SetSchedulerFailed;
-    }
-}
-
-// Pin process to specific CPU core
-fn pinToCore(core: u32) !void {
-    var set: std.os.linux.cpu_set_t = [_]usize{0} ** (std.os.linux.CPU_SETSIZE / @sizeOf(usize));
-
-    const word_index = core / @bitSizeOf(usize);
-    const bit_index = core % @bitSizeOf(usize);
-    set[word_index] |= @as(usize, 1) << @as(u6, @intCast(bit_index));
-
-    try std.os.linux.sched_setaffinity(0, &set);
-}
-
-pub const Battery = enum(u8) {
-    Lipo_2S = 2, // 2 cells in series (7.4V nominal)
-    Lipo_3S = 3, // 3 cells in series (11.1V nominal)
-    Lipo_4S = 4, // 4 cells in series (14.8V nominal)
-    Lipo_5S = 5, // 5 cells in series (18.5V nominal)
-    Lipo_6S = 6, // 6 cells in series (22.2V nominal)
-
-    // Get cell count for voltage calculations
-    pub fn cellCount(self: Battery) u8 {
-        return @intFromEnum(self);
-    }
-
-    // Get minimum safe voltage (3.4V per cell)
-    pub fn minVoltage(self: Battery) f32 {
-        return 3.4 * @as(f32, @floatFromInt(self.cellCount()));
-    }
-
-    // Get maximum voltage (4.2V per cell when fully charged)
-    pub fn maxVoltage(self: Battery) f32 {
-        return 4.2 * @as(f32, @floatFromInt(self.cellCount()));
-    }
-
-    // Calculate battery percentage based on current voltage
-    pub fn calculatePercentage(self: Battery, voltage: f32) f32 {
-        const min_v = self.minVoltage();
-        const max_v = self.maxVoltage();
-
-        // Normalize between min and max voltages
-        const percentage = (voltage - min_v) / (max_v - min_v) * 100.0;
-        return @max(0.0, @min(100.0, percentage)); // Clamp between 0-100%
-    }
-};
-
-const DSHOT_CMD = struct {
-    const SPIN_DIRECTION_1: u16 = 7; // Set spin direction 1 (normal)
-    const SPIN_DIRECTION_2: u16 = 8; // Set spin direction 2 (reversed)
-    const SAVE_SETTINGS: u16 = 12; // Save settings to ESC
-    const REPEAT_COUNT: u32 = 8; // Number of times to repeat direction command
-};
 
 // GPIO Memory mapping structure
 const GpioRegs = struct {
@@ -107,8 +33,10 @@ pub const MotorController = struct {
     motors: []Motor,
     gpio_mem: *volatile GpioRegs,
     running: Atomic.Value(bool),
+    thread: ?std.Thread = null,
     allocator: std.mem.Allocator,
 
+    protocol: DSHOT,
     battery_type: Battery,
     battery_voltage: Atomic.Value(f32),
     battery_percentage: Atomic.Value(f32),
@@ -118,30 +46,28 @@ pub const MotorController = struct {
     // Motor Configuration
     const Motor = struct {
         pin: u8,
-        direction: Atomic.Value(RotationDirection),
+        direction: Atomic.Value(Drone.RotationDirection),
         throttle: Atomic.Value(u16),
         armed: Atomic.Value(bool),
         mutex: Mutex,
 
-        pub fn init(pin: u8, direction: RotationDirection) Motor {
+        pub fn init(pin: u8, direction: Drone.RotationDirection) Motor {
             return Motor{
                 .pin = pin,
-                .direction = Atomic.Value(RotationDirection).init(direction),
-                .throttle = Atomic.Value(u16).init(DSHOT_MIN_THROTTLE),
+                .direction = Atomic.Value(Drone.RotationDirection).init(direction),
+                .throttle = Atomic.Value(u16).init(DSHOT.MIN_THROTTLE),
                 .armed = Atomic.Value(bool).init(false),
                 .mutex = Mutex{},
             };
         }
     };
 
-    pub const RotationDirection = enum(u8) {
-        Clockwise = 0,
-        Counterclockwise = 1,
+    pub const Config = struct {
+        pin: u8,
+        direction: Drone.RotationDirection,
     };
 
-    pub const Config = struct { pin: u8, direction: RotationDirection };
-
-    pub fn init(allocator: std.mem.Allocator, config: []Config, battery_type: Battery) !*Self {
+    pub fn init(allocator: std.mem.Allocator, config: []Config, battery_type: Battery, protocol: DSHOT) !*Self {
         // try setRealtimePriority();
         // try pinToCore(3);
 
@@ -177,6 +103,7 @@ pub const MotorController = struct {
             .gpio_mem = @ptrCast(@alignCast(gpio_mem)),
             .running = Atomic.Value(bool).init(true),
             .allocator = allocator,
+            .protocol = protocol,
             .battery_type = battery_type,
             .battery_voltage = Atomic.Value(f32).init(0.0),
             .battery_percentage = Atomic.Value(f32).init(0.0),
@@ -189,6 +116,7 @@ pub const MotorController = struct {
             .{ config.len, @tagName(battery_type), battery_type.cellCount() },
         );
 
+        controller.thread = try Thread.spawn(.{}, motorControlThread, .{controller});
         return controller;
     }
 
@@ -229,30 +157,13 @@ pub const MotorController = struct {
 
     pub fn deinit(self: *Self) void {
         self.running.store(false, .release);
+        if (self.thread) |thread| {
+            thread.join();
+        }
+
         self.allocator.free(self.motors);
         // Unmap GPIO memory
         _ = std.os.linux.munmap(@as([*]u8, @ptrCast(@volatileCast(self.gpio_mem))), @sizeOf(GpioRegs));
-    }
-
-    fn dshotChecksum(value: u16) u8 {
-        return @truncate((value ^ (value >> 4) ^ (value >> 8)) & 0x0F);
-    }
-
-    fn createDshotPacket(value: u16, telemetry: bool) u16 {
-        // Bit 11 is the telemetry bit
-        const packet = (value << 1) | @intFromBool(telemetry);
-        return (packet << 4) | dshotChecksum(packet);
-    }
-
-    fn sendSpecialCommand(self: *Self, pin: u8, command: u16, repeat_count: u32) void {
-        var i: u32 = 0;
-        while (i < repeat_count) : (i += 1) {
-            // Special commands typically want telemetry bit set
-            const packet = createDshotPacket(command, true);
-            self.sendDshotPacket(pin, packet);
-            // Small delay between repeated commands
-            std.time.sleep(1 * time.ns_per_ms);
-        }
     }
 
     fn sendDshotPacket(self: *Self, pin: u8, packet: u16) void {
@@ -264,7 +175,7 @@ pub const MotorController = struct {
         _ = std.os.linux.sigprocmask(std.os.linux.SIG.BLOCK, null, &old_mask);
         defer _ = std.os.linux.sigprocmask(std.os.linux.SIG.SETMASK, &old_mask, null);
 
-        var start_time = getNanoTime();
+        var start_time = Timing.getNanoTime();
         var bit_time: u64 = undefined;
 
         // Send 16 bits
@@ -275,17 +186,17 @@ pub const MotorController = struct {
             self.gpio_mem.gpset[reg_idx] = bit_mask;
 
             if (bit == 1) {
-                busyWaitUntil(bit_time + (DSHOT_BIT_TIME * 3) / 4);
+                Timing.busyWaitUntil(bit_time + self.protocol.t1h_time());
             } else {
-                busyWaitUntil(bit_time + T0H_TIME);
+                Timing.busyWaitUntil(bit_time + self.protocol.t0h_time());
             }
 
             self.gpio_mem.gpclr[reg_idx] = bit_mask;
-            start_time += DSHOT_BIT_TIME;
-            busyWaitUntil(start_time);
+            start_time += self.protocol.bit_time();
+            Timing.busyWaitUntil(start_time);
         }
 
-        busyWaitUntil(start_time + FRAME_RESET_TIME);
+        Timing.busyWaitUntil(start_time + self.protocol.frame_reset_time());
     }
 
     pub fn reverseMotorDirection(self: *Self, motor_idx: usize) !void {
@@ -300,27 +211,25 @@ pub const MotorController = struct {
             return error.MotorArmed;
         }
 
-        // Decide which command to send based on current direction
-        const current_direction = motor.direction.load(.acquire);
-        const direction_cmd = switch (current_direction) {
-            .Clockwise => DSHOT_CMD.SPIN_DIRECTION_2, // Switch to reverse
-            .Counterclockwise => DSHOT_CMD.SPIN_DIRECTION_1, // Switch to normal
-        };
-
-        // Get initial timestamp
-        var start_time = getNanoTime();
+        var start_time = Timing.getNanoTime();
 
         // Send a solid burst of zero throttle commands first
         var i: u32 = 0;
         while (i < 100) : (i += 1) {
-            self.sendDshotPacket(motor.pin, createDshotPacket(0, false));
+            self.sendDshotPacket(motor.pin, DSHOT.create_packet(DSHOT.CMD.MOTOR_STOP, false));
             start_time += 100 * time.ns_per_us;
-            busyWaitUntil(start_time);
+            Timing.busyWaitUntil(start_time);
         }
 
         // Long delay to ensure ESC is ready
         start_time += 10 * time.ns_per_ms;
-        busyWaitUntil(start_time);
+        Timing.busyWaitUntil(start_time);
+
+        const current_direction = motor.direction.load(.acquire);
+        const direction_cmd = switch (current_direction) {
+            .Clockwise => DSHOT.CMD.SPIN_DIRECTION_2,
+            .Counterclockwise => DSHOT.CMD.SPIN_DIRECTION_1,
+        };
 
         // Send multiple bursts of direction commands with delays between bursts
         var burst: u32 = 0;
@@ -328,34 +237,34 @@ pub const MotorController = struct {
             // Send a burst of direction commands
             i = 0;
             while (i < 100) : (i += 1) {
-                self.sendDshotPacket(motor.pin, createDshotPacket(direction_cmd, true));
+                self.sendDshotPacket(motor.pin, DSHOT.create_packet(direction_cmd, true));
                 start_time += 100 * time.ns_per_us;
-                busyWaitUntil(start_time);
+                Timing.busyWaitUntil(start_time);
             }
 
             // Send save settings after each burst
             i = 0;
             while (i < 20) : (i += 1) {
-                self.sendDshotPacket(motor.pin, createDshotPacket(DSHOT_CMD.SAVE_SETTINGS, true));
+                self.sendDshotPacket(motor.pin, DSHOT.create_packet(DSHOT.CMD.SAVE_SETTINGS, true));
                 start_time += 100 * time.ns_per_us;
-                busyWaitUntil(start_time);
+                Timing.busyWaitUntil(start_time);
             }
 
             // Delay between bursts
             start_time += 50 * time.ns_per_ms;
-            busyWaitUntil(start_time);
+            Timing.busyWaitUntil(start_time);
         }
 
         // Final delay to ensure all commands are processed
         start_time += 100 * time.ns_per_ms;
-        busyWaitUntil(start_time);
+        Timing.busyWaitUntil(start_time);
 
-        const new_direction = if (current_direction == .Clockwise)
-            RotationDirection.Counterclockwise
+        const new_direction: Drone.RotationDirection = if (current_direction == .Clockwise)
+            .Counterclockwise
         else
-            RotationDirection.Clockwise;
-        motor.direction.store(new_direction, .release);
+            .Clockwise;
 
+        motor.direction.store(new_direction, .release);
         std.debug.print("Motor {d} direction reversed from {s} to {s}\n", .{ motor_idx, @tagName(current_direction), @tagName(new_direction) });
     }
 
@@ -372,7 +281,7 @@ pub const MotorController = struct {
         var i: u32 = 0;
         while (i < 1000) : (i += 1) {
             // For arming, send zero throttle with no telemetry bit
-            const packet = createDshotPacket(0, false);
+            const packet = DSHOT.create_packet(DSHOT.CMD.MOTOR_STOP, false);
             self.sendDshotPacket(motor.pin, packet);
             std.time.sleep(1 * time.ns_per_ms); // 1ms delay
         }
@@ -389,11 +298,11 @@ pub const MotorController = struct {
         defer motor.mutex.unlock();
 
         // Send zero throttle one last time
-        const packet = createDshotPacket(0, false);
+        const packet = DSHOT.create_packet(DSHOT.CMD.MOTOR_STOP, false);
         self.sendDshotPacket(motor.pin, packet);
 
         motor.armed.store(false, .release);
-        motor.throttle.store(DSHOT_MIN_THROTTLE, .release);
+        motor.throttle.store(DSHOT.MIN_THROTTLE, .release);
         std.debug.print("Motor {d} disarmed\n", .{motor_idx});
     }
 
@@ -406,11 +315,11 @@ pub const MotorController = struct {
         // Clamp speed percentage between 0 and 100
         const clamped_speed = @min(100.0, @max(0.0, speed_percent));
 
-        const throttle_range = DSHOT_MAX_THROTTLE - DSHOT_MIN_THROTTLE;
+        const throttle_range = DSHOT.MAX_THROTTLE - DSHOT.MIN_THROTTLE;
         const throttle_increment = @as(u16, @intFromFloat((clamped_speed / 100.0) * @as(f32, @floatFromInt(throttle_range))));
-        const throttle = DSHOT_MIN_THROTTLE + throttle_increment;
+        const throttle = DSHOT.MIN_THROTTLE + throttle_increment;
 
-        const final_throttle = @min(DSHOT_MAX_THROTTLE, @max(DSHOT_MIN_THROTTLE, throttle));
+        const final_throttle = @min(DSHOT.MAX_THROTTLE, @max(DSHOT.MIN_THROTTLE, throttle));
 
         motor.throttle.store(final_throttle, .release);
         std.debug.print("Motor {d} speed set to {d:.1}%\n", .{ motor_idx, speed_percent });
@@ -433,7 +342,7 @@ pub const MotorController = struct {
             for (self.motors) |*motor| {
                 if (motor.armed.load(.acquire)) {
                     const throttle = motor.throttle.load(.acquire);
-                    const packet = createDshotPacket(throttle, false);
+                    const packet = DSHOT.create_packet(throttle, false);
                     self.sendDshotPacket(motor.pin, packet);
                 }
             }
@@ -441,43 +350,11 @@ pub const MotorController = struct {
     }
 };
 
-const Commands = enum {
-    Arm,
-    Disarm,
-    SetSpeed,
-    ReverseDirection,
-    Battery,
-};
-
-// TCP Server for remote control
-const Command = struct {
-    motor_idx: usize,
-    command_type: Commands,
-    speed: ?f32 = null,
-};
-
-pub const ServerState = enum(u8) {
-    WaitingForClient,
-    Connected,
-    ConfigSync,
-    Ready,
-    Running,
-    Failed,
-};
-
-pub const ServerError = error{
-    SocketCreationFailed,
-    BindFailed,
-    ConfigParseError,
-    InvalidConfig,
-    MotorInitFailed,
-};
-
 const Server = struct {
     const Self = @This();
     const HEARTBEAT_TIMEOUT_SEC = 2;
 
-    state: Atomic.Value(ServerState),
+    state: Atomic.Value(Protocol.ServerState),
     socket: ?std.posix.socket_t,
     address: std.net.Address,
     client_addr: ?std.net.Address,
@@ -491,7 +368,7 @@ const Server = struct {
         const self = try allocator.create(Self);
 
         self.* = .{
-            .state = Atomic.Value(ServerState).init(.WaitingForClient),
+            .state = Atomic.Value(Protocol.ServerState).init(.WaitingForClient),
             .socket = null,
             .address = try std.net.Address.parseIp("0.0.0.0", port),
             .client_addr = null,
@@ -545,6 +422,17 @@ const Server = struct {
             std.mem.asBytes(&reuse),
         );
 
+        const timeout = std.posix.timeval{
+            .sec = 1, // 1 second timeout
+            .usec = 0,
+        };
+        try std.posix.setsockopt(
+            sock,
+            std.posix.SOL.SOCKET,
+            std.posix.SO.RCVTIMEO,
+            std.mem.asBytes(&timeout),
+        );
+
         try std.posix.bind(
             sock,
             &self.address.any,
@@ -567,14 +455,20 @@ const Server = struct {
                 &client_addr,
                 &client_addr_len,
             ) catch |err| {
-                std.debug.print("Receive error: {}\n", .{err});
+                if (err == error.WouldBlock or err == error.TimedOut) {
+                    continue;
+                }
+
+                std.debug.print("Receive error: {any}\n", .{err});
                 continue;
             };
 
             if (len == 0) continue;
 
             const msg = buf[0..len];
-            try self.handleMessage(msg, client_addr, client_addr_len);
+            self.handleMessage(msg, client_addr, client_addr_len) catch |err| {
+                std.debug.print("Failed to handle message! Err => {any}\n", .{err});
+            };
         }
     }
 
@@ -647,7 +541,6 @@ const Server = struct {
                     try self.sendResponse(status_msg, client_addr, addr_len);
                 } else {
                     try self.handleCommand(trimmed_msg);
-                    // try self.sendResponse("OK\n", client_addr, addr_len);
                 }
             },
             .Failed => {
@@ -657,7 +550,15 @@ const Server = struct {
                     motor_controller.deinit();
                     self.motor_controller = null;
                 }
+
+                if (self.socket) |socket| {
+                    std.posix.close(socket);
+                    self.socket = null;
+                }
+
+                try self.initializeSocket();
                 self.state.store(.WaitingForClient, .release);
+                std.debug.print("Socket recreated, waiting for client...\n", .{});
             },
         }
     }
@@ -671,6 +572,8 @@ const Server = struct {
         );
         defer parsed.deinit();
 
+        const protocol: DSHOT = @enumFromInt(parsed.value.object.get("dshot_protocol").?.integer);
+
         // Extract motor pins from config
         const motors_array = parsed.value.object.get("motors").?.array;
         var config = try self.allocator.alloc(MotorController.Config, motors_array.items.len);
@@ -683,38 +586,37 @@ const Server = struct {
             };
         }
 
-        var battery_type = Battery.Lipo_4S; // Default to 3S if not specified
+        var battery_type = Battery.Lipo_4S; // Default to 4S if not specified
         if (parsed.value.object.get("battery")) |battery_config| {
             const cells = @as(u8, @intCast(battery_config.object.get("cells").?.integer));
             battery_type = @as(Battery, @enumFromInt(cells));
         }
 
-        // TODO: Implement different ability to select protocols
-        // const protocol = parsed.value.object.get("").?.
-
         // Initialize motor controller
         if (self.motor_controller) |controller| {
             controller.deinit();
+            self.motor_controller = null;
         }
 
-        self.motor_controller = try MotorController.init(self.allocator, config, battery_type);
-        // Start motor control thread
-        _ = try Thread.spawn(.{}, MotorController.motorControlThread, .{self.motor_controller.?});
+        self.motor_controller = try MotorController.init(self.allocator, config, battery_type, protocol);
     }
 
     fn handleCommand(self: *Self, cmd_str: []const u8) !void {
         var iterator = std.mem.splitSequence(u8, cmd_str, " ");
         const parsed_cmd = iterator.next() orelse return error.NoCommandReceived;
 
-        const cmd: ?Commands = std.meta.stringToEnum(Commands, parsed_cmd);
-        if (cmd == null) return error.InvalidCommand;
+        const cmd_opt: ?Protocol.CommandType = std.meta.stringToEnum(Protocol.CommandType, parsed_cmd);
+        if (cmd_opt == null) {
+            std.debug.print("{s} is not a valid command!\n", .{parsed_cmd});
+            return error.InvalidCommand;
+        }
 
-        // TODO: Implement SetDirection & conditions to only allow certain commands only during specific states
-        switch (cmd.?) {
+        const cmd = cmd_opt.?;
+        switch (cmd) {
             .Arm => {
                 const motor_idx = try std.fmt.parseInt(
                     usize,
-                    iterator.next() orelse return error.InvalidCommand,
+                    iterator.next() orelse return error.InvalidArmMotor,
                     10,
                 );
 
@@ -723,7 +625,7 @@ const Server = struct {
             .Disarm => {
                 const motor_idx = try std.fmt.parseInt(
                     usize,
-                    iterator.next() orelse return error.InvalidCommand,
+                    iterator.next() orelse return error.InvalidDisarmMotor,
                     10,
                 );
 
@@ -732,27 +634,27 @@ const Server = struct {
             .SetSpeed => {
                 const motor_idx = try std.fmt.parseInt(
                     usize,
-                    iterator.next() orelse return error.InvalidCommand,
+                    iterator.next() orelse return error.InvalidSpeedMotor,
                     10,
                 );
 
                 const speed = try std.fmt.parseFloat(
                     f32,
-                    iterator.next() orelse return error.InvalidCommand,
+                    iterator.next() orelse return error.InvalidSpeedCommand,
                 );
                 try self.motor_controller.?.setMotorSpeed(motor_idx, speed);
             },
             .ReverseDirection => {
                 const motor_idx = try std.fmt.parseInt(
                     usize,
-                    iterator.next() orelse return error.InvalidCommand,
+                    iterator.next() orelse return error.InvalidReverseMotor,
                     10,
                 );
 
                 try self.motor_controller.?.reverseMotorDirection(motor_idx);
             },
             .Battery => {
-                const voltage_str = iterator.next() orelse return error.InvalidCommand;
+                const voltage_str = iterator.next() orelse return error.InvalidVoltageStr;
                 const voltage = std.fmt.parseFloat(f32, voltage_str) catch |err| {
                     std.debug.print("Failed to parse voltage str: {s}. Err => {any}\n", .{ voltage_str, err });
                     return;
@@ -763,17 +665,21 @@ const Server = struct {
                 }
                 return;
             },
+            .UpdateOrientation => {},
+            .SetOrientation => {},
         }
     }
 
     fn sendResponse(self: *Self, response: []const u8, client_addr: std.posix.sockaddr, addr_len: std.posix.socklen_t) !void {
-        _ = try std.posix.sendto(
+        _ = std.posix.sendto(
             self.socket.?,
             response,
             0,
             &client_addr,
             addr_len,
-        );
+        ) catch |err| {
+            std.debug.print("Error in sending response: {s} to client! Err => {any}\n", .{ response, err });
+        };
     }
 
     fn heartbeatMonitor(self: *Self) void {
@@ -789,7 +695,9 @@ const Server = struct {
                     if (self.motor_controller) |controller| {
                         // Safely disarm all motors
                         for (0..controller.motors.len) |i| {
-                            controller.disarmMotor(i) catch {};
+                            controller.disarmMotor(i) catch |err| {
+                                std.debug.print("Error disarming motor: {d}. Err => {any}\n", .{ i, err });
+                            };
                         }
                     }
                 }

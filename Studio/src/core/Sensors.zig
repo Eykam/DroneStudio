@@ -26,7 +26,7 @@ pub const SensorState = struct {
     previous_mag_magnitude: f32 = 0,
 
     position: Vec3,
-    velocity: Vec3 = .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+    velocity: Vec3,
 
     samples: u32 = 0,
     sample_count: u32 = 0,
@@ -35,20 +35,21 @@ pub const SensorState = struct {
 
     declination: f32 = -12.46,
 
-    accel_offset: Vec3 = .{ .x = 0.0, .y = 0.0, .z = 0.0 },
-    gyro_offset: Vec3 = .{ .x = 0.0, .y = 0.0, .z = 0.0 },
+    accel_offset: Vec3 = Vec3.zero(),
+    gyro_offset: Vec3 = Vec3.zero(),
 
-    mag_hard_iron: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    mag_hard_iron: Vec3 = Vec3.zero(),
     mag_soft_iron: Vec3 = .{ .x = 1, .y = 1, .z = 1 },
 
     mag_min: Vec3 = .{ .x = 99999.0, .y = 99999.0, .z = 99999.0 },
     mag_max: Vec3 = .{ .x = -99999.0, .y = -99999.0, .z = -99999.0 },
 
-    pub fn init(allocator: std.mem.Allocator, node: *Node, config: *DroneConfig) !*Self {
+    pub fn init(allocator: std.mem.Allocator, config: *DroneConfig) !*Self {
         const self = try allocator.create(Self);
         self.* = Self{
             .config = config,
-            .position = .{ .x = node.position[0], .y = node.position[1], .z = node.position[2] },
+            .position = Vec3.zero(),
+            .velocity = Vec3.zero(),
             .mag_hard_iron = config.sensor_calibration.mag_hard_iron,
             .mag_soft_iron = config.sensor_calibration.mag_soft_iron,
             .accel_offset = config.sensor_calibration.accel_offset,
@@ -93,8 +94,8 @@ pub const SensorState = struct {
             .AccelGyro => {
                 self.calibrating = true;
                 self.sample_count = 0;
-                self.accel_offset = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
-                self.gyro_offset = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+                self.accel_offset = Vec3.zero();
+                self.gyro_offset = Vec3.zero();
             },
             .Magnetometer => {
                 self.calibrating = true;
@@ -230,7 +231,7 @@ pub const PoseHandler = struct {
             .allocator = allocator,
             .node = node,
             .prev_instant = time.Instant.now() catch unreachable,
-            .sensor_state = try SensorState.init(allocator, node, config),
+            .sensor_state = try SensorState.init(allocator, config),
         };
     }
 

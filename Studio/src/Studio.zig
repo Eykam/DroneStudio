@@ -2,24 +2,25 @@ const std = @import("std");
 const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
 const Secrets = _Secrets{};
 
-const Math = @import("Math.zig");
+const Math = @import("core/Math.zig");
 const Vec3 = Math.Vec3;
 
-const Pipeline = @import("Pipeline.zig");
+const Drone = @import("core/Drone.zig");
+const Pipeline = @import("core/Pipeline.zig");
 const Scene = Pipeline.Scene;
-const Shape = @import("Shape.zig");
-const Node = @import("Node.zig");
-const Mesh = @import("Mesh.zig");
+const Shape = @import("core/Shape.zig");
+const Node = @import("core/Node.zig");
+const Mesh = @import("core/Mesh.zig");
 
-const UDP = @import("UDP.zig");
-const Sensors = @import("Sensors.zig");
+const UDP = @import("core/UDP.zig");
+const Sensors = @import("core/Sensors.zig");
 
-const Video = @import("Video.zig");
-const Vision = @import("Vision.zig");
-const gl = @import("bindings/gl.zig");
+const Video = @import("core/Video.zig");
+const Vision = @import("core/Vision.zig");
+const gl = @import("core/bindings/gl.zig");
 const glfw = gl.glfw;
 
-const UI = @import("UI.zig");
+const UI = @import("core/UI.zig");
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -132,7 +133,12 @@ pub fn main() !void {
         scene.camera.position.z,
     }});
 
-    // ======================================================= IMU Setup =======================================================
+    // ======================================================= Motor controller & IMU Setup =======================================================
+    const motor_controller = try Drone.MotorControllerClient.init(
+        alloc,
+        null,
+    );
+    scene.motor_controller = motor_controller;
 
     //Initialize UDP servers
     var imu_server = UDP.init(
@@ -142,11 +148,12 @@ pub fn main() !void {
         Secrets.client_port_imu,
     );
 
-    var pose_handler = try Sensors.PoseHandler.init(alloc, droneNode, scene.motor_controller.config);
+    var pose_handler = try Sensors.PoseHandler.init(alloc, droneNode, motor_controller.config);
+    motor_controller.sensor_state = pose_handler.sensor_state;
+
     var pose_udp_handler = UDP.Handler(Sensors.PoseHandler).init(&pose_handler);
     const pose_interface = pose_udp_handler.interface();
     try imu_server.start(pose_interface);
-
     // ================================================= Stereo Matching Setup =================================================
 
     const StereoVO = try Vision.StereoVO.init(

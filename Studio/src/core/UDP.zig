@@ -2,10 +2,6 @@
 const std = @import("std");
 const time = std.time;
 const Instant = time.Instant;
-const Mesh = @import("Shape.zig").Mesh;
-const Math = @import("Math.zig");
-const Vec3 = Math.Vec3;
-
 const Self = @This();
 
 host_ip: []const u8,

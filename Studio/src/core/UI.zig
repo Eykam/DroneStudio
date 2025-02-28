@@ -7,7 +7,7 @@ const Sensors = @import("Sensors.zig");
 const Math = @import("Math.zig");
 
 const DroneConfig = Drone.DroneConfig;
-const MotorController = Drone.MotorController;
+const MotorController = Drone.MotorControllerClient;
 const StereoVO = Vision.StereoVO;
 const CameraPose = Vision.CameraPose;
 
@@ -741,7 +741,7 @@ pub const DroneConfigWindow = struct {
     show_save_modal: bool = false,
     show_load_modal: bool = false,
 
-    selected_motor: MotorController.Motors,
+    selected_motor: Drone.Protocol.Motors,
     global_throttle: f32,
 
     allocator: std.mem.Allocator,
@@ -750,7 +750,7 @@ pub const DroneConfigWindow = struct {
         const self = try allocator.create(Self);
         self.* = .{
             .visible = true,
-            .selected_motor = MotorController.Motors.Motor_1,
+            .selected_motor = .Motor_1,
             .global_throttle = 0,
             .allocator = allocator,
         };
@@ -1000,7 +1000,7 @@ pub const DroneConfigWindow = struct {
         imgui.igNewLine();
 
         // Connection Status and Controls
-        const motor_controller = ctx.scene.motor_controller;
+        const motor_controller = ctx.scene.motor_controller.?;
         const conn_state = motor_controller.getConnectionState();
         const state_str = conn_state.toString();
 
@@ -1021,14 +1021,14 @@ pub const DroneConfigWindow = struct {
             .Disconnected => {
                 if (imgui.igButton("Connect", imgui.ImVec2{ .x = 120, .y = 0 })) {
                     motor_controller.connect() catch |err| {
-                        std.debug.print("Failed to connect: {}\n", .{err});
+                        std.debug.print("Failed to connect: {any}\n", .{err});
                     };
                 }
             },
             .Failed => {
                 if (imgui.igButton("Retry", imgui.ImVec2{ .x = 120, .y = 0 })) {
                     motor_controller.retryConnection() catch |err| {
-                        std.debug.print("Failed to retry connection: {}\n", .{err});
+                        std.debug.print("Failed to retry connection: {any}\n", .{err});
                     };
                 }
             },
@@ -1048,7 +1048,7 @@ pub const DroneConfigWindow = struct {
                 "(Configuration locked while running)",
             );
         }
-        const config = ctx.scene.motor_controller.config;
+        const config = motor_controller.config;
 
         const local_ip = self.allocator.dupeZ(u8, config.local_ip) catch {
             std.debug.print("Failed to allocate mem for local ip string\n", .{});
@@ -1104,7 +1104,7 @@ pub const DroneConfigWindow = struct {
         imgui.igText("Config Path: %s", @as([*c]const u8, curr_path.ptr));
 
         // Save/Load Buttons
-        const button_disabled = ctx.scene.motor_controller.getConnectionState() == .Running;
+        const button_disabled = motor_controller.getConnectionState() == .Running;
 
         if (button_disabled) {
             imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_Alpha, 0.5);
@@ -1126,16 +1126,17 @@ pub const DroneConfigWindow = struct {
     }
 
     inline fn drawThrottleTesting(self: *Self, ctx: *const UIContext) void {
-        if (ctx.scene.motor_controller.getConnectionState() != .Running and ctx.scene.motor_controller.getConnectionState() != .Ready) {
+        const motor_controller = ctx.scene.motor_controller.?;
+        if (motor_controller.getConnectionState() != .Running and motor_controller.getConnectionState() != .Ready) {
             imgui.igText("Please connect to controller to initiate testing!");
             return;
         }
 
-        const motor_states = ctx.scene.motor_controller.motor_states;
+        const motor_states = motor_controller.motor_states;
 
         // Individual sliders for each motor
-        inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
-            const motor_enum = @as(MotorController.Motors, @enumFromInt(motor.value));
+        inline for (@typeInfo(Drone.Protocol.Motors).@"enum".fields) |motor| {
+            const motor_enum = @as(Drone.Protocol.Motors, @enumFromInt(motor.value));
             const motor_state = &motor_states[motor.value];
 
             // Motor header with status
@@ -1158,12 +1159,11 @@ pub const DroneConfigWindow = struct {
                     std.fmt.comptimePrint("Reverse###{d}", .{motor.value}),
                     imgui.ImVec2{ .x = 80, .y = 0 },
                 )) {
-                    const command = MotorController.Command{
-                        .kind = .ReverseDirection,
-                        .speed = 0,
+                    const command = Drone.Protocol.Command{
+                        .type = .ReverseDirection,
                         .motor = motor_enum,
                     };
-                    _ = ctx.scene.motor_controller.command_queue.push(command);
+                    _ = motor_controller.command_queue.push(command);
                 }
                 imgui.igSameLine(0, 10);
             }
@@ -1179,12 +1179,11 @@ pub const DroneConfigWindow = struct {
                 button_label,
                 imgui.ImVec2{ .x = 80, .y = 0 },
             )) {
-                const command = MotorController.Command{
-                    .kind = if (motor_state.armed) .Disarm else .Arm,
-                    .speed = 0,
+                const command = Drone.Protocol.Command{
+                    .type = if (motor_state.armed) .Disarm else .Arm,
                     .motor = motor_enum,
                 };
-                _ = ctx.scene.motor_controller.command_queue.push(command);
+                _ = motor_controller.command_queue.push(command);
             }
 
             imgui.igSameLine(0, 10);
@@ -1199,17 +1198,17 @@ pub const DroneConfigWindow = struct {
                 std.fmt.comptimePrint("{s} Throttle (%)", .{@tagName(motor_enum)}),
                 &throttle,
                 0.0,
-                ctx.scene.motor_controller.config.global_max_throttle,
+                motor_controller.config.global_max_throttle,
                 "%.1f",
                 imgui.ImGuiSliderFlags_None,
             )) {
                 if (motor_state.armed) {
-                    const command = MotorController.Command{
-                        .kind = .SetSpeed,
+                    const command = Drone.Protocol.Command{
+                        .type = .SetSpeed,
                         .speed = throttle,
                         .motor = motor_enum,
                     };
-                    _ = ctx.scene.motor_controller.command_queue.push(command);
+                    _ = motor_controller.command_queue.push(command);
                 }
             }
 
@@ -1224,25 +1223,26 @@ pub const DroneConfigWindow = struct {
             "All Armed Motors Throttle (%)",
             &self.global_throttle,
             0.0,
-            ctx.scene.motor_controller.config.global_max_throttle,
+            motor_controller.config.global_max_throttle,
             "%.1f",
             imgui.ImGuiSliderFlags_None,
         )) {
-            inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+            inline for (@typeInfo(Drone.Protocol.Motors).@"enum".fields) |motor| {
                 if (motor_states[motor.value].armed) {
-                    const command = MotorController.Command{
-                        .kind = .SetSpeed,
+                    const command = Drone.Protocol.Command{
+                        .type = .SetSpeed,
                         .speed = self.global_throttle,
                         .motor = @enumFromInt(motor.value),
                     };
-                    _ = ctx.scene.motor_controller.command_queue.push(command);
+                    _ = motor_controller.command_queue.push(command);
                 }
             }
         }
     }
 
     inline fn drawServerConfig(self: *Self, ctx: *const UIContext) void {
-        const conn_state = ctx.scene.motor_controller.getConnectionState();
+        const motor_controller = ctx.scene.motor_controller.?;
+        const conn_state = motor_controller.getConnectionState();
         const config_locked = conn_state == .Running or conn_state == .Ready;
 
         if (config_locked) {
@@ -1264,15 +1264,15 @@ pub const DroneConfigWindow = struct {
         )) {
             if (!config_locked) {
                 const ip_len = std.mem.indexOfScalar(u8, &self.local_ip_buffer, 0) orelse self.local_ip_buffer.len;
-                ctx.scene.motor_controller.config.allocator.free(ctx.scene.motor_controller.config.local_ip);
-                ctx.scene.motor_controller.config.local_ip = ctx.scene.motor_controller.config.allocator.dupe(u8, self.local_ip_buffer[0..ip_len]) catch |err| {
+                motor_controller.config.allocator.free(motor_controller.config.local_ip);
+                motor_controller.config.local_ip = motor_controller.config.allocator.dupe(u8, self.local_ip_buffer[0..ip_len]) catch |err| {
                     std.debug.print("Failed to allocate memory for IP: {}\n", .{err});
                     return;
                 };
             }
         }
 
-        var local_port = @as(c_int, ctx.scene.motor_controller.config.local_port);
+        var local_port = @as(c_int, motor_controller.config.local_port);
         if (imgui.igInputInt(
             "Local Port",
             &local_port,
@@ -1281,7 +1281,7 @@ pub const DroneConfigWindow = struct {
             if (config_locked) imgui.ImGuiInputTextFlags_ReadOnly else imgui.ImGuiInputTextFlags_None,
         )) {
             if (!config_locked) {
-                ctx.scene.motor_controller.config.local_port = @intCast(@max(0, @min(local_port, 65535)));
+                motor_controller.config.local_port = @intCast(@max(0, @min(local_port, 65535)));
             }
         }
 
@@ -1299,15 +1299,15 @@ pub const DroneConfigWindow = struct {
         )) {
             if (!config_locked) {
                 const ip_len = std.mem.indexOfScalar(u8, &self.controller_ip_buffer, 0) orelse self.controller_ip_buffer.len;
-                ctx.scene.motor_controller.config.allocator.free(ctx.scene.motor_controller.config.controller_ip);
-                ctx.scene.motor_controller.config.controller_ip = ctx.scene.motor_controller.config.allocator.dupe(u8, self.controller_ip_buffer[0..ip_len]) catch |err| {
+                motor_controller.config.allocator.free(motor_controller.config.controller_ip);
+                motor_controller.config.controller_ip = motor_controller.config.allocator.dupe(u8, self.controller_ip_buffer[0..ip_len]) catch |err| {
                     std.debug.print("Failed to allocate memory for IP: {}\n", .{err});
                     return;
                 };
             }
         }
 
-        var controller_port = @as(c_int, ctx.scene.motor_controller.config.controller_port);
+        var controller_port = @as(c_int, motor_controller.config.controller_port);
         if (imgui.igInputInt(
             "Controller Port",
             &controller_port,
@@ -1316,7 +1316,7 @@ pub const DroneConfigWindow = struct {
             if (config_locked) imgui.ImGuiInputTextFlags_ReadOnly else imgui.ImGuiInputTextFlags_None,
         )) {
             if (!config_locked) {
-                ctx.scene.motor_controller.config.controller_port = @intCast(@max(0, @min(controller_port, 65535)));
+                motor_controller.config.controller_port = @intCast(@max(0, @min(controller_port, 65535)));
             }
         }
 
@@ -1327,23 +1327,25 @@ pub const DroneConfigWindow = struct {
 
     inline fn drawProtocolConfig(self: *Self, ctx: *const UIContext) void {
         // DShot Protocol Selection
+        const motor_controller = ctx.scene.motor_controller.?;
 
-        inline for (@typeInfo(MotorController.Protocols).@"enum".fields) |protocol| {
+        imgui.igNewLine();
+        inline for (@typeInfo(Drone.DSHOT).@"enum".fields) |protocol| {
             if (protocol.value > 0) {
                 imgui.igSameLine(0, 4);
             }
 
-            const is_selected = protocol.value == @intFromEnum(ctx.scene.motor_controller.config.dshot_protocol);
+            const is_selected = protocol.value == @intFromEnum(motor_controller.config.dshot_protocol);
             Styles.pushButtonColors(is_selected);
 
-            const protocol_str = std.fmt.allocPrintZ(self.allocator, "DShot {s}", .{@tagName(@as(MotorController.Protocols, @enumFromInt(protocol.value)))}) catch unreachable;
+            const protocol_str = std.fmt.allocPrintZ(self.allocator, "DShot {d}", .{protocol.value}) catch unreachable;
             defer self.allocator.free(protocol_str);
 
             if (imgui.igButton(
                 protocol_str,
                 imgui.ImVec2{ .x = 90, .y = 0 },
             )) {
-                ctx.scene.motor_controller.config.dshot_protocol = @enumFromInt(protocol.value);
+                motor_controller.config.dshot_protocol = @enumFromInt(protocol.value);
             }
 
             Styles.popButtonColors();
@@ -1352,7 +1354,7 @@ pub const DroneConfigWindow = struct {
         imgui.igNewLine();
 
         // Global Max Throttle
-        var global_max = ctx.scene.motor_controller.config.global_max_throttle;
+        var global_max = motor_controller.config.global_max_throttle;
         if (imgui.igSliderFloat(
             "Global Max Throttle (%)",
             &global_max,
@@ -1361,14 +1363,16 @@ pub const DroneConfigWindow = struct {
             "%.1f",
             imgui.ImGuiSliderFlags_None,
         )) {
-            ctx.scene.motor_controller.config.global_max_throttle = global_max;
+            motor_controller.config.global_max_throttle = global_max;
         }
     }
 
     inline fn drawMotorConfig(self: *Self, ctx: *const UIContext) void {
         // Motor Selection Buttons
+        const motor_controller = ctx.scene.motor_controller.?;
+
         imgui.igText("Select Motor:");
-        inline for (@typeInfo(MotorController.Motors).@"enum".fields) |motor| {
+        inline for (@typeInfo(Drone.Protocol.Motors).@"enum".fields) |motor| {
             if (motor.value > 0) {
                 imgui.igSameLine(0, 4);
             }
@@ -1390,7 +1394,7 @@ pub const DroneConfigWindow = struct {
         imgui.igSeparator();
 
         // Selected Motor Configuration
-        const motor = &ctx.scene.motor_controller.config.motors[@intFromEnum(self.selected_motor)];
+        const motor = &motor_controller.config.motors[@intFromEnum(self.selected_motor)];
         var pin = @as(c_int, motor.pin);
         if (imgui.igInputInt("GPIO Pin", &pin, 0, 0, imgui.ImGuiInputTextFlags_CharsDecimal)) {
             motor.pin = @intCast(@max(0, @min(pin, 27)));
@@ -1408,12 +1412,12 @@ pub const DroneConfigWindow = struct {
         }
         imgui.igEndDisabled();
 
-        var max_throttle = @min(motor.max_throttle, ctx.scene.motor_controller.config.global_max_throttle);
+        var max_throttle = @min(motor.max_throttle, motor_controller.config.global_max_throttle);
         if (imgui.igSliderFloat(
             "Max Throttle (%)",
             &max_throttle,
             0.0,
-            @min(100.0, ctx.scene.motor_controller.config.global_max_throttle),
+            @min(100.0, motor_controller.config.global_max_throttle),
             "%.1f",
             imgui.ImGuiSliderFlags_None,
         )) {
@@ -1422,6 +1426,8 @@ pub const DroneConfigWindow = struct {
     }
 
     inline fn drawSaveModal(self: *Self, ctx: *const UIContext) void {
+        const motor_controller = ctx.scene.motor_controller.?;
+
         if (self.show_save_modal) {
             imgui.igSetNextWindowSize(.{ .x = 400, .y = 150 }, imgui.ImGuiCond_FirstUseEver);
             if (imgui.igBegin("Save Configuration##modal", &self.show_save_modal, imgui.ImGuiWindowFlags_Modal)) {
@@ -1440,7 +1446,7 @@ pub const DroneConfigWindow = struct {
 
                 imgui.igSpacing();
                 if (imgui.igButton("Save", imgui.ImVec2{ .x = 120, .y = 0 })) {
-                    ctx.scene.motor_controller.config.saveToFile(self.config_path_buffer[0 .. std.mem.indexOfScalar(u8, &self.config_path_buffer, 0) orelse self.config_path_buffer.len]) catch |err| {
+                    motor_controller.config.saveToFile(self.config_path_buffer[0 .. std.mem.indexOfScalar(u8, &self.config_path_buffer, 0) orelse self.config_path_buffer.len]) catch |err| {
                         std.debug.print("Failed to save config: {}\n", .{err});
                     };
                     self.show_save_modal = false;
@@ -1455,6 +1461,8 @@ pub const DroneConfigWindow = struct {
     }
 
     inline fn drawLoadModal(self: *Self, ctx: *const UIContext) void {
+        const motor_controller = ctx.scene.motor_controller.?;
+
         if (self.show_load_modal) {
             imgui.igSetNextWindowSize(.{ .x = 400, .y = 300 }, imgui.ImGuiCond_FirstUseEver);
             if (imgui.igBegin("Load Configuration##modal", &self.show_load_modal, imgui.ImGuiWindowFlags_Modal)) {
@@ -1487,8 +1495,8 @@ pub const DroneConfigWindow = struct {
                 imgui.igSpacing();
                 if (imgui.igButton("Load", imgui.ImVec2{ .x = 120, .y = 0 })) {
                     const path = self.config_path_buffer[0 .. std.mem.indexOfScalar(u8, &self.config_path_buffer, 0) orelse self.config_path_buffer.len];
-                    ctx.scene.motor_controller.config = DroneConfig.loadFromFile(
-                        ctx.scene.motor_controller.config.allocator,
+                    motor_controller.config = DroneConfig.loadFromFile(
+                        motor_controller.config.allocator,
                         path,
                     ) catch |err| {
                         std.debug.print("Failed to load config: {}\n", .{err});
@@ -1574,7 +1582,7 @@ pub const BatteryStatusWindow = struct {
 
         // Window content
         if (imgui.igBegin("Battery Status", &self.visible, window_flags)) {
-            const motor_controller = ctx.scene.motor_controller;
+            const motor_controller = ctx.scene.motor_controller.?;
             const battery_info = motor_controller.connection_handler.battery_info;
 
             // Get the draw list for custom rendering

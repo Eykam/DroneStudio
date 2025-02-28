@@ -16,7 +16,7 @@ const glfw = gl.glfw;
 const glad = gl.glad;
 const imgui = c.imgui;
 const Pose = Vision.CameraPose;
-const MotorController = Drone.MotorController;
+const MotorController = Drone.MotorControllerClient;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
 const ShaderError = error{ UnableToCreateShader, ShaderCompilationFailed, UnableToCreateProgram, ShaderLinkingFailed, UnableToCreateWindow };
@@ -51,7 +51,7 @@ pub const Scene = struct {
     height: f32,
     appState: AppState,
     camera: Camera,
-    motor_controller: *MotorController,
+    motor_controller: ?*MotorController = null,
 
     uModelLoc: glad.GLint,
     uViewLoc: glad.GLint,
@@ -74,7 +74,10 @@ pub const Scene = struct {
     frame_times: [120]f64 = .{0} ** 120,
     frame_time_index: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, window: ?*glfw.struct_GLFWwindow) !*Self {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        window: ?*glfw.struct_GLFWwindow,
+    ) !*Self {
         if (window == null) {
             std.debug.print("Failed to create GLFW window\n", .{});
             return GSLWError.FailedToCreateWindow;
@@ -157,7 +160,6 @@ pub const Scene = struct {
             .depthTextureLoc = depthTextureLoc,
             .useInstancedKeypointLoc = useInstancedKeypointLoc,
             .useInstancedLinesLoc = uInstancedLinesLoc,
-            .motor_controller = try MotorController.init(allocator, null),
         };
 
         return scene;

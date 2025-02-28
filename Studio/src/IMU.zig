@@ -1,4 +1,5 @@
 const std = @import("std");
+const I2C = @import("core/I2C.zig");
 const time = std.time;
 const math = std.math;
 
@@ -36,82 +37,11 @@ const INA219_CONFIG_BADCRES_12BIT = 0x0400; // 12-bit bus res = 0..4097
 const INA219_CONFIG_SADCRES_12BIT_1S_532US = 0x0018; // 1 x 12-bit shunt sample
 const INA219_CONFIG_MODE_SANDBVOLT_CONTINUOUS = 0x0007; // Continuous sampling
 
-// I2C Config
 const I2C_PATH = "/dev/i2c-1";
 const I2C_SLAVE = 0x0703;
 
 const Readings = struct { x: f32, y: f32, z: f32 };
 const ReadingsPacket = [44]u8;
-
-const I2C = struct {
-    const I2C_RDWR = 0x0707;
-    const I2C_M_RD = 0x0001;
-
-    const I2C_Msg = extern struct {
-        addr: u16,
-        flags: u16,
-        len: u16,
-        buf: [*]u8,
-    };
-
-    const I2C_Rdwr_Ioctl_Data = extern struct {
-        msgs: [*]I2C_Msg,
-        nmsgs: u32,
-    };
-
-    pub fn readBlock(fd: i32, addr: u8, reg: u8, buffer: []u8) !void {
-        var msgs: [2]I2C_Msg = undefined;
-
-        // Write register address
-        msgs[0] = .{
-            .addr = addr,
-            .flags = 0,
-            .len = 1,
-            .buf = @ptrCast(@constCast(&reg)),
-        };
-
-        // Read data
-        msgs[1] = .{
-            .addr = addr,
-            .flags = I2C_M_RD,
-            .len = @intCast(buffer.len),
-            .buf = buffer.ptr,
-        };
-
-        var data = I2C_Rdwr_Ioctl_Data{
-            .msgs = &msgs,
-            .nmsgs = 2,
-        };
-
-        if (std.os.linux.ioctl(fd, I2C_RDWR, @intFromPtr(&data)) < 0) {
-            return error.I2CTransferFailed;
-        }
-    }
-
-    fn openI2C() !i32 {
-        const fd = try std.posix.open(I2C_PATH, std.posix.O{ .ACCMODE = .RDWR }, 0);
-        if (fd < 0) {
-            std.debug.print("Failed to open I2C bus\n", .{});
-            return error.I2COpenFailed;
-        }
-        return fd;
-    }
-
-    // Helper function to check if a device is present on the I2C bus
-    fn isDevicePresent(fd: i32, addr: u8) bool {
-        if (std.os.linux.ioctl(fd, I2C_SLAVE, addr) < 0) {
-            return false;
-        }
-
-        // Try to read a single byte
-        var buf: [1]u8 = undefined;
-        const bytes_read = std.posix.read(fd, &buf) catch {
-            return false;
-        };
-
-        return bytes_read == 1;
-    }
-};
 
 pub const Mpu9250 = struct {
     i2c_fd: i32,
@@ -126,12 +56,12 @@ pub const Mpu9250 = struct {
     const Self = @This();
 
     pub fn init() !?Self {
-        const fd = I2C.openI2C() catch |err| {
+        const fd = I2C.openI2C(I2C_PATH) catch |err| {
             std.debug.print("Failed to open I2C for MPU9250: {any}\n", .{err});
             return null;
         };
 
-        if (!I2C.isDevicePresent(fd, MPU9250_ADDR)) {
+        if (!I2C.isDevicePresent(fd, MPU9250_ADDR, I2C_SLAVE)) {
             std.debug.print("MPU9250 not detected on I2C bus\n", .{});
             _ = std.posix.close(fd);
             return null;
@@ -342,13 +272,13 @@ pub const Ina219 = struct {
     const Self = @This();
 
     pub fn init() !?Self {
-        const fd = I2C.openI2C() catch |err| {
+        const fd = I2C.openI2C(I2C_PATH) catch |err| {
             std.debug.print("Failed to open I2C for INA219: {any}\n", .{err});
             return null;
         };
 
         // Check if INA219 is present
-        if (!I2C.isDevicePresent(fd, INA219_ADDR)) {
+        if (!I2C.isDevicePresent(fd, INA219_ADDR, I2C_SLAVE)) {
             std.debug.print("INA219 not detected on I2C bus\n", .{});
             _ = std.posix.close(fd);
             return null;

@@ -7,12 +7,15 @@ sdkconfig.old
 Secrets.local.zig
 ffmpeg-windows
 cuda-windows
-*kernels.o
 gprof2dot.py
 generate_brief_pattern.py
+kernels.o
 out.dot
 callgrind*
 sass.txt
 *.ini
 drone_config.json
-configs 
+config
+PiSetup.zig
+PiTransfer.zig
+VideoStream.zig
