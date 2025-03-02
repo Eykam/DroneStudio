@@ -21,6 +21,7 @@ pub const SensorState = struct {
     };
 
     filter: ?*MadgwickFilter = null,
+    filter_offset: Vec3,
     config: *DroneConfig,
     mag_updated: bool = false,
     previous_mag_magnitude: f32 = 0,
@@ -54,6 +55,7 @@ pub const SensorState = struct {
             .mag_soft_iron = config.sensor_calibration.mag_soft_iron,
             .accel_offset = config.sensor_calibration.accel_offset,
             .gyro_offset = config.sensor_calibration.gyro_offset,
+            .filter_offset = Vec3{ .x = 0.0, .y = 0.0, .z = 180.0 },
         };
         return self;
     }
@@ -120,7 +122,7 @@ pub const SensorState = struct {
                 self.accel_offset = self.accel_offset.add(Vec3{
                     .x = accel.x,
                     .y = accel.y,
-                    .z = 1.0 + accel.z,
+                    .z = 1.0 - accel.z,
                 });
                 self.gyro_offset = self.gyro_offset.add(gyro);
 
@@ -261,9 +263,9 @@ pub const PoseHandler = struct {
         };
 
         const accel_ned = Vec3{
-            .x = accel.z,
-            .y = -accel.x,
-            .z = -accel.y,
+            .x = -accel.z,
+            .y = accel.x,
+            .z = accel.y,
         };
 
         // Apply same rotation to gyroscope readings
@@ -472,7 +474,7 @@ pub const MadgwickFilter = struct {
 
             const s_norm_squared = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
             if (s_norm_squared < 0.000001) {
-                std.debug.print("Gradient step too small in updateNoMag, using gyro only\n", .{});
+                // std.debug.print("Gradient step too small in updateNoMag, using gyro only\n", .{});
                 // If gradient is too small, just integrate gyro
                 const qDot0 = 0.5 * (-q1 * gx - q2 * gy - q3 * gz);
                 const qDot1 = 0.5 * (q0 * gx + q2 * gz - q3 * gy);
@@ -815,8 +817,8 @@ pub fn updateModelMatrix(
     const q = sensor_state.filter.?.q;
 
     const euler_gl = q.toEuler();
-    const q_gl2 = Math.Quaternion.fromAxisAngle(.{ .x = -1, .y = 0, .z = 0 }, euler_gl[1] - Math.radians(180.0));
-    const q_gl3 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = -1, .z = 0 }, euler_gl[2]);
+    const q_gl2 = Math.Quaternion.fromAxisAngle(.{ .x = 1, .y = 0, .z = 0 }, euler_gl[1]);
+    const q_gl3 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = 1, .z = 0 }, euler_gl[2]);
     const q_gl4 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = 0, .z = 1 }, euler_gl[0]);
 
     return q_gl4.multiply(q_gl2).multiply(q_gl3);

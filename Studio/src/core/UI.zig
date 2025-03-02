@@ -744,6 +744,24 @@ pub const DroneConfigWindow = struct {
     selected_motor: Drone.Protocol.Motors,
     global_throttle: f32,
 
+    target_roll: f32 = 0.0,
+    target_pitch: f32 = 0.0,
+    target_yaw: f32 = 0.0,
+    base_throttle: f32 = 20.0,
+    roll_kp: f32 = 0.5,
+    roll_ki: f32 = 0.01,
+    roll_kd: f32 = 0.1,
+    pitch_kp: f32 = 0.5,
+    pitch_ki: f32 = 0.01,
+    pitch_kd: f32 = 0.1,
+    yaw_kp: f32 = 0.2,
+    yaw_ki: f32 = 0.0,
+    yaw_kd: f32 = 0.05,
+    history_roll_error: [100]f32 = [_]f32{0.0} ** 100,
+    history_pitch_error: [100]f32 = [_]f32{0.0} ** 100,
+    history_yaw_error: [100]f32 = [_]f32{0.0} ** 100,
+    history_index: usize = 0,
+
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
@@ -831,6 +849,11 @@ pub const DroneConfigWindow = struct {
                     imgui.igEndTabItem();
                 }
 
+                if (imgui.igBeginTabItem("PID Control", null, 0)) {
+                    self.drawPidTab(ctx);
+                    imgui.igEndTabItem();
+                }
+
                 if (imgui.igBeginTabItem("Sensors", null, 0)) {
                     self.drawSensorConfig(ctx);
                     imgui.igEndTabItem();
@@ -844,6 +867,366 @@ pub const DroneConfigWindow = struct {
             self.drawLoadModal(ctx);
         }
         imgui.igEnd();
+    }
+
+    pub fn drawPidTab(self: *Self, ctx: *const UIContext) void {
+        const motor_controller = ctx.scene.motor_controller.?;
+        const pid_debug = motor_controller.getPidDebugInfo();
+        const deg_to_rad = std.math.pi / 180.0;
+
+        // Update PID errors history
+        if (motor_controller.connection_handler.pid_debug.active) {
+            self.history_roll_error[self.history_index] = pid_debug.roll_error;
+            self.history_pitch_error[self.history_index] = pid_debug.pitch_error;
+            self.history_yaw_error[self.history_index] = pid_debug.yaw_error;
+            self.history_index = (self.history_index + 1) % self.history_roll_error.len;
+        }
+
+        // PID Controller Status
+        if (imgui.igCollapsingHeader_BoolPtr("PID Controller Status", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Active status
+            const is_active = pid_debug.active;
+            const status_color = if (is_active)
+                imgui.ImVec4{ .x = 0.0, .y = 1.0, .z = 0.0, .w = 1.0 }
+            else
+                imgui.ImVec4{ .x = 0.7, .y = 0.7, .z = 0.7, .w = 1.0 };
+
+            const active_text = if (is_active) "ACTIVE" else "INACTIVE";
+            imgui.igTextColored(status_color, "Status: %s", &active_text);
+
+            // Enable/Disable button
+            if (is_active) {
+                if (imgui.igButton("Disable Orientation Control", imgui.ImVec2{ .x = 200, .y = 0 })) {
+                    const command = Drone.Protocol.Command{
+                        .type = .StopOrientation,
+                    };
+                    _ = motor_controller.command_queue.push(command);
+                }
+            } else {
+                if (imgui.igButton("Enable Orientation Control", imgui.ImVec2{ .x = 200, .y = 0 })) {
+                    // Create quaternion from euler angles
+                    const quat = Math.Quaternion.fromEuler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
+
+                    const command = Drone.Protocol.Command{
+                        .type = .SetOrientation,
+                        .pose = quat,
+                    };
+                    _ = motor_controller.command_queue.push(command);
+                }
+            }
+
+            imgui.igSeparator();
+
+            // Current and target orientation display
+            imgui.igText("Current Orientation (degrees):");
+            imgui.igText("  Roll:  %.2f", pid_debug.current_roll);
+            imgui.igText("  Pitch: %.2f", pid_debug.current_pitch);
+            imgui.igText("  Yaw:   %.2f", pid_debug.current_yaw);
+
+            imgui.igText("Target Orientation (degrees):");
+            imgui.igText("  Roll:  %.2f", pid_debug.target_roll);
+            imgui.igText("  Pitch: %.2f", pid_debug.target_pitch);
+            imgui.igText("  Yaw:   %.2f", pid_debug.target_yaw);
+
+            imgui.igSeparator();
+
+            // PID Error Values
+            imgui.igText("PID Errors:");
+            imgui.igText("  Roll:  %.2f", pid_debug.roll_error);
+            imgui.igText("  Pitch: %.2f", pid_debug.pitch_error);
+            imgui.igText("  Yaw:   %.2f", pid_debug.yaw_error);
+
+            // PID Integral Values
+            imgui.igText("PID Integral Values:");
+            imgui.igText("  Roll:  %.2f", pid_debug.roll_integral);
+            imgui.igText("  Pitch: %.2f", pid_debug.pitch_integral);
+            imgui.igText("  Yaw:   %.2f", pid_debug.yaw_integral);
+
+            imgui.igSeparator();
+
+            // Motor outputs
+            imgui.igText("Motor Outputs:");
+            for (pid_debug.motor_outputs, 0..) |output, i| {
+                imgui.igText("  Motor %d: %.1f%%", i, output);
+            }
+        }
+
+        // Set Target Orientation
+        if (imgui.igCollapsingHeader_BoolPtr("Set Target Orientation", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+            imgui.igText("Enter target orientation in degrees:");
+
+            var changed = false;
+            changed = imgui.igSliderFloat("Target Roll", &self.target_roll, -45.0, 45.0, "%.1f°", imgui.ImGuiSliderFlags_None) or changed;
+            changed = imgui.igSliderFloat("Target Pitch", &self.target_pitch, -45.0, 45.0, "%.1f°", imgui.ImGuiSliderFlags_None) or changed;
+            changed = imgui.igSliderFloat("Target Yaw", &self.target_yaw, -180.0, 180.0, "%.1f°", imgui.ImGuiSliderFlags_None) or changed;
+
+            imgui.igSeparator();
+
+            // Apply button
+            if (imgui.igButton("Apply Target Orientation", imgui.ImVec2{ .x = 200, .y = 0 }) or changed) {
+                // Create quaternion from euler angles
+                const quat = Math.Quaternion.fromEuler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
+
+                const command = Drone.Protocol.Command{
+                    .type = .SetOrientation,
+                    .pose = quat,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+
+            // Reset button
+            imgui.igSameLine(0, 10);
+            if (imgui.igButton("Reset to Current", imgui.ImVec2{ .x = 120, .y = 0 })) {
+                self.target_roll = pid_debug.current_roll;
+                self.target_pitch = pid_debug.current_pitch;
+                self.target_yaw = pid_debug.current_yaw;
+
+                // Also send the command
+                const quat = Math.Quaternion.fromEuler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
+
+                const command = Drone.Protocol.Command{
+                    .type = .SetOrientation,
+                    .pose = quat,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+
+            // Add "Level" button for quick leveling
+            imgui.igSameLine(0, 10);
+            if (imgui.igButton("Level", imgui.ImVec2{ .x = 60, .y = 0 })) {
+                self.target_roll = 0.0;
+                self.target_pitch = 0.0;
+                // Keep current yaw
+                self.target_yaw = pid_debug.current_yaw;
+
+                const quat = Math.Quaternion.fromEuler(0.0, self.target_yaw * deg_to_rad, 0.0);
+
+                const command = Drone.Protocol.Command{
+                    .type = .SetOrientation,
+                    .pose = quat,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+
+            imgui.igSeparator();
+
+            // Base throttle setting
+            changed = imgui.igSliderFloat("Base Throttle", &self.base_throttle, 5.0, 50.0, "%.1f%%", imgui.ImGuiSliderFlags_None);
+            if (changed and pid_debug.active) {
+                // Send base throttle update command
+                const command = Drone.Protocol.Command{
+                    .type = .UpdateBaseThrottle,
+                    .speed = self.base_throttle,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+        }
+
+        // PID Parameters
+        if (imgui.igCollapsingHeader_BoolPtr("PID Parameters", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Update local variables from PID debug info if active
+            if (pid_debug.active) {
+                self.roll_kp = pid_debug.roll_kp;
+                self.roll_ki = pid_debug.roll_ki;
+                self.roll_kd = pid_debug.roll_kd;
+
+                self.pitch_kp = pid_debug.pitch_kp;
+                self.pitch_ki = pid_debug.pitch_ki;
+                self.pitch_kd = pid_debug.pitch_kd;
+
+                self.yaw_kp = pid_debug.yaw_kp;
+                self.yaw_ki = pid_debug.yaw_ki;
+                self.yaw_kd = pid_debug.yaw_kd;
+            }
+
+            // Show axes with different colors
+            imgui.igTextColored(.{ .x = 1.0, .y = 0.4, .z = 0.4, .w = 1.0 }, "Roll Axis (Red)");
+            var roll_changed = imgui.igSliderFloat("Roll P##roll", &self.roll_kp, 0.0, 2.0, "%.3f", imgui.ImGuiSliderFlags_None);
+            roll_changed = imgui.igSliderFloat("Roll I##roll", &self.roll_ki, 0.0, 0.1, "%.3f", imgui.ImGuiSliderFlags_None) or roll_changed;
+            roll_changed = imgui.igSliderFloat("Roll D##roll", &self.roll_kd, 0.0, 1.0, "%.3f", imgui.ImGuiSliderFlags_None) or roll_changed;
+
+            if (roll_changed) {
+                // Send command to update roll PID params
+                const command = Drone.Protocol.Command{
+                    .type = .UpdatePidParams,
+                    .axis = "Roll",
+                    .kp = self.roll_kp,
+                    .ki = self.roll_ki,
+                    .kd = self.roll_kd,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+
+            imgui.igSpacing();
+            imgui.igTextColored(.{ .x = 0.4, .y = 1.0, .z = 0.4, .w = 1.0 }, "Pitch Axis (Green)");
+            var pitch_changed = imgui.igSliderFloat("Pitch P##pitch", &self.pitch_kp, 0.0, 2.0, "%.3f", imgui.ImGuiSliderFlags_None);
+            pitch_changed = imgui.igSliderFloat("Pitch I##pitch", &self.pitch_ki, 0.0, 0.1, "%.3f", imgui.ImGuiSliderFlags_None) or pitch_changed;
+            pitch_changed = imgui.igSliderFloat("Pitch D##pitch", &self.pitch_kd, 0.0, 1.0, "%.3f", imgui.ImGuiSliderFlags_None) or pitch_changed;
+
+            if (pitch_changed) {
+                // Send command to update pitch PID params
+                const command = Drone.Protocol.Command{
+                    .type = .UpdatePidParams,
+                    .axis = "Pitch",
+                    .kp = self.pitch_kp,
+                    .ki = self.pitch_ki,
+                    .kd = self.pitch_kd,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+
+            imgui.igSpacing();
+            imgui.igTextColored(.{ .x = 0.4, .y = 0.4, .z = 1.0, .w = 1.0 }, "Yaw Axis (Blue)");
+            var yaw_changed = imgui.igSliderFloat("Yaw P##yaw", &self.yaw_kp, 0.0, 2.0, "%.3f", imgui.ImGuiSliderFlags_None);
+            yaw_changed = imgui.igSliderFloat("Yaw I##yaw", &self.yaw_ki, 0.0, 0.1, "%.3f", imgui.ImGuiSliderFlags_None) or yaw_changed;
+            yaw_changed = imgui.igSliderFloat("Yaw D##yaw", &self.yaw_kd, 0.0, 1.0, "%.3f", imgui.ImGuiSliderFlags_None) or yaw_changed;
+
+            if (yaw_changed) {
+                // Send command to update yaw PID params
+                const command = Drone.Protocol.Command{
+                    .type = .UpdatePidParams,
+                    .axis = "Yaw",
+                    .kp = self.yaw_kp,
+                    .ki = self.yaw_ki,
+                    .kd = self.yaw_kd,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+
+            imgui.igSeparator();
+            if (imgui.igButton("Apply All Parameters", imgui.ImVec2{ .x = 200, .y = 0 })) {
+                // Send command to update all PID params at once
+                const command = Drone.Protocol.Command{
+                    .type = .UpdatePidParams,
+                    .axis = "All",
+                    .kp = self.roll_kp, // Using roll values for all axes
+                    .ki = self.roll_ki,
+                    .kd = self.roll_kd,
+                };
+                _ = motor_controller.command_queue.push(command);
+            }
+        }
+
+        // PID Error Plot
+        if (imgui.igCollapsingHeader_BoolPtr("PID Error Plot", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Error plots
+            var plot_params: imgui.ImVec2 = undefined;
+            imgui.igGetContentRegionAvail(&plot_params);
+
+            const plot_height = 100.0;
+            const plot_width = plot_params.x;
+
+            const draw_list = imgui.igGetWindowDrawList();
+            var cursor_pos: imgui.ImVec2 = undefined;
+            imgui.igGetCursorScreenPos(&cursor_pos);
+
+            // Background
+            imgui.ImDrawList_AddRectFilled(
+                draw_list,
+                cursor_pos,
+                .{ .x = cursor_pos.x + plot_width, .y = cursor_pos.y + plot_height },
+                imgui.igColorConvertFloat4ToU32(.{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 0.7 }),
+                5.0,
+                imgui.ImDrawFlags_None,
+            );
+
+            // Grid lines
+            const grid_color = imgui.igColorConvertFloat4ToU32(.{ .x = 0.5, .y = 0.5, .z = 0.5, .w = 0.5 });
+            const center_y = cursor_pos.y + plot_height / 2.0;
+
+            // Horizontal center line
+            imgui.ImDrawList_AddLine(draw_list, .{ .x = cursor_pos.x, .y = center_y }, .{ .x = cursor_pos.x + plot_width, .y = center_y }, grid_color, 1.0);
+
+            // Get max error for scaling
+            var max_error: f32 = 5.0; // Default scale to +/- 5 degrees
+            for (0..self.history_roll_error.len) |i| {
+                max_error = @max(max_error, @abs(self.history_roll_error[i]));
+                max_error = @max(max_error, @abs(self.history_pitch_error[i]));
+                max_error = @max(max_error, @abs(self.history_yaw_error[i]));
+            }
+
+            // Scale factor
+            const scale_factor = (plot_height / 2.0) / max_error;
+
+            // Error limit markers
+            imgui.ImDrawList_AddText_Vec2(
+                draw_list,
+                .{ .x = cursor_pos.x + 5, .y = cursor_pos.y + 5 },
+                imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 }),
+                std.fmt.allocPrintZ(self.allocator, "+{d:.1}°", .{max_error}) catch "",
+                null,
+            );
+
+            imgui.ImDrawList_AddText_Vec2(
+                draw_list,
+                .{ .x = cursor_pos.x + 5, .y = cursor_pos.y + plot_height - 15 },
+                imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 }),
+                std.fmt.allocPrintZ(self.allocator, "-{d:.1}°", .{max_error}) catch "",
+                null,
+            );
+
+            // Draw roll error line
+            const roll_color = imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 0.4, .z = 0.4, .w = 1.0 });
+            var prev_point_x = cursor_pos.x;
+            var prev_point_y = center_y - self.history_roll_error[self.history_index] * scale_factor;
+
+            for (0..self.history_roll_error.len) |i| {
+                const idx = (self.history_index + i) % self.history_roll_error.len;
+                const x = cursor_pos.x + (@as(f32, @floatFromInt(i)) * plot_width) / self.history_roll_error.len;
+                const y = center_y - self.history_roll_error[idx] * scale_factor;
+
+                if (i > 0) {
+                    imgui.ImDrawList_AddLine(draw_list, .{ .x = prev_point_x, .y = prev_point_y }, .{ .x = x, .y = y }, roll_color, 2.0);
+                }
+
+                prev_point_x = x;
+                prev_point_y = y;
+            }
+
+            // Draw pitch error line
+            const pitch_color = imgui.igColorConvertFloat4ToU32(.{ .x = 0.4, .y = 1.0, .z = 0.4, .w = 1.0 });
+            prev_point_x = cursor_pos.x;
+            prev_point_y = center_y - self.history_pitch_error[self.history_index] * scale_factor;
+
+            for (0..self.history_pitch_error.len) |i| {
+                const idx = (self.history_index + i) % self.history_pitch_error.len;
+                const x = cursor_pos.x + (@as(f32, @floatFromInt(i)) * plot_width) / self.history_pitch_error.len;
+                const y = center_y - self.history_pitch_error[idx] * scale_factor;
+
+                if (i > 0) {
+                    imgui.ImDrawList_AddLine(draw_list, .{ .x = prev_point_x, .y = prev_point_y }, .{ .x = x, .y = y }, pitch_color, 2.0);
+                }
+
+                prev_point_x = x;
+                prev_point_y = y;
+            }
+
+            // Draw yaw error line
+            const yaw_color = imgui.igColorConvertFloat4ToU32(.{ .x = 0.4, .y = 0.4, .z = 1.0, .w = 1.0 });
+            prev_point_x = cursor_pos.x;
+            prev_point_y = center_y - self.history_yaw_error[self.history_index] * scale_factor;
+
+            for (0..self.history_yaw_error.len) |i| {
+                const idx = (self.history_index + i) % self.history_yaw_error.len;
+                const x = cursor_pos.x + (@as(f32, @floatFromInt(i)) * plot_width) / self.history_yaw_error.len;
+                const y = center_y - self.history_yaw_error[idx] * scale_factor;
+
+                if (i > 0) {
+                    imgui.ImDrawList_AddLine(draw_list, .{ .x = prev_point_x, .y = prev_point_y }, .{ .x = x, .y = y }, yaw_color, 2.0);
+                }
+
+                prev_point_x = x;
+                prev_point_y = y;
+            }
+
+            // Legend
+            imgui.igDummy(.{ .x = 0, .y = plot_height + 5 });
+            imgui.igTextColored(.{ .x = 1.0, .y = 0.4, .z = 0.4, .w = 1.0 }, "Roll");
+            imgui.igSameLine(0, 20);
+            imgui.igTextColored(.{ .x = 0.4, .y = 1.0, .z = 0.4, .w = 1.0 }, "Pitch");
+            imgui.igSameLine(0, 20);
+            imgui.igTextColored(.{ .x = 0.4, .y = 0.4, .z = 1.0, .w = 1.0 }, "Yaw");
+        }
     }
 
     pub fn drawSensorConfig(self: *Self, ctx: *const UIContext) void {

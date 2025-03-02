@@ -46,6 +46,7 @@ pub const DSHOT = enum(u32) {
     DSHOT_150 = 150,
     DSHOT_300 = 300,
     DSHOT_600 = 600,
+    DSHOT_1200 = 1200,
 
     pub const MIN_THROTTLE: u16 = 48;
     pub const MAX_THROTTLE: u16 = 2047;
@@ -85,11 +86,16 @@ pub const DSHOT = enum(u32) {
             .DSHOT_150 => 6670, // 150kbps -> ~6.67µs per bit
             .DSHOT_300 => 3330, // 300kbps -> ~3.33µs per bit
             .DSHOT_600 => 1670, // 600kbps -> ~1.67µs per bit
+            .DSHOT_1200 => 830,
         };
     }
 
     /// Get the high time for a zero bit (T0H) in nanoseconds
     pub fn t0h_time(self: DSHOT) u64 {
+        if (self == .DSHOT_300) {
+            return 1250; // Precisely calibrated for your system
+        }
+
         // T0H is typically ~37.5% of the bit time
         const t = self.bit_time();
         return (t * 3) / 8;
@@ -97,6 +103,10 @@ pub const DSHOT = enum(u32) {
 
     /// Get the high time for a one bit (T1H) in nanoseconds
     pub fn t1h_time(self: DSHOT) u64 {
+        if (self == .DSHOT_300) {
+            return 2500; // Precisely calibrated for your system
+        }
+
         // T1H is typically ~75% of the bit time
         const t = self.bit_time();
         return (t * 3) / 4;
@@ -108,6 +118,7 @@ pub const DSHOT = enum(u32) {
             .DSHOT_150 => 30000, // 30µs
             .DSHOT_300 => 25000, // 25µs
             .DSHOT_600 => 20000, // 20µs
+            .DSHOT_1200 => 15000, // 15µs
         };
     }
 
@@ -158,23 +169,53 @@ pub const TimingUtils = struct {
 
     /// Set real-time priority for the current process
     pub fn setRealtimePriority() !void {
-        var sched = std.os.linux.sched_param{ .priority = 99 };
-        const ret = std.os.linux.sched_setscheduler(0, std.os.linux.SCHED{ .mode = .FIFO }, &sched);
+        const policy = std.os.linux.SCHED{
+            .mode = .FIFO, // Real-time FIFO scheduling
+            .RESET_ON_FORK = false,
+        };
 
+        // Set priority (1-99 for RT, higher is higher priority)
+        var param = std.os.linux.sched_param{
+            .priority = 99, // Maximum RT priority
+        };
+
+        const pid = std.os.linux.getpid();
+        const ret = std.os.linux.sched_setscheduler(pid, policy, &param);
         if (ret != 0) {
-            return error.SetSchedulerFailed;
+            return error.FailedToSetScheduler;
         }
+
+        // For memory locking, we need to use a direct syscall since it's not in std
+        // Define mlockall constants
+        const MCL_CURRENT: usize = 1;
+        const MCL_FUTURE: usize = 2;
+
+        // Call mlockall directly using syscall
+        const mlockall_result = std.os.linux.syscall1(std.os.linux.syscalls.Arm64.mlock, MCL_CURRENT | MCL_FUTURE);
+        if (mlockall_result != 0) {
+            std.debug.print("Warning: Failed to lock memory, paging may occur\n", .{});
+        }
+
+        std.debug.print("Set realtime priority (SCHED_FIFO, 99)\n", .{});
     }
 
     /// Pin process to a specific CPU core for better timing performance
-    pub fn pinToCore(core: u32) !void {
-        var set: std.os.linux.cpu_set_t = [_]usize{0} ** (std.os.linux.CPU_SETSIZE / @sizeOf(usize));
+    pub fn pinToCore(core_id: usize) !void {
+        var cpu_set: std.os.linux.cpu_set_t = [_]usize{0} ** (std.os.linux.CPU_SETSIZE / @sizeOf(usize));
 
-        const word_index = core / @bitSizeOf(usize);
-        const bit_index = core % @bitSizeOf(usize);
-        set[word_index] |= @as(usize, 1) << @as(u6, @intCast(bit_index));
+        const word_index = core_id / (@sizeOf(usize) * 8);
+        const bit_index = core_id % (@sizeOf(usize) * 8);
 
-        try std.os.linux.sched_setaffinity(0, &set);
+        if (word_index >= cpu_set.len) {
+            return error.CoreIdOutOfRange;
+        }
+
+        cpu_set[word_index] |= @as(usize, 1) << @intCast(bit_index);
+
+        const pid = std.os.linux.getpid();
+        try std.os.linux.sched_setaffinity(pid, &cpu_set);
+
+        std.debug.print("Pinned thread to core {d}\n", .{core_id});
     }
 };
 
@@ -194,6 +235,9 @@ pub const Protocol = struct {
         Battery,
         UpdateOrientation,
         SetOrientation,
+        StopOrientation,
+        UpdatePidParams,
+        UpdateBaseThrottle,
     };
 
     pub const Command = struct {
@@ -203,6 +247,11 @@ pub const Protocol = struct {
         motor: ?Motors = null,
         speed: ?f32 = null,
         pose: ?Math.Quaternion = null,
+
+        axis: ?[]const u8 = null,
+        kp: ?f32 = null,
+        ki: ?f32 = null,
+        kd: ?f32 = null,
 
         pub fn is_valid(self: Self) bool {
             switch (self.type) {
@@ -230,6 +279,18 @@ pub const Protocol = struct {
                         !std.math.isNan(pose.z) and
                         !std.math.isNan(pose.w);
                 },
+                .UpdatePidParams => {
+                    if (self.axis == null or self.kp == null or
+                        self.ki == null or self.kd == null) return false;
+
+                    return true;
+                },
+                .UpdateBaseThrottle => {
+                    if (self.speed == null) return false;
+                    const speed = self.speed.?;
+                    return speed >= 0 and speed <= 100.0;
+                },
+                .StopOrientation => return true,
                 .ReverseDirection => return self.motor != null,
                 .Arm => return self.motor != null,
                 .Disarm => return self.motor != null,
@@ -307,13 +368,49 @@ pub const Protocol = struct {
                         allocator,
                         "SetOrientation {d:.3} {d:.3} {d:.3} {d:.3}\n",
                         .{
+                            self.pose.?.w,
                             self.pose.?.x,
                             self.pose.?.y,
                             self.pose.?.z,
-                            self.pose.?.w,
                         },
                     ) catch |err| {
                         std.debug.print("Failed to format SetOrientation command: {any}\n", .{err});
+                        return error.FailedToGenerateCommand;
+                    };
+                },
+                .StopOrientation => blk: {
+                    break :blk std.fmt.allocPrint(
+                        allocator,
+                        "StopOrientation\n",
+                        .{},
+                    ) catch |err| {
+                        std.debug.print("Failed to format StopOrientation command: {any}\n", .{err});
+                        return error.FailedToGenerateCommand;
+                    };
+                },
+                .UpdatePidParams => blk: {
+                    break :blk std.fmt.allocPrint(
+                        allocator,
+                        "UpdatePidParams {s} {d:.3} {d:.3} {d:.3}\n",
+                        .{
+                            self.axis.?,
+                            self.kp.?,
+                            self.ki.?,
+                            self.kd.?,
+                        },
+                    ) catch |err| {
+                        std.debug.print("Failed to format UpdatePidParams command: {any}\n", .{err});
+                        return error.FailedToGenerateCommand;
+                    };
+                },
+
+                .UpdateBaseThrottle => blk: {
+                    break :blk std.fmt.allocPrint(
+                        allocator,
+                        "UpdateBaseThrottle {d:.1}\n",
+                        .{self.speed.?},
+                    ) catch |err| {
+                        std.debug.print("Failed to format UpdateBaseThrottle command: {any}\n", .{err});
                         return error.FailedToGenerateCommand;
                     };
                 },
@@ -402,13 +499,60 @@ pub const Protocol = struct {
     };
 };
 
+pub const PidDebugInfo = struct {
+    // PID activity status
+    active: bool = false,
+
+    // PID parameters
+    roll_kp: f32 = 0.0,
+    roll_ki: f32 = 0.0,
+    roll_kd: f32 = 0.0,
+
+    pitch_kp: f32 = 0.0,
+    pitch_ki: f32 = 0.0,
+    pitch_kd: f32 = 0.0,
+
+    yaw_kp: f32 = 0.0,
+    yaw_ki: f32 = 0.0,
+    yaw_kd: f32 = 0.0,
+
+    // Current and target orientations
+    current_quaternion: Math.Quaternion = Math.Quaternion.identity(),
+    target_quaternion: Math.Quaternion = Math.Quaternion.identity(),
+
+    // Euler angles (in degrees)
+    current_roll: f32 = 0.0,
+    current_pitch: f32 = 0.0,
+    current_yaw: f32 = 0.0,
+
+    target_roll: f32 = 0.0,
+    target_pitch: f32 = 0.0,
+    target_yaw: f32 = 0.0,
+
+    // PID controller errors
+    roll_error: f32 = 0.0,
+    pitch_error: f32 = 0.0,
+    yaw_error: f32 = 0.0,
+
+    // PID integral values
+    roll_integral: f32 = 0.0,
+    pitch_integral: f32 = 0.0,
+    yaw_integral: f32 = 0.0,
+
+    // Motor outputs
+    motor_outputs: [4]f32 = [_]f32{0.0} ** 4,
+
+    // Last update timestamp
+    last_update: i64 = 0,
+};
+
 pub const ConnectionHandler = struct {
     const Self = @This();
 
     const ACK_TIMEOUT_MS = 500;
     const MAX_RETRIES = 1;
     const MAX_FAILURES = 1;
-    const SYNC_INTERVAL_MS = 100;
+    const SYNC_INTERVAL_MS = 250;
 
     pub const ConnectionError = error{
         SocketCreationFailed,
@@ -439,6 +583,9 @@ pub const ConnectionHandler = struct {
     allocator: std.mem.Allocator,
     sync_thread: ?std.Thread,
     mutex: std.Thread.Mutex,
+
+    pid_debug: PidDebugInfo = .{},
+    pid_debug_mutex: std.Thread.Mutex = .{},
 
     pub fn init(allocator: std.mem.Allocator, config: *DroneConfig, motor_states: *[@typeInfo(Protocol.Motors).@"enum".fields.len]Protocol.MotorState) !*Self {
         const self = try allocator.create(Self);
@@ -593,6 +740,14 @@ pub const ConnectionHandler = struct {
             &std.mem.toBytes(timeout),
         );
 
+        const rcvbuf_size: c_int = 8192; // 8KB receive buffer
+        try std.posix.setsockopt(
+            sock,
+            std.posix.SOL.SOCKET,
+            std.posix.SO.RCVBUF,
+            &std.mem.toBytes(rcvbuf_size),
+        );
+
         // Set socket reuse address option
         try std.posix.setsockopt(
             sock,
@@ -740,11 +895,204 @@ pub const ConnectionHandler = struct {
         }
     }
 
+    fn parsePidDebugInfo(self: *Self, status_msg: []const u8) void {
+        // Get current timestamp
+        const current_time = std.time.timestamp();
+
+        // First, check if PID is active to avoid unnecessary parsing
+        if (std.mem.indexOf(u8, status_msg, "PID_ACTIVE 1")) |_| {
+            // PID is active
+            self.pid_debug_mutex.lock();
+            self.pid_debug.active = true;
+            self.pid_debug.last_update = current_time;
+            self.pid_debug_mutex.unlock();
+
+            // Extract all needed values in a single pass for better performance
+            var sections = std.mem.splitSequence(u8, status_msg, " ");
+
+            var current_section: enum {
+                None,
+                PidParams,
+                CurrQuat,
+                TargetQuat,
+                PidOutputs,
+                PidErrors,
+                CurrEuler,
+                TargetEuler,
+                PidIntegral,
+            } = .None;
+
+            var param_index: usize = 0;
+            var euler_index: usize = 0;
+            var integral_index: usize = 0;
+            var output_index: usize = 0;
+
+            while (sections.next()) |section| {
+                if (std.mem.eql(u8, section, "PID_PARAMS")) {
+                    current_section = .PidParams;
+                    param_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "CURR_QUAT")) {
+                    current_section = .CurrQuat;
+                    param_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "TARGET_QUAT")) {
+                    current_section = .TargetQuat;
+                    param_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "PID_OUTPUTS")) {
+                    current_section = .PidOutputs;
+                    output_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "PID_ERRORS")) {
+                    current_section = .PidErrors;
+                    param_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "CURR_EULER")) {
+                    current_section = .CurrEuler;
+                    euler_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "TARGET_EULER")) {
+                    current_section = .TargetEuler;
+                    euler_index = 0;
+                    continue;
+                } else if (std.mem.eql(u8, section, "PID_INTEGRAL")) {
+                    current_section = .PidIntegral;
+                    integral_index = 0;
+                    continue;
+                }
+
+                // Skip section marker
+                if (std.mem.eql(u8, section, "R_KP") or std.mem.eql(u8, section, "R_KI") or
+                    std.mem.eql(u8, section, "R_KD") or std.mem.eql(u8, section, "P_KP") or
+                    std.mem.eql(u8, section, "P_KI") or std.mem.eql(u8, section, "P_KD") or
+                    std.mem.eql(u8, section, "Y_KP") or std.mem.eql(u8, section, "Y_KI") or
+                    std.mem.eql(u8, section, "Y_KD"))
+                {
+                    continue;
+                }
+
+                self.pid_debug_mutex.lock();
+
+                switch (current_section) {
+                    .PidParams => {
+                        const params = [_]*f32{
+                            &self.pid_debug.roll_kp,  &self.pid_debug.roll_ki,  &self.pid_debug.roll_kd,
+                            &self.pid_debug.pitch_kp, &self.pid_debug.pitch_ki, &self.pid_debug.pitch_kd,
+                            &self.pid_debug.yaw_kp,   &self.pid_debug.yaw_ki,   &self.pid_debug.yaw_kd,
+                        };
+
+                        if (param_index < params.len) {
+                            params[param_index].* = std.fmt.parseFloat(f32, section) catch params[param_index].*;
+                            param_index += 1;
+                        }
+                    },
+                    .CurrQuat => {
+                        const quat_components = [_]*f32{
+                            &self.pid_debug.current_quaternion.w,
+                            &self.pid_debug.current_quaternion.x,
+                            &self.pid_debug.current_quaternion.y,
+                            &self.pid_debug.current_quaternion.z,
+                        };
+
+                        if (param_index < quat_components.len) {
+                            quat_components[param_index].* = std.fmt.parseFloat(f32, section) catch quat_components[param_index].*;
+                            param_index += 1;
+                        }
+                    },
+                    .TargetQuat => {
+                        const quat_components = [_]*f32{
+                            &self.pid_debug.target_quaternion.w,
+                            &self.pid_debug.target_quaternion.x,
+                            &self.pid_debug.target_quaternion.y,
+                            &self.pid_debug.target_quaternion.z,
+                        };
+
+                        if (param_index < quat_components.len) {
+                            quat_components[param_index].* = std.fmt.parseFloat(f32, section) catch quat_components[param_index].*;
+                            param_index += 1;
+                        }
+                    },
+                    .PidOutputs => {
+                        // Parse format like "0:23.5"
+                        if (std.mem.indexOf(u8, section, ":")) |colon_idx| {
+                            const idx_str = section[0..colon_idx];
+                            const val_str = section[colon_idx + 1 ..];
+
+                            const idx = std.fmt.parseInt(usize, idx_str, 10) catch continue;
+                            if (idx < self.pid_debug.motor_outputs.len) {
+                                self.pid_debug.motor_outputs[idx] = std.fmt.parseFloat(f32, val_str) catch self.pid_debug.motor_outputs[idx];
+                            }
+                        }
+                    },
+                    .PidErrors => {
+                        const error_components = [_]*f32{
+                            &self.pid_debug.roll_error,
+                            &self.pid_debug.pitch_error,
+                            &self.pid_debug.yaw_error,
+                        };
+
+                        if (param_index < error_components.len) {
+                            error_components[param_index].* = std.fmt.parseFloat(f32, section) catch error_components[param_index].*;
+                            param_index += 1;
+                        }
+                    },
+                    .CurrEuler => {
+                        const euler_components = [_]*f32{
+                            &self.pid_debug.current_roll,
+                            &self.pid_debug.current_pitch,
+                            &self.pid_debug.current_yaw,
+                        };
+
+                        if (euler_index < euler_components.len) {
+                            euler_components[euler_index].* = std.fmt.parseFloat(f32, section) catch euler_components[euler_index].*;
+                            euler_index += 1;
+                        }
+                    },
+                    .TargetEuler => {
+                        const euler_components = [_]*f32{
+                            &self.pid_debug.target_roll,
+                            &self.pid_debug.target_pitch,
+                            &self.pid_debug.target_yaw,
+                        };
+
+                        if (euler_index < euler_components.len) {
+                            euler_components[euler_index].* = std.fmt.parseFloat(f32, section) catch euler_components[euler_index].*;
+                            euler_index += 1;
+                        }
+                    },
+                    .PidIntegral => {
+                        const integral_components = [_]*f32{
+                            &self.pid_debug.roll_integral,
+                            &self.pid_debug.pitch_integral,
+                            &self.pid_debug.yaw_integral,
+                        };
+
+                        if (integral_index < integral_components.len) {
+                            integral_components[integral_index].* = std.fmt.parseFloat(f32, section) catch integral_components[integral_index].*;
+                            integral_index += 1;
+                        }
+                    },
+                    .None => {},
+                }
+
+                self.pid_debug_mutex.unlock();
+            }
+        } else {
+            // PID is not active
+            self.pid_debug_mutex.lock();
+            self.pid_debug.active = false;
+            self.pid_debug.last_update = current_time;
+            self.pid_debug_mutex.unlock();
+        }
+    }
+
     fn handleHeartbeatResponse(self: *Self, response: []const u8) !void {
         std.debug.print("Heartbeat response: {s}\n", .{response});
         if (std.mem.startsWith(u8, response, "STATUS ")) {
             self.updateMotorStates(response);
             self.parseBatteryStatus(response);
+            self.parsePidDebugInfo(response);
         } else if (!std.mem.eql(u8, response, "ACK\n")) {
             return error.InvalidResponse;
         }
@@ -762,7 +1110,7 @@ pub const ConnectionHandler = struct {
             self.server_addr.getOsSockLen(),
         );
 
-        var buf: [512]u8 = undefined;
+        var buf: [2048]u8 = undefined;
         const len = try std.posix.recvfrom(
             self.socket.?,
             &buf,
@@ -803,7 +1151,7 @@ pub const MotorControllerClient = struct {
     connection_handler: *ConnectionHandler,
     sensor_state: ?*Sensors.SensorState = null,
     allocator: std.mem.Allocator,
-    orientation_interval_ms: u64 = 1, // Send orientation updates every 1ms (1khz)
+    orientation_interval_ms: u64 = 1000, // Send orientation updates every 1ms (1khz)
     orientation_running: bool = false, // Flag to control orientation thread
     target_orientation: Math.Quaternion = Math.Quaternion.identity(),
 
@@ -979,7 +1327,7 @@ pub const MotorControllerClient = struct {
 
     fn orientationThread(self: *Self) void {
         var last_orientation: ?Math.Quaternion = null;
-        const QUAT_CHANGE_THRESHOLD: f32 = 0.01; // Minimum change threshold to send update
+        const QUAT_CHANGE_THRESHOLD: f32 = 0.005; // Minimum change threshold to send update
 
         while (self.orientation_running) {
             switch (self.connection_handler.state.load(.acquire)) {
@@ -1006,9 +1354,10 @@ pub const MotorControllerClient = struct {
                             }
                         }
 
+                        //TODO: CHANGE BACK TO should_send
                         if (should_send) {
                             const command = Protocol.Command{
-                                .type = .SetOrientation,
+                                .type = .UpdateOrientation,
                                 .pose = current_orientation,
                             };
 
@@ -1050,6 +1399,13 @@ pub const MotorControllerClient = struct {
 
     pub fn getConnectionState(self: *Self) Protocol.ClientState {
         return self.connection_handler.state.load(.acquire);
+    }
+
+    pub fn getPidDebugInfo(self: *Self) PidDebugInfo {
+        self.connection_handler.pid_debug_mutex.lock();
+        defer self.connection_handler.pid_debug_mutex.unlock();
+
+        return self.connection_handler.pid_debug;
     }
 
     // pub fn handleInput(self: *@This(), up_pressed: bool) void {
@@ -1107,7 +1463,7 @@ pub const DroneConfig = struct {
             .local_port = default_local_port,
             .controller_ip = try allocator.dupe(u8, default_controller_ip),
             .controller_port = default_controller_port,
-            .dshot_protocol = DSHOT.DSHOT_300,
+            .dshot_protocol = DSHOT.DSHOT_150,
             .global_max_throttle = global_max_throttle,
             .motors = [_]MotorConfig{
                 .{
