@@ -3,10 +3,11 @@ const Math = @import("Math.zig");
 const Node = @import("Node.zig");
 const Drone = @import("Drone.zig");
 
-const DroneConfig = Drone.DroneConfig;
 const Vec3 = Math.Vec3;
+const Quaternion = Math.Quaternion;
 const time = std.time;
 const Instant = time.Instant;
+const DroneConfig = Drone.DroneConfig;
 
 pub const SensorState = struct {
     const Self = @This();
@@ -40,10 +41,10 @@ pub const SensorState = struct {
     gyro_offset: Vec3 = Vec3.zero(),
 
     mag_hard_iron: Vec3 = Vec3.zero(),
-    mag_soft_iron: Vec3 = .{ .x = 1, .y = 1, .z = 1 },
+    mag_soft_iron: Vec3 = Vec3.init(1, 1, 1),
 
-    mag_min: Vec3 = .{ .x = 99999.0, .y = 99999.0, .z = 99999.0 },
-    mag_max: Vec3 = .{ .x = -99999.0, .y = -99999.0, .z = -99999.0 },
+    mag_min: Vec3 = Vec3.init(99999.0, 99999.0, 99999.0),
+    mag_max: Vec3 = Vec3.init(-99999.0, -99999.0, -99999.0),
 
     pub fn init(allocator: std.mem.Allocator, config: *DroneConfig) !*Self {
         const self = try allocator.create(Self);
@@ -55,25 +56,17 @@ pub const SensorState = struct {
             .mag_soft_iron = config.sensor_calibration.mag_soft_iron,
             .accel_offset = config.sensor_calibration.accel_offset,
             .gyro_offset = config.sensor_calibration.gyro_offset,
-            .filter_offset = Vec3{ .x = 0.0, .y = 0.0, .z = 180.0 },
+            .filter_offset = Vec3.init(0.0, 0.0, 180.0),
         };
         return self;
     }
 
     pub fn apply_mag_calibration(self: *Self, raw_mag: Vec3) Vec3 {
         // First subtract hard iron offset
-        const hard_iron_corrected = Vec3{
-            .x = raw_mag.x - self.mag_hard_iron.x,
-            .y = raw_mag.y - self.mag_hard_iron.y,
-            .z = raw_mag.z - self.mag_hard_iron.z,
-        };
+        const hard_iron_corrected = raw_mag.sub(self.mag_hard_iron);
 
         // Then apply soft iron correction
-        return Vec3{
-            .x = hard_iron_corrected.x * self.mag_soft_iron.x,
-            .y = hard_iron_corrected.y * self.mag_soft_iron.y,
-            .z = hard_iron_corrected.z * self.mag_soft_iron.z,
-        };
+        return hard_iron_corrected.multiply(self.mag_soft_iron);
     }
 
     pub fn apply_accel_calibration(self: *Self, raw_accel: Vec3) Vec3 {
@@ -102,8 +95,8 @@ pub const SensorState = struct {
             .Magnetometer => {
                 self.calibrating = true;
                 self.sample_count = 0;
-                self.mag_min = .{ .x = 99999.0, .y = 99999.0, .z = 99999.0 };
-                self.mag_max = .{ .x = -99999.0, .y = -99999.0, .z = -99999.0 };
+                self.mag_min = Vec3.init(99999.0, 99999.0, 99999.0);
+                self.mag_max = Vec3.init(-99999.0, -99999.0, -99999.0);
             },
             .None => {},
         }
@@ -119,11 +112,11 @@ pub const SensorState = struct {
                 const accel = pose.accel;
                 const gyro = pose.gyro;
 
-                self.accel_offset = self.accel_offset.add(Vec3{
-                    .x = accel.x,
-                    .y = accel.y,
-                    .z = 1.0 - accel.z,
-                });
+                self.accel_offset = self.accel_offset.add(Vec3.init(
+                    accel.x(),
+                    accel.y(),
+                    1.0 - accel.z(),
+                ));
                 self.gyro_offset = self.gyro_offset.add(gyro);
 
                 self.sample_count += 1;
@@ -132,16 +125,29 @@ pub const SensorState = struct {
                 if (!self.mag_updated) return;
 
                 const mag = pose.mag;
-                self.mag_min = .{
-                    .x = if (mag.x < self.mag_min.x) mag.x else self.mag_min.x,
-                    .y = if (mag.y < self.mag_min.y) mag.y else self.mag_min.y,
-                    .z = if (mag.z < self.mag_min.z) mag.z else self.mag_min.z,
-                };
-                self.mag_max = .{
-                    .x = if (mag.x > self.mag_max.x) mag.x else self.mag_max.x,
-                    .y = if (mag.y > self.mag_max.y) mag.y else self.mag_max.y,
-                    .z = if (mag.z > self.mag_max.z) mag.z else self.mag_max.z,
-                };
+
+                const mx = mag.x();
+                const my = mag.y();
+                const mz = mag.z();
+
+                const min_x = self.mag_min.x();
+                const min_y = self.mag_min.y();
+                const min_z = self.mag_min.z();
+
+                const max_x = self.mag_max.x();
+                const max_y = self.mag_max.y();
+                const max_z = self.mag_max.z();
+
+                self.mag_min = Vec3.init(
+                    if (mx < min_x) mx else min_x,
+                    if (my < min_y) my else min_y,
+                    if (mz < min_z) mz else min_z,
+                );
+                self.mag_max = Vec3.init(
+                    if (mx > max_x) mx else max_x,
+                    if (my > max_y) my else max_y,
+                    if (mz > max_z) mz else max_z,
+                );
 
                 self.sample_count += 1;
             },
@@ -156,16 +162,8 @@ pub const SensorState = struct {
                 self.gyro_offset = self.gyro_offset.scale((1.0 / @as(f32, @floatFromInt(self.sample_count))));
 
                 std.debug.print("Accel Offset: {d:.2}, Gyro Offset: {d:.2}", .{
-                    [_]f32{
-                        self.accel_offset.x,
-                        self.accel_offset.y,
-                        self.accel_offset.z,
-                    },
-                    [_]f32{
-                        self.gyro_offset.x,
-                        self.gyro_offset.y,
-                        self.gyro_offset.z,
-                    },
+                    self.accel_offset,
+                    self.gyro_offset,
                 });
 
                 self.saveCalibration(self.config);
@@ -180,12 +178,12 @@ pub const SensorState = struct {
                 // Soft-iron can be approximated as the ratio to the largest axis
                 // or a more sophisticated elliptical fit can be done.
                 // For simplicity, let's store scale = (maxSpan / axisSpan).
-                const max_axis = @max(@max(span.x, span.y), span.z);
-                self.mag_soft_iron = .{
-                    .x = max_axis / span.x,
-                    .y = max_axis / span.y,
-                    .z = max_axis / span.z,
-                };
+                const max_axis = @max(@max(span.x(), span.y()), span.z());
+                self.mag_soft_iron = Vec3.init(
+                    max_axis / span.x(),
+                    max_axis / span.y(),
+                    max_axis / span.z(),
+                );
 
                 self.saveCalibration(self.config);
             },
@@ -238,49 +236,49 @@ pub const PoseHandler = struct {
     }
 
     pub fn parse(packet: []const u8) Pose {
-        const accel = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, packet[0..4], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[4..8], .little)),
-            .z = @bitCast(std.mem.readInt(u32, packet[8..12], .little)),
-        };
+        const accel = Vec3.init(
+            @bitCast(std.mem.readInt(u32, packet[0..4], .little)),
+            @bitCast(std.mem.readInt(u32, packet[4..8], .little)),
+            @bitCast(std.mem.readInt(u32, packet[8..12], .little)),
+        );
 
-        const gyro = Vec3{
-            .x = Math.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
-            .y = Math.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
-            .z = Math.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
-        };
+        const gyro = Vec3.init(
+            Math.radians(@bitCast(std.mem.readInt(u32, packet[12..16], .little))),
+            Math.radians(@bitCast(std.mem.readInt(u32, packet[16..20], .little))),
+            Math.radians(@bitCast(std.mem.readInt(u32, packet[20..24], .little))),
+        );
 
-        const mag = Vec3{
-            .x = @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
-            .y = @bitCast(std.mem.readInt(u32, packet[28..32], .little)),
-            .z = @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
-        };
+        const mag = Vec3.init(
+            @bitCast(std.mem.readInt(u32, packet[24..28], .little)),
+            @bitCast(std.mem.readInt(u32, packet[28..32], .little)),
+            @bitCast(std.mem.readInt(u32, packet[32..36], .little)),
+        );
 
-        const mag_sens = Vec3{
-            .x = mag.y,
-            .y = mag.x,
-            .z = -mag.z,
-        };
+        const mag_sens = Vec3.init(
+            mag.y(),
+            mag.x(),
+            -mag.z(),
+        );
 
-        const accel_ned = Vec3{
-            .x = -accel.z,
-            .y = accel.x,
-            .z = accel.y,
-        };
+        const accel_ned = Vec3.init(
+            -accel.z(),
+            accel.x(),
+            accel.y(),
+        );
 
         // Apply same rotation to gyroscope readings
-        const gyro_ned = Vec3{
-            .x = gyro.z,
-            .y = -gyro.x,
-            .z = -gyro.y,
-        };
+        const gyro_ned = Vec3.init(
+            gyro.z(),
+            -gyro.x(),
+            -gyro.y(),
+        );
 
         // Apply rotation to magnetometer readings
-        const mag_ned = Vec3{
-            .x = mag_sens.z,
-            .y = -mag_sens.x,
-            .z = -mag_sens.y,
-        };
+        const mag_ned = Vec3.init(
+            mag_sens.z(),
+            -mag_sens.x(),
+            -mag_sens.y(),
+        );
 
         const timestamp: i64 = @bitCast(std.mem.readInt(i64, packet[36..44], .little));
 
@@ -296,7 +294,7 @@ pub const PoseHandler = struct {
         const pose = PoseHandler.parse(data);
 
         const mag = pose.mag;
-        const magnitude_mag = mag.x + mag.y + mag.z;
+        const magnitude_mag = mag.x() + mag.y() + mag.z();
         const mag_updated = @abs(magnitude_mag - self.sensor_state.previous_mag_magnitude) > 0.0001;
 
         if (mag_updated) self.mag_count += 1;
@@ -367,18 +365,18 @@ pub const MadgwickFilter = struct {
     beta_accel_only: f32, // gain when using only accel (no mag)
     convergence_threshold: f32 = 0.005, // Threshold to detect convergence
     convergence_counter: u32 = 0,
-    previous_quaternion: Math.Quaternion = Math.Quaternion.identity(),
-    q: Math.Quaternion, // current orientation estimate
+    previous_quaternion: Quaternion = Quaternion.identity(),
+    q: Quaternion, // current orientation estimate
 
     /// Create a new Madgwick filter with the specified gain and optional initial orientation.
-    pub fn init(allocator: std.mem.Allocator, beta: f32, initial_orientation: ?Math.Quaternion) !*Self {
+    pub fn init(allocator: std.mem.Allocator, beta: f32, initial_orientation: ?Quaternion) !*Self {
         const self = try allocator.create(Self);
         self.* = Self{
             .allocator = allocator,
             .beta = self.beta_high,
             .beta_default = beta,
             .beta_accel_only = beta * 0.5,
-            .q = if (initial_orientation) |init_q| init_q else Math.Quaternion.identity(),
+            .q = if (initial_orientation) |init_q| init_q else Quaternion.identity(),
         };
         return self;
     }
@@ -392,10 +390,10 @@ pub const MadgwickFilter = struct {
         const q = self.q;
 
         const q_diff = @sqrt(
-            std.math.pow(f32, q.w - self.previous_quaternion.w, 2) +
-                std.math.pow(f32, q.x - self.previous_quaternion.x, 2) +
-                std.math.pow(f32, q.y - self.previous_quaternion.y, 2) +
-                std.math.pow(f32, q.z - self.previous_quaternion.z, 2),
+            std.math.pow(f32, q.w() - self.previous_quaternion.w(), 2) +
+                std.math.pow(f32, q.x() - self.previous_quaternion.x(), 2) +
+                std.math.pow(f32, q.y() - self.previous_quaternion.y(), 2) +
+                std.math.pow(f32, q.z() - self.previous_quaternion.z(), 2),
         );
 
         // Update previous quaternion for next iteration
@@ -418,18 +416,18 @@ pub const MadgwickFilter = struct {
     /// Update the orientation estimate using only accelerometer and gyroscope data
     pub fn updateNoMag(self: *Self, gyro: Vec3, accel: Vec3, dt: f32) void {
         const q_local = self.q;
-        var q0 = q_local.w;
-        var q1 = q_local.x;
-        var q2 = q_local.y;
-        var q3 = q_local.z;
+        var q0 = q_local.w();
+        var q1 = q_local.x();
+        var q2 = q_local.y();
+        var q3 = q_local.z();
 
         // Local copies of raw data
-        const gx = gyro.x;
-        const gy = gyro.y;
-        const gz = gyro.z;
-        var ax = accel.x;
-        var ay = accel.y;
-        var az = accel.z;
+        const gx = gyro.x();
+        const gy = gyro.y();
+        const gz = gyro.z();
+        var ax = accel.x();
+        var ay = accel.y();
+        var az = accel.z();
 
         // Normalize accelerometer measurement
         const acc_norm_squared = ax * ax + ay * ay + az * az;
@@ -522,12 +520,12 @@ pub const MadgwickFilter = struct {
         const recipNorm = 1.0 / @sqrt(q_norm_squared);
 
         // Only update the actual quaternion after all calculations are done
-        self.q = .{
-            .w = q0 * recipNorm,
-            .x = q1 * recipNorm,
-            .y = q2 * recipNorm,
-            .z = q3 * recipNorm,
-        };
+        self.q = Quaternion.init(
+            q1 * recipNorm,
+            q2 * recipNorm,
+            q3 * recipNorm,
+            q0 * recipNorm,
+        );
     }
 
     /// Update the orientation estimate using gyro, accel, mag data and timestamp.
@@ -541,21 +539,23 @@ pub const MadgwickFilter = struct {
             return;
         }
         const q_local = self.q;
-        var q0 = q_local.w;
-        var q1 = q_local.x;
-        var q2 = q_local.y;
-        var q3 = q_local.z;
+        var q0 = q_local.w();
+        var q1 = q_local.x();
+        var q2 = q_local.y();
+        var q3 = q_local.z();
 
         // Local copies of raw data
-        const gx = gyro.x;
-        const gy = gyro.y;
-        const gz = gyro.z;
-        var ax = accel.x;
-        var ay = accel.y;
-        var az = accel.z;
-        var mx = mag.?.x;
-        var my = mag.?.y;
-        var mz = mag.?.z;
+        const gx = gyro.x();
+        const gy = gyro.y();
+        const gz = gyro.z();
+
+        var ax = accel.x();
+        var ay = accel.y();
+        var az = accel.z();
+
+        var mx = mag.?.x();
+        var my = mag.?.y();
+        var mz = mag.?.z();
 
         // ==== 1) Normalize accelerometer ====
         const accel_norm = accel.length();
@@ -707,26 +707,26 @@ pub const MadgwickFilter = struct {
         const recipNorm = 1.0 / @sqrt(q_norm_squared);
 
         // Only update the actual quaternion after all calculations are done
-        self.q = .{
-            .w = q0 * recipNorm,
-            .x = q1 * recipNorm,
-            .y = q2 * recipNorm,
-            .z = q3 * recipNorm,
-        };
+        self.q = Quaternion.init(
+            q1 * recipNorm,
+            q2 * recipNorm,
+            q3 * recipNorm,
+            q0 * recipNorm,
+        );
     }
 };
 
-pub fn computeInitialOrientation(accel: Vec3, mag: ?Vec3, declination_deg: f32) Math.Quaternion {
+pub fn computeInitialOrientation(accel: Vec3, mag: ?Vec3, declination_deg: f32) Quaternion {
     // Step 1: Normalize accelerometer reading
     const accel_norm = accel.length();
     if (accel_norm == 0.0) {
         // If accelerometer data is invalid, return identity quaternion
-        return Math.Quaternion{ .w = 1, .x = 0, .y = 0, .z = 0 };
+        return Quaternion.init(0, 0, 0, 1);
     }
 
-    const ax = accel.x / accel_norm;
-    const ay = accel.y / accel_norm;
-    const az = accel.z / accel_norm;
+    const ax = accel.x() / accel_norm;
+    const ay = accel.y() / accel_norm;
+    const az = accel.z() / accel_norm;
 
     // Step 2: Calculate roll and pitch from accelerometer (gravity vector)
     // In NED frame, when the device is level, accelerometer reads [0, 0, 1]
@@ -748,9 +748,9 @@ pub fn computeInitialOrientation(accel: Vec3, mag: ?Vec3, declination_deg: f32) 
         // Normalize magnetometer reading
         const mag_norm = m.length();
         if (mag_norm > 0.0) {
-            const mx = m.x / mag_norm;
-            const my = m.y / mag_norm;
-            const mz = m.z / mag_norm;
+            const mx = m.x() / mag_norm;
+            const my = m.y() / mag_norm;
+            const mz = m.z() / mag_norm;
 
             // Apply tilt compensation to get the horizontal components
             // Rotate mag readings by roll and pitch to get them in the horizontal plane
@@ -777,7 +777,12 @@ pub fn computeInitialOrientation(accel: Vec3, mag: ?Vec3, declination_deg: f32) 
 
     // Combine rotations (roll, pitch, then yaw)
     // This creates a quaternion representing the initial orientation
-    return Math.Quaternion{ .w = cy * cp * cr + sy * sp * sr, .x = cy * cp * sr - sy * sp * cr, .y = cy * sp * cr + sy * cp * sr, .z = sy * cp * cr - cy * sp * sr };
+    return Quaternion.init(
+        cy * cp * sr - sy * sp * cr,
+        cy * sp * cr + sy * cp * sr,
+        sy * cp * cr - cy * sp * sr,
+        cy * cp * cr + sy * sp * sr,
+    );
 }
 
 pub fn updateModelMatrix(
@@ -816,10 +821,10 @@ pub fn updateModelMatrix(
 
     const q = sensor_state.filter.?.q;
 
-    const euler_gl = q.toEuler();
-    const q_gl2 = Math.Quaternion.fromAxisAngle(.{ .x = 1, .y = 0, .z = 0 }, euler_gl[1]);
-    const q_gl3 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = 1, .z = 0 }, euler_gl[2]);
-    const q_gl4 = Math.Quaternion.fromAxisAngle(.{ .x = 0, .y = 0, .z = 1 }, euler_gl[0]);
+    const euler_gl = q.to_euler();
+    const q_gl2 = Quaternion.from_axis_angle(Vec3.init(1, 0, 0), euler_gl[1]);
+    const q_gl3 = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), euler_gl[2]);
+    const q_gl4 = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), euler_gl[0]);
 
     return q_gl4.multiply(q_gl2).multiply(q_gl3);
 }

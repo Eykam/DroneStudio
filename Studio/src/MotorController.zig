@@ -11,6 +11,7 @@ const heap = std.heap;
 const Thread = std.Thread;
 const Mutex = std.Thread.Mutex;
 const Atomic = std.atomic;
+const Quaternion = Math.Quaternion;
 
 const Protocol = Drone.Protocol;
 const Battery = Drone.Battery;
@@ -129,8 +130,8 @@ pub const QuadcopterController = struct {
     motor_config: MotorConfiguration,
     base_throttle: f32,
 
-    current_orientation: Math.Quaternion,
-    target_orientation: Math.Quaternion,
+    current_orientation: Quaternion,
+    target_orientation: Quaternion,
 
     running: std.atomic.Value(bool),
     mutex: std.Thread.Mutex,
@@ -144,8 +145,8 @@ pub const QuadcopterController = struct {
             .motor_outputs = [_]f32{0.0} ** 4,
             .motor_config = config,
             .base_throttle = base_throttle,
-            .current_orientation = Math.Quaternion.identity(),
-            .target_orientation = Math.Quaternion.identity(),
+            .current_orientation = Quaternion.identity(),
+            .target_orientation = Quaternion.identity(),
             .running = std.atomic.Value(bool).init(false),
             .mutex = std.Thread.Mutex{},
             .pid_thread = null,
@@ -169,14 +170,14 @@ pub const QuadcopterController = struct {
         }
     }
 
-    pub fn setTargetOrientation(self: *Self, quaternion: Math.Quaternion) void {
+    pub fn setTargetOrientation(self: *Self, quaternion: Quaternion) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
         self.target_orientation = quaternion;
     }
 
-    pub fn updateCurrentOrientation(self: *Self, quaternion: Math.Quaternion) void {
+    pub fn updateCurrentOrientation(self: *Self, quaternion: Quaternion) void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -212,8 +213,8 @@ pub const QuadcopterController = struct {
             frame_count += 1;
 
             // Get quaternions with minimal lock time
-            var current_quat: Math.Quaternion = undefined;
-            var target_quat: Math.Quaternion = undefined;
+            var current_quat: Quaternion = undefined;
+            var target_quat: Quaternion = undefined;
 
             {
                 self.mutex.lock();
@@ -224,8 +225,8 @@ pub const QuadcopterController = struct {
 
             // Convert quaternions to Euler angles outside of lock
             // This is CPU intensive but now outside critical section
-            current_euler_cache = current_quat.toEuler();
-            target_euler_cache = target_quat.toEuler();
+            current_euler_cache = current_quat.to_euler();
+            target_euler_cache = target_quat.to_euler();
 
             // Update PID controllers (with lock)
             self.mutex.lock();
@@ -319,8 +320,8 @@ pub const Controller = struct {
     battery_mutex: Mutex,
 
     orientation_control: ?QuadcopterController = null,
-    current_orientation: Math.Quaternion = Math.Quaternion.identity(),
-    target_orientation: Math.Quaternion = Math.Quaternion.identity(),
+    current_orientation: Quaternion = Quaternion.identity(),
+    target_orientation: Quaternion = Quaternion.identity(),
     orientation_control_active: std.atomic.Value(bool),
     orientation_mutex: Mutex,
 
@@ -654,7 +655,7 @@ pub const Controller = struct {
         std.debug.print("Motor {d} speed set to {d:.1}%\n", .{ motor_idx, speed_percent });
     }
 
-    pub fn setTargetOrientation(self: *Self, quaternion: Math.Quaternion) void {
+    pub fn setTargetOrientation(self: *Self, quaternion: Quaternion) void {
         self.orientation_mutex.lock();
         defer self.orientation_mutex.unlock();
 
@@ -664,10 +665,10 @@ pub const Controller = struct {
             control.setTargetOrientation(quaternion);
         }
 
-        std.debug.print("Target orientation set: W={d:.3} X={d:.3} Y={d:.3} Z={d:.3}\n", .{ quaternion.w, quaternion.x, quaternion.y, quaternion.z });
+        std.debug.print("Target orientation set: W={d:.3} X={d:.3} Y={d:.3} Z={d:.3}\n", .{ quaternion.w(), quaternion.x(), quaternion.y(), quaternion.z() });
     }
 
-    pub fn updateCurrentOrientation(self: *Self, quaternion: Math.Quaternion) void {
+    pub fn updateCurrentOrientation(self: *Self, quaternion: Quaternion) void {
         self.orientation_mutex.lock();
         defer self.orientation_mutex.unlock();
 
@@ -929,12 +930,12 @@ const Server = struct {
 
                 const current_quat = controller.current_orientation;
                 try std.fmt.format(writer, "CURR_QUAT {d:.4} {d:.4} {d:.4} {d:.4} ", .{
-                    current_quat.w, current_quat.x, current_quat.y, current_quat.z,
+                    current_quat.w(), current_quat.x(), current_quat.y(), current_quat.z(),
                 });
 
                 const target_quat = controller.target_orientation;
                 try std.fmt.format(writer, "TARGET_QUAT {d:.4} {d:.4} {d:.4} {d:.4} ", .{
-                    target_quat.w, target_quat.x, target_quat.y, target_quat.z,
+                    target_quat.w(), target_quat.x(), target_quat.y(), target_quat.z(),
                 });
 
                 const motor_outputs = pid_control.getMotorOutputs();
@@ -949,8 +950,8 @@ const Server = struct {
                     pid_control.yaw_pid.last_error,
                 });
 
-                const current_euler = current_quat.toEuler();
-                const target_euler = target_quat.toEuler();
+                const current_euler = current_quat.to_euler();
+                const target_euler = target_quat.to_euler();
 
                 const rad_to_deg = 180.0 / std.math.pi;
                 try std.fmt.format(writer, "CURR_EULER {d:.1} {d:.1} {d:.1} TARGET_EULER {d:.1} {d:.1} {d:.1} ", .{
@@ -1138,12 +1139,7 @@ const Server = struct {
                 const y = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
                 const z = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
 
-                const quaternion = Math.Quaternion{
-                    .w = w,
-                    .x = x,
-                    .y = y,
-                    .z = z,
-                };
+                const quaternion = Quaternion.init(x, y, z, w);
 
                 if (self.controller) |controller| {
                     controller.updateCurrentOrientation(quaternion);
@@ -1155,12 +1151,7 @@ const Server = struct {
                 const y = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
                 const z = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
 
-                const quaternion = Math.Quaternion{
-                    .w = w,
-                    .x = x,
-                    .y = y,
-                    .z = z,
-                };
+                const quaternion = Quaternion.init(x, y, z, w);
 
                 if (self.controller) |controller| {
                     controller.setTargetOrientation(quaternion);

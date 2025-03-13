@@ -1,11 +1,15 @@
 const std = @import("std");
 const Mesh = @import("Mesh.zig");
 const Math = @import("Math.zig");
-const Scene = @import("Pipeline.zig").Scene;
+const Pipeline = @import("Pipeline.zig");
 const gl = @import("bindings/gl.zig");
-const Quaternion = Math.Quaternion;
+
 const Vec3 = Math.Vec3;
+const Mat4 = Math.Mat4;
+const Scene = Pipeline.Scene;
+const Quaternion = Math.Quaternion;
 const glad = gl.glad;
+
 const glCheckError = @import("Debug.zig").glCheckError;
 
 const Self = @This();
@@ -39,8 +43,8 @@ instance_data: ?InstanceData = null,
 position: [3]f32 = .{ 0, 0, 0 },
 rotation: Quaternion = Quaternion.identity(),
 scale: [3]f32 = .{ 1, 1, 1 },
-local_transform: [16]f32 = Math.identity(),
-world_transform: [16]f32 = Math.identity(),
+local_transform: Mat4 = Mat4.identity(),
+world_transform: Mat4 = Mat4.identity(),
 
 pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?[]u32, draw: ?Mesh.draw) !*Self {
     var node_arena = try allocator.create(std.heap.ArenaAllocator);
@@ -120,7 +124,7 @@ pub fn setRotation(self: *Self, q: Quaternion) void {
 }
 
 pub fn setRotationEuler(self: *Self, pitch: f32, yaw: f32, roll: f32) void {
-    self.rotation = Quaternion.normalize(Quaternion.fromEuler(pitch, yaw, roll));
+    self.rotation = Quaternion.normalize(Quaternion.from_euler(pitch, yaw, roll));
     self.updateLocalTransform();
 }
 
@@ -145,7 +149,6 @@ pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
     self.yTextureUnit = scene.texGen.generateID();
     self.uvTextureUnit = scene.texGen.generateID();
     self.depthTextureUnit = scene.texGen.generateID();
-    // std.debug.print("Setting y: {d}, uv: {d}\n", .{ self.yTextureUnit, self.uvTextureUnit });
 
     for (self.children.items) |child| {
         child.addSceneRecursively(scene);
@@ -154,22 +157,21 @@ pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
 
 // (Scale -> Rotate -> Translate)
 fn updateLocalTransform(self: *Self) void {
-    var transform = Math.identity();
+    var transform = Mat4.identity();
 
-    const center_transform = Math.translate(transform, -self.position[0], -self.position[1], -self.position[2]);
-    transform = center_transform;
+    transform = transform.translate(-self.position[0], -self.position[1], -self.position[2]);
 
     // Apply scale
-    transform = Math.scale(transform, self.scale[0], self.scale[1], self.scale[2]);
+    transform = transform.scale(self.scale[0], self.scale[1], self.scale[2]);
 
     // Apply rotation around center
-    const rotation_matrix = Quaternion.toMatrix(self.rotation);
-    transform = Math.multiply_matrices(transform, rotation_matrix);
+    const rotation_matrix = Quaternion.to_mat4(self.rotation);
+    transform = transform.multiply(rotation_matrix);
 
     // Move back and translate to position
-    const inv_center = Math.translate(Math.identity(), self.position[0], self.position[1], self.position[2]);
-    transform = Math.multiply_matrices(transform, inv_center);
-    transform = Math.translate(transform, self.position[0], self.position[1], self.position[2]);
+    const inv_center = Mat4.translation(self.position[0], self.position[1], self.position[2]);
+    transform = transform.multiply(inv_center);
+    transform = transform.translate(self.position[0], self.position[1], self.position[2]);
 
     self.local_transform = transform;
 }
@@ -177,7 +179,7 @@ fn updateLocalTransform(self: *Self) void {
 fn updateWorldTransform(self: *Self) void {
     if (self.parent) |parent| {
         // Combine parent's world transform with our local transform
-        self.world_transform = Math.multiply_matrices(parent.world_transform, self.local_transform);
+        self.world_transform = Mat4.multiply(parent.world_transform, self.local_transform);
     } else {
         // Root node - world transform is the same as local transform
         self.world_transform = self.local_transform;

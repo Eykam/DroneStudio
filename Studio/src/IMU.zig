@@ -524,7 +524,7 @@ pub const UDP_Provider = struct {
 };
 
 pub fn main() !void {
-    const server_ip = "192.168.1.171";
+    const server_ip = "192.168.1.166";
     const server_port = 8000;
 
     var imu_reader = try UDP_Provider.init(

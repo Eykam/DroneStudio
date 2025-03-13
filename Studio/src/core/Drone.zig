@@ -2,7 +2,9 @@
 const std = @import("std");
 const Math = @import("Math.zig");
 const Sensors = @import("Sensors.zig");
+
 const Vec3 = Math.Vec3;
+const Quaternion = Math.Quaternion;
 
 pub const Battery = enum(u8) {
     Lipo_2S = 2, // 2 cells in series (7.4V nominal)
@@ -246,7 +248,7 @@ pub const Protocol = struct {
         type: CommandType,
         motor: ?Motors = null,
         speed: ?f32 = null,
-        pose: ?Math.Quaternion = null,
+        pose: ?Quaternion = null,
 
         axis: ?[]const u8 = null,
         kp: ?f32 = null,
@@ -265,19 +267,19 @@ pub const Protocol = struct {
                     if (self.pose == null) return false;
 
                     const pose = self.pose.?;
-                    return !std.math.isNan(pose.x) and
-                        !std.math.isNan(pose.y) and
-                        !std.math.isNan(pose.z) and
-                        !std.math.isNan(pose.w);
+                    return !std.math.isNan(pose.x()) and
+                        !std.math.isNan(pose.y()) and
+                        !std.math.isNan(pose.z()) and
+                        !std.math.isNan(pose.w());
                 },
                 .SetOrientation => {
                     if (self.pose == null) return false;
 
                     const pose = self.pose.?;
-                    return !std.math.isNan(pose.x) and
-                        !std.math.isNan(pose.y) and
-                        !std.math.isNan(pose.z) and
-                        !std.math.isNan(pose.w);
+                    return !std.math.isNan(pose.x()) and
+                        !std.math.isNan(pose.y()) and
+                        !std.math.isNan(pose.z()) and
+                        !std.math.isNan(pose.w());
                 },
                 .UpdatePidParams => {
                     if (self.axis == null or self.kp == null or
@@ -353,10 +355,10 @@ pub const Protocol = struct {
                         allocator,
                         "UpdateOrientation {d:.3} {d:.3} {d:.3} {d:.3}\n",
                         .{
-                            self.pose.?.w,
-                            self.pose.?.x,
-                            self.pose.?.y,
-                            self.pose.?.z,
+                            self.pose.?.w(),
+                            self.pose.?.x(),
+                            self.pose.?.y(),
+                            self.pose.?.z(),
                         },
                     ) catch |err| {
                         std.debug.print("Failed to format Orientation command: {any}\n", .{err});
@@ -368,10 +370,10 @@ pub const Protocol = struct {
                         allocator,
                         "SetOrientation {d:.3} {d:.3} {d:.3} {d:.3}\n",
                         .{
-                            self.pose.?.w,
-                            self.pose.?.x,
-                            self.pose.?.y,
-                            self.pose.?.z,
+                            self.pose.?.w(),
+                            self.pose.?.x(),
+                            self.pose.?.y(),
+                            self.pose.?.z(),
                         },
                     ) catch |err| {
                         std.debug.print("Failed to format SetOrientation command: {any}\n", .{err});
@@ -517,8 +519,8 @@ pub const PidDebugInfo = struct {
     yaw_kd: f32 = 0.0,
 
     // Current and target orientations
-    current_quaternion: Math.Quaternion = Math.Quaternion.identity(),
-    target_quaternion: Math.Quaternion = Math.Quaternion.identity(),
+    current_quaternion: Quaternion = Quaternion.identity(),
+    target_quaternion: Quaternion = Quaternion.identity(),
 
     // Euler angles (in degrees)
     current_roll: f32 = 0.0,
@@ -989,10 +991,10 @@ pub const ConnectionHandler = struct {
                     },
                     .CurrQuat => {
                         const quat_components = [_]*f32{
-                            &self.pid_debug.current_quaternion.w,
-                            &self.pid_debug.current_quaternion.x,
-                            &self.pid_debug.current_quaternion.y,
-                            &self.pid_debug.current_quaternion.z,
+                            @constCast(&self.pid_debug.current_quaternion.w()),
+                            &self.pid_debug.current_quaternion.x(),
+                            &self.pid_debug.current_quaternion.y(),
+                            &self.pid_debug.current_quaternion.z(),
                         };
 
                         if (param_index < quat_components.len) {
@@ -1002,10 +1004,10 @@ pub const ConnectionHandler = struct {
                     },
                     .TargetQuat => {
                         const quat_components = [_]*f32{
-                            &self.pid_debug.target_quaternion.w,
-                            &self.pid_debug.target_quaternion.x,
-                            &self.pid_debug.target_quaternion.y,
-                            &self.pid_debug.target_quaternion.z,
+                            &self.pid_debug.target_quaternion.w(),
+                            &self.pid_debug.target_quaternion.x(),
+                            &self.pid_debug.target_quaternion.y(),
+                            &self.pid_debug.target_quaternion.z(),
                         };
 
                         if (param_index < quat_components.len) {
@@ -1153,7 +1155,7 @@ pub const MotorControllerClient = struct {
     allocator: std.mem.Allocator,
     orientation_interval_ms: u64 = 1000, // Send orientation updates every 1ms (1khz)
     orientation_running: bool = false, // Flag to control orientation thread
-    target_orientation: Math.Quaternion = Math.Quaternion.identity(),
+    target_orientation: Quaternion = Quaternion.identity(),
 
     pub const CommandQueue = struct {
 
@@ -1326,7 +1328,7 @@ pub const MotorControllerClient = struct {
     }
 
     fn orientationThread(self: *Self) void {
-        var last_orientation: ?Math.Quaternion = null;
+        var last_orientation: ?Quaternion = null;
         const QUAT_CHANGE_THRESHOLD: f32 = 0.005; // Minimum change threshold to send update
 
         while (self.orientation_running) {
@@ -1342,10 +1344,10 @@ pub const MotorControllerClient = struct {
                             should_send = true;
                         } else {
                             // Calculate quaternion difference (simplified approach)
-                            const dx = @abs(current_orientation.x - last_orientation.?.x);
-                            const dy = @abs(current_orientation.y - last_orientation.?.y);
-                            const dz = @abs(current_orientation.z - last_orientation.?.z);
-                            const dw = @abs(current_orientation.w - last_orientation.?.w);
+                            const dx = @abs(current_orientation.x() - last_orientation.?.x());
+                            const dy = @abs(current_orientation.y() - last_orientation.?.y());
+                            const dz = @abs(current_orientation.z() - last_orientation.?.z());
+                            const dw = @abs(current_orientation.w() - last_orientation.?.w());
 
                             if (dx > QUAT_CHANGE_THRESHOLD or dy > QUAT_CHANGE_THRESHOLD or
                                 dz > QUAT_CHANGE_THRESHOLD or dw > QUAT_CHANGE_THRESHOLD)
@@ -1489,10 +1491,10 @@ pub const DroneConfig = struct {
             },
             .battery = Battery.Lipo_4S,
             .sensor_calibration = .{
-                .mag_hard_iron = .{ .x = 0, .y = 0, .z = 0 },
-                .mag_soft_iron = .{ .x = 1, .y = 1, .z = 1 },
-                .accel_offset = .{ .x = 0, .y = 0, .z = 0 },
-                .gyro_offset = .{ .x = 0, .y = 0, .z = 0 },
+                .mag_hard_iron = Vec3.zero(),
+                .mag_soft_iron = Vec3.init(1, 1, 1),
+                .accel_offset = Vec3.zero(),
+                .gyro_offset = Vec3.zero(),
             },
             .allocator = allocator,
         };
@@ -1535,26 +1537,26 @@ pub const DroneConfig = struct {
                 .type = "LiPo",
             },
             .sensor_calibration = .{
-                .mag_hard_iron = .{
-                    .x = self.sensor_calibration.mag_hard_iron.x,
-                    .y = self.sensor_calibration.mag_hard_iron.y,
-                    .z = self.sensor_calibration.mag_hard_iron.z,
-                },
-                .mag_soft_iron = .{
-                    .x = self.sensor_calibration.mag_soft_iron.x,
-                    .y = self.sensor_calibration.mag_soft_iron.y,
-                    .z = self.sensor_calibration.mag_soft_iron.z,
-                },
-                .accel_offset = .{
-                    .x = self.sensor_calibration.accel_offset.x,
-                    .y = self.sensor_calibration.accel_offset.y,
-                    .z = self.sensor_calibration.accel_offset.z,
-                },
-                .gyro_offset = .{
-                    .x = self.sensor_calibration.gyro_offset.x,
-                    .y = self.sensor_calibration.gyro_offset.y,
-                    .z = self.sensor_calibration.gyro_offset.z,
-                },
+                .mag_hard_iron = Vec3.init(
+                    self.sensor_calibration.mag_hard_iron.x(),
+                    self.sensor_calibration.mag_hard_iron.y(),
+                    self.sensor_calibration.mag_hard_iron.z(),
+                ),
+                .mag_soft_iron = Vec3.init(
+                    self.sensor_calibration.mag_soft_iron.x(),
+                    self.sensor_calibration.mag_soft_iron.y(),
+                    self.sensor_calibration.mag_soft_iron.z(),
+                ),
+                .accel_offset = Vec3.init(
+                    self.sensor_calibration.accel_offset.x(),
+                    self.sensor_calibration.accel_offset.y(),
+                    self.sensor_calibration.accel_offset.z(),
+                ),
+                .gyro_offset = Vec3.init(
+                    self.sensor_calibration.gyro_offset.x(),
+                    self.sensor_calibration.gyro_offset.y(),
+                    self.sensor_calibration.gyro_offset.z(),
+                ),
             },
         }, .{});
     }
@@ -1597,26 +1599,26 @@ pub const DroneConfig = struct {
                 .type = "LiPo",
             },
             .sensor_calibration = .{
-                .mag_hard_iron = .{
-                    .x = self.sensor_calibration.mag_hard_iron.x,
-                    .y = self.sensor_calibration.mag_hard_iron.y,
-                    .z = self.sensor_calibration.mag_hard_iron.z,
-                },
-                .mag_soft_iron = .{
-                    .x = self.sensor_calibration.mag_soft_iron.x,
-                    .y = self.sensor_calibration.mag_soft_iron.y,
-                    .z = self.sensor_calibration.mag_soft_iron.z,
-                },
-                .accel_offset = .{
-                    .x = self.sensor_calibration.accel_offset.x,
-                    .y = self.sensor_calibration.accel_offset.y,
-                    .z = self.sensor_calibration.accel_offset.z,
-                },
-                .gyro_offset = .{
-                    .x = self.sensor_calibration.gyro_offset.x,
-                    .y = self.sensor_calibration.gyro_offset.y,
-                    .z = self.sensor_calibration.gyro_offset.z,
-                },
+                .mag_hard_iron = Vec3.init(
+                    self.sensor_calibration.mag_hard_iron.x(),
+                    self.sensor_calibration.mag_hard_iron.y(),
+                    self.sensor_calibration.mag_hard_iron.z(),
+                ),
+                .mag_soft_iron = Vec3.init(
+                    self.sensor_calibration.mag_soft_iron.x(),
+                    self.sensor_calibration.mag_soft_iron.y(),
+                    self.sensor_calibration.mag_soft_iron.z(),
+                ),
+                .accel_offset = Vec3.init(
+                    self.sensor_calibration.accel_offset.x(),
+                    self.sensor_calibration.accel_offset.y(),
+                    self.sensor_calibration.accel_offset.z(),
+                ),
+                .gyro_offset = Vec3.init(
+                    self.sensor_calibration.gyro_offset.x(),
+                    self.sensor_calibration.gyro_offset.y(),
+                    self.sensor_calibration.gyro_offset.z(),
+                ),
             },
         }, .{}, file.writer());
     }
@@ -1683,34 +1685,34 @@ pub const DroneConfig = struct {
             const gyro_offset = calibration.object.get("gyro_offset").?.object;
 
             config.sensor_calibration = .{
-                .mag_hard_iron = .{
-                    .x = @floatCast(mag_hard_iron.get("x").?.float),
-                    .y = @floatCast(mag_hard_iron.get("y").?.float),
-                    .z = @floatCast(mag_hard_iron.get("z").?.float),
-                },
-                .mag_soft_iron = .{
-                    .x = @floatCast(mag_soft_iron.get("x").?.float),
-                    .y = @floatCast(mag_soft_iron.get("y").?.float),
-                    .z = @floatCast(mag_soft_iron.get("z").?.float),
-                },
-                .accel_offset = .{
-                    .x = @floatCast(accel_offset.get("x").?.float),
-                    .y = @floatCast(accel_offset.get("y").?.float),
-                    .z = @floatCast(accel_offset.get("z").?.float),
-                },
-                .gyro_offset = .{
-                    .x = @floatCast(gyro_offset.get("x").?.float),
-                    .y = @floatCast(gyro_offset.get("y").?.float),
-                    .z = @floatCast(gyro_offset.get("z").?.float),
-                },
+                .mag_hard_iron = Vec3.init(
+                    @floatCast(mag_hard_iron.get("x").?.float),
+                    @floatCast(mag_hard_iron.get("y").?.float),
+                    @floatCast(mag_hard_iron.get("z").?.float),
+                ),
+                .mag_soft_iron = Vec3.init(
+                    @floatCast(mag_soft_iron.get("x").?.float),
+                    @floatCast(mag_soft_iron.get("y").?.float),
+                    @floatCast(mag_soft_iron.get("z").?.float),
+                ),
+                .accel_offset = Vec3.init(
+                    @floatCast(accel_offset.get("x").?.float),
+                    @floatCast(accel_offset.get("y").?.float),
+                    @floatCast(accel_offset.get("z").?.float),
+                ),
+                .gyro_offset = Vec3.init(
+                    @floatCast(gyro_offset.get("x").?.float),
+                    @floatCast(gyro_offset.get("y").?.float),
+                    @floatCast(gyro_offset.get("z").?.float),
+                ),
             };
         } else {
             // Set default calibration values if not found in config
             config.sensor_calibration = .{
-                .mag_hard_iron = .{ .x = 0, .y = 0, .z = 0 },
-                .mag_soft_iron = .{ .x = 1, .y = 1, .z = 1 },
-                .accel_offset = .{ .x = 0, .y = 0, .z = 0 },
-                .gyro_offset = .{ .x = 0, .y = 0, .z = 0 },
+                .mag_hard_iron = Vec3.zero(),
+                .mag_soft_iron = Vec3.init(1, 1, 1),
+                .accel_offset = Vec3.zero(),
+                .gyro_offset = Vec3.zero(),
             };
         }
 

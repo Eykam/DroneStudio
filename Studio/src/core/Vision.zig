@@ -5,9 +5,12 @@ const libav = @import("bindings/libav.zig");
 const gl = @import("bindings/gl.zig");
 const CudaGL = @import("CudaGL.zig");
 const Math = @import("Math.zig");
-const cuda = CudaGL.cuda;
 const video = libav.video;
 const glad = gl.glad;
+const cuda = CudaGL.cuda;
+
+const Vec3 = Math.Vec3;
+const Quaternion = Math.Quaternion;
 
 const KeypointDebugger = Shape.InstancedKeypointDebugger;
 const InstancedLine = Shape.InstancedLine;
@@ -90,52 +93,52 @@ pub const CameraPose = struct {
         return result;
     }
     // Convert rotation matrix to quaternion
-    pub fn toQuaternion(self: CameraPose) Math.Quaternion {
+    pub fn toQuaternion(self: CameraPose) Quaternion {
         const m = self.rotation;
         const trace = m[0] + m[4] + m[8];
         if (trace > 0) {
             const s = 0.5 / @sqrt(trace + 1.0);
-            return Math.Quaternion{
-                .w = 0.25 / s,
-                .x = (m[7] - m[5]) * s,
-                .y = (m[2] - m[6]) * s,
-                .z = (m[3] - m[1]) * s,
-            };
+            return Quaternion.init(
+                (m[7] - m[5]) * s,
+                (m[2] - m[6]) * s,
+                (m[3] - m[1]) * s,
+                0.25 / s,
+            );
         } else {
             if (m[0] > m[4] and m[0] > m[8]) {
                 const s = 2.0 * @sqrt(1.0 + m[0] - m[4] - m[8]);
-                return Math.Quaternion{
-                    .w = (m[7] - m[5]) / s,
-                    .x = 0.25 * s,
-                    .y = (m[1] + m[3]) / s,
-                    .z = (m[2] + m[6]) / s,
-                };
+                return Quaternion.init(
+                    0.25 * s,
+                    (m[1] + m[3]) / s,
+                    (m[2] + m[6]) / s,
+                    (m[7] - m[5]) / s,
+                );
             } else if (m[4] > m[8]) {
                 const s = 2.0 * @sqrt(1.0 + m[4] - m[0] - m[8]);
-                return Math.Quaternion{
-                    .w = (m[2] - m[6]) / s,
-                    .x = (m[1] + m[3]) / s,
-                    .y = 0.25 * s,
-                    .z = (m[5] + m[7]) / s,
-                };
+                return Quaternion.init(
+                    (m[1] + m[3]) / s,
+                    0.25 * s,
+                    (m[5] + m[7]) / s,
+                    (m[2] - m[6]) / s,
+                );
             } else {
                 const s = 2.0 * @sqrt(1.0 + m[8] - m[0] - m[4]);
-                return Math.Quaternion{
-                    .w = (m[3] - m[1]) / s,
-                    .x = (m[2] + m[6]) / s,
-                    .y = (m[5] + m[7]) / s,
-                    .z = 0.25 * s,
-                };
+                return Quaternion.init(
+                    (m[2] + m[6]) / s,
+                    (m[5] + m[7]) / s,
+                    0.25 * s,
+                    (m[3] - m[1]) / s,
+                );
             }
         }
     }
     // Convert translation array to Vec3
-    pub fn toVec3(self: CameraPose) Math.Vec3 {
-        return Math.Vec3{
-            .x = self.translation[0],
-            .y = self.translation[1],
-            .z = self.translation[2],
-        };
+    pub fn toVec3(self: CameraPose) Vec3 {
+        return Vec3.init(
+            self.translation[0],
+            self.translation[1],
+            self.translation[2],
+        );
     }
 };
 
@@ -1010,7 +1013,7 @@ pub const StereoVO = struct {
 
         // If you also want to reset the actual scene node transform visually:
         if (!self.params.disable_spatial_tracking) {
-            self.combined.target_node.setRotation(Math.Quaternion.identity());
+            self.combined.target_node.setRotation(Quaternion.identity());
             self.combined.target_node.setPosition(0, 0, 0);
             _ = try self.combined.updateTransformation();
         }
@@ -1110,6 +1113,6 @@ pub const DetectionResourceManager = struct {
     }
 
     pub fn updateTransformation(self: *Self) !void {
-        try self.resources.map_transformation(self.target_node.world_transform);
+        try self.resources.map_transformation(self.target_node.world_transform.to_array());
     }
 };

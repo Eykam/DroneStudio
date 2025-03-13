@@ -6,6 +6,7 @@ const Drone = @import("Drone.zig");
 const Sensors = @import("Sensors.zig");
 const Math = @import("Math.zig");
 
+const Vec3 = Math.Vec3;
 const DroneConfig = Drone.DroneConfig;
 const MotorController = Drone.MotorControllerClient;
 const StereoVO = Vision.StereoVO;
@@ -905,7 +906,7 @@ pub const DroneConfigWindow = struct {
             } else {
                 if (imgui.igButton("Enable Orientation Control", imgui.ImVec2{ .x = 200, .y = 0 })) {
                     // Create quaternion from euler angles
-                    const quat = Math.Quaternion.fromEuler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
+                    const quat = Math.Quaternion.from_euler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
 
                     const command = Drone.Protocol.Command{
                         .type = .SetOrientation,
@@ -965,7 +966,7 @@ pub const DroneConfigWindow = struct {
             // Apply button
             if (imgui.igButton("Apply Target Orientation", imgui.ImVec2{ .x = 200, .y = 0 }) or changed) {
                 // Create quaternion from euler angles
-                const quat = Math.Quaternion.fromEuler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
+                const quat = Math.Quaternion.from_euler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
 
                 const command = Drone.Protocol.Command{
                     .type = .SetOrientation,
@@ -982,7 +983,7 @@ pub const DroneConfigWindow = struct {
                 self.target_yaw = pid_debug.current_yaw;
 
                 // Also send the command
-                const quat = Math.Quaternion.fromEuler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
+                const quat = Math.Quaternion.from_euler(self.target_pitch * deg_to_rad, self.target_yaw * deg_to_rad, self.target_roll * deg_to_rad);
 
                 const command = Drone.Protocol.Command{
                     .type = .SetOrientation,
@@ -999,7 +1000,7 @@ pub const DroneConfigWindow = struct {
                 // Keep current yaw
                 self.target_yaw = pid_debug.current_yaw;
 
-                const quat = Math.Quaternion.fromEuler(0.0, self.target_yaw * deg_to_rad, 0.0);
+                const quat = Math.Quaternion.from_euler(0.0, self.target_yaw * deg_to_rad, 0.0);
 
                 const command = Drone.Protocol.Command{
                     .type = .SetOrientation,
@@ -1234,9 +1235,9 @@ pub const DroneConfigWindow = struct {
 
         const sensor_state = ctx.pose_handler.sensor_state;
         const pose = ctx.pose_handler.prev_pose orelse Sensors.Pose{
-            .accel = .{ .x = 0, .y = 0, .z = 0 },
-            .gyro = .{ .x = 0, .y = 0, .z = 0 },
-            .mag = .{ .x = 0, .y = 0, .z = 0 },
+            .accel = Vec3.zero(),
+            .gyro = Vec3.zero(),
+            .mag = Vec3.zero(),
             .timestamp = 0,
         };
 
@@ -1253,13 +1254,13 @@ pub const DroneConfigWindow = struct {
             // Show last raw reading (approx)
             const mag = pose.mag;
             imgui.igText("Raw Magnetometer (NED or pre-rotated):");
-            imgui.igText("  X: %.2f", mag.x);
-            imgui.igText("  Y: %.2f", mag.y);
-            imgui.igText("  Z: %.2f", mag.z);
+            imgui.igText("  X: %.2f", mag.x());
+            imgui.igText("  Y: %.2f", mag.y());
+            imgui.igText("  Z: %.2f", mag.z());
 
             // Show current calibration values
-            imgui.igText("Hard Iron: [%.2f, %.2f, %.2f]", sensor_state.mag_hard_iron.x, sensor_state.mag_hard_iron.y, sensor_state.mag_hard_iron.z);
-            imgui.igText("Soft Iron: [%.2f, %.2f, %.2f]", sensor_state.mag_soft_iron.x, sensor_state.mag_soft_iron.y, sensor_state.mag_soft_iron.z);
+            imgui.igText("Hard Iron: [%.2f, %.2f, %.2f]", sensor_state.mag_hard_iron.x(), sensor_state.mag_hard_iron.y(), sensor_state.mag_hard_iron.z());
+            imgui.igText("Soft Iron: [%.2f, %.2f, %.2f]", sensor_state.mag_soft_iron.x(), sensor_state.mag_soft_iron.y(), sensor_state.mag_soft_iron.z());
 
             // If we are in magnetometer calibration mode, show countdown
             if (sensor_state.calibration_type == .Magnetometer and sensor_state.calibrating) {
@@ -1297,27 +1298,27 @@ pub const DroneConfigWindow = struct {
         if (imgui.igCollapsingHeader_BoolPtr("Accelerometer & Gyro Calibration", null, imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
             // Raw readings
             imgui.igText("Raw Accel:");
-            imgui.igText("  X: %.2f", pose.accel.x);
-            imgui.igText("  Y: %.2f", pose.accel.y);
-            imgui.igText("  Z: %.2f", pose.accel.z);
+            imgui.igText("  X: %.2f", pose.accel.x());
+            imgui.igText("  Y: %.2f", pose.accel.y());
+            imgui.igText("  Z: %.2f", pose.accel.z());
 
             imgui.igText("Raw Gyro:");
-            imgui.igText("  X: %.2f", pose.gyro.x);
-            imgui.igText("  Y: %.2f", pose.gyro.y);
-            imgui.igText("  Z: %.2f", pose.gyro.z);
+            imgui.igText("  X: %.2f", pose.gyro.x());
+            imgui.igText("  Y: %.2f", pose.gyro.y());
+            imgui.igText("  Z: %.2f", pose.gyro.z());
 
             // Show offsets
             imgui.igText(
                 "Accel Offset: [%.2f, %.2f, %.2f]",
-                sensor_state.accel_offset.x,
-                sensor_state.accel_offset.y,
-                sensor_state.accel_offset.z,
+                sensor_state.accel_offset.x(),
+                sensor_state.accel_offset.y(),
+                sensor_state.accel_offset.z(),
             );
             imgui.igText(
                 "Gyro Offset: [%.2f, %.2f, %.2f]",
-                sensor_state.gyro_offset.x,
-                sensor_state.gyro_offset.y,
-                sensor_state.gyro_offset.z,
+                sensor_state.gyro_offset.x(),
+                sensor_state.gyro_offset.y(),
+                sensor_state.gyro_offset.z(),
             );
 
             // +/- 90° rotation test buttons (stubs)
@@ -1468,7 +1469,7 @@ pub const DroneConfigWindow = struct {
         // Current Orientation
         if (sensor_state.filter) |filter| {
             const q = filter.q;
-            const euler = q.toEuler();
+            const euler = q.to_euler();
             const rad_to_deg = 180.0 / std.math.pi;
 
             imgui.igText("Orientation (deg):");

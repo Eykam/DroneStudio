@@ -54,9 +54,9 @@ pub fn main() !void {
 
     //Initializing Entities
     // const gridNode = try Shape.Grid.init(alloc, 1000, 5);
-    const axisNode = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.5, .z = 0.0 }, 10.0);
-    const triangleNode = try Shape.Triangle.init(alloc, Vec3{ .x = 0.0, .y = 1.0, .z = 10.0 }, null);
-    const droneAxis = try Shape.Axis.init(alloc, Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 }, 2.0);
+    const axisNode = try Shape.Axis.init(alloc, Vec3.init(0.0, 0.5, 0.0), 10.0);
+    const triangleNode = try Shape.Triangle.init(alloc, Vec3.init(0.0, 1.0, 10.0), null);
+    const droneAxis = try Shape.Axis.init(alloc, Vec3.init(0.0, 0.0, 0.0), 2.0);
     const boxNode = try Shape.Box.init(alloc, null, null, null, null);
 
     const canvas_width = 12.8;
@@ -64,7 +64,7 @@ pub fn main() !void {
     const texture_dims = [_]u32{ 1280, 720 };
 
     var canvasNode = try Node.init(alloc, null, null, null);
-    canvasNode.setRotation(Math.Quaternion{ .w = 1, .x = 1.0, .y = 0, .z = 0 });
+    canvasNode.setRotation(Math.Quaternion.init(1.0, 0, 0, 1.0));
 
     var canvasNodeLeft = try Shape.TexturedPlane.init(
         alloc,
@@ -127,11 +127,7 @@ pub fn main() !void {
     //Debugging Entities
     scene.getSceneGraph();
 
-    std.debug.print("\nIntial Camera Pos: {d}\n", .{[_]f32{
-        scene.camera.position.x,
-        scene.camera.position.y,
-        scene.camera.position.z,
-    }});
+    std.debug.print("\nIntial Camera Pos: {d}\n", .{scene.camera.position});
 
     // ======================================================= Motor controller & IMU Setup =======================================================
     const motor_controller = try Drone.MotorControllerClient.init(

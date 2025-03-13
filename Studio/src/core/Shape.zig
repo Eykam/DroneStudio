@@ -30,24 +30,20 @@ pub const Triangle = struct {
         if (origin) |position| {
             pos = position;
         } else {
-            pos = Vec3{
-                .x = 0.0,
-                .y = 0.0,
-                .z = 0.0,
-            };
+            pos = Vec3.zero();
         }
 
         const vertices = [_]Vertex{
             Vertex{
-                .position = .{ 0.0 + pos.x, 0.5 + pos.y, 0.0 + pos.z },
+                .position = .{ 0.0 + pos.x(), 0.5 + pos.y(), 0.0 + pos.z() },
                 .color = .{ 1.0, 0.0, 0.0 },
             },
             Vertex{
-                .position = .{ -0.5 + pos.x, -0.5 + pos.y, 0.0 + pos.z },
+                .position = .{ -0.5 + pos.x(), -0.5 + pos.y(), 0.0 + pos.z() },
                 .color = .{ 0.0, 1.0, 0.0 },
             },
             Vertex{
-                .position = .{ 0.5 + pos.x, -0.5 + pos.y, 0.0 + pos.z },
+                .position = .{ 0.5 + pos.x(), -0.5 + pos.y(), 0.0 + pos.z() },
                 .color = .{ 0.0, 0.0, 1.0 },
             },
         };
@@ -161,7 +157,7 @@ pub const Axis = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, position: ?Vec3, length: ?f32) !*Node {
-        const default_pos: Vec3 = .{ .x = 0.0, .y = 0.0, .z = 0.0 };
+        const default_pos = Vec3.zero();
         const vertices: []Vertex = try generateVertices(
             allocator,
             position orelse default_pos,
@@ -258,9 +254,9 @@ pub const Axis = struct {
 
             vertices[index] = Vertex{
                 .position = .{
-                    position.x,
-                    position.y,
-                    position.z,
+                    position.x(),
+                    position.y(),
+                    position.z(),
                 },
                 .color = color,
             };
@@ -269,25 +265,25 @@ pub const Axis = struct {
             switch ((index - 1) % 3) {
                 0 => vertices[index] = Vertex{
                     .position = .{
-                        position.x + length,
-                        position.y,
-                        position.z,
+                        position.x() + length,
+                        position.y(),
+                        position.z(),
                     },
                     .color = color,
                 },
                 1 => vertices[index] = Vertex{
                     .position = .{
-                        position.x,
-                        position.y + length,
-                        position.z,
+                        position.x(),
+                        position.y() + length,
+                        position.z(),
                     },
                     .color = color,
                 },
                 2 => vertices[index] = Vertex{
                     .position = .{
-                        position.x,
-                        position.y,
-                        position.z + length,
+                        position.x(),
+                        position.y(),
+                        position.z() + length,
                     },
                     .color = color,
                 },
@@ -457,7 +453,7 @@ pub const TexturedPlane = struct {
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, pos: ?Vec3, width: ?f32, height: ?f32, texture_dims: ?struct { w: u32, h: u32 }) !*Node {
-        const default_pos = Vec3{ .x = 0.0, .y = 0.0, .z = 0.0 };
+        const default_pos = Vec3.zero();
         const plane_params = try Self.generatePlaneVertices(
             allocator,
             pos orelse default_pos,
@@ -552,8 +548,8 @@ pub const TexturedPlane = struct {
 
         const step_x = width / @as(f32, @floatFromInt(segments));
         const step_z = height / @as(f32, @floatFromInt(segments));
-        const start_x = position.x - (width / 2.0);
-        const start_z = position.z - (height / 2.0);
+        const start_x = position.x() - (width / 2.0);
+        const start_z = position.z() - (height / 2.0);
 
         // Generate vertices
         var z: u32 = 0;
@@ -567,7 +563,7 @@ pub const TexturedPlane = struct {
                 const tex_z = 1.0 - @as(f32, @floatFromInt(z)) / @as(f32, @floatFromInt(segments));
 
                 vertices[vertex_idx] = .{
-                    .position = .{ pos_x, position.y, pos_z },
+                    .position = .{ pos_x, position.y(), pos_z },
                     .color = .{ 0.8, 0.8, 0.8 },
                     .texture = [_]f32{ tex_x, tex_z },
                 };

@@ -1,25 +1,869 @@
 const std = @import("std");
+const math = std.math;
 const Sensors = @import("Sensors.zig");
 const SensorState = Sensors.SensorState;
 
-pub const Mat4 = [16]f32;
+pub fn radians(_degrees: f32) f32 {
+    return _degrees * (std.math.pi / 180.0);
+}
+
+pub fn degrees(_radians: f32) f32 {
+    return _radians / (std.math.pi / 180.0);
+}
 
 pub fn clamp(x: f32, low: f32, high: f32) f32 {
     return if (x < low) low else if (x > high) high else x;
 }
 
-// Todo: Use @Vector instead for SIMD
-pub const Quaternion = struct {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
+pub const Vec3 = struct {
+    const Self = @This();
 
-    pub fn identity() Quaternion {
-        return Quaternion{ .w = 1, .x = 0, .y = 0, .z = 0 };
+    data: @Vector(3, f32),
+
+    pub inline fn x(self: Self) f32 {
+        return self.data[0];
     }
 
-    pub fn fromAxisAngle(axis: Vec3, angle: f32) Quaternion {
+    pub inline fn y(self: Self) f32 {
+        return self.data[1];
+    }
+
+    pub inline fn z(self: Self) f32 {
+        return self.data[2];
+    }
+
+    pub inline fn set_x(self: *Self, value: f32) void {
+        self.data[0] = value;
+    }
+
+    pub inline fn set_y(self: *Self, value: f32) void {
+        self.data[1] = value;
+    }
+
+    pub inline fn set_z(self: *Self, value: f32) void {
+        self.data[2] = value;
+    }
+
+    pub fn init(_x: f32, _y: f32, _z: f32) Self {
+        return .{ .data = .{ _x, _y, _z } };
+    }
+
+    pub fn zero() Self {
+        return .{ .data = .{ 0, 0, 0 } };
+    }
+
+    pub fn add(a: Self, b: Self) Self {
+        const result: @Vector(3, f32) = a.data + b.data;
+        return .{ .data = result };
+    }
+
+    pub fn add_inplace(self: *Self, other: Self) void {
+        const result = self.data + other.data;
+        self.data = result;
+    }
+
+    pub fn sub(a: Self, b: Self) Self {
+        const result = a.data - b.data;
+
+        return .{ .data = result };
+    }
+
+    pub fn sub_inplace(self: *Self, other: Self) void {
+        const result = self.data - other.data;
+        self.data = result;
+    }
+
+    pub fn multiply(a: Self, b: Self) Self {
+        const result = a.data * b.data;
+        return .{ .data = result };
+    }
+
+    pub fn scale(self: Self, scalar: f32) Self {
+        const s: @Vector(3, f32) = @splat(scalar);
+        const result = self.data * s;
+
+        return .{ .data = result };
+    }
+
+    pub fn scale_inplace(self: *Self, scalar: f32) void {
+        const s: @Vector(3, f32) = @splat(scalar);
+        const result = self.data * s;
+        self.data = result;
+    }
+
+    pub fn dot(a: Self, b: Self) f32 {
+        const product = a.data * b.data;
+        return @reduce(.Add, product);
+    }
+
+    pub fn cross(a: Self, b: Self) Self {
+        return .{
+            .data = .{
+                a.y() * b.z() - a.z() * b.y(),
+                a.z() * b.x() - a.x() * b.z(),
+                a.x() * b.y() - a.y() * b.x(),
+            },
+        };
+    }
+
+    pub fn length(self: Self) f32 {
+        return @sqrt(self.dot(self));
+    }
+
+    pub fn lengthSquared(self: Self) f32 {
+        return self.dot(self);
+    }
+
+    pub fn normalize(self: Self) Self {
+        const len = self.length();
+
+        if (math.approxEqAbs(f32, len, 0.0, 1e-6)) {
+            std.debug.print("Vec3 with 0 Length Detected", .{});
+            return self;
+        }
+
+        return self.scale(1.0 / len);
+    }
+
+    pub fn normalize_inplace(self: *Self) void {
+        const len = self.length();
+
+        if (math.approxEqAbs(f32, len, 0.0, 1e-6)) {
+            std.debug.print("Vec3 with 0 Length Detected", .{});
+            return;
+        }
+
+        self.scale_inplace(1.0 / len);
+    }
+
+    pub fn lerp(a: Self, b: Self, t: f32) Self {
+        const vt: @Vector(3, f32) = @splat(t);
+
+        // a + t * (b - a)
+        const diff = b.data - a.data;
+        const scaled = diff * vt;
+        const result = a.data + scaled;
+
+        return .{ .data = result };
+    }
+
+    /// Create vector from angles
+    pub fn from_angles(yaw_deg: f32, pitch_deg: f32) Self {
+        const yaw = yaw_deg * (math.pi / 180.0);
+        const pitch = pitch_deg * (math.pi / 180.0);
+
+        const front = Self.init(@cos(yaw) * @cos(pitch), @sin(pitch), @sin(yaw) * @cos(pitch));
+        return front.normalize();
+    }
+
+    /// Check if two vectors are approximately equal
+    pub fn approx_eq(a: Self, b: Self, tolerance: f32) bool {
+        const diff = @abs(a.data - b.data);
+        const tol: @Vector(3, f32) = @splat(tolerance);
+
+        // Check if all components are within tolerance
+        const within_tolerance: @Vector(3, bool) = diff <= tol;
+        return @reduce(.And, within_tolerance);
+    }
+
+    /// Convert to string representation (for debugging)
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("Vec3({d:.6}, {d:.6}, {d:.6})", .{ self.x(), self.y(), self.z() });
+    }
+};
+
+pub fn Matrix(comptime N: usize) type {
+    return struct {
+        data: [N * N]f32,
+
+        const Self = @This();
+
+        pub fn identity() Self {
+            var result = Self{ .data = undefined };
+            @memset(&result.data, 0);
+
+            var i: usize = 0;
+            while (i < N) : (i += 1) {
+                result.data[i * N + i] = 1.0;
+            }
+            return result;
+        }
+
+        pub fn zero() Self {
+            var result = Self{ .data = undefined };
+            @memset(&result.data, 0);
+            return result;
+        }
+
+        pub inline fn at(self: Self, i: usize, j: usize) f32 {
+            return self.data[i * N + j];
+        }
+
+        pub inline fn set(self: *Self, i: usize, j: usize, value: f32) void {
+            self.data[i * N + j] = value;
+        }
+
+        pub fn add(self: Self, other: Self) Self {
+            var result = Self{ .data = undefined };
+
+            for (0..N * N) |i| {
+                result.data[i] = self.data[i] + other.data[i];
+            }
+
+            return result;
+        }
+
+        pub fn subtract(self: Self, other: Self) Self {
+            var result = Self{ .data = undefined };
+
+            for (0..N * N) |i| {
+                result.data[i] = self.data[i] - other.data[i];
+            }
+
+            return result;
+        }
+
+        pub fn scale(self: Self, scalar: f32) Self {
+            var result = Self{ .data = undefined };
+
+            for (0..N * N) |i| {
+                result.data[i] = self.data[i] * scalar;
+            }
+
+            return result;
+        }
+
+        pub fn multiply(self: Self, other: Self) Self {
+            var result = Self.zero();
+
+            for (0..N) |i| {
+                for (0..N) |j| {
+                    var sum: f32 = 0.0;
+                    for (0..N) |k| {
+                        sum += self.data[i * N + k] * other.data[k * N + j];
+                    }
+                    result.data[i * N + j] = sum;
+                }
+            }
+
+            return result;
+        }
+
+        pub fn transpose(self: Self) Self {
+            var result = Self{ .data = undefined };
+
+            for (0..N) |i| {
+                for (0..N) |j| {
+                    result.data[j * N + i] = self.data[i * N + j];
+                }
+            }
+
+            return result;
+        }
+
+        pub fn to_array(self: Self) [N * N]f32 {
+            return self.data;
+        }
+
+        pub fn from_array(arr: [N * N]f32) Self {
+            return Self{ .data = arr };
+        }
+    };
+}
+
+pub const Mat2 = struct {
+    base: Matrix(2),
+
+    const Self = @This();
+
+    /// Create from generic Matrix(2)
+    pub fn from_matrix(m: [2 * 2]f32) Self {
+        return Self{ .base = Matrix(2).from_array(m) };
+    }
+
+    /// Create identity matrix
+    pub fn identity() Self {
+        return Self{ .base = Matrix(2).identity() };
+    }
+
+    /// Create zero matrix
+    pub fn zero() Self {
+        return Self{ .base = Matrix(2).zero() };
+    }
+
+    /// Create rotation matrix
+    pub fn rotation(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = undefined };
+        result.base.data[0] = c;
+        result.base.data[1] = -s;
+        result.base.data[2] = s;
+        result.base.data[3] = c;
+
+        return result;
+    }
+
+    /// Create scaling matrix
+    pub fn scaling(x: f32, y: f32) Self {
+        var result = Self{ .base = Matrix(2).identity() };
+        result.base.data[0] = x;
+        result.base.data[3] = y;
+
+        return result;
+    }
+
+    /// Pass-through methods to base matrix
+    pub fn add(self: Self, other: Self) Self {
+        return Self{ .base = self.base.add(other.base) };
+    }
+
+    pub fn subtract(self: Self, other: Self) Self {
+        return Self{ .base = self.base.subtract(other.base) };
+    }
+
+    pub fn multiply(self: Self, other: Self) Self {
+        return Self{ .base = self.base.multiply(other.base) };
+    }
+
+    pub fn scale(self: Self, scalar: f32) Self {
+        return Self{ .base = self.base.scale(scalar) };
+    }
+
+    pub fn transpose(self: Self) Self {
+        return Self{ .base = self.base.transpose() };
+    }
+};
+
+/// Specialized 3x3 matrix type with additional methods
+pub const Mat3 = struct {
+    base: Matrix(3),
+
+    const Self = @This();
+
+    /// Create from generic Matrix(3)
+    pub fn from_array(m: [3 * 3]f32) Self {
+        return Self{ .base = Matrix(3).from_array(m) };
+    }
+
+    /// Create identity matrix
+    pub fn identity() Self {
+        return Self{ .base = Matrix(3).identity() };
+    }
+
+    /// Create zero matrix
+    pub fn zero() Self {
+        return Self{ .base = Matrix(3).zero() };
+    }
+
+    /// Create rotation matrix around X axis
+    pub fn rotation_x(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = Matrix(3).identity() };
+        result.base.data[4] = c; // [1,1]
+        result.base.data[5] = -s; // [1,2]
+        result.base.data[7] = s; // [2,1]
+        result.base.data[8] = c; // [2,2]
+
+        return result;
+    }
+
+    /// Create rotation matrix around Y axis
+    pub fn rotation_y(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = Matrix(3).identity() };
+        result.base.data[0] = c; // [0,0]
+        result.base.data[2] = s; // [0,2]
+        result.base.data[6] = -s; // [2,0]
+        result.base.data[8] = c; // [2,2]
+
+        return result;
+    }
+
+    /// Create rotation matrix around Z axis
+    pub fn rotation_z(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = Matrix(3).identity() };
+        result.base.data[0] = c; // [0,0]
+        result.base.data[1] = -s; // [0,1]
+        result.base.data[3] = s; // [1,0]
+        result.base.data[4] = c; // [1,1]
+
+        return result;
+    }
+
+    /// Create scaling matrix
+    pub fn scaling(x: f32, y: f32, z: f32) Self {
+        var result = Self{ .base = Matrix(3).identity() };
+        result.base.data[0] = x;
+        result.base.data[4] = y;
+        result.base.data[8] = z;
+
+        return result;
+    }
+
+    /// Create 3x3 rotation matrix from Quaternion
+    pub fn from_quaternion(q: Quaternion) Self {
+        const qx = q.x();
+        const qy = q.y();
+        const qz = q.z();
+        const qw = q.w();
+
+        const xx = qx * qx;
+        const yy = qy * qy;
+        const zz = qz * qz;
+        const xy = qx * qy;
+        const xz = qx * qz;
+        const yz = qy * qz;
+        const wx = qw * qx;
+        const wy = qw * qy;
+        const wz = qw * qz;
+
+        var result = Self{ .base = undefined };
+
+        // Row 0
+        result.base.data[0] = 1 - 2 * (yy + zz);
+        result.base.data[1] = 2 * (xy - wz);
+        result.base.data[2] = 2 * (xz + wy);
+
+        // Row 1
+        result.base.data[3] = 2 * (xy + wz);
+        result.base.data[4] = 1 - 2 * (xx + zz);
+        result.base.data[5] = 2 * (yz - wx);
+
+        // Row 2
+        result.base.data[6] = 2 * (xz - wy);
+        result.base.data[7] = 2 * (yz + wx);
+        result.base.data[8] = 1 - 2 * (xx + yy);
+
+        return result;
+    }
+
+    // TODO: Add inplace operations
+    pub fn add(self: Self, other: Self) Self {
+        return Self{ .base = self.base.add(other.base) };
+    }
+
+    pub fn subtract(self: Self, other: Self) Self {
+        return Self{ .base = self.base.subtract(other.base) };
+    }
+
+    pub fn multiply(self: Self, other: Self) Self {
+        return Self{ .base = self.base.multiply(other.base) };
+    }
+
+    pub fn scale(self: Self, scalar: f32) Self {
+        return Self{ .base = self.base.scale(scalar) };
+    }
+};
+
+// TODO: Add inplace operations
+pub const Mat4 = struct {
+    base: Matrix(4),
+
+    const Self = @This();
+
+    pub fn to_array(self: Self) [4 * 4]f32 {
+        return self.base.to_array();
+    }
+
+    pub fn from_array(m: [4 * 4]f32) Self {
+        return Self{ .base = Matrix(4).from_array(m) };
+    }
+
+    pub fn identity() Self {
+        return Self{ .base = Matrix(4).identity() };
+    }
+
+    pub fn zero() Self {
+        return Self{ .base = Matrix(4).zero() };
+    }
+
+    /// Create translation matrix
+    pub fn translation(x: f32, y: f32, z: f32) Self {
+        var result = Self{ .base = Matrix(4).identity() };
+        result.base.data[3] = x; // [0,3]
+        result.base.data[7] = y; // [1,3]
+        result.base.data[11] = z; // [2,3]
+
+        return result;
+    }
+
+    /// Apply translation to existing matrix
+    pub fn translate(self: Self, x: f32, y: f32, z: f32) Self {
+        var result = self;
+        const m = self.base.data;
+
+        // Translation components in last column
+        result.base.data[3] = m[0] * x + m[1] * y + m[2] * z + m[3];
+        result.base.data[7] = m[4] * x + m[5] * y + m[6] * z + m[7];
+        result.base.data[11] = m[8] * x + m[9] * y + m[10] * z + m[11];
+        result.base.data[15] = m[12] * x + m[13] * y + m[14] * z + m[15];
+
+        return result;
+    }
+
+    /// Create scaling matrix
+    pub fn scaling(x: f32, y: f32, z: f32) Self {
+        var result = Self{ .base = Matrix(4).identity() };
+        result.base.data[0] = x;
+        result.base.data[5] = y;
+        result.base.data[10] = z;
+
+        return result;
+    }
+
+    /// Apply scaling to existing matrix
+    pub fn scale(self: Self, x: f32, y: f32, z: f32) Self {
+        var result = self;
+
+        // Scale the basis vectors
+        for (0..4) |i| {
+            result.base.data[i] *= x; // First row
+            result.base.data[4 + i] *= y; // Second row
+            result.base.data[8 + i] *= z; // Third row
+        }
+
+        return result;
+    }
+
+    /// Create rotation matrix around X axis
+    pub fn rotation_x(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = Matrix(4).identity() };
+        result.base.data[5] = c; // [1,1]
+        result.base.data[6] = -s; // [1,2]
+        result.base.data[9] = s; // [2,1]
+        result.base.data[10] = c; // [2,2]
+
+        return result;
+    }
+
+    /// Create rotation matrix around Y axis
+    pub fn rotation_y(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = Matrix(4).identity() };
+        result.base.data[0] = c; // [0,0]
+        result.base.data[2] = s; // [0,2]
+        result.base.data[8] = -s; // [2,0]
+        result.base.data[10] = c; // [2,2]
+
+        return result;
+    }
+
+    /// Create rotation matrix around Z axis
+    pub fn rotation_z(angle_deg: f32) Self {
+        const angle_rad = angle_deg * (math.pi / 180.0);
+        const c = @cos(angle_rad);
+        const s = @sin(angle_rad);
+
+        var result = Self{ .base = Matrix(4).identity() };
+        result.base.data[0] = c; // [0,0]
+        result.base.data[1] = -s; // [0,1]
+        result.base.data[4] = s; // [1,0]
+        result.base.data[5] = c; // [1,1]
+
+        return result;
+    }
+
+    /// Create perspective projection matrix
+    pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) Self {
+        const rad = fov * (math.pi / 180.0);
+        const tan_half_fov = @tan(rad / 2.0);
+
+        var result = Self{ .base = Matrix(4).zero() };
+        result.base.data[0] = 1.0 / (aspect * tan_half_fov);
+        result.base.data[5] = 1.0 / tan_half_fov;
+        result.base.data[10] = -(far + near) / (far - near);
+        result.base.data[11] = -1.0;
+        result.base.data[14] = -(2.0 * far * near) / (far - near);
+
+        return result;
+    }
+
+    /// Create orthographic projection matrix
+    pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) Self {
+        var result = Self{ .base = Matrix(4).identity() };
+
+        result.base.data[0] = 2.0 / (right - left);
+        result.base.data[5] = 2.0 / (top - bottom);
+        result.base.data[10] = -2.0 / (far - near);
+
+        result.base.data[3] = -(right + left) / (right - left);
+        result.base.data[7] = -(top + bottom) / (top - bottom);
+        result.base.data[11] = -(far + near) / (far - near);
+
+        return result;
+    }
+
+    /// Create look-at view matrix
+    pub fn look_at(eye: Vec3, center: Vec3, up: Vec3) Self {
+        // Calculate forward vector (normalized eye to center)
+        var f: Vec3 = center.sub(eye);
+        f.normalize_inplace();
+
+        // Calculate right vector (normalized cross product of forward and up)
+        var s = Vec3.cross(f, up);
+        s.normalize_inplace();
+
+        // Calculate camera up vector (cross product of right and forward)
+        const u = Vec3.cross(s, f);
+
+        var result = Self{ .base = Matrix(4).identity() };
+
+        // Row 0
+        result.base.data[0] = s.x();
+        result.base.data[1] = s.y();
+        result.base.data[2] = s.z();
+        result.base.data[3] = -Vec3.dot(s, eye);
+
+        // Row 1
+        result.base.data[4] = u.x();
+        result.base.data[5] = u.y();
+        result.base.data[6] = u.z();
+        result.base.data[7] = -Vec3.dot(u, eye);
+
+        // Row 2
+        result.base.data[8] = -f.x();
+        result.base.data[9] = -f.y();
+        result.base.data[10] = -f.z();
+        result.base.data[11] = Vec3.dot(f, eye);
+
+        return result;
+    }
+
+    /// Create 4x4 matrix from Quaternion
+    pub fn from_quaternion(q: Quaternion) Self {
+        const qx = q.x();
+        const qy = q.y();
+        const qz = q.z();
+        const qw = q.w();
+
+        const xx = qx * qx;
+        const yy = qy * qy;
+        const zz = qz * qz;
+        const xy = qx * qy;
+        const xz = qx * qz;
+        const yz = qy * qz;
+        const wx = qw * qx;
+        const wy = qw * qy;
+        const wz = qw * qz;
+
+        var result = Self{ .base = undefined };
+
+        // Row 0
+        result.base.data[0] = 1 - 2 * (yy + zz);
+        result.base.data[1] = 2 * (xy - wz);
+        result.base.data[2] = 2 * (xz + wy);
+        result.base.data[3] = 0;
+
+        // Row 1
+        result.base.data[4] = 2 * (xy + wz);
+        result.base.data[5] = 1 - 2 * (xx + zz);
+        result.base.data[6] = 2 * (yz - wx);
+        result.base.data[7] = 0;
+
+        // Row 2
+        result.base.data[8] = 2 * (xz - wy);
+        result.base.data[9] = 2 * (yz + wx);
+        result.base.data[10] = 1 - 2 * (xx + yy);
+        result.base.data[11] = 0;
+
+        // Row 3
+        result.base.data[12] = 0;
+        result.base.data[13] = 0;
+        result.base.data[14] = 0;
+        result.base.data[15] = 1;
+
+        return result;
+    }
+
+    // Create a Mat4 from Mat3 with 0 padding
+    pub fn from_mat3(m: Mat3) Mat3 {
+        const data: [4 * 4]f32 = undefined;
+
+        data[0] = m.data[0];
+        data[1] = m.data[1];
+        data[2] = m.data[2];
+        data[4] = m.data[3];
+        data[5] = m.data[4];
+        data[6] = m.data[5];
+        data[8] = m.data[6];
+        data[9] = m.data[7];
+        data[10] = m.data[8];
+
+        return Self.from_array(data);
+    }
+
+    // Extract the upper 3x3 portion of the matrix
+    pub fn to_mat3(self: Self) Mat3 {
+        var result = Matrix(3){ .data = undefined };
+
+        // Copy upper-left 3x3 submatrix
+        result.data[0] = self.base.data[0];
+        result.data[1] = self.base.data[1];
+        result.data[2] = self.base.data[2];
+        result.data[3] = self.base.data[4];
+        result.data[4] = self.base.data[5];
+        result.data[5] = self.base.data[6];
+        result.data[6] = self.base.data[8];
+        result.data[7] = self.base.data[9];
+        result.data[8] = self.base.data[10];
+
+        return Mat3{ .base = result };
+    }
+
+    /// Pass-through methods to base matrix
+    pub fn add(self: Self, other: Self) Self {
+        return Self{ .base = self.base.add(other.base) };
+    }
+
+    pub fn subtract(self: Self, other: Self) Self {
+        return Self{ .base = self.base.subtract(other.base) };
+    }
+
+    pub fn multiply(self: Self, other: Self) Self {
+        return Self{ .base = self.base.multiply(other.base) };
+    }
+
+    pub fn scale_uniform(self: Self, scalar: f32) Self {
+        return Self{ .base = self.base.scale(scalar) };
+    }
+
+    pub fn transpose(self: Self) Self {
+        return Self{ .base = self.base.transpose() };
+    }
+
+    pub fn determinant(self: Self) f32 {
+        return self.base.determinant();
+    }
+
+    pub fn inverse(self: Self) ?Self {
+        if (self.base.inverse()) |inv| {
+            return Self{ .base = inv };
+        }
+        return null;
+    }
+};
+
+// Todo: Use @Vector instead for SIMD
+pub const Quaternion = struct {
+    const Self = @This();
+
+    data: @Vector(4, f32), // [x, y, z, w]
+
+    pub fn init(_x: f32, _y: f32, _z: f32, _w: f32) Self {
+        return Self{ .data = .{ _x, _y, _z, _w } };
+    }
+
+    pub inline fn x(self: Quaternion) f32 {
+        return self.data[0];
+    }
+    pub inline fn y(self: Quaternion) f32 {
+        return self.data[1];
+    }
+    pub inline fn z(self: Quaternion) f32 {
+        return self.data[2];
+    }
+    pub inline fn w(self: Quaternion) f32 {
+        return self.data[3];
+    }
+
+    pub fn identity() Quaternion {
+        return Quaternion.init(0, 0, 0, 1);
+    }
+
+    pub fn add(a: Self, b: Self) Self {
+        const result = a.data + b.data;
+        return .{ .data = result };
+    }
+
+    pub fn add_inplace(a: Self, b: Self) Self {
+        _ = a;
+        _ = b;
+    }
+
+    pub fn multiply(a: Self, b: Self) Self {
+        return Self.init(
+            a.w() * b.x() + a.x() * b.w() + a.y() * b.z() - a.z() * b.y(),
+            a.w() * b.y() - a.x() * b.z() + a.y() * b.w() + a.z() * b.x(),
+            a.w() * b.z() + a.x() * b.y() - a.y() * b.x() + a.z() * b.w(),
+            a.w() * b.w() - a.x() * b.x() - a.y() * b.y() - a.z() * b.z(),
+        );
+    }
+
+    pub fn multiply_inplace(a: Self, b: Self) Self {
+        _ = a;
+        _ = b;
+    }
+
+    pub fn scale(self: Self, scalar: f32) Self {
+        const s: @Vector(4, f32) = @splat(scalar);
+        const result = self.data * s;
+
+        return .{ .data = result };
+    }
+
+    pub fn scale_inplace(self: Self, scalar: f32) Self {
+        _ = self;
+        _ = scalar;
+    }
+
+    pub fn length(self: Self) f32 {
+        const product = self.data * self.data;
+        const dot = @reduce(.Add, product);
+
+        return @sqrt(dot);
+    }
+
+    pub fn normalize(q: Self) Self {
+        const len = q.length();
+
+        if (math.approxEqAbs(f32, len, 0.0, 1e-6)) {
+            std.debug.print("Quaternion with 0 Length Detected", .{});
+            return q;
+        }
+
+        return q.scale(1.0 / len);
+    }
+
+    pub fn normalize_inplace(self: *Self) void {
+        _ = self;
+    }
+
+    pub fn conjugate(self: Self) Self {
+        // Conjugate: keep w, negate x, y, z
+        const mask: @Vector(4, f32) = .{ -1, -1, -1, 1 };
+        const result = self.data * mask.data;
+
+        return .{ .data = result };
+    }
+
+    pub fn from_axis_angle(axis: Vec3, angle: f32) Self {
         const normalized_axis = axis.normalize();
 
         // Calculate the sine and cosine of half the angle
@@ -27,81 +871,71 @@ pub const Quaternion = struct {
         const sin_half = @sin(half_angle);
         const cos_half = @cos(half_angle);
 
-        return Quaternion{
-            .x = normalized_axis.x * sin_half,
-            .y = normalized_axis.y * sin_half,
-            .z = normalized_axis.z * sin_half,
-            .w = cos_half,
-        };
+        return Self.init(
+            normalized_axis.x() * sin_half,
+            normalized_axis.y() * sin_half,
+            normalized_axis.z() * sin_half,
+            cos_half,
+        );
     }
 
-    pub fn toEuler(self: Quaternion) [3]f32 {
+    pub fn to_euler(self: Self) [3]f32 {
+        const qx = self.x();
+        const qy = self.y();
+        const qz = self.z();
+        const qw = self.w();
+
         // Pitch (rotation around X-axis)
-        const sinp = 2.0 * (self.w * self.x + self.y * self.z);
-        const cosp = 1.0 - 2.0 * (self.x * self.x + self.y * self.y);
-        const pitch = std.math.atan2(sinp, cosp);
+        const sin_pitch = 2.0 * (qw * qx + qy * qz);
+        const cos_pitch = 1.0 - 2.0 * (qx * qx + qy * qy);
+        const pitch = std.math.atan2(sin_pitch, cos_pitch);
 
         // Yaw (rotation around Y-axis)
-        const siny = 2.0 * (self.w * self.y - self.z * self.x);
+        const sin_yaw = 2.0 * (qw * qy - qz * qx);
         // Clamp siny to ensure the value is in the valid range for asin
-        const yaw = std.math.asin(clamp(siny, -1.0, 1.0));
+        const yaw = std.math.asin(clamp(sin_yaw, -1.0, 1.0));
 
         // Roll (rotation around Z-axis)
-        const sinr = 2.0 * (self.w * self.z + self.x * self.y);
-        const cosr = 1.0 - 2.0 * (self.y * self.y + self.z * self.z);
-        const roll = std.math.atan2(sinr, cosr);
+        const sin_roll = 2.0 * (qw * qz + qx * qy);
+        const cos_roll = 1.0 - 2.0 * (qy * qy + qz * qz);
+        const roll = std.math.atan2(sin_roll, cos_roll);
 
         return [3]f32{ pitch, yaw, roll };
     }
 
-    pub fn fromEuler(pitch: f32, yaw: f32, roll: f32) Quaternion {
-        const qx = Quaternion{
-            .x = @sin(roll / 2.0),
-            .y = 0,
-            .z = 0,
-            .w = @cos(roll / 2.0),
-        };
+    pub fn from_euler(pitch: f32, yaw: f32, roll: f32) Self {
+        const qx = Self.init(
+            @sin(roll / 2.0),
+            0,
+            0,
+            @cos(roll / 2.0),
+        );
 
         // Create rotation around y-axis (pitch)
-        const qy = Quaternion{
-            .x = 0,
-            .y = @sin(pitch / 2.0),
-            .z = 0,
-            .w = @cos(pitch / 2.0),
-        };
+        const qy = Self.init(
+            0,
+            @sin(pitch / 2.0),
+            0,
+            @cos(pitch / 2.0),
+        );
 
         // Create rotation around z-axis (yaw)
-        const qz = Quaternion{
-            .x = 0,
-            .y = 0,
-            .z = @sin(yaw / 2.0),
-            .w = @cos(yaw / 2.0),
-        };
+        const qz = Self.init(
+            0,
+            0,
+            @sin(yaw / 2.0),
+            @cos(yaw / 2.0),
+        );
 
         // Combine rotations in ZYX order (yaw, pitch, roll)
         // This means roll first, then pitch, then yaw
         return qz.multiply(qy).multiply(qx).normalize();
     }
 
-    pub fn normalize(q: Quaternion) Quaternion {
-        const mag = @sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-
-        if (mag == 0) {
-            std.debug.print("Quaternion with 0 Length Detected", .{});
-            return q;
-        }
-
-        return Quaternion{
-            .x = q.x / mag,
-            .y = q.y / mag,
-            .z = q.z / mag,
-            .w = q.w / mag,
-        };
-    }
-
-    pub fn fromMat3(mat: [9]f32) Quaternion {
+    pub fn from_mat3(_mat: Mat3) Self {
+        const mat = _mat.base.data;
         const trace = mat[0] + mat[4] + mat[8];
-        var result = Quaternion{
+        var result = Self{
             .w = 0,
             .x = 0,
             .y = 0,
@@ -135,313 +969,78 @@ pub const Quaternion = struct {
         }
 
         // Normalize the quaternion
-        const length = @sqrt(result.w * result.w +
-            result.x * result.x +
-            result.y * result.y +
-            result.z * result.z);
-
-        return .{
-            .w = result.w / length,
-            .x = result.x / length,
-            .y = result.y / length,
-            .z = result.z / length,
-        };
+        return result.normalize();
     }
 
-    pub fn toMatrix(q: Quaternion) Mat4 {
-        const xx = q.x * q.x;
-        const yy = q.y * q.y;
-        const zz = q.z * q.z;
-        const xy = q.x * q.y;
-        const xz = q.x * q.z;
-        const yz = q.y * q.z;
-        const wx = q.w * q.x;
-        const wy = q.w * q.y;
-        const wz = q.w * q.z;
+    pub fn to_mat4(q: Self) Mat4 {
+        const qx = q.x();
+        const qy = q.y();
+        const qz = q.z();
+        const qw = q.w();
 
-        return Mat4{
+        const xx = qx * qx;
+        const yy = qy * qy;
+        const zz = qz * qz;
+        const xy = qx * qy;
+        const xz = qx * qz;
+        const yz = qy * qz;
+        const wx = qw * qx;
+        const wy = qw * qy;
+        const wz = qw * qz;
+
+        const data = [4 * 4]f32{
             1 - 2 * (yy + zz), 2 * (xy - wz),     2 * (xz + wy),     0,
             2 * (xy + wz),     1 - 2 * (xx + zz), 2 * (yz - wx),     0,
             2 * (xz - wy),     2 * (yz + wx),     1 - 2 * (xx + yy), 0,
             0,                 0,                 0,                 1,
         };
-    }
-    pub fn add(self: Quaternion, other: Quaternion) Quaternion {
-        return Quaternion{
-            .x = self.x + other.x,
-            .y = self.y + other.y,
-            .z = self.z + other.z,
-            .w = self.w + other.w,
-        };
+
+        return Mat4.from_array(data);
     }
 
-    pub fn multiply(a: Quaternion, b: Quaternion) Quaternion {
-        const q = Quaternion{
-            .w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
-            .x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-            .y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-            .z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-        };
+    pub fn slerp(a: Self, b: Self, t: f32) Self {
+        const ax = a.x();
+        const ay = a.y();
+        const az = a.z();
+        const aw = a.w();
 
-        return q;
-    }
+        const bx = b.x();
+        const by = b.y();
+        const bz = b.z();
+        const bw = b.w();
 
-    pub fn scale(self: Quaternion, scalar: f32) Quaternion {
-        return Quaternion{
-            .x = self.x * scalar,
-            .y = self.y * scalar,
-            .z = self.z * scalar,
-            .w = self.w * scalar,
-        };
-    }
+        var cos_half_theta = aw * bw + ax * bx + ay * by + az * bz;
 
-    pub fn conjugate(self: Quaternion) Quaternion {
-        return Quaternion{
-            .w = self.w,
-            .x = -self.x,
-            .y = -self.y,
-            .z = -self.z,
-        };
-    }
-
-    pub fn slerp(a: Quaternion, b: Quaternion, t: f32) Quaternion {
-        var cos_half_theta = a.w * b.w + a.x * b.x + a.y * b.y + a.z * b.z;
-
-        var b_copy = b;
+        var b_copy: Self = undefined;
         if (cos_half_theta < 0.0) {
-            b_copy = Quaternion{ .x = -b.x, .y = -b.y, .z = -b.z, .w = -b.w };
+            b_copy = Self.init(-bx, -by, -bz, -bw);
             cos_half_theta = -cos_half_theta;
         }
 
+        const bcx = b_copy.x();
+        const bcy = b_copy.y();
+        const bcz = b_copy.z();
+        const bcw = b_copy.w();
+
         if (cos_half_theta > 0.9995) {
-            return Quaternion.normalize(Quaternion{
-                .x = a.x + t * (b_copy.x - a.x),
-                .y = a.y + t * (b_copy.y - a.y),
-                .z = a.z + t * (b_copy.z - a.z),
-                .w = a.w + t * (b_copy.w - a.w),
-            });
+            return Self.normalize(Self.init(
+                ax + t * (bcx - ax),
+                ay + t * (bcy - ay),
+                az + t * (bcz - az),
+                aw + t * (bcw - aw),
+            ));
         } else {
             const half_theta = std.math.acos(cos_half_theta);
             const sin_half_theta = @sin(half_theta);
             const ratio_a = @sin((1 - t) * half_theta) / sin_half_theta;
             const ratio_b = @sin(t * half_theta) / sin_half_theta;
 
-            return Quaternion{
-                .x = a.x * ratio_a + b_copy.x * ratio_b,
-                .y = a.y * ratio_a + b_copy.y * ratio_b,
-                .z = a.z * ratio_a + b_copy.z * ratio_b,
-                .w = a.w * ratio_a + b_copy.w * ratio_b,
-            };
+            return Self.init(
+                ax * ratio_a + bcx * ratio_b,
+                ay * ratio_a + bcy * ratio_b,
+                az * ratio_a + bcz * ratio_b,
+                aw * ratio_a + bcw * ratio_b,
+            );
         }
     }
 };
-
-//Todo: Use @Vector for SIMD
-pub const Vec3 = struct {
-    x: f32,
-    y: f32,
-    z: f32,
-
-    pub fn normalize(self: Vec3) Vec3 {
-        const _length = self.length();
-
-        if (_length == 0) {
-            std.debug.print("Vec3 with 0 Length Detected", .{});
-            return self;
-        }
-
-        return Vec3{
-            .x = self.x / _length,
-            .y = self.y / _length,
-            .z = self.z / _length,
-        };
-    }
-
-    pub fn zero() Vec3 {
-        return Vec3{
-            .x = 0.0,
-            .y = 0.0,
-            .z = 0.0,
-        };
-    }
-
-    pub fn add(a: Vec3, b: Vec3) Vec3 {
-        return Vec3{
-            .x = a.x + b.x,
-            .y = a.y + b.y,
-            .z = a.z + b.z,
-        };
-    }
-
-    pub fn sub(a: Vec3, b: Vec3) Vec3 {
-        return Vec3{
-            .x = a.x - b.x,
-            .y = a.y - b.y,
-            .z = a.z - b.z,
-        };
-    }
-
-    pub fn scale(self: Vec3, scalar: f32) Vec3 {
-        return Vec3{
-            .x = self.x * scalar,
-            .y = self.y * scalar,
-            .z = self.z * scalar,
-        };
-    }
-
-    pub fn cross(a: Vec3, b: Vec3) Vec3 {
-        return Vec3{
-            .x = a.y * b.z - a.z * b.y,
-            .y = a.z * b.x - a.x * b.z,
-            .z = a.x * b.y - a.y * b.x,
-        };
-    }
-
-    pub fn dot(a: Vec3, b: Vec3) f32 {
-        return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
-
-    pub fn from_angles(yaw_deg: f32, pitch_deg: f32) Vec3 {
-        const yaw = radians(yaw_deg);
-        const pitch = radians(pitch_deg);
-
-        const front = Vec3{
-            .x = @cos(yaw) * @cos(pitch),
-            .y = @sin(pitch),
-            .z = @sin(yaw) * @cos(pitch),
-        };
-        return Vec3.normalize(front);
-    }
-
-    pub fn length(self: Vec3) f32 {
-        return @sqrt(self.x * self.x + self.y * self.y + self.z * self.z);
-    }
-};
-
-pub fn identity() Mat4 {
-    return .{
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-pub fn rotate_x(angle_deg: f32) Mat4 {
-    const angle_rad = angle_deg * (std.math.pi / 180.0);
-    const c = @cos(angle_rad);
-    const s = @sin(angle_rad);
-
-    return .{
-        1.0, 0.0, 0.0, 0.0,
-        0.0, c,   -s,  0.0,
-        0.0, s,   c,   0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-pub fn translate(matrix: Mat4, x: f32, y: f32, z: f32) Mat4 {
-    // Create translation matrix
-    var result = matrix;
-
-    // Translation components go in the last column (indices 12,13,14)
-    // In column-major order: matrix[12] = x, matrix[13] = y, matrix[14] = z
-    result[12] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
-    result[13] = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
-    result[14] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
-    result[15] = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
-
-    return result;
-}
-
-pub fn scale(matrix: Mat4, x: f32, y: f32, z: f32) Mat4 {
-    var result = matrix;
-
-    // Scale the basis vectors
-    result[0] *= x;
-    result[1] *= x;
-    result[2] *= x;
-    result[3] *= x;
-
-    result[4] *= y;
-    result[5] *= y;
-    result[6] *= y;
-    result[7] *= y;
-
-    result[8] *= z;
-    result[9] *= z;
-    result[10] *= z;
-    result[11] *= z;
-
-    return result;
-}
-
-pub fn rotate_y(angle_deg: f32) Mat4 {
-    const angle_rad = radians(angle_deg);
-    const c = std.math.cos(angle_rad);
-    const s = std.math.sin(angle_rad);
-
-    return .{
-        c,   0.0, s,   0.0,
-        0.0, 1.0, 0.0, 0.0,
-        -s,  0.0, c,   0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-}
-
-pub fn orthographic(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) Mat4 {
-    return .{
-        2.0 / (right - left), 0.0,                  0.0,                 -(right + left) / (right - left),
-        0.0,                  2.0 / (top - bottom), 0.0,                 -(top + bottom) / (top - bottom),
-        0.0,                  0.0,                  -2.0 / (far - near), -(far + near) / (far - near),
-        0.0,                  0.0,                  0.0,                 1.0,
-    };
-}
-
-pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) Mat4 {
-    const rad = radians(fov);
-    const tan_half_fov = @tan(rad / 2.0);
-    var mat: Mat4 = .{0} ** 16;
-    mat[0] = 1.0 / (aspect * tan_half_fov);
-    mat[5] = 1.0 / (tan_half_fov);
-    mat[10] = -(far + near) / (far - near);
-    mat[11] = -1.0;
-    mat[14] = -(2.0 * far * near) / (far - near);
-    return mat;
-}
-
-// Function to create a simple view matrix (camera at (0,0,5) looking at origin)
-pub fn lookAt(eye: Vec3, center: Vec3, up: Vec3) Mat4 {
-    const f = Vec3.normalize(Vec3.sub(center, eye));
-    const s = Vec3.normalize(Vec3.cross(f, up));
-    const u = Vec3.cross(s, f);
-
-    return .{
-        s.x,               u.x,               -f.x,             0.0,
-        s.y,               u.y,               -f.y,             0.0,
-        s.z,               u.z,               -f.z,             0.0,
-        -Vec3.dot(s, eye), -Vec3.dot(u, eye), Vec3.dot(f, eye), 1.0,
-    };
-}
-
-pub fn multiply_matrices(a: Mat4, b: Mat4) Mat4 {
-    var result: Mat4 = .{0} ** 16;
-    for (0..4) |row| {
-        for (0..4) |col| {
-            var sum: f32 = 0.0;
-            for (0..4) |i| {
-                sum += a[row * 4 + i] * b[i * 4 + col];
-            }
-            result[row * 4 + col] = sum;
-        }
-    }
-    return result;
-}
-
-pub fn radians(_degrees: f32) f32 {
-    return _degrees * (std.math.pi / 180.0);
-}
-
-fn degrees(_radians: f32) f32 {
-    return _radians / (std.math.pi / 180.0);
-}

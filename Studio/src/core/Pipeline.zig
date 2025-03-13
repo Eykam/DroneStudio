@@ -11,6 +11,7 @@ const Sensors = @import("Sensors.zig");
 const Drone = @import("Drone.zig");
 
 const Vec3 = Math.Vec3;
+const Mat4 = Math.Mat4;
 const File = std.fs.File;
 const glfw = gl.glfw;
 const glad = gl.glad;
@@ -65,7 +66,7 @@ pub const Scene = struct {
 
     texGen: TextureGenerator = TextureGenerator{},
 
-    last_projection: [16]f32 = undefined,
+    last_projection: Mat4 = undefined,
     projection_dirty: bool = true,
 
     frame_count: u64 = 0,
@@ -87,54 +88,54 @@ pub const Scene = struct {
         var height: i32 = undefined;
         glfw.glfwGetWindowSize(window.?, &width, &height);
 
-        const shaderProgram = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
-        glad.glUseProgram(shaderProgram);
+        const shader_program = try createShaderProgram("shaders/vertex_shader.glsl", "shaders/fragment_shader.glsl");
+        glad.glUseProgram(shader_program);
 
-        var currentProgram: u32 = 0;
-        glad.glGetIntegerv(glad.GL_CURRENT_PROGRAM, @ptrCast(&currentProgram));
-        if (currentProgram != shaderProgram) {
+        var current_program: u32 = 0;
+        glad.glGetIntegerv(glad.GL_CURRENT_PROGRAM, @ptrCast(&current_program));
+        if (current_program != shader_program) {
             std.debug.print("Shader program not active!\n", .{});
         }
 
         checkOpenGLError("Uniform Setup");
 
-        var numActiveAttributes: c_int = 0;
-        glad.glGetProgramiv(shaderProgram, glad.GL_ACTIVE_ATTRIBUTES, &numActiveAttributes);
+        var num_active_attributes: c_int = 0;
+        glad.glGetProgramiv(shader_program, glad.GL_ACTIVE_ATTRIBUTES, &num_active_attributes);
 
         std.debug.print("\nGetting Attributes\n", .{});
-        std.debug.print("Number of active vertex attributes: {}\n", .{numActiveAttributes});
+        std.debug.print("Number of active vertex attributes: {}\n", .{num_active_attributes});
 
-        for (0..@intCast(numActiveAttributes)) |i| {
-            var nameBuffer: [256]u8 = undefined;
+        for (0..@intCast(num_active_attributes)) |i| {
+            var name_buffer: [256]u8 = undefined;
             var length: c_int = 0;
             var size: c_int = 0;
             var var_type: c_uint = 0;
 
             glad.glGetActiveAttrib(
-                shaderProgram,
+                shader_program,
                 @intCast(i),
-                nameBuffer.len,
+                name_buffer.len,
                 &length,
                 &size,
                 &var_type,
-                &nameBuffer,
+                &name_buffer,
             );
 
-            std.debug.print(" - Attribute {d}: {s} == Size: {d} == Type: {x}\n", .{ i, nameBuffer[0..@as(u32, @intCast(length))], size, var_type });
+            std.debug.print(" - Attribute {d}: {s} == Size: {d} == Type: {x}\n", .{ i, name_buffer[0..@as(u32, @intCast(length))], size, var_type });
         }
 
         glad.glDepthFunc(glad.GL_LESS);
 
         // Cache uniform locations
-        const uModelLoc = glad.glGetUniformLocation(shaderProgram, "uModel");
-        const uViewLoc = glad.glGetUniformLocation(shaderProgram, "uView");
-        const uProjectionLoc = glad.glGetUniformLocation(shaderProgram, "uProjection");
-        const useTextureLoc = glad.glGetUniformLocation(shaderProgram, "useTexture");
-        const yTextureLoc = glad.glGetUniformLocation(shaderProgram, "yTexture");
-        const uvTextureLoc = glad.glGetUniformLocation(shaderProgram, "uvTexture");
-        const depthTextureLoc = glad.glGetUniformLocation(shaderProgram, "depthTexture");
-        const useInstancedKeypointLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedKeypoints");
-        const uInstancedLinesLoc = glad.glGetUniformLocation(shaderProgram, "uInstancedLines");
+        const uModelLoc = glad.glGetUniformLocation(shader_program, "uModel");
+        const uViewLoc = glad.glGetUniformLocation(shader_program, "uView");
+        const uProjectionLoc = glad.glGetUniformLocation(shader_program, "uProjection");
+        const useTextureLoc = glad.glGetUniformLocation(shader_program, "useTexture");
+        const yTextureLoc = glad.glGetUniformLocation(shader_program, "yTexture");
+        const uvTextureLoc = glad.glGetUniformLocation(shader_program, "uvTexture");
+        const depthTextureLoc = glad.glGetUniformLocation(shader_program, "depthTexture");
+        const useInstancedKeypointLoc = glad.glGetUniformLocation(shader_program, "uInstancedKeypoints");
+        const uInstancedLinesLoc = glad.glGetUniformLocation(shader_program, "uInstancedLines");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
@@ -146,7 +147,7 @@ pub const Scene = struct {
         scene.* = Self{
             .allocator = allocator,
             .nodes = std.StringHashMap(*Node).init(allocator),
-            .shaderProgram = shaderProgram,
+            .shaderProgram = shader_program,
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
             .appState = AppState{},
@@ -204,8 +205,8 @@ pub const Scene = struct {
         _ = glfw.glfwSetMouseButtonCallback(window, mouseButtonCallback);
     }
 
-    pub fn updateProjection(self: *Self) [16]f32 {
-        return Math.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
+    pub fn updateProjection(self: *Self) Mat4 {
+        return Mat4.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
     }
 
     pub fn getSceneGraph(self: Self) void {
@@ -233,15 +234,18 @@ pub const Scene = struct {
         glad.glClearColor(0.15, 0.15, 0.15, 1.0);
         glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
 
-        var view = self.camera.get_view_matrix();
+        const view = self.camera.get_view_matrix();
+        const view_arr = view.to_array();
+
         if (self.uViewLoc != -1) {
-            glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view);
+            glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view_arr);
         }
 
         if (self.projection_dirty) {
-            const currentProjection = self.updateProjection();
+            const current_projection = self.updateProjection();
+            const projection_arr = current_projection.to_array();
             if (self.uProjectionLoc != -1) {
-                glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &currentProjection);
+                glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &projection_arr);
             }
             self.projection_dirty = false;
         }
@@ -296,38 +300,38 @@ pub const Scene = struct {
             (if (sprinting) @as(f32, 2.0) else @as(f32, 1.0));
 
         // Pre-calculate movement vectors once per frame if needed
-        var movement = Vec3{ .x = 0, .y = 0, .z = 0 };
+        var movement: Vec3 = @constCast(&Vec3.zero());
 
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
-            movement = Vec3.add(movement, Vec3.scale(self.camera.front, velocity));
+            movement.sub_inplace(self.camera.front.scale(velocity));
         }
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_S)]) {
-            movement = Vec3.sub(movement, Vec3.scale(self.camera.front, velocity));
+            movement.sub_inplace(self.camera.front.scale(velocity));
         }
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
-            movement = Vec3.add(movement, Vec3.scale(self.camera.right, velocity));
+            movement.sub_inplace(self.camera.right.scale(velocity));
         }
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
-            movement = Vec3.sub(movement, Vec3.scale(self.camera.right, velocity));
+            movement.sub_inplace(self.camera.right.scale(velocity));
         }
 
         if (self.appState.fly) {
-            self.camera.position = Vec3.add(self.camera.position, movement);
+            self.camera.position = self.camera.position.add(movement.*);
             if (self.appState.keys[@as(usize, glfw.GLFW_KEY_SPACE)]) {
-                self.camera.position.y += velocity;
+                self.camera.position.set_y(self.camera.position.y() + velocity);
             }
         } else {
-            self.camera.position = Vec3.add(
-                Vec3{
-                    .x = self.camera.position.x,
-                    .y = 1,
-                    .z = self.camera.position.z,
-                },
-                Vec3{
-                    .x = movement.x,
-                    .y = 0,
-                    .z = movement.z,
-                },
+            self.camera.position = self.camera.position.add(
+                Vec3.init(
+                    self.camera.position.x(),
+                    1,
+                    self.camera.position.z(),
+                ),
+                Vec3.init(
+                    movement.x(),
+                    0,
+                    movement.z(),
+                ),
             );
         }
 
