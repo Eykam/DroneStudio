@@ -300,7 +300,7 @@ pub const Scene = struct {
             (if (sprinting) @as(f32, 2.0) else @as(f32, 1.0));
 
         // Pre-calculate movement vectors once per frame if needed
-        var movement: Vec3 = @constCast(&Vec3.zero());
+        var movement: *Vec3 = @constCast(&Vec3.zero());
 
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
             movement.sub_inplace(self.camera.front.scale(velocity));
@@ -321,18 +321,19 @@ pub const Scene = struct {
                 self.camera.position.set_y(self.camera.position.y() + velocity);
             }
         } else {
-            self.camera.position = self.camera.position.add(
-                Vec3.init(
-                    self.camera.position.x(),
-                    1,
-                    self.camera.position.z(),
-                ),
-                Vec3.init(
-                    movement.x(),
-                    0,
-                    movement.z(),
-                ),
+            const grounded = Vec3.init(
+                self.camera.position.x(),
+                1,
+                self.camera.position.z(),
             );
+
+            const grounded_movement = Vec3.init(
+                movement.x(),
+                0,
+                movement.z(),
+            );
+
+            self.camera.position = grounded.add(grounded_movement);
         }
 
         // Zoom controls can remain in the keyCallback since they are discrete actions
