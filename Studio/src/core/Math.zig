@@ -149,8 +149,8 @@ pub const Vec3 = struct {
 
     /// Create vector from angles
     pub fn from_angles(yaw_deg: f32, pitch_deg: f32) Self {
-        const yaw = yaw_deg * (math.pi / 180.0);
-        const pitch = pitch_deg * (math.pi / 180.0);
+        const yaw = radians(yaw_deg);
+        const pitch = radians(pitch_deg);
 
         const front = Self.init(@cos(yaw) * @cos(pitch), @sin(pitch), @sin(yaw) * @cos(pitch));
         return front.normalize();
@@ -500,9 +500,9 @@ pub const Mat4 = struct {
     /// Create translation matrix
     pub fn translation(x: f32, y: f32, z: f32) Self {
         var result = Self{ .base = Matrix(4).identity() };
-        result.base.data[3] = x; // [0,3]
-        result.base.data[7] = y; // [1,3]
-        result.base.data[11] = z; // [2,3]
+        result.base.data[12] = x; // [0,3]
+        result.base.data[13] = y; // [1,3]
+        result.base.data[14] = z; // [2,3]
 
         return result;
     }
@@ -513,10 +513,10 @@ pub const Mat4 = struct {
         const m = self.base.data;
 
         // Translation components in last column
-        result.base.data[3] = m[0] * x + m[1] * y + m[2] * z + m[3];
-        result.base.data[7] = m[4] * x + m[5] * y + m[6] * z + m[7];
-        result.base.data[11] = m[8] * x + m[9] * y + m[10] * z + m[11];
-        result.base.data[15] = m[12] * x + m[13] * y + m[14] * z + m[15];
+        result.base.data[12] = m[0] * x + m[4] * y + m[8] * z + m[12];
+        result.base.data[13] = m[1] * x + m[5] * y + m[9] * z + m[13];
+        result.base.data[14] = m[2] * x + m[6] * y + m[10] * z + m[14];
+        result.base.data[15] = m[3] * x + m[7] * y + m[11] * z + m[15];
 
         return result;
     }
@@ -562,7 +562,7 @@ pub const Mat4 = struct {
 
     /// Create rotation matrix around Y axis
     pub fn rotation_y(angle_deg: f32) Self {
-        const angle_rad = angle_deg * (math.pi / 180.0);
+        const angle_rad = radians(angle_deg);
         const c = @cos(angle_rad);
         const s = @sin(angle_rad);
 
@@ -592,7 +592,7 @@ pub const Mat4 = struct {
 
     /// Create perspective projection matrix
     pub fn perspective(fov: f32, aspect: f32, near: f32, far: f32) Self {
-        const rad = fov * (math.pi / 180.0);
+        const rad = radians(fov);
         const tan_half_fov = @tan(rad / 2.0);
 
         var result = Self{ .base = Matrix(4).zero() };
@@ -623,12 +623,10 @@ pub const Mat4 = struct {
     /// Create look-at view matrix
     pub fn look_at(eye: Vec3, center: Vec3, up: Vec3) Self {
         // Calculate forward vector (normalized eye to center)
-        var f: Vec3 = center.sub(eye);
-        f.normalize_inplace();
+        var f: Vec3 = center.sub(eye).normalize();
 
         // Calculate right vector (normalized cross product of forward and up)
-        var s = Vec3.cross(f, up);
-        s.normalize_inplace();
+        var s = Vec3.cross(f, up).normalize();
 
         // Calculate camera up vector (cross product of right and forward)
         const u = Vec3.cross(s, f);
@@ -637,21 +635,20 @@ pub const Mat4 = struct {
 
         // Row 0
         result.base.data[0] = s.x();
-        result.base.data[1] = s.y();
-        result.base.data[2] = s.z();
-        result.base.data[3] = -Vec3.dot(s, eye);
+        result.base.data[1] = u.x();
+        result.base.data[2] = -f.x();
 
-        // Row 1
-        result.base.data[4] = u.x();
+        result.base.data[4] = s.y();
         result.base.data[5] = u.y();
-        result.base.data[6] = u.z();
-        result.base.data[7] = -Vec3.dot(u, eye);
+        result.base.data[6] = -f.y();
 
-        // Row 2
-        result.base.data[8] = -f.x();
-        result.base.data[9] = -f.y();
+        result.base.data[8] = s.z();
+        result.base.data[9] = u.z();
         result.base.data[10] = -f.z();
-        result.base.data[11] = Vec3.dot(f, eye);
+
+        result.base.data[12] = -Vec3.dot(s, eye);
+        result.base.data[13] = -Vec3.dot(u, eye);
+        result.base.data[14] = Vec3.dot(f, eye);
 
         return result;
     }
@@ -867,7 +864,7 @@ pub const Quaternion = struct {
         const normalized_axis = axis.normalize();
 
         // Calculate the sine and cosine of half the angle
-        const half_angle = angle * 0.5;
+        const half_angle = radians(angle * 0.5);
         const sin_half = @sin(half_angle);
         const cos_half = @cos(half_angle);
 

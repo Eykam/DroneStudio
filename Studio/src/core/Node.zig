@@ -4,11 +4,11 @@ const Math = @import("Math.zig");
 const Pipeline = @import("Pipeline.zig");
 const gl = @import("bindings/gl.zig");
 
+const Scene = Pipeline.Scene;
+const glad = gl.glad;
 const Vec3 = Math.Vec3;
 const Mat4 = Math.Mat4;
-const Scene = Pipeline.Scene;
 const Quaternion = Math.Quaternion;
-const glad = gl.glad;
 
 const glCheckError = @import("Debug.zig").glCheckError;
 
@@ -119,12 +119,12 @@ pub fn setPosition(self: *Self, x: f32, y: f32, z: f32) void {
 }
 
 pub fn setRotation(self: *Self, q: Quaternion) void {
-    self.rotation = Quaternion.normalize(q);
+    self.rotation = q.normalize();
     self.updateLocalTransform();
 }
 
 pub fn setRotationEuler(self: *Self, pitch: f32, yaw: f32, roll: f32) void {
-    self.rotation = Quaternion.normalize(Quaternion.from_euler(pitch, yaw, roll));
+    self.rotation = Quaternion.from_euler(pitch, yaw, roll).normalize();
     self.updateLocalTransform();
 }
 
@@ -165,7 +165,7 @@ fn updateLocalTransform(self: *Self) void {
     transform = transform.scale(self.scale[0], self.scale[1], self.scale[2]);
 
     // Apply rotation around center
-    const rotation_matrix = Quaternion.to_mat4(self.rotation);
+    const rotation_matrix = self.rotation.to_mat4();
     transform = transform.multiply(rotation_matrix);
 
     // Move back and translate to position
@@ -179,7 +179,7 @@ fn updateLocalTransform(self: *Self) void {
 fn updateWorldTransform(self: *Self) void {
     if (self.parent) |parent| {
         // Combine parent's world transform with our local transform
-        self.world_transform = Mat4.multiply(parent.world_transform, self.local_transform);
+        self.world_transform = parent.world_transform.multiply(self.local_transform);
     } else {
         // Root node - world transform is the same as local transform
         self.world_transform = self.local_transform;
@@ -193,7 +193,7 @@ pub fn update(self: *Self) void {
         // Set mesh-specific uniforms
         if (self.scene) |scene| {
             if (scene.uModelLoc != -1) {
-                glad.glUniformMatrix4fv(scene.uModelLoc, 1, glad.GL_FALSE, &self.world_transform);
+                glad.glUniformMatrix4fv(scene.uModelLoc, 1, glad.GL_FALSE, &self.world_transform.to_array());
             }
 
             if (self._update) |_update| {

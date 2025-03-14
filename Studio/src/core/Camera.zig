@@ -35,7 +35,7 @@ pub fn init(position: ?Vec3, front: ?Vec3) Self {
 // Update the front, right, and up vectors based on current yaw and pitch
 pub fn update_direction(self: *Self) void {
     self.front = Vec3.from_angles(self.yaw, self.pitch);
-    self.right = Vec3.normalize(Vec3.cross(self.front, self.up));
+    self.right = Vec3.cross(self.front, self.up).normalize();
 }
 
 //TODO: Use Quaternions instead? Removes the need for constraining Euler angles

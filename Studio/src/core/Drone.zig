@@ -992,9 +992,9 @@ pub const ConnectionHandler = struct {
                     .CurrQuat => {
                         const quat_components = [_]*f32{
                             @constCast(&self.pid_debug.current_quaternion.w()),
-                            &self.pid_debug.current_quaternion.x(),
-                            &self.pid_debug.current_quaternion.y(),
-                            &self.pid_debug.current_quaternion.z(),
+                            @constCast(&self.pid_debug.current_quaternion.x()),
+                            @constCast(&self.pid_debug.current_quaternion.y()),
+                            @constCast(&self.pid_debug.current_quaternion.z()),
                         };
 
                         if (param_index < quat_components.len) {
@@ -1004,10 +1004,10 @@ pub const ConnectionHandler = struct {
                     },
                     .TargetQuat => {
                         const quat_components = [_]*f32{
-                            &self.pid_debug.target_quaternion.w(),
-                            &self.pid_debug.target_quaternion.x(),
-                            &self.pid_debug.target_quaternion.y(),
-                            &self.pid_debug.target_quaternion.z(),
+                            @constCast(&self.pid_debug.target_quaternion.w()),
+                            @constCast(&self.pid_debug.target_quaternion.x()),
+                            @constCast(&self.pid_debug.target_quaternion.y()),
+                            @constCast(&self.pid_debug.target_quaternion.z()),
                         };
 
                         if (param_index < quat_components.len) {

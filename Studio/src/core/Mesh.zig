@@ -1,5 +1,4 @@
 const std = @import("std");
-const Math = @import("Math.zig");
 const Debug = @import("Debug.zig");
 const Node = @import("Node.zig");
 const gl = @import("bindings/gl.zig");

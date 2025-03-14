@@ -303,13 +303,13 @@ pub const Scene = struct {
         var movement: *Vec3 = @constCast(&Vec3.zero());
 
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
-            movement.sub_inplace(self.camera.front.scale(velocity));
+            movement.add_inplace(self.camera.front.scale(velocity));
         }
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_S)]) {
             movement.sub_inplace(self.camera.front.scale(velocity));
         }
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
-            movement.sub_inplace(self.camera.right.scale(velocity));
+            movement.add_inplace(self.camera.right.scale(velocity));
         }
         if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
             movement.sub_inplace(self.camera.right.scale(velocity));
