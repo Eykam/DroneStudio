@@ -1,7 +1,6 @@
 const std = @import("std");
 const math = std.math;
 const Sensors = @import("Sensors.zig");
-const SensorState = Sensors.SensorState;
 
 pub fn radians(_degrees: f32) f32 {
     return _degrees * (std.math.pi / 180.0);
@@ -114,6 +113,7 @@ pub const Vec3 = struct {
         return self.dot(self);
     }
 
+    //TODO: Return error if check is false
     pub fn normalize(self: Self) Self {
         const len = self.length();
 
@@ -125,6 +125,7 @@ pub const Vec3 = struct {
         return self.scale(1.0 / len);
     }
 
+    //TODO: Return error if check is false
     pub fn normalize_inplace(self: *Self) void {
         const len = self.length();
 
@@ -349,6 +350,10 @@ pub const Mat3 = struct {
     base: Matrix(3),
 
     const Self = @This();
+
+    pub fn to_array(self: Self) [3 * 3]f32 {
+        return self.base.to_array();
+    }
 
     /// Create from generic Matrix(3)
     pub fn from_array(m: [3 * 3]f32) Self {
@@ -700,7 +705,7 @@ pub const Mat4 = struct {
     }
 
     // Create a Mat4 from Mat3 with 0 padding
-    pub fn from_mat3(m: Mat3) Mat3 {
+    pub fn from_mat3(m: Mat3) Mat4 {
         const data: [4 * 4]f32 = undefined;
 
         data[0] = m.data[0];
@@ -802,6 +807,18 @@ pub const Quaternion = struct {
     pub fn add_inplace(a: Self, b: Self) Self {
         _ = a;
         _ = b;
+        @panic("Not Implemented!");
+    }
+
+    pub fn sub(a: Self, b: Self) Self {
+        const result = a.data - b.data;
+        return .{ .data = result };
+    }
+
+    pub fn sub_inplace(a: Self, b: Self) Self {
+        _ = a;
+        _ = b;
+        @panic("Not Implemented!");
     }
 
     pub fn multiply(a: Self, b: Self) Self {
@@ -816,6 +833,19 @@ pub const Quaternion = struct {
     pub fn multiply_inplace(a: Self, b: Self) Self {
         _ = a;
         _ = b;
+        @panic("Not Implemented!");
+    }
+
+    pub fn dot(a: Self, b: Self) f32 {
+        const product = a.data * b.data;
+        const result = @reduce(.Add, product);
+        return result;
+    }
+
+    pub fn dot_inplace(a: Self, b: Self) f32 {
+        _ = a;
+        _ = b;
+        @panic("Not Implemented!");
     }
 
     pub fn scale(self: Self, scalar: f32) Self {
@@ -828,15 +858,15 @@ pub const Quaternion = struct {
     pub fn scale_inplace(self: Self, scalar: f32) Self {
         _ = self;
         _ = scalar;
+        @panic("Not Implemented!");
     }
 
     pub fn length(self: Self) f32 {
-        const product = self.data * self.data;
-        const dot = @reduce(.Add, product);
-
-        return @sqrt(dot);
+        const _dot = self.dot(self);
+        return @sqrt(_dot);
     }
 
+    //TODO: Return error if check is false
     pub fn normalize(q: Self) Self {
         const len = q.length();
 
@@ -848,8 +878,10 @@ pub const Quaternion = struct {
         return q.scale(1.0 / len);
     }
 
+    //TODO: Return error if check is false
     pub fn normalize_inplace(self: *Self) void {
         _ = self;
+        @panic("Not Implemented!");
     }
 
     pub fn conjugate(self: Self) Self {

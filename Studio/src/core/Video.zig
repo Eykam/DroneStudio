@@ -2,8 +2,8 @@ const std = @import("std");
 const libav = @import("bindings/libav.zig");
 const video = libav.video;
 const Node = @import("Node.zig");
-const Vision = @import("Vision.zig");
-const DetectionResourceManager = Vision.DetectionResourceManager;
+const Vision = @import("VisionV2.zig");
+const SceneManager = Vision.SceneManager;
 
 const mem = std.mem;
 const fs = std.fs;
@@ -11,7 +11,7 @@ const fs = std.fs;
 const AVERROR_EAGAIN = -1 * @as(c_int, @intCast(video.EAGAIN));
 const AVERROR_EOF = -1 * @as(c_int, @intCast(video.EOF));
 
-const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *DetectionResourceManager, *video.struct_AVFrame) void;
+const DecodedFrameCallback = *const fn (mem.Allocator, *Node, *SceneManager, SceneManager.CameraID, *video.struct_AVFrame) void;
 pub const StreamPollingConfig = struct {
     max_retry_attempts: u32 = 100,
     retry_delay_ms: u64 = 2000, // 2 seconds between retries
@@ -56,7 +56,8 @@ pub const VideoHandler = struct {
     buffersink: ?*video.AVFilterContext = null,
 
     // Callback for decoded RGB frames
-    detection_manager: ?*DetectionResourceManager = null,
+    scene_manager: ?*SceneManager = null,
+    camera_id: ?SceneManager.CameraID,
     onDecodedFrame: DecodedFrameCallback,
 
     polling_config: StreamPollingConfig,
@@ -69,7 +70,8 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
-        detection_manager: ?*DetectionResourceManager,
+        scene_manager: ?*SceneManager,
+        camera_id: ?SceneManager.CameraID,
     ) !Self {
         const config = polling_config orelse StreamPollingConfig{};
 
@@ -227,7 +229,8 @@ pub const VideoHandler = struct {
             .onDecodedFrame = onDecodedFrame,
             .polling_config = config,
             .is_stream_ready = true,
-            .detection_manager = detection_manager,
+            .scene_manager = scene_manager,
+            .camera_id = camera_id,
         };
 
         try self.initHardwareFilterGraph();
@@ -388,7 +391,8 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
-        detection_manager: ?*DetectionResourceManager,
+        scene_manager: ?*SceneManager,
+        camera_id: ?SceneManager.CameraID,
     ) !std.Thread {
         const spwn_config = std.Thread.SpawnConfig{
             .allocator = std.heap.page_allocator,
@@ -402,7 +406,8 @@ pub const VideoHandler = struct {
             hw_type,
             onDecodedFrame,
             polling_config,
-            detection_manager,
+            scene_manager,
+            camera_id,
         });
     }
 
@@ -413,7 +418,8 @@ pub const VideoHandler = struct {
         hw_type: ?c_uint,
         onDecodedFrame: DecodedFrameCallback,
         polling_config: ?StreamPollingConfig,
-        detection_manager: ?*DetectionResourceManager,
+        scene_manager: ?*SceneManager,
+        camera_id: ?SceneManager.CameraID,
     ) void {
         while (true) {
             var videoHandler: ?Self = null;
@@ -425,7 +431,8 @@ pub const VideoHandler = struct {
                     hw_type,
                     onDecodedFrame,
                     polling_config,
-                    detection_manager,
+                    scene_manager,
+                    camera_id,
                 ) catch |err| {
                     std.debug.print("Error initializing Video Handler: {any}\n", .{err});
                     std.time.sleep(2 * std.time.ns_per_s); // Wait 2 seconds before retrying
@@ -512,7 +519,7 @@ pub const VideoHandler = struct {
                 continue;
             }
 
-            self.onDecodedFrame(self.allocator, self.node, self.detection_manager.?, self.hw_frame);
+            self.onDecodedFrame(self.allocator, self.node, self.scene_manager.?, self.camera_id.?, self.hw_frame);
         }
 
         return true;
@@ -613,11 +620,11 @@ pub fn initRTPStreamWithSDP(sdp_path: [:0]const u8) !*video.AVFormatContext {
     return format_context_ptr;
 }
 
-pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, detection_manager: *DetectionResourceManager, frame: *video.AVFrame) void {
+pub fn frameCallback(allocator: std.mem.Allocator, node: *Node, scene_manager: *SceneManager, camera_id: SceneManager.CameraID, frame: *video.AVFrame) void {
     _ = allocator;
 
     if (!node.scene.?.appState.paused) {
-        detection_manager.queueFrame(frame) catch |err| {
+        scene_manager.updateFrame(frame, camera_id) catch |err| {
             std.debug.print("Failed to queue frame! Err => {any}\n", .{err});
             return;
         };

@@ -16,7 +16,8 @@ const UDP = @import("core/UDP.zig");
 const Sensors = @import("core/Sensors.zig");
 
 const Video = @import("core/Video.zig");
-const Vision = @import("core/Vision.zig");
+const Vision = @import("core/VisionV2.zig");
+const SceneManager = Vision.SceneManager;
 const gl = @import("core/bindings/gl.zig");
 const glfw = gl.glfw;
 
@@ -152,15 +153,16 @@ pub fn main() !void {
     try imu_server.start(pose_interface);
     // ================================================= Stereo Matching Setup =================================================
 
-    const StereoVO = try Vision.StereoVO.init(
+    const scene_manager = try SceneManager.init(
         alloc,
-        canvasNodeLeft,
-        canvasNodeRight,
-        canvasNodeCombined,
-        canvasNodeTemporal,
+        environment,
+        texture_dims[0],
+        texture_dims[1],
         null,
+        null,
+        &pose_handler,
     );
-    defer StereoVO.deinit();
+    defer scene_manager.deinit();
 
     // ============================================= FFMPEG Video Processing Setup =============================================
 
@@ -174,7 +176,8 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        StereoVO.left,
+        scene_manager,
+        .left,
     );
     defer video_handler_left.join();
 
@@ -185,7 +188,8 @@ pub fn main() !void {
         null,
         Video.frameCallback,
         null,
-        StereoVO.right,
+        scene_manager,
+        .right,
     );
     defer video_handler_right.join();
 
@@ -193,7 +197,7 @@ pub fn main() !void {
 
     const windows = [_]type{
         UI.OverlayWindow,
-        UI.StereoDebugWindow,
+        // UI.StereoDebugWindow,
         UI.DroneConfigWindow,
         UI.BatteryStatusWindow,
     };
@@ -203,7 +207,7 @@ pub fn main() !void {
         alloc,
         .{
             .scene = scene,
-            .StereoVO = StereoVO,
+            // .StereoVO = StereoVO,
             .pose_handler = &pose_handler,
         },
     );
@@ -229,18 +233,19 @@ pub fn main() !void {
         scene.render(window);
 
         if (!scene.appState.paused) {
-            const start = try std.time.Instant.now();
-            try StereoVO.update();
-            const end = try std.time.Instant.now();
-            const debug_str = "= Total Stereo Pipeline Execution Time: {d:.3} ms =\n";
-            std.debug.print("\n{s}\n", .{"=" ** (debug_str.len - 1)});
-            std.debug.print(debug_str, .{@as(f64, @floatFromInt(end.since(start))) / 1e6});
-            std.debug.print("{s}\n", .{"=" ** (debug_str.len - 1)});
-        } else if (StereoVO.params_changed) {
-            try StereoVO.match();
-            StereoVO.free_matches();
-            StereoVO.params_changed = false;
+            // const start = try std.time.Instant.now();
+            try scene_manager.processFramePair();
+            // const end = try std.time.Instant.now();
+            // const debug_str = "= Total Stereo Pipeline Execution Time: {d:.3} ms =\n";
+            // std.debug.print("\n{s}\n", .{"=" ** (debug_str.len - 1)});
+            // std.debug.print(debug_str, .{@as(f64, @floatFromInt(end.since(start))) / 1e6});
+            // std.debug.print("{s}\n", .{"=" ** (debug_str.len - 1)});
         }
+        // } else if (StereoVO.params_changed) {
+        //     try StereoVO.match();
+        //     StereoVO.free_matches();
+        //     StereoVO.params_changed = false;
+        // }
     }
 }
 

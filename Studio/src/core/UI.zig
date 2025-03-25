@@ -9,12 +9,12 @@ const Math = @import("Math.zig");
 const Vec3 = Math.Vec3;
 const DroneConfig = Drone.DroneConfig;
 const MotorController = Drone.MotorControllerClient;
-const StereoVO = Vision.StereoVO;
+// const StereoVO = Vision.StereoVO;
 const CameraPose = Vision.CameraPose;
 
 const UIContext = struct {
     scene: *Scene,
-    StereoVO: *StereoVO,
+    // StereoVO: *StereoVO,
     pose_handler: *Sensors.PoseHandler,
 };
 

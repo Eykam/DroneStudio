@@ -6,6 +6,8 @@
 
 #define GAUSSIAN_KERNEL_RADIUS 2
 #define GAUSSIAN_KERNEL_SIZE (2 * GAUSSIAN_KERNEL_RADIUS + 1)
+#define BLOCK_SIZE 16
+#define APRON_SIZE GAUSSIAN_KERNEL_RADIUS
 
 // ============================================================= Detection =================================================================
 // Generated BRIEF pattern (512 pairs):
@@ -44,50 +46,117 @@ __constant__ float d_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
 
 
 // Separable Gaussian blur kernels
-__global__ void gaussianBlurHorizontal(
+__global__ void gaussianBlur(
     const uint8_t* __restrict__ input,
-    uint8_t* output,
+    uint8_t* __restrict__ output,
     int width,
     int height,
-    int pitch
-) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int pitch)
+{
+    // Shared memory for kernel coefficients
+    __shared__ float s_kernel[GAUSSIAN_KERNEL_SIZE];
     
-    if (x >= width || y >= height) return;
+    // Load kernel to shared memory (only a few threads do this)
+    if (threadIdx.y == 0 && threadIdx.x < GAUSSIAN_KERNEL_SIZE) {
+        s_kernel[threadIdx.x] = d_gaussian_kernel[threadIdx.x];
+    }
     
-    float sum = 0.0f;
+    // Shared memory tile for the block's data with apron
+    __shared__ uint8_t s_data[BLOCK_SIZE+2*APRON_SIZE][BLOCK_SIZE+2*APRON_SIZE];
+    
+    // Global coordinates
+    const int gx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int gy = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    // Local coordinates (for shared memory)
+    const int lx = threadIdx.x + APRON_SIZE;
+    const int ly = threadIdx.y + APRON_SIZE;
+    
+    // Wait for kernel coefficients to be loaded
+    __syncthreads();
+    
+    // Load main block data to shared memory
+    if (gx < width && gy < height) {
+        s_data[ly][lx] = input[gy * pitch + gx];
+    }
+    
+    // Load apron/halo regions
+    // Each thread loads its main pixel plus potentially one or more apron pixels
+    
+    // Top and bottom apron
+    if (threadIdx.y < APRON_SIZE) {
+        // Top apron
+        int y_pos = gy - APRON_SIZE;
+        if (y_pos >= 0 && gx < width) {
+            s_data[threadIdx.y][lx] = input[y_pos * pitch + gx];
+        }
+        else if (gx < width) {
+            // Clamp to edge
+            s_data[threadIdx.y][lx] = input[0 * pitch + gx];
+        }
+        
+        // Bottom apron
+        y_pos = gy + blockDim.y;
+        if (y_pos < height && gx < width) {
+            s_data[ly + blockDim.y][lx] = input[y_pos * pitch + gx];
+        }
+        else if (gx < width) {
+            // Clamp to edge
+            s_data[ly + blockDim.y][lx] = input[(height-1) * pitch + gx];
+        }
+    }
+    
+    // Left and right apron
+    if (threadIdx.x < APRON_SIZE) {
+        // Left apron
+        int x_pos = gx - APRON_SIZE;
+        if (x_pos >= 0 && gy < height) {
+            s_data[ly][threadIdx.x] = input[gy * pitch + x_pos];
+        }
+        else if (gy < height) {
+            // Clamp to edge
+            s_data[ly][threadIdx.x] = input[gy * pitch + 0];
+        }
+        
+        // Right apron
+        x_pos = gx + blockDim.x;
+        if (x_pos < width && gy < height) {
+            s_data[ly][lx + blockDim.x] = input[gy * pitch + x_pos];
+        }
+        else if (gy < height) {
+            // Clamp to edge
+            s_data[ly][lx + blockDim.x] = input[gy * pitch + (width-1)];
+        }
+    }
+    
+    // Make sure all data is loaded before computing
+    __syncthreads();
+    
+    // Skip threads that are out of bounds
+    if (gx >= width || gy >= height) return;
     
     // Horizontal pass
+    float h_sum = 0.0f;
+    #pragma unroll
     for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
-        int cur_x = min(max(x + i, 0), width - 1);
-        sum += input[y * pitch + cur_x] * d_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
+        h_sum += s_data[ly][lx + i] * s_kernel[i + GAUSSIAN_KERNEL_RADIUS];
     }
     
-    output[y * pitch + x] = (uint8_t)sum;
-}
-
-__global__ void gaussianBlurVertical(
-    const uint8_t* __restrict__ input,
-    uint8_t* output,
-    int width,
-    int height,
-    int pitch
-) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    // Store horizontal result back to shared memory
+    s_data[ly][lx] = (uint8_t)(h_sum + 0.5f);
     
-    if (x >= width || y >= height) return;
-    
-    float sum = 0.0f;
+    // Wait for all threads to complete horizontal pass
+    __syncthreads();
     
     // Vertical pass
+    float v_sum = 0.0f;
+    #pragma unroll
     for (int i = -GAUSSIAN_KERNEL_RADIUS; i <= GAUSSIAN_KERNEL_RADIUS; i++) {
-        int cur_y = min(max(y + i, 0), height - 1);
-        sum += input[cur_y * pitch + x] * d_gaussian_kernel[i + GAUSSIAN_KERNEL_RADIUS];
+        v_sum += s_data[ly + i][lx] * s_kernel[i + GAUSSIAN_KERNEL_RADIUS];
     }
     
-    output[y * pitch + x] = (uint8_t)sum;
+    // Write final result to global memory
+    output[gy * pitch + gx] = (uint8_t)(v_sum + 0.5f);
 }
 
 __device__ float3 convertPxToCanvasCoords(float x, float y, float imageWidth, float imageHeight) {
@@ -1550,17 +1619,15 @@ extern "C" {
     }
 
     void launch_gaussian_blur(
-        const uint8_t* input,
-        uint8_t* temp1,
-        uint8_t* temp2,
+        const uint8_t* d_input,
+        uint8_t* d_output,
         int width,
         int height,
         int pitch,
         dim3 grid,
         dim3 block
     ) {
-        gaussianBlurHorizontal<<<grid, block>>>(input, temp1, width, height, pitch);
-        gaussianBlurVertical<<<grid, block>>>(temp1, temp2, width, height, pitch);
+        gaussianBlur<<<grid, block>>>(d_input, d_output, width, height, pitch);
     }
 
     void launch_keypoint_detection(

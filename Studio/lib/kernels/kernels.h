@@ -86,9 +86,8 @@ void init_gaussian_kernel(float sigma);
 
 // Launch Gaussian blur kernels
 void launch_gaussian_blur(
-    const uint8_t* input,
-    uint8_t* temp1,
-    uint8_t* temp2,
+    const uint8_t* d_input,
+    uint8_t* d_output,
     int width,
     int height,
     int pitch,

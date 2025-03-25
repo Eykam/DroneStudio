@@ -207,7 +207,7 @@ pub const TextureResource = struct {
     }
 };
 
-pub const BufferParams = struct {
+pub const BufferIDs = struct {
     position: glad.GLuint,
     color: glad.GLuint,
     size: u32,
@@ -220,7 +220,7 @@ pub const Buffers = struct {
     colors: *BufferResource,
     buffer_size: u32,
 
-    pub fn init(allocator: std.mem.Allocator, buffer_ids: BufferParams) !Self {
+    pub fn init(allocator: std.mem.Allocator, buffer_ids: BufferIDs) !Self {
         return Self{
             .positions = try BufferResource.init(allocator, buffer_ids.position),
             .colors = try BufferResource.init(allocator, buffer_ids.color),
@@ -250,7 +250,7 @@ pub const ConnectionResources = struct {
     left: ?Buffers,
     right: ?Buffers,
 
-    pub fn init(allocator: std.mem.Allocator, _left: ?BufferParams, _right: ?BufferParams) !Self {
+    pub fn init(allocator: std.mem.Allocator, _left: ?BufferIDs, _right: ?BufferIDs) !Self {
         return Self{
             .left = if (_left) |left| try Buffers.init(allocator, left) else null,
             .right = if (_right) |right| try Buffers.init(allocator, right) else null,
@@ -288,37 +288,6 @@ pub const ConnectionResources = struct {
     }
 };
 
-pub const KeypointResources = struct {
-    const Self = @This();
-
-    connections: ConnectionResources,
-    keypoints: Buffers,
-
-    pub fn init(allocator: std.mem.Allocator, keypoint_buffers: BufferParams, left: ?BufferParams, right: ?BufferParams) !Self {
-        const resources = Self{
-            .keypoints = try Buffers.init(allocator, keypoint_buffers),
-            .connections = try ConnectionResources.init(allocator, left, right),
-        };
-
-        return resources;
-    }
-
-    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-        self.connections.deinit(allocator);
-        self.keypoints.deinit(allocator);
-    }
-
-    pub fn map(self: *Self) !void {
-        try self.keypoints.map();
-        try self.connections.map();
-    }
-
-    pub fn unmap(self: *Self) !void {
-        try self.keypoints.unmap();
-        try self.connections.unmap();
-    }
-};
-
 pub const TextureIDs = struct {
     y: glad.GLuint,
     uv: glad.GLuint,
@@ -338,7 +307,8 @@ pub const DetectionResources = struct {
     allocator: std.mem.Allocator,
     initialized: bool,
 
-    keypoint_resources: ?KeypointResources,
+    landmark_resources: Buffers,
+    connection_resources: ?ConnectionResources,
     gl_textures: Textures,
     gl_texture_ids: TextureIDs,
     world_transform: [16]f32,
@@ -354,9 +324,9 @@ pub const DetectionResources = struct {
         y_texture_id: glad.GLuint,
         uv_texture_id: glad.GLuint,
         depth_texture_id: glad.GLuint,
-        buffer_ids: BufferParams,
-        left_connection: ?BufferParams,
-        right_connection: ?BufferParams,
+        buffer_ids: BufferIDs,
+        left_connection: ?BufferIDs,
+        right_connection: ?BufferIDs,
     ) !*Self {
         const self = try allocator.create(Self);
 
@@ -415,10 +385,11 @@ pub const DetectionResources = struct {
                 .uv = null,
                 .depth = null,
             },
+            .landmark_resources = undefined,
+            .connection_resources = null,
             .world_transform = identity,
             .d_keypoint_count = d_keypoint_count,
             .d_world_transform = d_world_transform,
-            .keypoint_resources = null,
             .d_descriptors = d_descriptors,
         };
 
@@ -433,7 +404,8 @@ pub const DetectionResources = struct {
         if (self.gl_textures.uv) |tex| tex.deinit(self.allocator);
         if (self.gl_textures.depth) |tex| tex.deinit(self.allocator);
 
-        if (self.keypoint_resources) |*res| res.deinit(self.allocator);
+        if (self.connection_resources) |*res| res.deinit(self.allocator);
+        self.landmark_resources.deinit(self.allocator);
 
         _ = cuda.cudaFree(self.d_keypoint_count);
         _ = cuda.cudaFree(self.d_descriptors);
@@ -465,23 +437,21 @@ pub const DetectionResources = struct {
         self.gl_textures.depth = try TextureResource.init(self.allocator, self.gl_texture_ids.depth);
     }
 
-    pub fn register_buffers(self: *Self, own: BufferParams, left: ?BufferParams, right: ?BufferParams) !void {
-        self.keypoint_resources = try KeypointResources.init(self.allocator, own, left, right);
+    pub fn register_buffers(self: *Self, own: BufferIDs, left: ?BufferIDs, right: ?BufferIDs) !void {
+        self.landmark_resources = try Buffers.init(self.allocator, own);
+        self.connection_resources = try ConnectionResources.init(self.allocator, own, left, right);
     }
 
     pub fn map_resources(self: *Self) !void {
-        // std.debug.print("Mapping Resources...\n", .{});
-
         if (self.gl_textures.y) |tex| try tex.map();
         if (self.gl_textures.uv) |tex| try tex.map();
         if (self.gl_textures.depth) |tex| try tex.map();
 
-        if (self.keypoint_resources) |*res| try res.map();
+        try self.landmark_resources.map();
+        if (self.connection_resources) |*resources| try resources.map();
     }
 
     pub fn unmap_resources(self: *Self) void {
-        // std.debug.print("Unmapping Resources...\n", .{});
-
         if (self.gl_textures.y) |tex| tex.unmap() catch |err| {
             std.debug.print("Failed to unmap Y Texture plane!  {any}\n", .{err});
         };
@@ -494,9 +464,11 @@ pub const DetectionResources = struct {
             std.debug.print("Failed to unmap Depth Texture Plane!  {any}\n", .{err});
         };
 
-        if (self.keypoint_resources) |*res| res.unmap() catch |err| {
-            std.debug.print("Failed to unmap Keypoint Buffer Resources! {any}\n", .{err});
+        if (self.connection_resources) |*res| res.unmap() catch |err| {
+            std.debug.print("Failed to unmap Connection Buffer Resources! {any}\n", .{err});
         };
+
+        try self.landmark_resources.unmap();
     }
 };
 
