@@ -1,27 +1,30 @@
 const std = @import("std");
 const _Secrets = @import("Secrets.local.zig"); // replace Secrets.example.zig with Secrets.local.zig
-const Secrets = _Secrets{};
-
 const Math = @import("core/Math.zig");
-const Vec3 = Math.Vec3;
-
 const Drone = @import("core/Drone.zig");
 const Pipeline = @import("core/Pipeline.zig");
-const Scene = Pipeline.Scene;
+const Cameras = @import("core/Cameras.zig");
 const Shape = @import("core/Shape.zig");
 const Node = @import("core/Node.zig");
 const Mesh = @import("core/Mesh.zig");
-
-const UDP = @import("core/UDP.zig");
 const Sensors = @import("core/Sensors.zig");
-
 const Video = @import("core/Video.zig");
+const UDP = @import("core/UDP.zig");
 const Vision = @import("core/VisionV2.zig");
-const SceneManager = Vision.SceneManager;
 const gl = @import("core/bindings/gl.zig");
-const glfw = gl.glfw;
-
 const UI = @import("core/UI.zig");
+const GLTF = @import("core/GLTF.zig");
+const Secrets = _Secrets{};
+
+const glfw = gl.glfw;
+const Vec3 = Math.Vec3;
+const Scene = Pipeline.Scene;
+const SceneManager = Vision.SceneManager;
+const Camera = Cameras.Camera;
+const FreeCamera = Cameras.FreeCamera;
+const DroneCamera = Cameras.DroneControlCamera;
+const SensorCamera = Cameras.SensorCamera;
+const CameraManager = Cameras.CameraManager;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -52,75 +55,115 @@ pub fn main() !void {
     var scene = try Scene.init(alloc, window);
     defer scene.deinit();
     scene.setupCallbacks(window);
+    scene.setAmbientColor(0.8, 0.9, 1.0);
+    scene.setAmbientStrength(0.25);
+
+    const hintze_hall = try GLTF.loadAsNode(alloc, "./assets/hintze_hall/scene.gltf", "hintze_hall");
+    hintze_hall.setPosition(0, -1.0, 0);
+    // const warehouse = try GLTF.loadAsNode(alloc, "./assets/warehouse/scene.gltf", "warehouse");
+    // warehouse.setPosition(-75, 0, 0);
 
     //Initializing Entities
-    // const gridNode = try Shape.Grid.init(alloc, 1000, 5);
+    const gridNode = try Shape.Grid.init(alloc, 100, 5);
     const axisNode = try Shape.Axis.init(alloc, Vec3.init(0.0, 0.5, 0.0), 10.0);
-    const triangleNode = try Shape.Triangle.init(alloc, Vec3.init(0.0, 1.0, 10.0), null);
     const droneAxis = try Shape.Axis.init(alloc, Vec3.init(0.0, 0.0, 0.0), 2.0);
-    const boxNode = try Shape.Box.init(alloc, null, null, null, null);
-
-    const canvas_width = 12.8;
-    const canvas_height = 7.2;
-    const texture_dims = [_]u32{ 1280, 720 };
-
-    var canvasNode = try Node.init(alloc, null, null, null);
-    canvasNode.setRotation(Math.Quaternion.init(1.0, 0, 0, 1.0));
-
-    var canvasNodeLeft = try Shape.TexturedPlane.init(
+    const droneBody = try GLTF.loadAsNode(alloc, "./assets/drone/scene.gltf", "drone");
+    const droneSensorCamera = try SensorCamera.init(
         alloc,
-        null,
-        canvas_width,
-        canvas_height,
-        .{ .w = texture_dims[0], .h = texture_dims[1] },
+        "imx708_sensor",
+        16.0 / 9.0, // Aspect ratio (16:9)
+        Vec3.init(0.0, 0.0, -0.5), // Position can be adjusted as needed
+        3.04, // Focal length in mm (calculated for 102° FOV)
+        6.287, // Sensor width in mm (1/2.3" sensor)
+        4.712, // Sensor height in mm
+        1280, // Resolution width in pixels
+        720, // Resolution height in pixels
     );
-    canvasNodeLeft.setPosition(-(canvas_width / 2.0) - 0.1, canvas_height / 2.0, 5);
-    try canvasNode.addChild(canvasNodeLeft);
+    try droneSensorCamera.base.toggle_debug_mode(alloc);
+    try droneBody.addChild(droneSensorCamera.base.node);
 
-    var canvasNodeRight = try Shape.TexturedPlane.init(
-        alloc,
-        null,
-        canvas_width,
-        canvas_height,
-        .{ .w = texture_dims[0], .h = texture_dims[1] },
-    );
-    canvasNodeRight.setPosition((canvas_width / 2.0) + 0.1, canvas_height / 2.0, 5);
-    try canvasNode.addChild(canvasNodeRight);
+    const aspect_ratio = scene.width / scene.height;
+    const freeCamera = try FreeCamera.init(alloc, "free", aspect_ratio, null, null, null);
+    const droneFirstPerson = try DroneCamera.init(alloc, "simulation_first_person", aspect_ratio, Vec3.init(0.0, 0.0, -0.5), null, null);
+    //TODO: Remove third / first person. Instead create toggle that will change the position.
+    const droneThirdPerson = try DroneCamera.init(alloc, "simulation_third_person", aspect_ratio, Vec3.init(0.0, 1, 5.0), null, null);
+    try droneThirdPerson.base.toggle_debug_mode(alloc);
 
-    var canvasNodeCombined = try Shape.TexturedPlane.init(
-        alloc,
-        null,
-        canvas_width,
-        canvas_height,
-        .{ .w = texture_dims[0], .h = texture_dims[1] },
-    );
-    canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
-    try canvasNode.addChild(canvasNodeCombined);
+    var freeCamera_union = Camera{ .Free = freeCamera.* };
+    var droneFirstPerson_union = Camera{ .DroneControl = droneFirstPerson.* };
+    var droneThirdPerson_union = Camera{ .DroneControl = droneThirdPerson.* };
+    var droneSensorCamera_union = Camera{ .SensorCamera = droneSensorCamera.* };
 
-    var canvasNodeTemporal = try Shape.TexturedPlane.init(
-        alloc,
-        null,
-        canvas_width,
-        canvas_height,
-        .{ .w = texture_dims[0], .h = texture_dims[1] },
-    );
-    // Position it next to the combined canvas
-    canvasNodeTemporal.setPosition(0, (3.0 * canvas_height / 2.0) + 0.2, -10);
-    try canvasNode.addChild(canvasNodeTemporal);
+    try scene.camera_manager.register_camera(&freeCamera_union);
+    try scene.camera_manager.register_camera(&droneFirstPerson_union);
+    try scene.camera_manager.register_camera(&droneThirdPerson_union);
+    try scene.camera_manager.register_camera(&droneSensorCamera_union);
+
+    // const canvas_width = 12.8;
+    // const canvas_height = 7.2;
+    // const texture_dims = [_]u32{ 1280, 720 };
+
+    // var canvasNode = try Node.init(alloc, null, null, null);
+    // canvasNode.setRotation(Math.Quaternion.init(1.0, 0, 0, 1.0));
+
+    // var canvasNodeLeft = try Shape.TexturedPlane.init(
+    //     alloc,
+    //     null,
+    //     canvas_width,
+    //     canvas_height,
+    //     .{ .w = texture_dims[0], .h = texture_dims[1] },
+    // );
+    // canvasNodeLeft.setPosition(-(canvas_width / 2.0) - 0.1, canvas_height / 2.0, 5);
+    // try canvasNode.addChild(canvasNodeLeft);
+
+    // var canvasNodeRight = try Shape.TexturedPlane.init(
+    //     alloc,
+    //     null,
+    //     canvas_width,
+    //     canvas_height,
+    //     .{ .w = texture_dims[0], .h = texture_dims[1] },
+    // );
+    // canvasNodeRight.setPosition((canvas_width / 2.0) + 0.1, canvas_height / 2.0, 5);
+    // try canvasNode.addChild(canvasNodeRight);
+
+    // var canvasNodeCombined = try Shape.TexturedPlane.init(
+    //     alloc,
+    //     null,
+    //     canvas_width,
+    //     canvas_height,
+    //     .{ .w = texture_dims[0], .h = texture_dims[1] },
+    // );
+    // canvasNodeCombined.setPosition(0, canvas_height / 2.0, -10);
+    // try canvasNode.addChild(canvasNodeCombined);
+
+    // var canvasNodeTemporal = try Shape.TexturedPlane.init(
+    //     alloc,
+    //     null,
+    //     canvas_width,
+    //     canvas_height,
+    //     .{ .w = texture_dims[0], .h = texture_dims[1] },
+    // );
+    // // Position it next to the combined canvas
+    // canvasNodeTemporal.setPosition(0, (3.0 * canvas_height / 2.0) + 0.2, -10);
+    // try canvasNode.addChild(canvasNodeTemporal);
 
     //Initializing drone node group (axis & box rotated by PoseHandler)
     var droneNode = try Node.init(alloc, null, null, null);
     droneNode.setPosition(0, 0.5, 0);
-    try droneNode.addChild(boxNode);
+    try droneNode.addChild(droneBody);
     try droneNode.addChild(droneAxis);
+    try droneNode.addChild(droneFirstPerson.base.node);
+    try droneNode.addChild(droneThirdPerson.base.node);
 
     //Adding Nodes to Environment (parent node)
     var environment = try Node.init(alloc, null, null, null);
-    // try environment.addChild(gridNode);
+    try environment.addChild(hintze_hall);
+    // try environment.addChild(warehouse);
+    try environment.addChild(freeCamera.base.node);
+    try environment.addChild(gridNode);
     try environment.addChild(axisNode);
-    try environment.addChild(triangleNode);
     try environment.addChild(droneNode);
-    try environment.addChild(canvasNode);
+    // try environment.addChild(canvasNode);
 
     //Adding environment to scene
     try scene.addNode("Environment", environment);
@@ -128,7 +171,7 @@ pub fn main() !void {
     //Debugging Entities
     scene.getSceneGraph();
 
-    std.debug.print("\nIntial Camera Pos: {d}\n", .{scene.camera.position});
+    std.debug.print("\nIntial Camera Pos: {d}\n", .{scene.camera_manager.main_camera.?.get_base().position});
 
     // ======================================================= Motor controller & IMU Setup =======================================================
     const motor_controller = try Drone.MotorControllerClient.init(
@@ -153,53 +196,54 @@ pub fn main() !void {
     try imu_server.start(pose_interface);
     // ================================================= Stereo Matching Setup =================================================
 
-    const scene_manager = try SceneManager.init(
-        alloc,
-        environment,
-        texture_dims[0],
-        texture_dims[1],
-        null,
-        null,
-        &pose_handler,
-    );
-    defer scene_manager.deinit();
+    // const scene_manager = try SceneManager.init(
+    //     alloc,
+    //     environment,
+    //     texture_dims[0],
+    //     texture_dims[1],
+    //     null,
+    //     null,
+    //     &pose_handler,
+    // );
+    // defer scene_manager.deinit();
 
     // ============================================= FFMPEG Video Processing Setup =============================================
 
-    try Video.initializeFFmpegNetwork();
-    defer Video.deinitFFmpegNetwork();
+    // try Video.initializeFFmpegNetwork();
+    // defer Video.deinitFFmpegNetwork();
 
-    var video_handler_left = try Video.VideoHandler.start(
-        alloc,
-        canvasNodeLeft,
-        Secrets.sdp_content_left,
-        null,
-        Video.frameCallback,
-        null,
-        scene_manager,
-        .left,
-    );
-    defer video_handler_left.join();
+    // var video_handler_left = try Video.VideoHandler.start(
+    //     alloc,
+    //     canvasNodeLeft,
+    //     Secrets.sdp_content_left,
+    //     null,
+    //     Video.frameCallback,
+    //     null,
+    //     scene_manager,
+    //     .left,
+    // );
+    // defer video_handler_left.join();
 
-    var video_handler_right = try Video.VideoHandler.start(
-        alloc,
-        canvasNodeRight,
-        Secrets.sdp_content_right,
-        null,
-        Video.frameCallback,
-        null,
-        scene_manager,
-        .right,
-    );
-    defer video_handler_right.join();
+    // var video_handler_right = try Video.VideoHandler.start(
+    //     alloc,
+    //     canvasNodeRight,
+    //     Secrets.sdp_content_right,
+    //     null,
+    //     Video.frameCallback,
+    //     null,
+    //     scene_manager,
+    //     .right,
+    // );
+    // defer video_handler_right.join();
 
     // ==================================================== UI Window Setup ====================================================
 
     const windows = [_]type{
-        UI.OverlayWindow,
+        // UI.OverlayWindow,
+        UI.RootWindow,
         // UI.StereoDebugWindow,
-        UI.DroneConfigWindow,
-        UI.BatteryStatusWindow,
+        // UI.DroneConfigWindow,
+        // UI.BatteryStatusWindow,
     };
 
     const TWindowManager = UI.WindowManager(&windows);
@@ -234,7 +278,7 @@ pub fn main() !void {
 
         if (!scene.appState.paused) {
             // const start = try std.time.Instant.now();
-            try scene_manager.processFramePair();
+            // try scene_manager.processFramePair();
             // const end = try std.time.Instant.now();
             // const debug_str = "= Total Stereo Pipeline Execution Time: {d:.3} ms =\n";
             // std.debug.print("\n{s}\n", .{"=" ** (debug_str.len - 1)});

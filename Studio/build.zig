@@ -201,12 +201,32 @@ fn configureDesktopLibs(
         });
     }
 
+    exe.addIncludePath(b.path("lib/cbullet"));
+    exe.addIncludePath(b.path("lib/bullet"));
+
+    // TODO: Use the old damping method for now otherwise there is a hang in powf().
+    const flags = &.{
+        "-DBT_USE_OLD_DAMPING_METHOD",
+        "-DBT_THREADSAFE=1",
+        "-std=c++11",
+        "-fno-sanitize=undefined",
+    };
+    exe.addCSourceFiles(.{
+        .files = &.{
+            "lib/cbullet/cbullet.cpp",
+            "lib/bullet/btLinearMathAll.cpp",
+            "lib/bullet/btBulletCollisionAll.cpp",
+            "lib/bullet/btBulletDynamicsAll.cpp",
+        },
+        .flags = flags,
+    });
+
     // Link the C standard library
     exe.linkLibC();
     exe.linkLibCpp();
 }
 
-fn configureCuda(
+fn configureKernels(
     b: *std.Build,
     exe: *Build.Step.Compile,
     target: std.Build.ResolvedTarget,
@@ -321,7 +341,7 @@ pub fn build(b: *std.Build) void {
         );
 
         // Configure CUDA if enabled
-        configureCuda(
+        configureKernels(
             b,
             desktop_exe,
             desktop_target,
@@ -443,6 +463,15 @@ pub fn build(b: *std.Build) void {
         test_pi_step.?.dependOn(&run_imu_tests.step);
         test_pi_step.?.dependOn(&run_motor_tests.step);
     }
+
+    const exe_check = b.addExecutable(.{
+        .name = "foo",
+        .root_source_file = b.path("src/main.zig"),
+        .target = desktop_target,
+        .optimize = optimize,
+    });
+    const check = b.step("check", "Check if foo compiles");
+    check.dependOn(&exe_check.step);
 
     // Default step builds everything
     const build_all_step = b.step("all", "Build all applications (desktop and Raspberry Pi)");

@@ -124,6 +124,372 @@ const Styles = struct {
     }
 };
 
+pub const RootWindow = struct {
+    const Self = @This();
+
+    visible: bool,
+    sidebar_width: f32 = 250.0, // Default width, will be adjusted by user
+    min_sidebar_width: f32 = 150.0, // Minimum sidebar width
+    max_sidebar_width: f32 = 500.0, // Maximum sidebar width
+    is_resizing: bool = false, // Track if currently resizing
+
+    pub fn init(allocator: std.mem.Allocator) !*Self {
+        const self = try allocator.create(Self);
+        self.* = .{ .visible = true };
+        return self;
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.destroy(self);
+    }
+
+    /// This is the top-level "root" that occupies the entire screen
+    pub fn draw(self: *Self, ctx: *const UIContext) void {
+        if (!self.visible) return;
+
+        const viewport = imgui.igGetMainViewport();
+        // Position at (0,0) in ImGui space, with the full size of the viewport:
+        imgui.igSetNextWindowPos(viewport.*.WorkPos, imgui.ImGuiCond_Always, .{ .x = 0, .y = 0 });
+        imgui.igSetNextWindowSize(viewport.*.WorkSize, imgui.ImGuiCond_Always);
+
+        const window_flags =
+            imgui.ImGuiWindowFlags_NoDecoration |
+            imgui.ImGuiWindowFlags_NoMove |
+            imgui.ImGuiWindowFlags_NoResize |
+            imgui.ImGuiWindowFlags_NoCollapse |
+            imgui.ImGuiWindowFlags_NoBringToFrontOnFocus |
+            imgui.ImGuiWindowFlags_NoNavFocus |
+            imgui.ImGuiWindowFlags_NoDocking;
+
+        imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 0, .y = 0 });
+        if (imgui.igBegin("RootWindow##FullScreen", &self.visible, window_flags)) {
+            imgui.igPopStyleVar(1);
+
+            // Get available window size
+            var avail_size: imgui.ImVec2 = undefined;
+            imgui.igGetContentRegionAvail(&avail_size);
+
+            // ===== TOP BAR / NAVBAR =====
+            const topbar_height = 0.0; // Increased height for better visual balance
+            // const topbar_bg_color = imgui.igColorConvertFloat4ToU32(.{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 1.0 });
+
+            // // Store original cursor position for the background
+            // var cursor_pos: imgui.ImVec2 = undefined;
+            // imgui.igGetCursorScreenPos(&cursor_pos);
+
+            // // Draw topbar background
+            // const draw_list = imgui.igGetWindowDrawList();
+            // imgui.ImDrawList_AddRectFilled(draw_list, cursor_pos, .{ .x = cursor_pos.x + avail_size.x, .y = cursor_pos.y + topbar_height }, topbar_bg_color, 0.0, imgui.ImDrawFlags_None);
+
+            // // Create a child window for the topbar with custom styling
+            // imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 15, .y = 0 });
+            // imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_FramePadding, .{ .x = 8, .y = 6 }); // Larger padding for menu items
+            // imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_MenuBarBg, .{ .x = 0, .y = 0, .z = 0, .w = 0 }); // Transparent menubar
+            // imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_PopupBg, .{ .x = 0.15, .y = 0.15, .z = 0.15, .w = 0.98 }); // Dark popup background
+
+            // _ = imgui.igBeginChild_Str(
+            //     "Topbar",
+            //     .{ .x = avail_size.x, .y = topbar_height },
+            //     imgui.ImGuiChildFlags_None,
+            //     imgui.ImGuiWindowFlags_NoScrollbar | imgui.ImGuiWindowFlags_MenuBar | imgui.ImGuiWindowFlags_NoNav,
+            // );
+
+            // // Use ImGui's menu bar for dropdown functionality
+            // if (imgui.igBeginMenuBar()) {
+            //     // Title with larger text and vertical centering
+            //     const title_text = "Drone Studio";
+
+            //     // Push larger text for the title (1.5x scale)
+            //     imgui.igSetWindowFontScale(1.25);
+
+            //     // Calculate height for vertical centering with scaled font
+            //     const scaled_font_size = imgui.igGetFontSize();
+            //     const menu_bar_height = imgui.igGetFrameHeight();
+            //     const y_offset = (menu_bar_height - scaled_font_size) * 0.5 - 1; // small adjustment for visual center
+
+            //     // Set cursor position for vertical centering
+            //     imgui.igSetCursorPosY(imgui.igGetCursorPosY() + y_offset);
+
+            //     // Draw the title
+            //     imgui.igTextColored(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 }, title_text);
+
+            //     // Reset cursor Y position for menus
+            //     imgui.igSetCursorPosY(imgui.igGetCursorPosY() - y_offset);
+
+            //     // Add spacing between title and menus
+            //     imgui.igSameLine(0, 40);
+
+            //     // Style for menu items
+            //     imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_Text, .{ .x = 0.9, .y = 0.9, .z = 0.9, .w = 1.0 });
+
+            //     // File menu dropdown
+            //     if (imgui.igBeginMenu("File", true)) {
+            //         if (imgui.igMenuItem_Bool("New Project", "Ctrl+N", false, true)) {}
+            //         if (imgui.igMenuItem_Bool("Open Project", "Ctrl+O", false, true)) {}
+            //         imgui.igSeparator();
+            //         if (imgui.igMenuItem_Bool("Save", "Ctrl+S", false, true)) {}
+            //         if (imgui.igMenuItem_Bool("Save As...", "Ctrl+Shift+S", false, true)) {}
+            //         imgui.igSeparator();
+            //         if (imgui.igMenuItem_Bool("Exit", "Alt+F4", false, true)) {}
+            //         imgui.igEndMenu();
+            //     }
+
+            //     // View menu dropdown
+            //     if (imgui.igBeginMenu("View", true)) {
+            //         if (imgui.igMenuItem_Bool("Cameras", null, false, true)) {}
+            //         if (imgui.igMenuItem_Bool("Configuration", null, false, true)) {}
+            //         imgui.igSeparator();
+            //         if (imgui.igMenuItem_Bool("Reset Layout", null, false, true)) {}
+            //         imgui.igEndMenu();
+            //     }
+
+            //     // Help menu dropdown
+            //     if (imgui.igBeginMenu("Help", true)) {
+            //         if (imgui.igMenuItem_Bool("Documentation", null, false, true)) {}
+            //         if (imgui.igMenuItem_Bool("About", null, false, true)) {}
+            //         imgui.igEndMenu();
+            //     }
+
+            //     // Pop styling for menu items
+            //     imgui.igPopStyleColor(1);
+
+            //     imgui.igEndMenuBar();
+            // }
+
+            // imgui.igEndChild();
+
+            // // Pop all pushed styles
+            // imgui.igPopStyleColor(2); // Pop MenuBarBg and PopupBg colors
+            // imgui.igPopStyleVar(2); // Pop WindowPadding and FramePadding
+
+            // Adjust main area to account for topbar
+            const main_area_height = avail_size.y - topbar_height;
+            // Define sidebar width (15% of total width)
+            const sidebar_width = avail_size.x * 0.15;
+
+            // Setup columns: left sidebar (20%), right content area (80%)
+            imgui.igColumns(2, "MainLayout", false);
+            imgui.igSetColumnWidth(0, sidebar_width);
+
+            // ===== LEFT COLUMN: SIDEBAR / MENUS =====
+            // Put a visible border/background for the sidebar
+            var cursor_pos: imgui.ImVec2 = undefined;
+            const draw_list = imgui.igGetWindowDrawList();
+            imgui.igGetCursorScreenPos(&cursor_pos);
+            imgui.ImDrawList_AddRectFilled(
+                draw_list,
+                .{ .x = cursor_pos.x, .y = cursor_pos.y },
+                .{ .x = cursor_pos.x + sidebar_width, .y = cursor_pos.y + main_area_height },
+                imgui.igColorConvertFloat4ToU32(.{ .x = 0.15, .y = 0.15, .z = 0.15, .w = 1.0 }),
+                0,
+                imgui.ImDrawFlags_None,
+            );
+            // Add some padding inside the sidebar
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str("Sidebar", .{ .x = sidebar_width - 10, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+            // Sidebar header
+            imgui.igText("Navigation");
+            imgui.igSeparator();
+
+            // ViewportManager in sidebar
+            ViewportManager(&self.visible, ctx);
+
+            imgui.igSeparator();
+
+            // Other menu items would go here
+            imgui.igText("Other sub-menu items in the sidebar...");
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+
+            // Move to second column (viewports area)
+            imgui.igNextColumn();
+
+            // ===== RIGHT COLUMN: MAIN VIEWPORT + SUB-VIEWPORTS =====
+
+            // Calculate layout for viewports area
+            const content_width = avail_size.x - sidebar_width;
+            const main_viewport_height = main_area_height * 0.8; // Main viewport takes 70% height
+            const sub_viewports_height = main_area_height - main_viewport_height;
+
+            // 1) MAIN VIEWPORT SECTION
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str("MainViewportArea", .{ .x = content_width, .y = main_viewport_height }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+            const scene = ctx.scene;
+            const camera_manager = scene.camera_manager;
+
+            // Draw main viewport
+            if (camera_manager.main_camera) |main_cam| {
+                // Find the name of main_cam in your hash
+                var main_cam_name: []const u8 = "unknown";
+                var it_cams = camera_manager.cameras.iterator();
+                while (it_cams.next()) |c_entry| {
+                    if (c_entry.value_ptr.* == main_cam) {
+                        main_cam_name = c_entry.key_ptr.*;
+                        break;
+                    }
+                }
+
+                // Look up the corresponding viewport
+                const main_vp = camera_manager.viewports.get(main_cam_name);
+                if (main_vp) |mvp| {
+                    if (mvp.enabled) {
+                        imgui.igTextColored(.{ .x = 0.0, .y = 0.8, .z = 1.0, .w = 1.0 }, "Main Camera: %s", main_cam_name.ptr);
+
+                        // Using actual FBO dimensions for correct aspect ratio
+                        const texture_width = @as(f32, @floatFromInt(mvp.fbo.width));
+                        const texture_height = @as(f32, @floatFromInt(mvp.fbo.height));
+                        const texture_aspect_ratio = texture_width / texture_height;
+
+                        // Get available space
+                        var region: imgui.ImVec2 = .{ .x = 0, .y = 0 };
+                        imgui.igGetContentRegionAvail(&region);
+
+                        // Calculate dimensions to maximize space usage while maintaining aspect ratio
+                        var img_width = region.x;
+                        var img_height = img_width / texture_aspect_ratio;
+
+                        // If height would exceed available space, scale down
+                        if (img_height > region.y - 30) {
+                            img_height = region.y - 30; // Leave space for header text
+                            img_width = img_height * texture_aspect_ratio;
+                        }
+
+                        // Center the image horizontally if it doesn't fill the width
+                        if (img_width < region.x) {
+                            imgui.igSetCursorPosX(imgui.igGetCursorPosX() + (region.x - img_width) * 0.5);
+                        }
+
+                        // Get the texture ID from the FBO
+                        const main_tex: imgui.ImTextureID = @intCast(mvp.fbo.texture);
+
+                        // Draw the image with the calculated dimensions
+                        imgui.igImage(main_tex, .{ .x = img_width, .y = img_height }, .{ .x = 0, .y = 1 }, // UV coordinates for bottom-left
+                            .{ .x = 1, .y = 0 }, // UV coordinates for top-right
+                            .{ .x = 1, .y = 1, .z = 1, .w = 1 }, // Tint color (white)
+                            .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1.0 } // Border color (dark gray)
+                        );
+                    }
+                }
+            } else {
+                imgui.igTextColored(.{ .x = 1, .y = 0, .z = 0, .w = 1 }, "No main camera set. Please select a camera");
+            }
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+
+            // 2) SUB-VIEWPORTS SECTION - Improved
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str(
+                "SubViewportsArea",
+                .{ .x = content_width, .y = sub_viewports_height },
+                imgui.ImGuiChildFlags_None,
+                imgui.ImGuiWindowFlags_None,
+            );
+
+            imgui.igText("Other Active Cameras:");
+            imgui.igSeparator();
+
+            // Calculate layout for sub-viewports with more appropriate spacing
+            const sub_panel_width = content_width;
+            const min_viewport_width: f32 = 250.0;
+            const viewport_spacing: f32 = 15.0;
+
+            // Calculate how many viewports can fit in a row
+            const max_per_row = @as(usize, @intFromFloat(@floor(sub_panel_width / (min_viewport_width + viewport_spacing))));
+            if (max_per_row > 0) {
+                var current_in_row: usize = 0;
+
+                var it_vp = camera_manager.viewports.iterator();
+                while (it_vp.next()) |entry| {
+                    const vp_name = entry.key_ptr.*;
+                    const vp = entry.value_ptr;
+
+                    if (!vp.enabled) continue;
+
+                    // Skip if this is the main camera
+                    if (camera_manager.main_camera) |mc| {
+                        if (camera_manager.cameras.get(vp_name) == mc) {
+                            continue; // skip main
+                        }
+                    }
+
+                    // Start a new row if needed
+                    if (current_in_row >= max_per_row) {
+                        current_in_row = 0;
+                        imgui.igNewLine();
+                    }
+
+                    // Add spacing between viewports (except for first in row)
+                    if (current_in_row > 0) {
+                        imgui.igSameLine(0, viewport_spacing);
+                    }
+
+                    // Calculate viewport dimensions using actual FBO dimensions for correct aspect ratio
+                    const tex_width = @as(f32, @floatFromInt(vp.fbo.width));
+                    const tex_height = @as(f32, @floatFromInt(vp.fbo.height));
+                    const actual_aspect_ratio = tex_width / tex_height;
+
+                    const draw_width = min_viewport_width;
+                    const draw_height = draw_width / actual_aspect_ratio;
+
+                    // Begin a group for this viewport
+                    imgui.igBeginGroup();
+
+                    // Camera name with distinctive background
+                    var cursor_pos_viewport: imgui.ImVec2 = undefined;
+                    imgui.igGetCursorScreenPos(&cursor_pos_viewport);
+
+                    var text_size: imgui.ImVec2 = undefined;
+                    imgui.igCalcTextSize(&text_size, vp_name.ptr, null, false, 0);
+
+                    // Draw text
+                    imgui.igText("%s", vp_name.ptr);
+
+                    // Store position before image for click detection
+                    var image_pos: imgui.ImVec2 = undefined;
+                    imgui.igGetCursorScreenPos(&image_pos);
+
+                    // Get the texture ID from the FBO
+                    const tex_id: imgui.ImTextureID = @intCast(vp.fbo.texture);
+
+                    // Draw the viewport image
+                    imgui.igImage(tex_id, .{ .x = draw_width, .y = draw_height }, .{ .x = 0, .y = 1 }, // UV coordinates for bottom-left
+                        .{ .x = 1, .y = 0 }, // UV coordinates for top-right
+                        .{ .x = 1, .y = 1, .z = 1, .w = 1 }, // Tint color (white)
+                        .{ .x = 0.2, .y = 0.2, .z = 0.2, .w = 1.0 } // Border color (dark gray)
+                    );
+
+                    // Make the viewport image clickable to set as main
+                    if (imgui.igIsItemClicked(imgui.ImGuiMouseButton_Left)) {
+                        // Set this camera as main
+                        camera_manager.main_camera = camera_manager.cameras.get(vp_name);
+
+                        // Mark viewports for resolution update
+                        scene.update_viewports = true;
+                    }
+
+                    // Add a tooltip when hovering over the image
+                    if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                        _ = imgui.igBeginTooltip();
+                        imgui.igText("Click to set as main viewport");
+                        imgui.igEndTooltip();
+                    }
+
+                    imgui.igEndGroup();
+                    current_in_row += 1;
+                }
+            }
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+        }
+        imgui.igEnd();
+    }
+};
+
 pub const OverlayWindow = struct {
     visible: bool,
 
@@ -192,6 +558,40 @@ pub const OverlayWindow = struct {
         self.visible = !self.visible;
     }
 };
+
+// The ViewportManager function as a widget (not a window)
+pub fn ViewportManager(visible: *bool, ctx: *const UIContext) void {
+    _ = visible;
+
+    const scene = ctx.scene;
+    const camera_manager = scene.camera_manager;
+
+    // Let user pick which cameras are active
+    imgui.igText("Active Cameras:");
+    imgui.igSeparator();
+
+    var changed = false;
+    var it_cam = camera_manager.cameras.iterator();
+    while (it_cam.next()) |entry| {
+        const cam_name = entry.key_ptr.*;
+
+        // Ensure we have a bool in active_cameras
+        if (!camera_manager.active_cameras.contains(cam_name)) {
+            camera_manager.active_cameras.put(cam_name, false) catch {};
+        }
+        const active_ptr = camera_manager.active_cameras.getPtr(cam_name) orelse continue;
+
+        // Checkbox for each camera
+        if (imgui.igCheckbox(cam_name.ptr, active_ptr)) {
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        std.debug.print("Camera toggles changed.\n", .{});
+        scene.update_viewports = true;
+    }
+}
 
 pub const StereoDebugWindow = struct {
     visible: bool,

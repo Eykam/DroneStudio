@@ -20,9 +20,33 @@ pub const InstanceData = struct {
     count: usize,
 };
 
+pub const TextureUnit = enum(c_uint) {
+    // Material property textures
+    BaseColor = 0,
+    NormalMap = 1,
+    MetallicRoughness = 2,
+    Occlusion = 3,
+    Emissive = 4,
+    Specular = 5,
+
+    // Reserved for other uses
+    Shadow = 6,
+    Environment = 7,
+    Irradiance = 8,
+    LUT = 9,
+
+    // Helper functions
+    pub fn glValue(self: TextureUnit) c_uint {
+        return @as(c_uint, @intCast(glad.GL_TEXTURE0)) + @intFromEnum(self);
+    }
+
+    pub fn index(self: TextureUnit) c_int {
+        return @intCast(@intFromEnum(self));
+    }
+};
+
 scene: ?*Scene = null,
 mesh: ?*Mesh,
-_update: ?*const fn (*Mesh) void,
 arena: *std.heap.ArenaAllocator,
 backing_allocator: std.mem.Allocator,
 allocator: std.mem.Allocator,
@@ -66,7 +90,6 @@ pub fn init(allocator: std.mem.Allocator, _vertices: ?[]Mesh.Vertex, _indices: ?
         .backing_allocator = allocator,
         .allocator = node_allocator,
         .mesh = mesh_ptr,
-        ._update = draw_fn,
         .children = try std.ArrayList(*Self).initCapacity(node_allocator, 0),
     };
 
@@ -96,20 +119,22 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn rotateWithQuaternion(self: *Self, q: Quaternion) void {
-    _ = q;
+    self.rotation = self.rotation.multiply(q).normalize();
     self.updateLocalTransform();
 }
 
 pub fn rotateWithEuler(self: *Self, pitch: f32, yaw: f32, roll: f32) void {
-    _ = pitch;
-    _ = yaw;
-    _ = roll;
+    const delta_q = Quaternion.from_euler(pitch, yaw, roll);
+    self.rotation = Quaternion.multiply(self.rotation, delta_q).normalize();
 
     self.updateLocalTransform();
 }
 
-pub fn translate(self: *Self, position: Vec3) void {
-    _ = position;
+pub fn translate(self: *Self, offsetLocal: Vec3) void {
+    self.position[0] += offsetLocal.x();
+    self.position[1] += offsetLocal.y();
+    self.position[2] += offsetLocal.z();
+
     self.updateLocalTransform();
 }
 
@@ -146,16 +171,12 @@ pub fn addChild(self: *Self, child: *Self) !void {
 pub fn addSceneRecursively(self: *Self, scene: *Scene) void {
     self.scene = scene;
 
-    self.yTextureUnit = scene.texGen.generateID();
-    self.uvTextureUnit = scene.texGen.generateID();
-    self.depthTextureUnit = scene.texGen.generateID();
-
     for (self.children.items) |child| {
         child.addSceneRecursively(scene);
     }
 }
 
-// (Scale -> Rotate -> Translate)
+//TODO: Option to set origin to simplify calculations
 fn updateLocalTransform(self: *Self) void {
     var transform = Mat4.identity();
 
@@ -176,12 +197,11 @@ fn updateLocalTransform(self: *Self) void {
     self.local_transform = transform;
 }
 
+//TODO: Write-through cache or some flag to determine if this needs to be recoumpte
 fn updateWorldTransform(self: *Self) void {
     if (self.parent) |parent| {
-        // Combine parent's world transform with our local transform
-        self.world_transform = parent.world_transform.multiply(self.local_transform);
+        self.world_transform = self.local_transform.multiply(parent.world_transform);
     } else {
-        // Root node - world transform is the same as local transform
         self.world_transform = self.local_transform;
     }
 }
@@ -190,15 +210,186 @@ pub fn update(self: *Self) void {
     self.updateWorldTransform();
 
     if (self.mesh) |mesh| {
-        // Set mesh-specific uniforms
-        if (self.scene) |scene| {
-            if (scene.uModelLoc != -1) {
-                glad.glUniformMatrix4fv(scene.uModelLoc, 1, glad.GL_FALSE, &self.world_transform.to_array());
-            }
+        const use_pbr = if (mesh.flags) |flags| flags.use_pbr else false;
 
-            if (self._update) |_update| {
-                try self.bindTexture();
-                _update(mesh);
+        if (self.scene) |scene| {
+            if ((scene.rendering_mode == .PBR and use_pbr) or
+                (scene.rendering_mode == .Standard and !use_pbr))
+            {
+                // std.debug.print("Rendering mode: {s}\n", .{@tagName(scene.rendering_mode)});
+                const model_loc = if (use_pbr) scene.pbr_uModelLoc else scene.uModelLoc;
+                if (model_loc != -1) {
+                    glad.glUniformMatrix4fv(model_loc, 1, glad.GL_FALSE, &self.world_transform.to_array());
+                }
+
+                if (use_pbr) {
+                    if (scene.pbr_useTextureLoc != -1) {
+                        const use_texture = if (mesh.flags) |flags|
+                            @intFromBool(flags.use_texture)
+                        else
+                            0;
+                        glad.glUniform1i(scene.pbr_useTextureLoc, use_texture);
+                    }
+
+                    const material = mesh.material;
+
+                    // Base color factor
+                    if (scene.pbr_baseColorFactorLoc != -1) {
+                        glad.glUniform4fv(scene.pbr_baseColorFactorLoc, 1, &material.baseColorFactor);
+                    }
+
+                    // Metallic factor
+                    if (scene.pbr_metallicFactorLoc != -1) {
+                        glad.glUniform1f(scene.pbr_metallicFactorLoc, material.metallicFactor);
+                    }
+
+                    // Roughness factor
+                    if (scene.pbr_roughnessFactorLoc != -1) {
+                        glad.glUniform1f(scene.pbr_roughnessFactorLoc, material.roughnessFactor);
+                    }
+
+                    // Specular-glossiness extension on
+                    if (scene.pbr_useSpecularGlossinessLoc != -1) {
+                        // Check if using specular-glossiness based on whether diffuseFactor is not default
+                        const use_sg = !std.mem.eql(f32, &material.diffuseFactor, &[_]f32{ 1.0, 1.0, 1.0, 1.0 });
+                        glad.glUniform1i(scene.pbr_useSpecularGlossinessLoc, @intFromBool(use_sg));
+
+                        if (use_sg) {
+                            if (scene.pbr_diffuseFactorLoc != -1) {
+                                glad.glUniform4fv(scene.pbr_diffuseFactorLoc, 1, &material.diffuseFactor);
+                            }
+                            if (scene.pbr_specularFactorLoc != -1) {
+                                glad.glUniform3fv(scene.pbr_specularFactorLoc, 1, &material.specularFactor);
+                            }
+                            if (scene.pbr_glossinessFactorLoc != -1) {
+                                glad.glUniform1f(scene.pbr_glossinessFactorLoc, material.glossinessFactor);
+                            }
+                        }
+                    }
+
+                    // Specular extension
+                    if (scene.pbr_useSpecularExtensionLoc != -1) {
+                        const use_specular = material.specularStrength > 0.0;
+                        glad.glUniform1i(scene.pbr_useSpecularExtensionLoc, @intFromBool(use_specular));
+
+                        if (use_specular) {
+                            if (scene.pbr_specularStrengthLoc != -1) {
+                                glad.glUniform1f(scene.pbr_specularStrengthLoc, material.specularStrength);
+                            }
+                            if (scene.pbr_specularColorFactorLoc != -1) {
+                                glad.glUniform3fv(scene.pbr_specularColorFactorLoc, 1, &material.specularColor);
+                            }
+                        }
+                    }
+
+                    // Emissive properties
+                    if (scene.pbr_emissiveFactorLoc != -1) {
+                        glad.glUniform3fv(scene.pbr_emissiveFactorLoc, 1, &material.emissiveFactor);
+                    }
+                    if (scene.pbr_emissiveStrengthLoc != -1) {
+                        glad.glUniform1f(scene.pbr_emissiveStrengthLoc, material.emissiveStrength);
+                    }
+
+                    // Alpha properties
+                    if (scene.pbr_alphaCutoffLoc != -1) {
+                        glad.glUniform1f(scene.pbr_alphaCutoffLoc, material.alphaCutoff);
+                    }
+                    if (scene.pbr_alphaModeLoc != -1) {
+                        glad.glUniform1i(scene.pbr_alphaModeLoc, @intFromEnum(material.alphaMode));
+                    }
+
+                    // Set up textures
+                    // Base color texture
+                    const has_base_color = material.textures.baseColor != null;
+                    if (scene.pbr_hasBaseColorTextureLoc != -1) {
+                        glad.glUniform1i(scene.pbr_hasBaseColorTextureLoc, @intFromBool(has_base_color));
+                    }
+
+                    if (has_base_color) {
+                        glad.glActiveTexture(TextureUnit.BaseColor.glValue());
+                        glad.glBindTexture(glad.GL_TEXTURE_2D, material.textures.baseColor.?);
+                    }
+
+                    // Metallic-roughness texture
+                    const has_metallic_roughness = material.textures.metallicRoughness != null;
+                    if (scene.pbr_hasMetallicRoughnessTextureLoc != -1) {
+                        glad.glUniform1i(scene.pbr_hasMetallicRoughnessTextureLoc, @intFromBool(has_metallic_roughness));
+                    }
+
+                    if (has_metallic_roughness) {
+                        glad.glActiveTexture(TextureUnit.MetallicRoughness.glValue());
+                        glad.glBindTexture(glad.GL_TEXTURE_2D, material.textures.metallicRoughness.?);
+                    }
+
+                    // Normal texture
+                    const has_normal = material.textures.normal != null;
+                    if (scene.pbr_hasNormalTextureLoc != -1) {
+                        glad.glUniform1i(scene.pbr_hasNormalTextureLoc, @intFromBool(has_normal));
+                    }
+
+                    if (has_normal) {
+                        glad.glActiveTexture(TextureUnit.NormalMap.glValue());
+                        glad.glBindTexture(glad.GL_TEXTURE_2D, material.textures.normal.?);
+                    }
+
+                    // Occlusion texture
+                    const has_occlusion = material.textures.occlusion != null;
+                    if (scene.pbr_hasOcclusionTextureLoc != -1) {
+                        glad.glUniform1i(scene.pbr_hasOcclusionTextureLoc, @intFromBool(has_occlusion));
+                    }
+
+                    if (has_occlusion) {
+                        glad.glActiveTexture(TextureUnit.Occlusion.glValue());
+                        glad.glBindTexture(glad.GL_TEXTURE_2D, material.textures.occlusion.?);
+                    }
+
+                    // // Emissive texture
+                    const has_emissive = material.textures.emissive != null;
+                    if (scene.pbr_hasEmissiveTextureLoc != -1) {
+                        glad.glUniform1i(scene.pbr_hasEmissiveTextureLoc, @intFromBool(has_emissive));
+                    }
+
+                    if (has_emissive) {
+                        glad.glActiveTexture(TextureUnit.Emissive.glValue());
+                        glad.glBindTexture(glad.GL_TEXTURE_2D, material.textures.emissive.?);
+                    }
+
+                    // For alpha blending
+                    if (material.alphaMode == .BLEND) {
+                        glad.glEnable(glad.GL_BLEND);
+                        glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
+                    } else {
+                        glad.glDisable(glad.GL_BLEND);
+                    }
+
+                    // For double-sided rendering
+                    if (material.doubleSided) {
+                        glad.glDisable(glad.GL_CULL_FACE);
+                    } else {
+                        glad.glEnable(glad.GL_CULL_FACE);
+                    }
+                } else {
+                    if (scene.useTextureLoc != -1) {
+                        const use_texture = if (mesh.flags) |flags|
+                            @intFromBool(flags.use_texture)
+                        else
+                            0;
+                        glad.glUniform1i(scene.useTextureLoc, use_texture);
+                    }
+
+                    if (mesh.flags) |flags| {
+                        if (flags.use_texture) {
+                            try self.bindTexture();
+                        }
+                    }
+                }
+
+                // In either case, draw the mesh
+                mesh._draw(mesh);
+
+                // Reset state
+                glad.glDisable(glad.GL_BLEND);
+                glad.glEnable(glad.GL_CULL_FACE);
             }
         }
     }
@@ -209,8 +400,6 @@ pub fn update(self: *Self) void {
 }
 
 fn bindTexture(self: *Self) !void {
-    if (!self.texture_updated) return;
-
     const mesh = self.*.mesh.?;
 
     glad.glActiveTexture(@intCast(glad.GL_TEXTURE0 + self.yTextureUnit));

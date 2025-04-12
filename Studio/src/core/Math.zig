@@ -167,6 +167,15 @@ pub const Vec3 = struct {
         return @reduce(.And, within_tolerance);
     }
 
+    pub fn rotate_by_quaternion(v: Self, q: Quaternion) Self {
+        const v_quat = Quaternion.init(v.x(), v.y(), v.z(), 0.0);
+
+        // q * v * q^-1
+        const result = q.multiply(v_quat).multiply(q.conjugate());
+
+        return Vec3.init(result.x(), result.y(), result.z());
+    }
+
     /// Convert to string representation (for debugging)
     pub fn format(
         self: Self,
@@ -704,7 +713,7 @@ pub const Mat4 = struct {
         return result;
     }
 
-    // Create a Mat4 from Mat3 with 0 padding
+    /// Create a Mat4 from Mat3 with 0 padding
     pub fn from_mat3(m: Mat3) Mat4 {
         const data: [4 * 4]f32 = undefined;
 
@@ -721,7 +730,7 @@ pub const Mat4 = struct {
         return Self.from_array(data);
     }
 
-    // Extract the upper 3x3 portion of the matrix
+    /// Extract the upper 3x3 portion of the matrix
     pub fn to_mat3(self: Self) Mat3 {
         var result = Matrix(3){ .data = undefined };
 
@@ -737,6 +746,33 @@ pub const Mat4 = struct {
         result.data[8] = self.base.data[10];
 
         return Mat3{ .base = result };
+    }
+
+    /// Gets the right basis vectors in row-major order
+    pub inline fn get_right(self: Self) Vec3 {
+        const right_x = self.base.data[0];
+        const right_y = self.base.data[1];
+        const right_z = self.base.data[2];
+
+        return Vec3.init(right_x, right_y, right_z).normalize();
+    }
+
+    /// Gets the up basis vectors in row-major order
+    pub inline fn get_up(self: Self) Vec3 {
+        const up_x = self.base.data[4];
+        const up_y = self.base.data[5];
+        const up_z = self.base.data[6];
+
+        return Vec3.init(up_x, up_y, up_z).normalize();
+    }
+
+    /// Gets the forward basis vectors in row-major order
+    pub inline fn get_forward(self: Self) Vec3 {
+        const forward_x = self.base.data[8];
+        const forward_y = self.base.data[9];
+        const forward_z = self.base.data[10];
+
+        return Vec3.init(forward_x, forward_y, forward_z).normalize();
     }
 
     /// Pass-through methods to base matrix
@@ -769,6 +805,23 @@ pub const Mat4 = struct {
             return Self{ .base = inv };
         }
         return null;
+    }
+
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        const m = self.base.data;
+        try writer.print("Mat4(\n{d:.6}\n{d:.6}\n{d:.6}\n{d:.6}\n)\n", .{
+            m[0..4],
+            m[4..8],
+            m[8..12],
+            m[12..16],
+        });
     }
 };
 
@@ -887,7 +940,7 @@ pub const Quaternion = struct {
     pub fn conjugate(self: Self) Self {
         // Conjugate: keep w, negate x, y, z
         const mask: @Vector(4, f32) = .{ -1, -1, -1, 1 };
-        const result = self.data * mask.data;
+        const result = self.data * mask;
 
         return .{ .data = result };
     }
@@ -933,31 +986,11 @@ pub const Quaternion = struct {
     }
 
     pub fn from_euler(pitch: f32, yaw: f32, roll: f32) Self {
-        const qx = Self.init(
-            @sin(roll / 2.0),
-            0,
-            0,
-            @cos(roll / 2.0),
-        );
+        const qx = from_axis_angle(Vec3.init(1, 0, 0), pitch);
+        const qy = from_axis_angle(Vec3.init(0, 1, 0), yaw);
+        const qz = from_axis_angle(Vec3.init(0, 0, 1), roll);
 
-        // Create rotation around y-axis (pitch)
-        const qy = Self.init(
-            0,
-            @sin(pitch / 2.0),
-            0,
-            @cos(pitch / 2.0),
-        );
-
-        // Create rotation around z-axis (yaw)
-        const qz = Self.init(
-            0,
-            0,
-            @sin(yaw / 2.0),
-            @cos(yaw / 2.0),
-        );
-
-        // Combine rotations in ZYX order (yaw, pitch, roll)
-        // This means roll first, then pitch, then yaw
+        // roll → pitch → yaw (Extrinsic)
         return qz.multiply(qy).multiply(qx).normalize();
     }
 
@@ -1001,7 +1034,9 @@ pub const Quaternion = struct {
         return result.normalize();
     }
 
-    pub fn to_mat4(q: Self) Mat4 {
+    pub fn to_mat4(_q: Self) Mat4 {
+        const q = _q.normalize();
+
         const qx = q.x();
         const qy = q.y();
         const qz = q.z();
@@ -1071,5 +1106,17 @@ pub const Quaternion = struct {
                 aw * ratio_a + bcw * ratio_b,
             );
         }
+    }
+
+    pub fn format(
+        self: Self,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        const m = self.data;
+        try writer.print("Quat({d:.6})\n", .{m});
     }
 };

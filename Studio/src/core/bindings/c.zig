@@ -10,3 +10,7 @@ pub const cuda = @cImport({
     @cInclude("cuda_wrapper.h");
     @cInclude("kernels.h");
 });
+
+pub const bullet = @cImport({
+    @cInclude("cbullet.h");
+});

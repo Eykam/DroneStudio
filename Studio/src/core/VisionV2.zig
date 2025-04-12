@@ -96,7 +96,7 @@ pub const KeyframeResources = struct {
         const resources = try allocator.create(Self);
 
         var d_matches: *cuda.float4 = undefined;
-        err = cuda.cudaMalloc(@ptrCast(&d_matches), max_features * @sizeOf(cuda.MatchedKeypoint));
+        const err = cuda.cudaMalloc(@ptrCast(&d_matches), max_features * @sizeOf(cuda.MatchedKeypoint));
         errdefer allocator.destroy(resources);
         if (err != cuda.cudaSuccess) {
             return error.CudaAllocationFailed;
@@ -106,7 +106,6 @@ pub const KeyframeResources = struct {
             .id = id,
             .allocator = allocator,
             .max_features = max_features,
-            .d_descriptors = d_descriptors,
             .d_matches = d_matches,
         };
 
@@ -245,7 +244,7 @@ pub const Keyframe = struct {
         // Read feature position from GPU
         var feature: cuda.MatchedKeypoint = undefined;
         _ = cuda.cudaMemcpy(
-            &feature_pos,
+            &feature,
             &self.resources.d_matches[feature_idx],
             @sizeOf(cuda.float4),
             cuda.cudaMemcpyDeviceToHost,
@@ -449,12 +448,12 @@ pub const TrackingData = struct {
     d_left_blurred: ?*u8 = null,
 
     // Stereo matching resources
-    d_right_feature_count: ?*c_uint = null,
+    d_right_features_count: ?*c_uint = null,
     d_right_positions: ?*cuda.float4 = null,
     d_right_colors: ?*cuda.float4 = null,
     d_right_descriptors: ?*cuda.BRIEFDescriptor = null,
 
-    d_left_feature_count: ?*c_uint = null,
+    d_left_features_count: ?*c_uint = null,
     d_left_positions: ?*cuda.float4 = null,
     d_left_colors: ?*cuda.float4 = null,
     d_left_descriptors: ?*cuda.BRIEFDescriptor = null,
@@ -683,7 +682,7 @@ pub const SparseMapper = struct {
             std.debug.print("Creating new keyframe {}\n", .{self.next_keyframe_id});
 
             // 4. Create new keyframe
-            try self.createKeyframe(left_frame, right_frame, estimated_pose);
+            // try self.createKeyframe(left_frame, right_frame, estimated_pose);
 
             // 5. Periodically prune the map
             // if (self.keyframes.count() % 15 == 0) {
@@ -732,7 +731,7 @@ pub const SparseMapper = struct {
         });
 
         // Reset left keypoint count
-        _ = cuda.cudaMemset(self.tracking_data.d_left_feature_count, 0, @sizeOf(c_uint));
+        _ = cuda.cudaMemset(self.tracking_data.d_left_features_count, 0, @sizeOf(c_uint));
 
         // Detect FAST features and compute BRIEF descriptors in left image
         try track_kernel("Left_Keypoint_Detection", void, cuda.launch_keypoint_detection, .{
@@ -745,7 +744,7 @@ pub const SparseMapper = struct {
             self.tracking_data.d_left_positions.?,
             self.tracking_data.d_left_colors.?,
             self.tracking_data.d_left_descriptors.?,
-            self.tracking_data.d_left_feature_count.?,
+            self.tracking_data.d_left_features_count.?,
             @as(c_int, @intCast(self.config.max_features_per_frame)),
             grid,
             block,
@@ -753,7 +752,7 @@ pub const SparseMapper = struct {
 
         // Get the number of features detected in left image
         var left_feature_count: c_uint = 0;
-        _ = cuda.cudaMemcpy(&left_feature_count, self.tracking_data.d_left_feature_count.?, @sizeOf(c_uint), cuda.cudaMemcpyDeviceToHost);
+        _ = cuda.cudaMemcpy(&left_feature_count, self.tracking_data.d_left_features_count.?, @sizeOf(c_uint), cuda.cudaMemcpyDeviceToHost);
 
         // If no features detected in left image, return empty result
         if (left_feature_count == 0) {
@@ -772,7 +771,7 @@ pub const SparseMapper = struct {
         });
 
         // Reset right keypoint count
-        _ = cuda.cudaMemset(self.tracking_data.d_right_feature_count, 0, @sizeOf(c_uint));
+        _ = cuda.cudaMemset(self.tracking_data.d_right_features_count, 0, @sizeOf(c_uint));
 
         // Detect FAST features and compute BRIEF descriptors in right image
         try track_kernel("Right_Keypoint_Detection", void, cuda.launch_keypoint_detection, .{
@@ -785,7 +784,7 @@ pub const SparseMapper = struct {
             self.tracking_data.d_right_positions.?,
             self.tracking_data.d_right_colors.?,
             self.tracking_data.d_right_descriptors.?,
-            self.tracking_data.d_right_feature_count.?,
+            self.tracking_data.d_right_features_count.?,
             @as(c_int, @intCast(self.config.max_features_per_frame)),
             grid,
             block,
@@ -793,7 +792,7 @@ pub const SparseMapper = struct {
 
         // Get the number of features detected in right image
         var right_feature_count: c_uint = 0;
-        _ = cuda.cudaMemcpy(&right_feature_count, self.tracking_data.d_right_feature_count.?, @sizeOf(c_uint), cuda.cudaMemcpyDeviceToHost);
+        _ = cuda.cudaMemcpy(&right_feature_count, self.tracking_data.d_right_features_count.?, @sizeOf(c_uint), cuda.cudaMemcpyDeviceToHost);
 
         // If no features detected in right image, return empty result
         if (right_feature_count == 0) {
@@ -835,7 +834,7 @@ pub const SparseMapper = struct {
             left_feature_count,
             right_feature_count,
             self.stereo_params,
-            self.tracking_data.d_matched_pairs.?,
+            self.tracking_data.d_matched_features.?,
             self.tracking_data.d_match_count.?,
             cross_check_grid,
             cross_check_block,
@@ -1012,93 +1011,93 @@ pub const SparseMapper = struct {
     }
 
     /// Create a new keyframe from the current frame
-    fn createKeyframe(self: *Self, left_frame: *video.AVFrame, right_frame: *video.AVFrame, pose: CameraPose) !void {
-        // Now create the keyframe using these triangulated positions
-        const keyframe_id = self.next_keyframe_id;
-        self.next_keyframe_id += 1;
+    // fn createKeyframe(self: *Self, left_frame: *video.AVFrame, right_frame: *video.AVFrame, pose: CameraPose) !void {
+    //     // Now create the keyframe using these triangulated positions
+    //     const keyframe_id = self.next_keyframe_id;
+    //     self.next_keyframe_id += 1;
 
-        // Create keyframe resources
-        const keyframe_resources = try KeyframeResources.init(
-            self.allocator,
-            keyframe_id,
-            self.config.max_features_per_frame,
-        );
+    //     // Create keyframe resources
+    //     const keyframe_resources = try KeyframeResources.init(
+    //         self.allocator,
+    //         keyframe_id,
+    //         self.config.max_features_per_frame,
+    //     );
 
-        // Create keyframe object
-        var keyframe = try Keyframe.init(
-            self.allocator,
-            keyframe_id,
-            left_frame.pts,
-            pose,
-            keyframe_resources,
-            null, // Don't store original frame to save memory
-        );
+    //     // Create keyframe object
+    //     var keyframe = try Keyframe.init(
+    //         self.allocator,
+    //         keyframe_id,
+    //         left_frame.pts,
+    //         pose,
+    //         keyframe_resources,
+    //         null, // Don't store original frame to save memory
+    //     );
 
-        // Copy feature data from detection resources to keyframe resources
-        try keyframe.copyFeatureData(
-            self.tracking_data.d_matched_features.?,
-            self.tracking_data.current_feature_count,
-        );
+    //     // Copy feature data from detection resources to keyframe resources
+    //     try keyframe.copyFeatureData(
+    //         self.tracking_data.d_matched_features.?,
+    //         self.tracking_data.current_feature_count,
+    //     );
 
-        // Add tracked landmarks as observations
-        var tracked_landmarks_count: u32 = 0;
+    //     // Add tracked landmarks as observations
+    //     var tracked_landmarks_count: u32 = 0;
 
-        // Process tracked landmarks from previous frames
-        for (0..self.tracking_data.current_feature_count) |i| {
-            const feature_idx: u32 = @intCast(i);
-            if (self.tracking_data.getLandmarkForFeature(feature_idx)) |landmark_id| {
-                if (self.landmarks.get(landmark_id)) |landmark| {
-                    // Add observation to existing landmark
-                    if (landmark.addObservation(keyframe_id, feature_idx)) {
-                        // Add observation to keyframe
-                        if (keyframe.addObservation(landmark_id, feature_idx)) {
-                            tracked_landmarks_count += 1;
-                        }
-                    }
-                }
-            }
-        }
+    //     // Process tracked landmarks from previous frames
+    //     for (0..self.tracking_data.current_feature_count) |i| {
+    //         const feature_idx: u32 = @intCast(i);
+    //         if (self.tracking_data.getLandmarkForFeature(feature_idx)) |landmark_id| {
+    //             if (self.landmarks.get(landmark_id)) |landmark| {
+    //                 // Add observation to existing landmark
+    //                 if (landmark.addObservation(keyframe_id, feature_idx)) {
+    //                     // Add observation to keyframe
+    //                     if (keyframe.addObservation(landmark_id, feature_idx)) {
+    //                         tracked_landmarks_count += 1;
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
 
-        // Create new landmarks from untracked features
-        var new_landmarks_count: u32 = 0;
+    //     // Create new landmarks from untracked features
+    //     var new_landmarks_count: u32 = 0;
 
-        // For each untracked feature with a valid triangulated position
-        for (0..self.tracking_data.current_feature_count) |i| {
-            const feature_idx: u32 = @intCast(i);
+    //     // For each untracked feature with a valid triangulated position
+    //     for (0..self.tracking_data.current_feature_count) |i| {
+    //         const feature_idx: u32 = @intCast(i);
 
-            // Skip if feature is already tracked
-            if (self.tracking_data.getLandmarkForFeature(feature_idx) != null) continue;
+    //         // Skip if feature is already tracked
+    //         if (self.tracking_data.getLandmarkForFeature(feature_idx) != null) continue;
 
-            // Skip if position is invalid (depth == 0)
-            if (triangulated_positions[feature_idx].y <= 0.0) continue;
+    //         // Skip if position is invalid (depth == 0)
+    //         if (triangulated_positions[feature_idx].y <= 0.0) continue;
 
-            // Create new landmark
-            const landmark_id = self.next_landmark_id;
-            self.next_landmark_id += 1;
+    //         // Create new landmark
+    //         const landmark_id = self.next_landmark_id;
+    //         self.next_landmark_id += 1;
 
-            const landmark = try Landmark.init(
-                self.allocator,
-                landmark_id,
-                triangulated_positions[feature_idx],
-                keyframe_id,
-                feature_idx,
-            );
+    //         const landmark = try Landmark.init(
+    //             self.allocator,
+    //             landmark_id,
+    //             triangulated_positions[feature_idx],
+    //             keyframe_id,
+    //             feature_idx,
+    //         );
 
-            try self.landmarks.put(landmark_id, landmark);
+    //         try self.landmarks.put(landmark_id, landmark);
 
-            // Add observation to keyframe
-            if (keyframe.addObservation(landmark_id, feature_idx)) {
-                // Add to tracking data for this frame
-                _ = self.tracking_data.addLandmarkMatch(feature_idx, landmark_id);
-                new_landmarks_count += 1;
-            }
-        }
+    //         // Add observation to keyframe
+    //         if (keyframe.addObservation(landmark_id, feature_idx)) {
+    //             // Add to tracking data for this frame
+    //             _ = self.tracking_data.addLandmarkMatch(feature_idx, landmark_id);
+    //             new_landmarks_count += 1;
+    //         }
+    //     }
 
-        // Add keyframe to map
-        try self.keyframes.put(keyframe_id, keyframe);
+    //     // Add keyframe to map
+    //     try self.keyframes.put(keyframe_id, keyframe);
 
-        std.debug.print("Created keyframe {}: {} landmarks tracked, {} new landmarks\n", .{ keyframe_id, tracked_landmarks_count, new_landmarks_count });
-    }
+    //     std.debug.print("Created keyframe {}: {} landmarks tracked, {} new landmarks\n", .{ keyframe_id, tracked_landmarks_count, new_landmarks_count });
+    // }
 
     /// Check if a new keyframe should be created
     fn shouldCreateKeyframe(self: *Self, current_pose: CameraPose) !bool {

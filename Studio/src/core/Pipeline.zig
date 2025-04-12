@@ -3,20 +3,24 @@ const std = @import("std");
 const Shape = @import("Shape.zig");
 const Math = @import("Math.zig");
 const Node = @import("Node.zig");
+const Mesh = @import("Mesh.zig");
 const gl = @import("bindings/gl.zig");
 const c = @import("bindings/c.zig");
-const Camera = @import("Camera.zig");
+const Cameras = @import("Cameras.zig");
 const Vision = @import("Vision.zig");
 const Sensors = @import("Sensors.zig");
 const Drone = @import("Drone.zig");
 
 const Vec3 = Math.Vec3;
 const Mat4 = Math.Mat4;
+const TextureUnit = Node.TextureUnit;
+const Quaternion = Math.Quaternion;
 const File = std.fs.File;
 const glfw = gl.glfw;
 const glad = gl.glad;
 const imgui = c.imgui;
 const Pose = Vision.CameraPose;
+const CameraManager = Cameras.CameraManager;
 const MotorController = Drone.MotorControllerClient;
 
 const GSLWError = error{ FailedToCreateWindow, FailedToInitialize };
@@ -33,6 +37,8 @@ pub const AppState = struct {
     paused: bool = false,
     fly: bool = false,
     menu: bool = false,
+    simulation_mode: bool = false,
+    first_person_view: bool = true,
 };
 
 // Timing for operations to debug in UI
@@ -42,17 +48,29 @@ pub const timing = struct {
     draw_timing: f32,
 };
 
+pub const RenderingMode = enum {
+    Standard,
+    PBR,
+};
+
 pub const Scene = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
     nodes: std.StringHashMap(*Node),
-    shaderProgram: u32,
     width: f32,
     height: f32,
     appState: AppState,
-    camera: Camera,
+    camera_manager: *CameraManager,
     motor_controller: ?*MotorController = null,
+
+    update_viewports: bool = false,
+
+    ambientColorLoc: glad.GLint,
+    ambientStrengthLoc: glad.GLint,
+
+    ambient_color: [3]f32 = .{ 1.0, 1.0, 1.0 }, // Default white ambient
+    ambient_strength: f32 = 0.1,
 
     uModelLoc: glad.GLint,
     uViewLoc: glad.GLint,
@@ -63,6 +81,66 @@ pub const Scene = struct {
     depthTextureLoc: glad.GLint,
     useInstancedKeypointLoc: glad.GLint,
     useInstancedLinesLoc: glad.GLint,
+
+    rendering_mode: RenderingMode = .Standard,
+    shaderProgram: u32,
+    pbrShaderProgram: u32 = 0,
+
+    // Standard MVP uniform locations
+    pbr_uModelLoc: glad.GLint = -1,
+    pbr_uViewLoc: glad.GLint = -1,
+    pbr_uProjectionLoc: glad.GLint = -1,
+
+    // PBR material uniforms
+    pbr_baseColorFactorLoc: glad.GLint = -1,
+    pbr_metallicFactorLoc: glad.GLint = -1,
+    pbr_roughnessFactorLoc: glad.GLint = -1,
+
+    // PBR texture uniforms
+    pbr_useTextureLoc: glad.GLint = -1,
+    pbr_hasBaseColorTextureLoc: glad.GLint = -1,
+    pbr_hasMetallicRoughnessTextureLoc: glad.GLint = -1,
+    pbr_hasNormalTextureLoc: glad.GLint = -1,
+    pbr_hasOcclusionTextureLoc: glad.GLint = -1,
+    pbr_hasEmissiveTextureLoc: glad.GLint = -1,
+
+    // PBR texture samplers
+    pbr_baseColorTextureLoc: glad.GLint = -1,
+    pbr_metallicRoughnessTextureLoc: glad.GLint = -1,
+    pbr_normalTextureLoc: glad.GLint = -1,
+    pbr_occlusionTextureLoc: glad.GLint = -1,
+    pbr_emissiveTextureLoc: glad.GLint = -1,
+
+    // Specular-Glossiness extension uniforms
+    pbr_useSpecularGlossinessLoc: glad.GLint = -1,
+    pbr_diffuseFactorLoc: glad.GLint = -1,
+    pbr_specularFactorLoc: glad.GLint = -1,
+    pbr_glossinessFactorLoc: glad.GLint = -1,
+
+    // Specular extension uniforms
+    pbr_useSpecularExtensionLoc: glad.GLint = -1,
+    pbr_specularStrengthLoc: glad.GLint = -1,
+    pbr_specularColorFactorLoc: glad.GLint = -1,
+
+    // Other PBR uniforms
+    pbr_emissiveFactorLoc: glad.GLint = -1,
+    pbr_emissiveStrengthLoc: glad.GLint = -1,
+    pbr_alphaCutoffLoc: glad.GLint = -1,
+    pbr_alphaModeLoc: glad.GLint = -1,
+
+    // Lighting uniforms
+    pbr_viewPosLoc: glad.GLint = -1,
+    pbr_lightPositionLoc: glad.GLint = -1,
+    pbr_lightColorLoc: glad.GLint = -1,
+    pbr_lightIntensityLoc: glad.GLint = -1,
+
+    pbr_ambientColorLoc: glad.GLint = -1,
+    pbr_ambientStrengthLoc: glad.GLint = -1,
+
+    // Default lighting values
+    lightPosition: [3]f32 = .{ 0.0, 10.0, 10.0 },
+    lightColor: [3]f32 = .{ 1.0, 1.0, 1.0 },
+    lightIntensity: f32 = 1.0,
 
     texGen: TextureGenerator = TextureGenerator{},
 
@@ -136,6 +214,8 @@ pub const Scene = struct {
         const depthTextureLoc = glad.glGetUniformLocation(shader_program, "depthTexture");
         const useInstancedKeypointLoc = glad.glGetUniformLocation(shader_program, "uInstancedKeypoints");
         const uInstancedLinesLoc = glad.glGetUniformLocation(shader_program, "uInstancedLines");
+        const ambientColorLoc = glad.glGetUniformLocation(shader_program, "ambientColor");
+        const ambientStrengthLoc = glad.glGetUniformLocation(shader_program, "ambientStrength");
 
         if (uModelLoc == -1 or uViewLoc == -1 or uProjectionLoc == -1) {
             std.debug.print("Failed to get one or more uniform locations\n", .{});
@@ -151,7 +231,7 @@ pub const Scene = struct {
             .width = @floatFromInt(width),
             .height = @floatFromInt(height),
             .appState = AppState{},
-            .camera = Camera.init(null, null),
+            .camera_manager = try CameraManager.init(allocator, @floatFromInt(width), @floatFromInt(height)),
             .uModelLoc = uModelLoc,
             .uViewLoc = uViewLoc,
             .uProjectionLoc = uProjectionLoc,
@@ -161,9 +241,91 @@ pub const Scene = struct {
             .depthTextureLoc = depthTextureLoc,
             .useInstancedKeypointLoc = useInstancedKeypointLoc,
             .useInstancedLinesLoc = uInstancedLinesLoc,
+            .ambientColorLoc = ambientColorLoc,
+            .ambientStrengthLoc = ambientStrengthLoc,
         };
 
+        try scene.initPBRShader();
+
         return scene;
+    }
+
+    pub fn initPBRShader(self: *Self) !void {
+        std.debug.print("Initializing PBR Shader...\n", .{});
+
+        // Create PBR shader program
+        self.pbrShaderProgram = try createShaderProgram("shaders/pbr_vertex.glsl", "shaders/pbr_fragment.glsl");
+
+        // Store uniform locations
+        glad.glUseProgram(self.pbrShaderProgram);
+
+        // Standard MVP uniforms
+        self.pbr_uModelLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "uModel");
+        self.pbr_uViewLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "uView");
+        self.pbr_uProjectionLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "uProjection");
+
+        // PBR material uniforms
+        self.pbr_baseColorFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "baseColorFactor");
+        self.pbr_metallicFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "metallicFactor");
+        self.pbr_roughnessFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "roughnessFactor");
+
+        // PBR texture uniforms
+        self.pbr_useTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "useTexture");
+        self.pbr_hasBaseColorTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "hasBaseColorTexture");
+        self.pbr_hasMetallicRoughnessTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "hasMetallicRoughnessTexture");
+        self.pbr_hasNormalTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "hasNormalTexture");
+        self.pbr_hasOcclusionTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "hasOcclusionTexture");
+        self.pbr_hasEmissiveTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "hasEmissiveTexture");
+
+        // PBR texture samplers
+        self.pbr_baseColorTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "baseColorTexture");
+        self.pbr_metallicRoughnessTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "metallicRoughnessTexture");
+        self.pbr_normalTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "normalTexture");
+        self.pbr_occlusionTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "occlusionTexture");
+        self.pbr_emissiveTextureLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "emissiveTexture");
+
+        glad.glUniform1i(self.pbr_baseColorTextureLoc, TextureUnit.BaseColor.index());
+        glad.glUniform1i(self.pbr_normalTextureLoc, TextureUnit.NormalMap.index());
+        glad.glUniform1i(self.pbr_metallicRoughnessTextureLoc, TextureUnit.MetallicRoughness.index());
+        glad.glUniform1i(self.pbr_occlusionTextureLoc, TextureUnit.Occlusion.index());
+        glad.glUniform1i(self.pbr_emissiveTextureLoc, TextureUnit.Emissive.index());
+
+        // Specular-Glossiness extension uniforms
+        self.pbr_useSpecularGlossinessLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "useSpecularGlossiness");
+        self.pbr_diffuseFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "diffuseFactor");
+        self.pbr_specularFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "specularFactor");
+        self.pbr_glossinessFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "glossinessFactor");
+
+        // Specular extension uniforms
+        self.pbr_useSpecularExtensionLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "useSpecularExtension");
+        self.pbr_specularStrengthLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "specularStrength");
+        self.pbr_specularColorFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "specularColorFactor");
+
+        // Other PBR uniforms
+        self.pbr_emissiveFactorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "emissiveFactor");
+        self.pbr_emissiveStrengthLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "emissiveStrength");
+        self.pbr_alphaCutoffLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "alphaCutoff");
+        self.pbr_alphaModeLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "alphaMode");
+
+        // Lighting uniforms
+        self.pbr_viewPosLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "viewPos");
+        self.pbr_lightPositionLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "lightPosition");
+        self.pbr_lightColorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "lightColor");
+        self.pbr_lightIntensityLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "lightIntensity");
+
+        // Ambient lighting (reusing from standard shader)
+        self.pbr_ambientColorLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "ambientColor");
+        self.pbr_ambientStrengthLoc = glad.glGetUniformLocation(self.pbrShaderProgram, "ambientStrength");
+
+        // Set default values
+        if (self.pbr_ambientColorLoc != -1) {
+            glad.glUniform3fv(self.pbr_ambientColorLoc, 1, &self.ambient_color);
+        }
+        if (self.pbr_ambientStrengthLoc != -1) {
+            glad.glUniform1f(self.pbr_ambientStrengthLoc, self.ambient_strength);
+        }
+
+        glad.glUseProgram(0);
     }
 
     pub fn deinit(self: *Self) void {
@@ -180,6 +342,13 @@ pub const Scene = struct {
                 }
             }
         }
+
+        var viewport_it = self.camera_manager.viewports.iterator();
+        while (viewport_it.next()) |entry| {
+            var viewport = entry.value_ptr;
+            viewport.deinit();
+        }
+        self.camera_manager.viewports.deinit();
 
         self.nodes.deinit();
         glad.glDeleteProgram(self.shaderProgram);
@@ -205,10 +374,6 @@ pub const Scene = struct {
         _ = glfw.glfwSetMouseButtonCallback(window, mouseButtonCallback);
     }
 
-    pub fn updateProjection(self: *Self) Mat4 {
-        return Mat4.perspective(self.appState.zoom, self.width / self.height, 0.1, 100.0);
-    }
-
     pub fn getSceneGraph(self: Self) void {
         var it = self.nodes.iterator();
 
@@ -231,31 +396,129 @@ pub const Scene = struct {
         // Start frame timing
         const frame_start = glfw.glfwGetTime();
 
+        // Update viewports if needed
+        if (self.update_viewports) {
+            self.update_viewports = self.camera_manager.update_viewports() catch |err| blk: {
+                std.debug.print("Failed to update viewports: {}\n", .{err});
+                break :blk true;
+            };
+        }
+
+        if (self.ambientColorLoc != -1) {
+            glad.glUniform3fv(self.ambientColorLoc, 1, &self.ambient_color);
+        }
+        if (self.ambientStrengthLoc != -1) {
+            glad.glUniform1f(self.ambientStrengthLoc, self.ambient_strength);
+        }
+
+        //TODO: Split updating nodes transformations & draw calls into separate functions, call transformation updates once here, then do draw calls for every FBO
+        // --- Render each active camera to its FBO ---
+        var vp_it = self.camera_manager.viewports.iterator();
+        while (vp_it.next()) |vp_entry| {
+            const cam_name = vp_entry.key_ptr.*;
+            const viewport = vp_entry.value_ptr;
+
+            // Skip disabled viewports
+            if (!viewport.enabled) continue;
+
+            // Retrieve the actual Camera* from camera_manager:
+            const cam_ptr = self.camera_manager.cameras.get(cam_name) orelse continue;
+
+            // Bind FBO
+            glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, viewport.fbo.fbo);
+            glad.glViewport(0, 0, viewport.fbo.width, viewport.fbo.height);
+
+            // Clear
+            glad.glClearColor(0.1, 0.1, 0.1, 1.0);
+            glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
+
+            // Get view and projection matrices once (used by both shaders)
+            const view_mat = cam_ptr.get_view_matrix();
+            const view_arr = view_mat.to_array();
+            const proj_mat = cam_ptr.get_projection_matrix();
+            const proj_arr = proj_mat.to_array();
+
+            // FIRST PASS: PBR objects
+            glad.glUseProgram(self.pbrShaderProgram);
+
+            // Set ambient lighting uniform for PBR shader
+            if (self.pbr_ambientColorLoc != -1) {
+                glad.glUniform3fv(self.pbr_ambientColorLoc, 1, &self.ambient_color);
+            }
+            if (self.pbr_ambientStrengthLoc != -1) {
+                glad.glUniform1f(self.pbr_ambientStrengthLoc, self.ambient_strength);
+            }
+
+            // Set camera position for PBR specular calculations
+            const camera_pos = cam_ptr.get_base().position;
+            if (self.pbr_viewPosLoc != -1) {
+                glad.glUniform3f(self.pbr_viewPosLoc, camera_pos.x(), camera_pos.y(), camera_pos.z());
+            }
+
+            // Set light properties for PBR shader
+            if (self.pbr_lightPositionLoc != -1) {
+                glad.glUniform3fv(self.pbr_lightPositionLoc, 1, &self.lightPosition);
+            }
+            if (self.pbr_lightColorLoc != -1) {
+                glad.glUniform3fv(self.pbr_lightColorLoc, 1, &self.lightColor);
+            }
+            if (self.pbr_lightIntensityLoc != -1) {
+                glad.glUniform1f(self.pbr_lightIntensityLoc, self.lightIntensity);
+            }
+
+            // Set camera's view and projection for PBR shader
+            if (self.pbr_uViewLoc != -1) {
+                glad.glUniformMatrix4fv(self.pbr_uViewLoc, 1, glad.GL_FALSE, &view_arr);
+            }
+            if (self.pbr_uProjectionLoc != -1) {
+                glad.glUniformMatrix4fv(self.pbr_uProjectionLoc, 1, glad.GL_FALSE, &proj_arr);
+            }
+
+            // Set rendering mode to PBR
+            self.rendering_mode = .PBR;
+
+            // Do a PBR pass through all nodes
+            var node_it = self.nodes.iterator();
+            while (node_it.next()) |node_entry| {
+                node_entry.value_ptr.*.update();
+            }
+
+            // SECOND PASS: Standard objects
+            glad.glUseProgram(self.shaderProgram);
+
+            // Set ambient lighting uniform for standard shader
+            if (self.ambientColorLoc != -1) {
+                glad.glUniform3fv(self.ambientColorLoc, 1, &self.ambient_color);
+            }
+            if (self.ambientStrengthLoc != -1) {
+                glad.glUniform1f(self.ambientStrengthLoc, self.ambient_strength);
+            }
+
+            // Set camera's view and projection for standard shader
+            if (self.uViewLoc != -1) {
+                glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view_arr);
+            }
+            if (self.uProjectionLoc != -1) {
+                glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &proj_arr);
+            }
+
+            // Set rendering mode to Standard
+            self.rendering_mode = .Standard;
+
+            // Do another pass through all nodes, but with standard shader active
+            node_it = self.nodes.iterator();
+            while (node_it.next()) |node_entry| {
+                node_entry.value_ptr.*.update();
+            }
+        }
+
+        // Now bind back to default framebuffer, just so we have a blank background for ImGui
+        glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, 0);
+        glad.glViewport(0, 0, @intFromFloat(self.width), @intFromFloat(self.height));
         glad.glClearColor(0.15, 0.15, 0.15, 1.0);
         glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
 
-        const view = self.camera.get_view_matrix();
-        const view_arr = view.to_array();
-
-        if (self.uViewLoc != -1) {
-            glad.glUniformMatrix4fv(self.uViewLoc, 1, glad.GL_FALSE, &view_arr);
-        }
-
-        if (self.projection_dirty) {
-            const current_projection = self.updateProjection();
-            const projection_arr = current_projection.to_array();
-            if (self.uProjectionLoc != -1) {
-                glad.glUniformMatrix4fv(self.uProjectionLoc, 1, glad.GL_FALSE, &projection_arr);
-            }
-            self.projection_dirty = false;
-        }
-
-        // Batch similar draw calls if possible
-        var it = self.nodes.iterator();
-        while (it.next()) |entry| {
-            entry.value_ptr.*.update();
-        }
-
+        // The rest: ImGui rendering
         imgui.igRender();
         imgui.ImGui_ImplOpenGL3_RenderDrawData(imgui.igGetDrawData());
 
@@ -286,57 +549,33 @@ pub const Scene = struct {
         }
     }
 
+    pub fn toggleSimulationMode(self: *Self) void {
+        self.appState.simulation_mode = !self.appState.simulation_mode;
+
+        if (self.appState.simulation_mode) {
+            self.camera_manager.set_active("simulation_third_person");
+        } else {
+            self.camera_manager.set_active("free");
+        }
+    }
+
     pub fn processInput(self: *Self, debug: bool) void {
         _ = debug;
 
-        // const up_pressed = self.appState.keys[@as(usize, glfw.GLFW_KEY_UP)];
-        // self.motor_handler.handleInput(up_pressed);
-
         const io = imgui.igGetIO();
-        if (io.*.WantCaptureKeyboard) return;
-
-        const sprinting = self.appState.keys[@as(usize, glfw.GLFW_KEY_LEFT_SHIFT)];
-        const velocity = self.camera.speed * self.appState.delta_time *
-            (if (sprinting) @as(f32, 2.0) else @as(f32, 1.0));
-
-        // Pre-calculate movement vectors once per frame if needed
-        var movement: *Vec3 = @constCast(&Vec3.zero());
-
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_W)]) {
-            movement.add_inplace(self.camera.front.scale(velocity));
-        }
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_S)]) {
-            movement.sub_inplace(self.camera.front.scale(velocity));
-        }
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_D)]) {
-            movement.add_inplace(self.camera.right.scale(velocity));
-        }
-        if (self.appState.keys[@as(usize, glfw.GLFW_KEY_A)]) {
-            movement.sub_inplace(self.camera.right.scale(velocity));
+        if (self.appState.menu) {
+            if (io.*.WantCaptureKeyboard) return;
         }
 
-        if (self.appState.fly) {
-            self.camera.position = self.camera.position.add(movement.*);
-            if (self.appState.keys[@as(usize, glfw.GLFW_KEY_SPACE)]) {
-                self.camera.position.set_y(self.camera.position.y() + velocity);
-            }
-        } else {
-            const grounded = Vec3.init(
-                self.camera.position.x(),
-                1,
-                self.camera.position.z(),
-            );
+        self.camera_manager.main_camera.?.process_key_input();
+    }
 
-            const grounded_movement = Vec3.init(
-                movement.x(),
-                0,
-                movement.z(),
-            );
+    pub fn setAmbientColor(self: *Self, r: f32, g: f32, b: f32) void {
+        self.ambient_color = .{ r, g, b };
+    }
 
-            self.camera.position = grounded.add(grounded_movement);
-        }
-
-        // Zoom controls can remain in the keyCallback since they are discrete actions
+    pub fn setAmbientStrength(self: *Self, strength: f32) void {
+        self.ambient_strength = std.math.clamp(strength, 0.0, 1.0);
     }
 };
 
@@ -477,16 +716,27 @@ pub fn createWindow() !?*glfw.GLFWwindow {
     glfw.glfwWindowHint(glfw.GLFW_FOCUS_ON_SHOW, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_CLIENT_API, glfw.GLFW_OPENGL_API);
     glfw.glfwWindowHint(glfw.GLFW_CONTEXT_CREATION_API, glfw.GLFW_NATIVE_CONTEXT_API);
-
     glfw.glfwWindowHint(glfw.GLFW_DOUBLEBUFFER, glfw.GLFW_TRUE);
     glfw.glfwWindowHint(glfw.GLFW_SRGB_CAPABLE, glfw.GLFW_TRUE);
+    glfw.glfwWindowHint(glfw.GLFW_DECORATED, glfw.GLFW_TRUE); // Remove window decorations
+    glfw.glfwWindowHint(glfw.GLFW_MAXIMIZED, glfw.GLFW_TRUE); // Start maximized
 
-    const width: i32 = @intFromFloat(1920 * 0.75);
-    const height: i32 = @intFromFloat(1080 * 0.75);
+    const monitor = glfw.glfwGetPrimaryMonitor();
+    const video_mode = glfw.glfwGetVideoMode(monitor);
+
+    // Create window with monitor's resolution
+    const width = video_mode.*.width;
+    const height = video_mode.*.height;
 
     const window = glfw.glfwCreateWindow(width, height, "Drone Studio", null, null) orelse return null;
 
-    // Make context current immediately after window creation
+    // Position the window at the monitor's position
+    var xpos: i32 = undefined;
+    var ypos: i32 = undefined;
+    glfw.glfwGetMonitorPos(monitor, &xpos, &ypos);
+    glfw.glfwSetWindowPos(window, xpos, ypos);
+
+    // Rest of your initialization code...
     glfw.glfwMakeContextCurrent(window);
     glfw.glfwSwapInterval(0);
 
@@ -520,24 +770,6 @@ pub fn createWindow() !?*glfw.GLFWwindow {
     glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
     if (glfw.glfwRawMouseMotionSupported() == glfw.GLFW_TRUE) {
         glfw.glfwSetInputMode(window, glfw.GLFW_RAW_MOUSE_MOTION, glfw.GLFW_TRUE);
-    }
-
-    const monitor = getCurrentMonitor(window);
-    if (monitor != null) {
-        // Get monitor position and video mode
-        var x: i32 = undefined;
-        var y: i32 = undefined;
-        glfw.glfwGetMonitorPos(monitor, &x, &y);
-
-        const video_mode = glfw.glfwGetVideoMode(monitor);
-        if (video_mode != null) {
-            // Correctly dereference the video mode pointer
-            const mode_width = video_mode.*.width;
-            const mode_height = video_mode.*.height;
-            const mode_refresh = video_mode.*.refreshRate;
-
-            glfw.glfwSetWindowMonitor(window, monitor, 0, 0, mode_width, mode_height, mode_refresh);
-        }
     }
 
     // Force focus and raise window
@@ -580,6 +812,7 @@ fn mouseCallback(window: ?*glfw.struct_GLFWwindow, xpos: f64, ypos: f64) callcon
     }
 
     const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
+    const io = imgui.igGetIO();
 
     if (scene.appState.first_mouse) {
         scene.appState.last_mouse_x = xpos;
@@ -594,12 +827,21 @@ fn mouseCallback(window: ?*glfw.struct_GLFWwindow, xpos: f64, ypos: f64) callcon
     scene.appState.last_mouse_x = xpos;
     scene.appState.last_mouse_y = ypos;
 
-    if (scene.appState.menu) return;
+    if (scene.appState.menu) {
+        if (io.*.WantCaptureMouse) {
+            // Let ImGui handle the mouse if it wants it
+            scene.appState.last_mouse_x = xpos;
+            scene.appState.last_mouse_y = ypos;
+            return;
+        }
+    }
 
-    const aspectRatio: f32 = scene.width / scene.height;
-
-    scene.camera.process_mouse_movement(xoffset, yoffset, aspectRatio, false);
+    if (scene.camera_manager.main_camera) |camera| {
+        camera.process_mouse_input(xoffset, yoffset);
+    }
 }
+
+// New method to handle drone mouse movement for yaw and pitch
 
 fn mouseButtonCallback(window: ?*glfw.struct_GLFWwindow, button: c_int, action: c_int, mods: c_int) callconv(.C) void {
     if (window == null) return;
@@ -610,11 +852,9 @@ fn mouseButtonCallback(window: ?*glfw.struct_GLFWwindow, button: c_int, action: 
         imgui.ImGui_ImplGlfw_MouseButtonCallback(@ptrCast(window), button, action, mods);
 
         const io = imgui.igGetIO();
-        if (!io.*.WantCaptureMouse) {
-            // If ImGui doesn't want it
+        if (io.*.WantCaptureMouse) {
+            return;
         }
-    } else {
-        // Menu not up
     }
 }
 
@@ -632,15 +872,9 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
     if (window == null) return;
 
     const scene = @as(*Scene, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
-
+    // const io = imgui.igGetIO();
     if (scene.appState.menu) {
         imgui.ImGui_ImplGlfw_KeyCallback(@ptrCast(window), key, scancode, action, mods);
-
-        // Check if ImGui wants to capture keyboard input
-        const io = imgui.igGetIO();
-        if (io.*.WantCaptureKeyboard) {
-            return; // Let ImGui handle the input exclusively
-        }
     }
 
     if (key < 0 or key >= 1024) return;
@@ -678,10 +912,6 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
             glfw.GLFW_KEY_RIGHT_BRACKET => {
                 glfw.glfwDestroyWindow(window);
             },
-            // glfw.GLFW_KEY_O => {
-            //     const command = Drone.CommandQueue.Command{ .kind = .Arm, .speed = 0.0 };
-            //     _ = scene.motor_handler.command_queue.push(command);
-            // },
             glfw.GLFW_KEY_P => {
                 scene.appState.paused = !scene.appState.paused;
             },
@@ -689,11 +919,31 @@ fn keyCallback(window: ?*glfw.struct_GLFWwindow, key: c_int, scancode: c_int, ac
                 scene.appState.fly = !scene.appState.fly;
             },
 
+            // New key bindings for simulation mode
+            glfw.GLFW_KEY_V => {
+                // Toggle simulation mode
+                scene.toggleSimulationMode();
+            },
+            glfw.GLFW_KEY_C => {
+                // Toggle first/third-person view in simulation mode
+                if (scene.appState.simulation_mode) {
+                    std.debug.print("Toggling from {s} => {s}\n", .{
+                        if (scene.appState.first_person_view) "simulation_first_person" else "simulation_third_person",
+                        if (scene.appState.first_person_view) "simulation_third_person" else "simulation_first_person",
+                    });
+
+                    if (scene.appState.first_person_view)
+                        scene.camera_manager.set_active("simulation_third_person")
+                    else
+                        scene.camera_manager.set_active("simulation_first_person");
+
+                    scene.appState.first_person_view = !scene.appState.first_person_view;
+                }
+            },
+
             else => {},
         }
     }
-
-    // Handle additional keys here
 }
 
 fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
@@ -718,10 +968,7 @@ fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) 
         scene.appState.zoom = newZoom;
     }
 
-    scene.projection_dirty = true;
-
-    std.debug.print("yOffset: {d}\n", .{yoffset});
-    std.debug.print("Zoom Level: {d}\n", .{newZoom});
+    scene.camera_manager.main_camera.?.process_scroll_wheel(newZoom);
 }
 
 pub const TextureGenerator = struct {
@@ -730,6 +977,233 @@ pub const TextureGenerator = struct {
 
     pub fn generateID(self: *Self) c_int {
         defer self.count += 1;
+        if (self.count >= 32) {
+            std.debug.print("Warning: Texture unit limit exceeded\n", .{});
+            return @mod(self.count, 32);
+        }
         return self.count;
+    }
+};
+
+pub const FrameBuffer = struct {
+    fbo: c_uint,
+    texture: c_uint,
+    depth_buffer: c_uint,
+    width: c_int,
+    height: c_int,
+
+    pub fn init(width: c_int, height: c_int) !FrameBuffer {
+        var fb: FrameBuffer = undefined;
+        fb.width = width;
+        fb.height = height;
+
+        // Create framebuffer
+        glad.glGenFramebuffers(1, &fb.fbo);
+        glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, fb.fbo);
+
+        // Create texture to render to
+        glad.glGenTextures(1, &fb.texture);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, fb.texture);
+        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RGB, width, height, 0, glad.GL_RGB, glad.GL_UNSIGNED_BYTE, null);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, 0);
+
+        // Attach texture to framebuffer
+        glad.glFramebufferTexture2D(glad.GL_FRAMEBUFFER, glad.GL_COLOR_ATTACHMENT0, glad.GL_TEXTURE_2D, fb.texture, 0);
+
+        // Create depth buffer
+        glad.glGenRenderbuffers(1, &fb.depth_buffer);
+        glad.glBindRenderbuffer(glad.GL_RENDERBUFFER, fb.depth_buffer);
+        glad.glRenderbufferStorage(glad.GL_RENDERBUFFER, glad.GL_DEPTH_COMPONENT, width, height);
+        glad.glBindRenderbuffer(glad.GL_RENDERBUFFER, 0);
+
+        // Attach depth buffer to framebuffer
+        glad.glFramebufferRenderbuffer(glad.GL_FRAMEBUFFER, glad.GL_DEPTH_ATTACHMENT, glad.GL_RENDERBUFFER, fb.depth_buffer);
+
+        // Check if framebuffer is complete
+        if (glad.glCheckFramebufferStatus(glad.GL_FRAMEBUFFER) != glad.GL_FRAMEBUFFER_COMPLETE) {
+            std.debug.print("Framebuffer is not complete!\n", .{});
+            return error.FramebufferIncomplete;
+        }
+
+        // Unbind framebuffer
+        glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, 0);
+
+        return fb;
+    }
+
+    pub fn deinit(self: *FrameBuffer) void {
+        glad.glDeleteFramebuffers(1, &self.fbo);
+        glad.glDeleteTextures(1, &self.texture);
+        glad.glDeleteRenderbuffers(1, &self.depth_buffer);
+    }
+};
+
+pub const Viewport = struct {
+    const Self = @This();
+
+    name: []const u8, // Name of the viewport
+    fbo: FrameBuffer, // Framebuffer for rendering this viewport
+    shader_program: c_uint,
+    mesh: *Mesh, // Use the Mesh struct instead of raw VAO/VBO
+    enabled: bool,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, name: []const u8, width: i32, height: i32) !Self {
+        // Create a copy of the name string
+        const name_copy = try allocator.dupe(u8, name);
+
+        // Initialize the framebuffer
+        const fbo = try FrameBuffer.init(width, height);
+
+        // Create shader program for rendering viewport
+        const shader_program = try createShaderProgram("shaders/miniview_vertex.glsl", "shaders/miniview_fragment.glsl");
+
+        // Create vertices for a quad using the Mesh.Vertex struct
+        const vertices = [_]Mesh.Vertex{
+            // Position                  Color                 Texture
+            .{ .position = .{ -1.0, -1.0, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .texture = .{ 0.0, 0.0 } },
+            .{ .position = .{ 1.0, -1.0, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .texture = .{ 1.0, 0.0 } },
+            .{ .position = .{ 1.0, 1.0, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .texture = .{ 1.0, 1.0 } },
+            .{ .position = .{ -1.0, 1.0, 0.0 }, .color = .{ 1.0, 1.0, 1.0 }, .texture = .{ 0.0, 1.0 } },
+        };
+
+        // Create indices for the quad (two triangles)
+        const indices = [_]u32{
+            0, 1, 2, // First triangle
+            2, 3, 0, // Second triangle
+        };
+
+        // Create a copy of the vertices and indices for the mesh
+        const vertices_copy = try allocator.dupe(Mesh.Vertex, &vertices);
+        const indices_copy = try allocator.dupe(u32, &indices);
+
+        // Create a mesh for the quad
+        const mesh = try Mesh.init(allocator, vertices_copy, indices_copy, Mesh.gen_draw(glad.GL_TRIANGLES));
+
+        const viewport = Self{
+            .name = name_copy,
+            .fbo = fbo,
+            .shader_program = shader_program,
+            .mesh = mesh,
+            .enabled = true,
+            .allocator = allocator,
+        };
+
+        return viewport;
+    }
+
+    pub fn deinit(self: *Self) void {
+        // Free OpenGL resources
+        self.fbo.deinit();
+        glad.glDeleteProgram(self.shader_program);
+
+        // Free the mesh
+        self.mesh.deinit();
+        self.allocator.destroy(self.mesh);
+
+        // Free the name
+        self.allocator.free(self.name);
+    }
+
+    pub fn render(self: *Self, window_width: f32, window_height: f32) void {
+        if (!self.enabled) return;
+
+        // Calculate viewport dimensions in pixels
+        const x = self.position[0] * window_width;
+        const y = self.position[1] * window_height;
+        const width = self.size[0] * window_width;
+        const height = self.size[1] * window_height;
+
+        // Save current OpenGL state
+        var last_viewport: [4]c_int = undefined;
+        glad.glGetIntegerv(glad.GL_VIEWPORT, &last_viewport);
+
+        var last_program: c_int = 0;
+        glad.glGetIntegerv(glad.GL_CURRENT_PROGRAM, &last_program);
+
+        var last_blend_enabled: c_int = 0;
+        glad.glGetIntegerv(glad.GL_BLEND, &last_blend_enabled);
+
+        var last_depth_test_enabled: c_int = 0;
+        glad.glGetIntegerv(glad.GL_DEPTH_TEST, &last_depth_test_enabled);
+
+        // Disable depth test for 2D rendering
+        glad.glDisable(glad.GL_DEPTH_TEST);
+
+        // Enable blending for transparency
+        glad.glEnable(glad.GL_BLEND);
+        glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
+
+        // Set viewport
+        glad.glViewport(
+            @intFromFloat(x),
+            @intFromFloat(y),
+            @intFromFloat(width),
+            @intFromFloat(height),
+        );
+
+        // Use the shader program
+        glad.glUseProgram(self.shader_program);
+
+        // Bind texture
+        glad.glActiveTexture(glad.GL_TEXTURE0);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, self.fbo.texture);
+
+        // Set texture uniform
+        const textureLoc = glad.glGetUniformLocation(self.shader_program, "viewTexture");
+        if (textureLoc != -1) {
+            glad.glUniform1i(textureLoc, 0);
+        }
+
+        // Draw the quad using the mesh's draw function
+        self.mesh._draw(self.mesh);
+
+        // Add border
+        const border_width: f32 = 2.0;
+        const border_color = imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 0.8 });
+
+        const draw_list = imgui.igGetWindowDrawList();
+        imgui.ImDrawList_AddRect(
+            draw_list,
+            .{ .x = x, .y = y },
+            .{ .x = x + width, .y = y + height },
+            border_color,
+            0.0,
+            imgui.ImDrawFlags_None,
+            border_width,
+        );
+
+        // Draw the Viewport name in the top-left corner
+        const text_padding = 5.0;
+        imgui.ImDrawList_AddText_Vec2(
+            draw_list,
+            .{ .x = x + text_padding, .y = y + text_padding },
+            imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 }),
+            self.name.ptr,
+            null,
+        );
+
+        // Restore previous OpenGL state
+        if (last_depth_test_enabled == glad.GL_TRUE) {
+            glad.glEnable(glad.GL_DEPTH_TEST);
+        } else {
+            glad.glDisable(glad.GL_DEPTH_TEST);
+        }
+
+        if (last_blend_enabled == glad.GL_TRUE) {
+            glad.glEnable(glad.GL_BLEND);
+        } else {
+            glad.glDisable(glad.GL_BLEND);
+        }
+
+        glad.glViewport(
+            last_viewport[0],
+            last_viewport[1],
+            last_viewport[2],
+            last_viewport[3],
+        );
+        glad.glUseProgram(@intCast(last_program));
     }
 };
