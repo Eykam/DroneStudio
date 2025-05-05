@@ -353,6 +353,33 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(desktop_exe);
         desktop_step.?.dependOn(&desktop_exe.step);
 
+        const exe_check = b.addExecutable(.{
+            .name = exe_name,
+            .root_source_file = b.path("src/Studio.zig"),
+            .target = desktop_target,
+            .optimize = optimize,
+        });
+
+        configureDesktopLibs(
+            exe_check,
+            b,
+            desktop_target,
+            use_cuda,
+            ffmpeg_path,
+        );
+
+        // Configure CUDA if enabled
+        configureKernels(
+            b,
+            exe_check,
+            desktop_target,
+            optimize,
+            use_cuda,
+        );
+
+        const check = b.step("check", "Check if it compiles");
+        check.dependOn(&exe_check.step);
+
         // Run command for the desktop executable
         const run_desktop_cmd = b.addRunArtifact(desktop_exe);
         run_desktop_cmd.step.dependOn(b.getInstallStep());
@@ -462,32 +489,5 @@ pub fn build(b: *std.Build) void {
         test_pi_step = b.step("test-pi", "Run all Raspberry Pi unit tests");
         test_pi_step.?.dependOn(&run_imu_tests.step);
         test_pi_step.?.dependOn(&run_motor_tests.step);
-    }
-
-    const exe_check = b.addExecutable(.{
-        .name = "foo",
-        .root_source_file = b.path("src/main.zig"),
-        .target = desktop_target,
-        .optimize = optimize,
-    });
-    const check = b.step("check", "Check if foo compiles");
-    check.dependOn(&exe_check.step);
-
-    // Default step builds everything
-    const build_all_step = b.step("all", "Build all applications (desktop and Raspberry Pi)");
-    if (build_desktop) {
-        build_all_step.dependOn(desktop_step.?);
-    }
-    if (build_pi) {
-        build_all_step.dependOn(pi_step.?);
-    }
-
-    // Test all step runs all tests
-    const test_all_step = b.step("test", "Run all unit tests");
-    if (build_desktop) {
-        test_all_step.dependOn(test_desktop_step.?);
-    }
-    if (build_pi) {
-        test_all_step.dependOn(test_pi_step.?);
     }
 }

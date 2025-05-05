@@ -30,6 +30,7 @@ pub const PixelFormat = enum {
 pub const Image = struct {
     width: u32,
     height: u32,
+    channels: u32,
     format: PixelFormat,
     data: []u8,
     allocator: Allocator,
@@ -50,6 +51,7 @@ pub const Image = struct {
         image.* = .{
             .width = width,
             .height = height,
+            .channels = channels,
             .format = format,
             .data = data,
             .allocator = allocator,

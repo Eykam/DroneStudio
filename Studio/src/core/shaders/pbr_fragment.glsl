@@ -18,13 +18,7 @@ uniform bool useTexture;
 
 
 // Textures
-uniform sampler2D baseColorTexture;  // Y component
-
-
-// Backward compatibility with your current texturing system
-uniform sampler2D yTexture;
-uniform sampler2D uvTexture;
-uniform sampler2D depthTexture;
+uniform sampler2D baseColorTexture; 
 
 // Lighting
 uniform vec3 ambientColor;
@@ -46,7 +40,7 @@ void main() {
         albedo = texture(baseColorTexture, TexCoord);
     } else {
         // Use the base color factor or vertex color
-        albedo = vec4(0.1, 0.1, 0.1, 0.3);
+        albedo = vec4(0.7, 0.1, 0.1, 0.3);
     }
     
     FragColor = albedo;

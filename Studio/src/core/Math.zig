@@ -148,6 +148,10 @@ pub const Vec3 = struct {
         return .{ .data = result };
     }
 
+    pub fn from_slice(slice: [3]f32) Self {
+        return Self{ .data = slice };
+    }
+
     /// Create vector from angles
     pub fn from_angles(yaw_deg: f32, pitch_deg: f32) Self {
         const yaw = radians(yaw_deg);
@@ -489,6 +493,12 @@ pub const Mat3 = struct {
     }
 };
 
+pub const TRS = struct {
+    translation: [3]f32,
+    rotation: Quaternion,
+    scale: [3]f32,
+};
+
 // TODO: Add inplace operations
 pub const Mat4 = struct {
     base: Matrix(4),
@@ -667,6 +677,74 @@ pub const Mat4 = struct {
         return result;
     }
 
+    pub fn decomposeTRS(self: Self) TRS {
+        const mat = self.base.data;
+        //  Extract translation.
+        // In a column-major matrix, the translation is in mat[12], mat[13], mat[14].
+        // mat[15] is typically 1.0 in an affine transform.
+        const _translation = [3]f32{ mat[12], mat[13], mat[14] };
+
+        // Extract scale by taking the length of each of the first 3 columns.
+        const sx = math.sqrt(mat[0] * mat[0] + mat[1] * mat[1] + mat[2] * mat[2]);
+        const sy = math.sqrt(mat[4] * mat[4] + mat[5] * mat[5] + mat[6] * mat[6]);
+        const sz = math.sqrt(mat[8] * mat[8] + mat[9] * mat[9] + mat[10] * mat[10]);
+        const _scale = [3]f32{ sx, sy, sz };
+
+        // Build a 3×3 rotation matrix by dividing out the scale from each column.
+        const r00 = mat[0] / sx;
+        const r01 = mat[4] / sy;
+        const r02 = mat[8] / sz;
+        const r10 = mat[1] / sx;
+        const r11 = mat[5] / sy;
+        const r12 = mat[9] / sz;
+        const r20 = mat[2] / sx;
+        const r21 = mat[6] / sy;
+        const r22 = mat[10] / sz;
+
+        // Convert this 3×3 rotation to a quaternion.
+        const trace = r00 + r11 + r22;
+
+        var qx: f32 = 0;
+        var qy: f32 = 0;
+        var qz: f32 = 0;
+        var qw: f32 = 0;
+
+        if (trace > 0) {
+            const s = 0.5 / math.sqrt(trace + 1.0);
+            qw = 0.25 / s;
+            qx = (r21 - r12) * s;
+            qy = (r02 - r20) * s;
+            qz = (r10 - r01) * s;
+        } else {
+            // If not in the “trace > 0” case, find which diagonal is largest and proceed.
+            if (r00 > r11 and r00 > r22) {
+                const s = 2.0 * math.sqrt(1.0 + r00 - r11 - r22);
+                qw = (r21 - r12) / s;
+                qx = 0.25 * s;
+                qy = (r01 + r10) / s;
+                qz = (r02 + r20) / s;
+            } else if (r11 > r22) {
+                const s = 2.0 * math.sqrt(1.0 + r11 - r00 - r22);
+                qw = (r02 - r20) / s;
+                qx = (r01 + r10) / s;
+                qy = 0.25 * s;
+                qz = (r12 + r21) / s;
+            } else {
+                const s = 2.0 * math.sqrt(1.0 + r22 - r00 - r11);
+                qw = (r10 - r01) / s;
+                qx = (r02 + r20) / s;
+                qy = (r12 + r21) / s;
+                qz = 0.25 * s;
+            }
+        }
+
+        // Optional: normalize the quaternion to avoid floating error drift
+        var q = Quaternion.init(qx, qy, qz, qw);
+        q = q.normalize();
+
+        return .{ .translation = _translation, .rotation = q, .scale = _scale };
+    }
+
     /// Create 4x4 matrix from Quaternion
     pub fn from_quaternion(q: Quaternion) Self {
         const qx = q.x();
@@ -775,6 +853,10 @@ pub const Mat4 = struct {
         return Vec3.init(forward_x, forward_y, forward_z).normalize();
     }
 
+    pub inline fn get_position(self: Self) Vec3 {
+        return Vec3.init(self.base.data[12], self.base.data[13], self.base.data[14]);
+    }
+
     /// Pass-through methods to base matrix
     pub fn add(self: Self, other: Self) Self {
         return Self{ .base = self.base.add(other.base) };
@@ -846,6 +928,19 @@ pub const Quaternion = struct {
     }
     pub inline fn w(self: Quaternion) f32 {
         return self.data[3];
+    }
+
+    pub inline fn set_x(self: *Quaternion, _x: f32) void {
+        self.data[0] = _x;
+    }
+    pub inline fn set_y(self: *Quaternion, _y: f32) void {
+        self.data[1] = _y;
+    }
+    pub inline fn set_z(self: *Quaternion, _z: f32) void {
+        self.data[2] = _z;
+    }
+    pub inline fn set_w(self: *Quaternion, _w: f32) void {
+        self.data[3] = _w;
     }
 
     pub fn identity() Quaternion {

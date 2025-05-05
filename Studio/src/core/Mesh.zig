@@ -1,6 +1,5 @@
 const std = @import("std");
 const Debug = @import("Debug.zig");
-const Node = @import("Node.zig");
 const gl = @import("bindings/gl.zig");
 const glad = gl.glad;
 
@@ -194,7 +193,6 @@ pub const MeshFlags = struct {
 pub const draw = *const fn (mesh: *Self) void;
 
 allocator: std.mem.Allocator,
-node: ?*Node = null,
 textureID: TextureID = TextureID{},
 vertices: []Vertex,
 indices: ?[]u32 = null,

@@ -2,12 +2,12 @@ const std = @import("std");
 const Node = @import("Node.zig");
 const Mesh = @import("Mesh.zig");
 const Math = @import("Math.zig");
-const Pipeline = @import("Pipeline.zig");
+const Opengl = @import("ecs//graphics/OpenGL.zig");
 const gl = @import("bindings/gl.zig");
 
 const glfw = gl.glfw;
 const glad = gl.glad;
-const Viewport = Pipeline.Viewport;
+const Viewport = Opengl.Viewport;
 const Mat3 = Math.Mat3;
 const Mat4 = Math.Mat4;
 const Vec3 = Math.Vec3;
@@ -17,14 +17,15 @@ pub const CameraManager = struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    scene_width: f32,
-    scene_height: f32,
+    scene_width: u32,
+    scene_height: u32,
+    update_flag: bool = false,
     viewports: std.StringArrayHashMap(Viewport) = undefined,
     cameras: std.StringArrayHashMap(*Camera),
     active_cameras: std.StringArrayHashMap(bool),
     main_camera: ?*Camera = null,
 
-    pub fn init(allocator: std.mem.Allocator, width: f32, height: f32) !*Self {
+    pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !*Self {
         const self = try allocator.create(Self);
         self.* = Self{
             .allocator = allocator,
@@ -53,8 +54,8 @@ pub const CameraManager = struct {
             self.main_camera = camera;
         }
 
-        const fbo_width: i32 = @intFromFloat(self.scene_width); // Main camera: 95% of screen width, max 1920px
-        const fbo_height: i32 = @intFromFloat(self.scene_height); // Main camera: 70% of screen height, max 1080px
+        const fbo_width: i32 = @intCast(self.scene_width);
+        const fbo_height: i32 = @intCast(self.scene_height);
 
         const viewport = try Viewport.init(
             self.allocator,
@@ -101,8 +102,8 @@ pub const CameraManager = struct {
                 const camera_name = entry.key_ptr.*;
 
                 // Use higher resolution for main camera, reasonable resolution for others
-                const fbo_width: i32 = @intFromFloat(self.scene_width); // Main camera: 95% of screen width, max 1920px
-                const fbo_height: i32 = @intFromFloat(self.scene_height); // Main camera: 70% of screen height, max 1080px
+                const fbo_width: i32 = @intCast(self.scene_width); // Main camera: 95% of screen width, max 1920px
+                const fbo_height: i32 = @intCast(self.scene_height); // Main camera: 70% of screen height, max 1080px
 
                 // Create the viewport with appropriate resolution
                 const viewport = try Viewport.init(
@@ -286,15 +287,6 @@ pub const FreeCamera = struct {
     pub fn process_mouse_input(self: *Self, xoffset: f64, yoffset: f64) void {
         self.yaw += @as(f32, @floatCast(xoffset)) * self.sensitivity;
         self.pitch += @as(f32, @floatCast(yoffset)) * self.sensitivity;
-
-        // if (constrain_pitch) {
-        //     if (self.pitch > 89.0) {
-        //         self.pitch = 89.0;
-        //     }
-        //     if (self.pitch < -89.0) {
-        //         self.pitch = -89.0;
-        //     }
-        // }
 
         self.update_direction();
         self.base.update_frustum();

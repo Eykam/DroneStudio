@@ -3,11 +3,8 @@ const std = @import("std");
 const json = std.json;
 const Allocator = std.mem.Allocator;
 const ImageLoader = @import("Image.zig");
-const Node = @import("Node.zig");
 const Mesh = @import("Mesh.zig");
 const Math = @import("Math.zig");
-const Pipeline = @import("Pipeline.zig");
-const Shape = @import("Shape.zig");
 const gl = @import("bindings/gl.zig");
 
 const glad = gl.glad;
@@ -198,34 +195,189 @@ pub const Sampler = struct {
     wrapT: ?u32 = null,
 };
 
-// Public helper function to load a glTF file and add it to a scene
-pub fn loadToScene(allocator: Allocator, scene: *Pipeline.Scene, filepath: []const u8, name: []const u8) !void {
-    std.debug.print("Loading glTF file: {s}\n", .{filepath});
+pub const ModelResource = struct {
+    model_id: []const u8,
+    entities: []EntityInfo,
+    allocator: std.mem.Allocator,
 
-    // Parse the glTF file
-    var gltf = try GLTF.init(allocator, filepath);
-    defer gltf.deinit();
+    pub const EntityInfo = struct {
+        name: ?[:0]const u8,
+        mesh_name: ?[:0]const u8,
+        material_name: ?[:0]const u8,
+        local_transformation: ?Mat4,
+        translation: ?[3]f32,
+        rotation: ?[4]f32,
+        scale: ?[3]f32,
+        parent_idx: ?usize,
+        children: []usize,
+    };
 
-    // Load the default scene from the glTF file
-    const root_node = try gltf.loadScene(allocator, null);
+    pub fn deinit(self: *ModelResource) void {
+        self.allocator.free(self.model_id);
+        for (self.entities) |entity| {
+            if (entity.name) |name| self.allocator.free(name);
+            if (entity.mesh_name) |name| self.allocator.free(name);
+            if (entity.material_name) |name| self.allocator.free(name);
+            self.allocator.free(entity.children);
+        }
+        self.allocator.free(self.entity);
+        self.allocator.destroy(self);
+    }
+};
 
-    // Add the loaded model to the scene
-    try scene.addNode(name, root_node);
+pub fn createModelResource(
+    allocator: std.mem.Allocator,
+    model_id: []const u8,
+    gltf: *GLTF,
+) !*ModelResource {
+    const scene_idx = gltf.document.scene orelse 0;
+    if (gltf.document.scenes == null or gltf.document.scenes.?.len == 0 or gltf.document.nodes == null) {
+        const empty_model = try allocator.create(ModelResource);
+        empty_model.* = .{
+            .model_id = try allocator.dupe(u8, model_id),
+            .entities = &.{},
+            .allocator = allocator,
+        };
+        return empty_model;
+    }
 
-    std.debug.print("glTF file loaded successfully\n", .{});
+    const gltf_scene = gltf.document.scenes.?[scene_idx];
+    var entity_list = std.ArrayList(ModelResource.EntityInfo).init(allocator);
+
+    // Recursively build up node/primitive entities
+    if (gltf_scene.nodes) |top_level_nodes| {
+        for (top_level_nodes) |node_idx| {
+            try processNodeAndChildren(allocator, gltf, model_id, node_idx, null, &entity_list);
+        }
+    }
+
+    const model_resource = try allocator.create(ModelResource);
+    model_resource.model_id = try allocator.dupe(u8, model_id);
+    model_resource.allocator = allocator;
+    model_resource.entities = try allocator.alloc(ModelResource.EntityInfo, entity_list.items.len);
+
+    for (entity_list.items, 0..) |info, i| {
+        model_resource.entities[i] = info;
+    }
+
+    entity_list.deinit();
+
+    return model_resource;
 }
 
-pub fn loadAsNode(allocator: Allocator, filepath: []const u8, name: []const u8) !*Node {
-    std.debug.print("Loading glTF file: {s}\n", .{filepath});
+fn processNodeAndChildren(
+    allocator: std.mem.Allocator,
+    gltf: *GLTF,
+    model_id: []const u8,
+    node_idx: usize,
+    parent_idx: ?usize,
+    entity_list: *std.ArrayList(ModelResource.EntityInfo),
+) !void {
+    if (gltf.document.nodes == null or node_idx >= gltf.document.nodes.?.len) {
+        return;
+    }
 
-    // Parse the glTF file
-    var gltf = try GLTF.init(allocator, filepath);
-    defer gltf.deinit();
+    const gltf_node = gltf.document.nodes.?[node_idx];
 
-    // Load the default scene from the glTF file
-    const root_node = try gltf.loadScene(allocator, null);
-    std.debug.print("glTF : {s} loaded successfully\n", .{name});
-    return root_node;
+    // -------------------------------
+    // 1) Create an entity for this node
+    // -------------------------------
+    var node_entity_info = ModelResource.EntityInfo{
+        .name = null,
+        .mesh_name = null,
+        .material_name = null,
+        .local_transformation = null,
+        .translation = null,
+        .rotation = null,
+        .scale = null,
+        .parent_idx = parent_idx,
+        .children = &.{},
+    };
+
+    // Copy the node's name if any
+    if (gltf_node.name) |node_name| {
+        node_entity_info.name = try allocator.dupeZ(u8, node_name);
+    }
+
+    // If the node has a matrix, use it directly
+    if (gltf_node.matrix) |mat_array| {
+        node_entity_info.local_transformation = Mat4.from_array(mat_array);
+    } else {
+        // Otherwise, store TRS
+        if (gltf_node.translation) |t| {
+            node_entity_info.translation = t;
+        }
+        if (gltf_node.rotation) |r| {
+            node_entity_info.rotation = r;
+        }
+        if (gltf_node.scale) |s| {
+            node_entity_info.scale = s;
+        }
+    }
+
+    // Add this node-entity to the list
+    const this_node_entity_idx = entity_list.items.len; // index of the new entity
+    try entity_list.append(node_entity_info);
+
+    // -------------------------------
+    // 2) If the node has a mesh, create child-entities for each primitive
+    // -------------------------------
+    if (gltf_node.mesh) |mesh_idx| {
+        if (gltf.document.meshes) |all_meshes| {
+            if (mesh_idx < all_meshes.len) {
+                const gltf_mesh = all_meshes[mesh_idx];
+                // The glTF mesh can have multiple primitives each with its own material
+                for (gltf_mesh.primitives, 0..) |primitive, prim_i| {
+                    // We'll create a child-entity that references the parent's transform
+                    // (so the child is effectively "in the same spot"),
+                    // but each primitive can have a unique mesh_name + material_name.
+
+                    var prim_entity_info = ModelResource.EntityInfo{
+                        .name = null,
+                        .mesh_name = null,
+                        .material_name = null,
+                        .local_transformation = Mat4.identity(),
+                        .translation = null,
+                        .rotation = null,
+                        .scale = null,
+                        .parent_idx = this_node_entity_idx, // parent is the node entity
+                        .children = &.{},
+                    };
+
+                    // Build a unique mesh name for the ECS or ResourceManager
+                    const prim_mesh_name = if (gltf_mesh.name) |mesh_name|
+                        try std.fmt.allocPrintZ(allocator, "{s}_{s}_prim_{d}", .{ model_id, mesh_name, prim_i })
+                    else
+                        try std.fmt.allocPrintZ(allocator, "{s}_mesh_{d}_prim_{d}", .{ model_id, mesh_idx, prim_i });
+                    prim_entity_info.mesh_name = prim_mesh_name;
+
+                    // Material (if any)
+                    if (primitive.material) |material_idx| {
+                        if (gltf.document.materials) |all_mats| {
+                            if (material_idx < all_mats.len) {
+                                const mat_def = all_mats[material_idx];
+                                const mat_name = if (mat_def.name) |mat_n|
+                                    try std.fmt.allocPrintZ(allocator, "{s}_{s}", .{ model_id, mat_n })
+                                else
+                                    try std.fmt.allocPrintZ(allocator, "{s}_material_{d}", .{ model_id, material_idx });
+
+                                prim_entity_info.material_name = mat_name;
+                            }
+                        }
+                    }
+
+                    // Append the child-entity
+                    try entity_list.append(prim_entity_info);
+                }
+            }
+        }
+    }
+
+    if (gltf_node.children) |child_indices| {
+        for (child_indices) |child_idx| {
+            try processNodeAndChildren(allocator, gltf, model_id, child_idx, this_node_entity_idx, entity_list);
+        }
+    }
 }
 
 /// Basic type definitions for glTF
@@ -364,315 +516,6 @@ pub const GLTF = struct {
         }
     }
 
-    pub fn loadScene(self: *GLTF, allocator: Allocator, scene_index: ?usize) !*Node {
-        // Get the scene to load (default or specified)
-        const scene_idx = scene_index orelse self.document.scene orelse 0;
-        if (self.document.scenes == null or scene_idx >= self.document.scenes.?.len) {
-            return GLTFError.ResourceNotFound;
-        }
-
-        const scene = self.document.scenes.?[scene_idx];
-
-        try self.preloadImages();
-        try self.preloadMaterials();
-
-        // Create root node for this scene
-        const root_node = try Node.init(allocator, null, null, null);
-
-        // Process all top-level nodes in the scene
-        if (scene.nodes) |node_indices| {
-            for (node_indices) |node_idx| {
-                const child_node = try self.loadNode(allocator, node_idx);
-                try root_node.addChild(child_node);
-            }
-        }
-
-        return root_node;
-    }
-
-    fn preloadImages(self: *GLTF) !void {
-        if (self.document.images == null) return;
-
-        const images = self.document.images.?;
-        try self.materials.ensureTotalCapacity(images.len);
-
-        for (images) |image| {
-            var texture: ?Mesh.TextureID = null;
-
-            if (image.uri) |uri| {
-                const full_path = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ self.base_path, uri });
-                defer self.allocator.free(full_path);
-
-                const img = ImageLoader.Image.loadFromFile(self.allocator, full_path) catch |err| {
-                    std.debug.print("Failed to load image: {}\n", .{err});
-                    return error.FailedToLoadImage;
-                };
-                defer img.deinit();
-
-                texture = try img.createGLTexture();
-            }
-
-            if (image.uri == null and image.bufferView != null) {
-                // This is a buffer-embedded image
-                if (image.mimeType) |_| {
-                    // Load the image from buffer view
-                    var img = try self.loadBufferViewImage(self.allocator, image.bufferView.?);
-
-                    // Create GL textures
-                    texture = try img.createGLTexture();
-                }
-            }
-
-            if (texture) |_texture|
-                try self.textures.append(_texture);
-        }
-    }
-
-    fn preloadMaterials(self: *GLTF) !void {
-        if (self.document.materials == null) {
-            return;
-        }
-
-        // Ensure capacity for all materials
-        try self.materials.ensureTotalCapacity(self.document.materials.?.len);
-
-        // Process each material
-        for (self.document.materials.?, 0..) |material_def, idx| {
-            var material = Mesh.Material{};
-
-            // Set basic material properties
-            if (material_def.doubleSided) |double_sided| {
-                material.doubleSided = double_sided;
-            }
-
-            if (material_def.alphaMode) |alpha_mode_str| {
-                if (std.mem.eql(u8, alpha_mode_str, "MASK")) {
-                    material.alphaMode = .MASK;
-                } else if (std.mem.eql(u8, alpha_mode_str, "BLEND")) {
-                    material.alphaMode = .BLEND;
-                } else {
-                    material.alphaMode = .OPAQUE;
-                }
-            }
-
-            if (material_def.alphaCutoff) |alpha_cutoff| {
-                material.alphaCutoff = alpha_cutoff;
-            }
-
-            // Set emissive factor if present
-            if (material_def.emissiveFactor) |emissive| {
-                material.emissiveFactor = emissive;
-            }
-
-            // Process PBR Metallic-Roughness parameters
-            if (material_def.pbrMetallicRoughness) |pbr_mr| {
-                if (pbr_mr.baseColorFactor) |base_color| {
-                    material.baseColorFactor = base_color;
-                }
-
-                if (pbr_mr.metallicFactor) |metallic| {
-                    material.metallicFactor = metallic;
-                }
-
-                if (pbr_mr.roughnessFactor) |roughness| {
-                    material.roughnessFactor = roughness;
-                }
-
-                // Load base color texture
-                if (pbr_mr.baseColorTexture) |tex_info| {
-                    try self.loadTextureForMaterial(tex_info.index, &material, .baseColor);
-                }
-
-                // Load metallic-roughness texture
-                if (pbr_mr.metallicRoughnessTexture) |tex_info| {
-                    try self.loadTextureForMaterial(tex_info.index, &material, .metallicRoughness);
-                }
-            }
-
-            // Load normal texture if present
-            if (material_def.normalTexture) |tex_info| {
-                try self.loadTextureForMaterial(tex_info.index, &material, .normal);
-            }
-
-            // Load occlusion texture if present
-            if (material_def.occlusionTexture) |tex_info| {
-                try self.loadTextureForMaterial(tex_info.index, &material, .occlusion);
-            }
-
-            // Load emissive texture if present
-            if (material_def.emissiveTexture) |tex_info| {
-                try self.loadTextureForMaterial(tex_info.index, &material, .emissive);
-            }
-
-            // Process extensions
-            if (material_def.extensions) |extensions| {
-                // KHR_materials_pbrSpecularGlossiness extension
-                if (extensions.KHR_materials_pbrSpecularGlossiness) |sg| {
-                    std.debug.print("Found KHR_materials_pbrSpecularGlossiness extension\n", .{});
-
-                    // Set specular-glossiness parameters
-                    if (sg.diffuseFactor) |diffuse| {
-                        material.diffuseFactor = diffuse;
-                    }
-
-                    if (sg.specularFactor) |specular| {
-                        material.specularFactor = specular;
-                    }
-
-                    if (sg.glossinessFactor) |glossiness| {
-                        material.glossinessFactor = glossiness;
-                    }
-
-                    // Load diffuse texture
-                    if (sg.diffuseTexture) |tex_info| {
-                        try self.loadTextureForMaterial(
-                            tex_info.index,
-                            &material,
-                            .baseColor,
-                        );
-                    }
-
-                    // Load specular-glossiness texture if present
-                    if (sg.specularGlossinessTexture) |tex_info| {
-                        try self.loadTextureForMaterial(
-                            tex_info.index,
-                            &material,
-                            .metallicRoughness,
-                        );
-                    }
-                }
-
-                // KHR_materials_emissive_strength extension
-                if (extensions.KHR_materials_emissive_strength) |es| {
-                    std.debug.print("Found KHR_materials_emissive_strength extension\n", .{});
-
-                    if (es.emissiveStrength) |strength| {
-                        material.emissiveStrength = strength;
-                    }
-                }
-
-                // KHR_materials_specular extension
-                if (extensions.KHR_materials_specular) |spec| {
-                    std.debug.print("Found KHR_materials_specular extension\n", .{});
-
-                    if (spec.specularFactor) |factor| {
-                        material.specularStrength = factor;
-                    }
-
-                    if (spec.specularColorFactor) |color| {
-                        material.specularColor = color;
-                    }
-
-                    // Load specular texture if present
-                    if (spec.specularTexture) |tex_info| {
-                        try self.loadTextureForMaterial(tex_info.index, &material, .specular);
-                    }
-                }
-            }
-
-            // Add the material to our cache
-            try self.materials.append(material);
-
-            std.debug.print("Preloaded Material IDX: {d}\n", .{idx});
-            std.debug.print("{any}\n", .{material});
-        }
-    }
-
-    fn loadTextureForMaterial(
-        self: *GLTF,
-        texture_idx: usize,
-        material: *Mesh.Material,
-        texture_type: TextureTypes,
-    ) !void {
-        std.debug.print("Loading Texture for: {s}...\n", .{@tagName(texture_type)});
-
-        if (self.document.textures == null or texture_idx >= self.document.textures.?.len) {
-            return;
-        }
-
-        const texture = self.document.textures.?[texture_idx];
-
-        if (texture.source == null) return;
-        const image_idx = texture.source.?;
-
-        if (self.document.images == null or image_idx >= self.document.images.?.len) {
-            return;
-        }
-
-        // Check if we've already loaded this texture
-        if (self.textures.items.len > texture_idx) {
-            const cached_texture = self.textures.items[texture_idx];
-
-            switch (texture_type) {
-                .baseColor => material.textures.baseColor = cached_texture.y,
-                .normal => material.textures.normal = cached_texture.y,
-                .metallicRoughness => material.textures.metallicRoughness = cached_texture.y,
-                .occlusion => material.textures.occlusion = cached_texture.y,
-                .emissive => material.textures.emissive = cached_texture.y,
-                .specular => material.textures.specular = cached_texture.y,
-            }
-
-            return;
-        }
-    }
-
-    pub fn loadNode(self: *GLTF, allocator: Allocator, node_idx: usize) !*Node {
-        if (self.document.nodes == null or node_idx >= self.document.nodes.?.len) {
-            return GLTFError.ResourceNotFound;
-        }
-
-        const node_def = self.document.nodes.?[node_idx];
-
-        var node = try Node.init(allocator, null, null, null);
-
-        // Initialize node (we'll add mesh data if present)
-        // Load mesh if present
-        if (node_def.mesh) |mesh_idx| {
-            if (try self.loadMesh(allocator, mesh_idx)) |mesh|
-                node.mesh = mesh;
-        }
-
-        // Apply transformations
-        if (node_def.matrix) |transformation| {
-            // If matrix is provided, use it directly
-            const mat = Mat4.from_array(transformation);
-            node.local_transform = mat;
-        } else {
-            // Otherwise, apply TRS properties
-            if (node_def.translation) |translation| {
-                node.setPosition(
-                    translation[0],
-                    translation[1],
-                    translation[2],
-                );
-            }
-
-            if (node_def.rotation) |rotation| {
-                const q = Quaternion.init(
-                    rotation[0],
-                    rotation[1],
-                    rotation[2],
-                    rotation[3],
-                );
-                node.setRotation(q);
-            }
-
-            if (node_def.scale) |scale| {
-                node.setScale(scale[0], scale[1], scale[2]);
-            }
-        }
-
-        // Process children nodes
-        if (node_def.children) |children| {
-            for (children) |child_idx| {
-                const child_node = try self.loadNode(allocator, child_idx);
-                try node.addChild(child_node);
-            }
-        }
-
-        return node;
-    }
-
     pub fn loadMesh(self: *GLTF, allocator: Allocator, mesh_idx: usize) !?*Mesh {
         if (self.document.meshes == null or mesh_idx >= self.document.meshes.?.len) {
             return GLTFError.ResourceNotFound;
@@ -794,7 +637,7 @@ pub const GLTF = struct {
         return mesh;
     }
 
-    fn loadBufferViewImage(self: *GLTF, allocator: Allocator, buffer_view_idx: usize) !*ImageLoader.Image {
+    pub fn loadBufferViewImage(self: *GLTF, allocator: Allocator, buffer_view_idx: usize) !*ImageLoader.Image {
         if (self.document.bufferViews == null or buffer_view_idx >= self.document.bufferViews.?.len) {
             return error.ImageErrorResourceNotFound;
         }
@@ -858,9 +701,23 @@ pub const GLTF = struct {
 
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            const pos = offset + accessor_offset + (i * stride);
-            const vec4_ptr: *[4]f32 = @constCast(@ptrCast(@alignCast(&buffer[pos])));
-            result[i] = vec4_ptr.*;
+            const base_pos = offset + accessor_offset + (i * stride);
+
+            // Safely read each float component individually
+            var j: usize = 0;
+            while (j < 4) : (j += 1) {
+                const float_pos = base_pos + (j * @sizeOf(f32));
+
+                // Ensure we don't read beyond the buffer
+                if (float_pos + @sizeOf(f32) > buffer.len) {
+                    self.allocator.free(result);
+                    return error.InvalidData;
+                }
+
+                // Read 4 bytes and convert to f32
+                const bytes = buffer[float_pos .. float_pos + @sizeOf(f32)];
+                result[i][j] = std.mem.bytesToValue(f32, bytes[0..4]);
+            }
         }
 
         return result;
@@ -909,9 +766,23 @@ pub const GLTF = struct {
 
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            const pos = offset + accessor_offset + (i * stride);
-            const vec3_ptr: *[3]f32 = @constCast(@ptrCast(@alignCast(&buffer[pos])));
-            result[i] = vec3_ptr.*;
+            const base_pos = offset + accessor_offset + (i * stride);
+
+            // Safely read each float component individually
+            var j: usize = 0;
+            while (j < 3) : (j += 1) {
+                const float_pos = base_pos + (j * @sizeOf(f32));
+
+                // Ensure we don't read beyond the buffer
+                if (float_pos + @sizeOf(f32) > buffer.len) {
+                    self.allocator.free(result);
+                    return error.InvalidData;
+                }
+
+                // Read 4 bytes and convert to f32
+                const bytes = buffer[float_pos .. float_pos + @sizeOf(f32)];
+                result[i][j] = std.mem.bytesToValue(f32, bytes[0..4]);
+            }
         }
 
         return result;
@@ -960,9 +831,23 @@ pub const GLTF = struct {
 
         var i: usize = 0;
         while (i < count) : (i += 1) {
-            const pos = offset + accessor_offset + (i * stride);
-            const vec2_ptr: *[2]f32 = @constCast(@ptrCast(@alignCast(&buffer[pos])));
-            result[i] = vec2_ptr.*;
+            const base_pos = offset + accessor_offset + (i * stride);
+
+            // Safely read each float component individually
+            var j: usize = 0;
+            while (j < 2) : (j += 1) {
+                const float_pos = base_pos + (j * @sizeOf(f32));
+
+                // Ensure we don't read beyond the buffer
+                if (float_pos + @sizeOf(f32) > buffer.len) {
+                    self.allocator.free(result);
+                    return error.InvalidData;
+                }
+
+                // Read 4 bytes and convert to f32
+                const bytes = buffer[float_pos .. float_pos + @sizeOf(f32)];
+                result[i][j] = std.mem.bytesToValue(f32, bytes[0..4]);
+            }
         }
 
         return result;
@@ -1012,21 +897,38 @@ pub const GLTF = struct {
         switch (accessor.componentType) {
             5121 => { // GL_UNSIGNED_BYTE
                 while (i < count) : (i += 1) {
+                    if (byte_pos >= buffer.len) {
+                        self.allocator.free(result);
+                        return error.InvalidData;
+                    }
+
                     result[i] = @intCast(buffer[byte_pos]);
                     byte_pos += 1;
                 }
             },
             5123 => { // GL_UNSIGNED_SHORT
                 while (i < count) : (i += 1) {
-                    const short_ptr: *u16 = @constCast(@ptrCast(@alignCast(&buffer[byte_pos])));
-                    result[i] = @intCast(short_ptr.*);
+                    if (byte_pos + @sizeOf(u16) > buffer.len) {
+                        self.allocator.free(result);
+                        return error.InvalidData;
+                    }
+
+                    // Read 2 bytes and convert to u16
+                    const bytes = buffer[byte_pos .. byte_pos + @sizeOf(u16)];
+                    result[i] = @intCast(std.mem.bytesToValue(u16, bytes[0..2]));
                     byte_pos += 2;
                 }
             },
             5125 => { // GL_UNSIGNED_INT
                 while (i < count) : (i += 1) {
-                    const int_ptr: *u32 = @constCast(@ptrCast(@alignCast(&buffer[byte_pos])));
-                    result[i] = int_ptr.*;
+                    if (byte_pos + @sizeOf(u32) > buffer.len) {
+                        self.allocator.free(result);
+                        return error.InvalidData;
+                    }
+
+                    // Read 4 bytes and convert to u32
+                    const bytes = buffer[byte_pos .. byte_pos + @sizeOf(u32)];
+                    result[i] = std.mem.bytesToValue(u32, bytes[0..4]);
                     byte_pos += 4;
                 }
             },
