@@ -19,6 +19,7 @@ pub const TransformComponent = struct {
     world_transform: Mat4 = Mat4.identity(),
     parent: ?Core.EntityID = null,
     children: std.ArrayList(Core.EntityID),
+    changed_this_frame: bool = true,
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
@@ -28,6 +29,14 @@ pub const TransformComponent = struct {
 
     pub fn deinit(self: *Self) void {
         self.children.deinit();
+    }
+
+    fn markDirty(self: *Self) void {
+        self.changed_this_frame = true;
+    }
+
+    fn resetFlag(self: *Self) void {
+        self.changed_this_frame = false;
     }
 
     pub fn setPosition(self: *Self, x: f32, y: f32, z: f32) void {
@@ -79,6 +88,7 @@ pub const TransformComponent = struct {
         transform = transform.translate(self.position[0], self.position[1], self.position[2]);
 
         self.local_transform = transform;
+        self.markDirty();
     }
 
     pub fn attach(self: *TransformComponent, ecs: *ECSManager, eid: Core.EntityID) !void {
@@ -128,6 +138,7 @@ pub const TransformSystem = struct {
 
                 // Recursively update all children
                 self.updateWorldTransformsRecursive(entity_id);
+                // transform.resetFlag();
             }
         }
     }

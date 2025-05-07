@@ -17,6 +17,7 @@ const TransformSystem = Transform.TransformSystem;
 
 pub const GlobalsComponent = struct {
     last_frame_time: f64 = 0,
+    dt: f64 = 0,
     last_fps_time: f64 = 0,
     frame_count: u32 = 0,
     avg_fps: f32 = 0,

@@ -16,6 +16,7 @@ const Controller = @import("components/Controller.zig");
 const Camera = @import("components/Camera.zig");
 const Globals = @import("components/Globals.zig");
 const Viewports = @import("components/Viewports.zig");
+const Recorder = @import("components/Recorder.zig");
 
 // Components
 const ControllerComponent = Controller.ControllerComponent;
@@ -34,6 +35,7 @@ const RenderSystem = Renderer.RenderSystem;
 const CameraSystem = Camera.CameraSystem;
 const GlobalsSystem = Globals.GlobalsSystem;
 const ViewportSystem = Viewports.ViewportSystem;
+const RecorderSystem = Recorder.RecorderSystem;
 
 const Self = @This();
 
@@ -57,6 +59,7 @@ render_system: RenderSystem,
 physics_system: PhysicsSystem,
 control_system: ControllerSytem,
 viewport_system: ViewportSystem,
+recorder_system: *RecorderSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const global_system = try GlobalsSystem.init(allocator, .{});
@@ -79,6 +82,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
 
         // Initialize systems
         .globals_system = global_system,
+        .recorder_system = try RecorderSystem.init(allocator),
         .transform_system = TransformSystem.init(
             world,
             &manager.transform_components,
@@ -160,6 +164,7 @@ pub fn update(self: *Self, time: f64) !void {
 
     const dt = time - self.globals.last_frame_time;
     const dt_fps = time - self.globals.last_fps_time;
+    self.globals.dt = dt;
     self.globals.last_frame_time = time;
     self.globals.frame_count += 1;
 
@@ -176,6 +181,7 @@ pub fn update(self: *Self, time: f64) !void {
     // self.physics_system.update(dt);
     try self.viewport_system.update();
     try self.render_system.update();
+    try self.recorder_system.update(self);
 }
 
 // Entity management methods
