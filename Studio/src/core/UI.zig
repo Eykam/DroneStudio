@@ -382,9 +382,16 @@ const TimelineRecorder = struct {
 
     allocator: std.mem.Allocator,
     scrub_pos: f32 = 0,
+    mode: enum { Record, Playback } = .Record,
+    load_popup_open: bool = false,
+    selected_file: []const u8 = "",
+    file_list: std.ArrayList([:0]const u8),
 
     pub fn init(alloc: std.mem.Allocator) Self {
-        return .{ .allocator = alloc };
+        return Self{
+            .allocator = alloc,
+            .file_list = std.ArrayList([:0]const u8).init(alloc),
+        };
     }
 
     /// Draws the timeline bar. Call *once per frame*.
@@ -398,46 +405,160 @@ const TimelineRecorder = struct {
         const h: f32 = 70.0;
         _ = imgui.igBeginChild_Str("TimelineWidget", .{ .x = avail.x, .y = h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
 
-        const start_label = if (rec.is_recording) "Pause" else "Start";
-        if (imgui.igButton(start_label, .{ .x = 50, .y = 0 })) {
-            rec.toggle() catch |err| {
-                std.debug.print("Error starting recording: {any}\n", .{err});
-            };
+        if (self.mode == .Record) {
+            const start_label = if (rec.is_recording) "Stop" else "Start";
+            if (imgui.igButton(start_label, .{ .x = 50, .y = 0 })) {
+                if (!rec.is_recording) {
+                    rec.toggle() catch |err| {
+                        std.debug.print("Error starting recording: {any}\n", .{err});
+                    };
+                } else {
+                    const ts = std.time.milliTimestamp(); // or format your own
+                    const path = std.fmt.allocPrint(self.allocator, "captures/rec_{d}.tmp", .{ts}) catch |err| {
+                        std.debug.print("Failed to create Capture path: {any}\n", .{err});
+                        return;
+                    };
+                    rec.saveToDisk(path) catch |err| std.debug.print("Save failed: {any}\n", .{err});
+                    self.mode = .Playback;
+                    self.scrub_pos = 0;
+                }
+            }
+            imgui.igSameLine(0, 8);
+
+            if (rec.duration == 0) imgui.igBeginDisabled(true);
+            if (imgui.igButton("Pause", .{ .x = 50, .y = 0 })) {
+                rec.toggle() catch {};
+            }
+            if (rec.duration == 0) imgui.igEndDisabled();
+            imgui.igSameLine(0, 8);
+
+            // Reset (disabled if nothing recorded)
+            if (rec.duration == 0) imgui.igBeginDisabled(true);
+            if (imgui.igButton("Reset", .{ .x = 50, .y = 0 })) {
+                rec.reset() catch {};
+                self.scrub_pos = 0;
+            }
+            if (rec.duration == 0) imgui.igEndDisabled();
+            imgui.igSameLine(0, 8);
+
+            // Reset (disabled if nothing recorded)
+            if (rec.is_recording) imgui.igBeginDisabled(true);
+            if (imgui.igButton("Load", .{ .x = 50, .y = 0 })) {
+                self.load_popup_open = true;
+            }
+            if (rec.is_recording) imgui.igEndDisabled();
+            imgui.igSameLine(0, 8);
+
+            const mins: i32 = @intFromFloat(@floor(rec.duration / 60));
+            const secs = @mod(@as(i32, @intFromFloat(@floor(rec.duration))), 60);
+            imgui.igText("Len: %02d:%02d  |  Size: %.02f MB\x00", mins, secs, rec.getMegabytes());
+
+            imgui.igPushItemWidth(-1);
+            var max_dur = rec.duration;
+            if (max_dur == 0) max_dur = 1; // avoid 0‑range slider
+            if (imgui.igSliderFloat("##scrub", &self.scrub_pos, 0, max_dur, "%.2fs", 0)) {
+                rec.seek(ecs, self.scrub_pos) catch |err| {
+                    std.debug.print("Error seeking: {any}\n", .{err});
+                };
+            }
+            imgui.igPopItemWidth();
+        } else {
+            // Show play/pause or just scrub slider
+            if (rec.is_playback) {
+                self.scrub_pos += @floatCast(ctx.ecs.globals.dt);
+                if (self.scrub_pos > rec.duration) {
+                    self.scrub_pos = 0;
+                    rec.is_playback = false;
+                } else {
+                    rec.seek(ctx.ecs, self.scrub_pos) catch |err| {
+                        std.debug.print("Failed to playback capture: {any}\n", .{err});
+                    };
+                }
+            }
+
+            const start_label = if (rec.is_playback) "Pause" else "Start";
+            if (imgui.igButton(start_label, .{ .x = 50, .y = 0 })) {
+                rec.is_playback = !rec.is_playback;
+            }
+            imgui.igSameLine(0, 8);
+            if (imgui.igButton("Load", .{ .x = 50, .y = 0 })) {
+                rec.is_playback = false;
+                self.load_popup_open = true;
+            }
+            imgui.igSameLine(0, 8);
+            if (imgui.igButton("Record Mode", .{ .x = 100, .y = 0 })) {
+                rec.is_playback = false;
+                rec.reset() catch {};
+                self.mode = .Record;
+                self.scrub_pos = 0;
+            }
+
+            imgui.igSameLine(0, 8);
+            const curr_min: i32 = @intFromFloat(@floor(self.scrub_pos / 60));
+            const curr_sec = @mod(@as(i32, @intFromFloat(@floor(self.scrub_pos))), 60);
+            const mins: i32 = @intFromFloat(@floor(rec.duration / 60));
+            const secs = @mod(@as(i32, @intFromFloat(@floor(rec.duration))), 60);
+            imgui.igText("%02d:%02d / %02d:%02d   |  Size: %.02f MB\x00", curr_min, curr_sec, mins, secs, rec.getMegabytes());
+
+            imgui.igPushItemWidth(-1);
+            const max_dur = rec.duration;
+            if (imgui.igSliderFloat("##scrub", &self.scrub_pos, 0, max_dur, "%.2fs", 0)) {
+                rec.seek(ctx.ecs, self.scrub_pos) catch {};
+            }
+            imgui.igPopItemWidth();
         }
-        imgui.igSameLine(0, 8);
 
-        // Reset (disabled if nothing recorded)
-        if (rec.getDuration() == 0) imgui.igBeginDisabled(true);
-        if (imgui.igButton("Reset", .{ .x = 50, .y = 0 })) {
-            rec.reset() catch {};
-            self.scrub_pos = 0;
+        if (self.load_popup_open) {
+            imgui.igOpenPopup_Str("Load Capture\x00", imgui.ImGuiPopupFlags_None);
+            self.load_popup_open = false;
         }
-        if (rec.getDuration() == 0) imgui.igEndDisabled();
-        imgui.igSameLine(0, 8);
 
-        // Save (disabled if nothing recorded)
-        if (rec.getDuration() == 0) imgui.igBeginDisabled(true);
-        if (imgui.igButton("Save", .{ .x = 50, .y = 0 })) {
-            // For now we just stop recording; caller can move/rename the file.
-            rec.stop() catch {};
+        if (imgui.igBeginPopupModal("Load Capture\x00", null, imgui.ImGuiWindowFlags_AlwaysAutoResize)) {
+            // on first open, enumerate files
+            if (self.file_list.items.len == 0) {
+                var dir = std.fs.cwd().openDir("captures", .{ .iterate = true }) catch @panic("Failed to open captures dir");
+                defer dir.close();
+
+                var dir_it = dir.iterate();
+                while (dir_it.next() catch @panic("Failed to walk captures dir")) |entry| {
+                    if (entry.kind == .file) {
+                        const name = self.allocator.dupeZ(u8, entry.name) catch @panic("Failed to dupe capture name");
+                        self.file_list.append(name) catch @panic("Failed to append capture file to entries");
+                    }
+                }
+            }
+
+            // list them
+            for (self.file_list.items) |fname| {
+                const selected = std.mem.eql(u8, fname, self.selected_file);
+                if (imgui.igSelectable_Bool(fname.ptr, selected, imgui.ImGuiSelectableFlags_NoAutoClosePopups, .{ .x = 0, .y = 0 })) {
+                    self.selected_file = fname;
+                }
+            }
+
+            if (imgui.igButton("Load Selected", .{ .x = 120, .y = 0 }) and self.selected_file.len > 0) {
+                const fullpath = std.fmt.allocPrint(self.allocator, "captures/{s}", .{self.selected_file}) catch |err| {
+                    std.debug.print("Failed to create fullpath for selected capture: {any}\n", .{err});
+                    @panic("Failed to create fullpath for selected capture");
+                };
+
+                rec.reset() catch {};
+                rec.loadFromDisk(fullpath) catch |err| {
+                    std.debug.print("Failed to load from disk: {any}\n", .{err});
+                };
+                self.mode = .Playback;
+                self.scrub_pos = 0;
+                imgui.igCloseCurrentPopup();
+                self.file_list.clearAndFree();
+            }
+            imgui.igSameLine(0, 8);
+            if (imgui.igButton("Cancel", .{ .x = 80, .y = 0 })) {
+                imgui.igCloseCurrentPopup();
+                self.file_list.clearAndFree();
+            }
+
+            imgui.igEndPopup();
         }
-        if (rec.getDuration() == 0) imgui.igEndDisabled();
-        imgui.igSameLine(0, 16);
-
-        const mins: i32 = @intFromFloat(@floor(rec.getDuration() / 60));
-        const secs = @mod(@as(i32, @intFromFloat(@floor(rec.getDuration()))), 60);
-        imgui.igText("Len: %02d:%02d  |  Size: %.02f MB\x00", mins, secs, rec.getMegabytes());
-
-        imgui.igPushItemWidth(-1);
-        var max_dur = rec.getDuration();
-        if (max_dur == 0) max_dur = 1; // avoid 0‑range slider
-        if (imgui.igSliderFloat("##scrub", &self.scrub_pos, 0, max_dur, "%.2fs", 0)) {
-            rec.seek(ecs, self.scrub_pos) catch |err| {
-                std.debug.print("Error seeking: {any}\n", .{err});
-            };
-        }
-        imgui.igPopItemWidth();
-
         imgui.igEndChild();
     }
 };

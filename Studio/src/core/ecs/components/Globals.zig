@@ -269,30 +269,23 @@ pub const GlobalsSystem = struct {
 
         if (key < 0 or key >= 1024) return;
 
-        if (action == glfw.GLFW_PRESS) {
-            scene.globals.keys[@intCast(key)] = true;
-        } else if (action == glfw.GLFW_RELEASE) {
+        if (action == glfw.GLFW_PRESS)
+            scene.globals.keys[@intCast(key)] = true
+        else if (action == glfw.GLFW_RELEASE)
             scene.globals.keys[@intCast(key)] = false;
-        }
 
         if (action == glfw.GLFW_PRESS or action == glfw.GLFW_REPEAT) {
             switch (key) {
                 glfw.GLFW_KEY_ESCAPE => {
                     scene.globals.menu = !scene.globals.menu;
-                    var cursor_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+                    const current_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
 
-                    switch (cursor_mode) {
-                        glfw.GLFW_CURSOR_NORMAL => {
-                            cursor_mode = glfw.GLFW_CURSOR_DISABLED;
-                        },
-                        glfw.GLFW_CURSOR_HIDDEN => {
-                            cursor_mode = glfw.GLFW_CURSOR_NORMAL;
-                        },
-                        glfw.GLFW_CURSOR_DISABLED => {
-                            cursor_mode = glfw.GLFW_CURSOR_NORMAL;
-                        },
-                        else => {},
-                    }
+                    const cursor_mode = switch (current_mode) {
+                        glfw.GLFW_CURSOR_NORMAL => glfw.GLFW_CURSOR_DISABLED,
+                        glfw.GLFW_CURSOR_HIDDEN => glfw.GLFW_CURSOR_NORMAL,
+                        glfw.GLFW_CURSOR_DISABLED => glfw.GLFW_CURSOR_NORMAL,
+                        else => unreachable,
+                    };
 
                     glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, cursor_mode);
                 },

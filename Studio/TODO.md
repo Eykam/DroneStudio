@@ -1,13 +1,28 @@
 TODO:
 [] - Add input / controller capture & replay
-    [] - Config to store / cache paths
-    [] - UI to select paths
-    [] - Timeline to show progress & step forward / backward
+    [x] - Timeline to show progress & step forward / backward
+        [] - Update timeline to look better
+    [x] - Create Start / Stop recording button
+        [] - On stop dialog to select path to save
+    [x] - Create Play button to playback recording 
+        [] - Store dt in PackedTransform
+        [x] - Use seek to playback?
+        [x] - Current Seek (00:00 / 10:00)
+        [] - 1|2|4|8x speed
+    [x] - Save to path / etc
+    [x] - UI to select saved configs
+    [] - Flag to ignore capture in transform
     [] - Automatic path generation ??
 [] - Add visualization for path
+    [] - Only shown in Free Camera
     [] - Previous steps
     [] - Next steps
 [] - IPC protocol using mmap to communicate between sim & python
+    [] - Register VP buffers with cuda (maybe opencl??)
+    [] - Map available camera / VP buffers
+    [] - Find way to access them typesafe???
+    [] - Create demo depthmap using opencv
+    [] - give VP back to engine to render??
 [] - Generate colliders / convex hulls of meshes
 [] - Add basic physics (gravity, collisions)
 [] - Implement Drone flying physics
@@ -46,3 +61,17 @@ TODO:
     [] - Similar to above, but using gymnasium
     [] - Expose scene data to user to use as input to agent
 [] - Dynamic Scenes
+
+
+
+FIX:
+[] - Fix transformsystem to do a basic dfs w/ dirty flag
+[] - Make new branch to store old studio code
+[] - Push new code & make docs / write up on Engine
+[] - Figure out why viewports initialize to black until toggleViewport 
+[] - Make main viewport larger (no max width)[] - Frustum only visible in Free / Debug mode
+[] - Move Active Flags from Camera => Viewport
+    [] - Update Viewport Selector in UI
+[] - Remove global component to global system
+[] - Remove PBRTexture & material structs from Mesh
+[] - Remove legacy Pipeline & code

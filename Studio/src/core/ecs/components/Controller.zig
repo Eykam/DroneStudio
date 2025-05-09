@@ -9,7 +9,7 @@ const Physics = @import("../components/Physics.zig");
 const ECSManager = @import("../ECSManager.zig");
 
 const GlobalsComponent = Globals.GlobalsComponent;
-const PhyiscsComponent = Physics.PhysicsComponent;
+const PhysicsComponent = Physics.PhysicsComponent;
 const TransformComponent = Transform.TransformComponent;
 
 const glfw = gl.glfw;
@@ -59,7 +59,7 @@ pub const ControlSystem = struct {
     world: *Core.World,
     globals: *GlobalsComponent,
     transform_components: *SparseSet(TransformComponent),
-    physics_components: *SparseSet(PhyiscsComponent),
+    physics_components: *SparseSet(PhysicsComponent),
     controller_components: *SparseSet(ControllerComponent),
     active_controller_eid: ?Core.EntityID = null,
 
@@ -67,7 +67,7 @@ pub const ControlSystem = struct {
         world: *Core.World,
         globals: *GlobalsComponent,
         transform_components: *SparseSet(TransformComponent),
-        physics_components: *SparseSet(PhyiscsComponent),
+        physics_components: *SparseSet(PhysicsComponent),
         controller_components: *SparseSet(ControllerComponent),
     ) Self {
         return .{
