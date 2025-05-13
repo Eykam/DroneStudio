@@ -1,18 +1,23 @@
 // src/ecs/components/Viewport.zig
 const std = @import("std");
+const gl = @import("../../bindings/gl.zig");
 const Core = @import("../Core.zig");
 const OpenGL = @import("../graphics/OpenGL.zig");
+const CudaGL = @import("../graphics/CudaGL.zig");
 const ECSManager = @import("../ECSManager.zig");
 const Globals = @import("../components/Globals.zig");
 const Transform = @import("../components/Transform.zig");
-
 const SparseSet = @import("../SparseSet.zig").SparseSet;
+
+const glad = gl.glad;
 const Viewport = OpenGL.Viewport;
 
 pub const ViewportComponent = struct {
     const Self = @This();
 
     vp: Viewport,
+    shared: bool = false,
+    shared_info: ?CudaGL.CUDAGLTexture = null,
     active: bool = true,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8, width: u32, height: u32) !Self {
@@ -26,11 +31,23 @@ pub const ViewportComponent = struct {
         };
     }
 
-    pub fn attach(self: *ViewportComponent, ecs: *ECSManager, eid: Core.EntityID) !void {
+    pub fn enableSharing(self: *Self) void {
+        // Create shared CUDA-GL texture
+        if (!self.shared or self.shared_info == null) {
+            self.shared_info = CudaGL.createCUDAGLTexture(
+                self.vp.fbo.width,
+                self.vp.fbo.height,
+                self.vp.fbo.texture,
+            );
+            self.shared = true;
+        }
+    }
+
+    pub fn attach(self: *Self, ecs: *ECSManager, eid: Core.EntityID) !void {
         try ecs.viewport_components.add(eid, self.*);
     }
 
-    pub fn deinit(self: *ViewportComponent) void {
+    pub fn deinit(self: *Self) void {
         self.vp.deinit();
     }
 };
@@ -62,11 +79,18 @@ pub const ViewportSystem = struct {
 
         var it = self.viewports.iterator();
         while (it.next()) |tuple| {
-            var vp = &tuple.component.vp;
+            var vc = tuple.component;
+            var vp = &vc.vp;
 
             if (vp.fbo.width != w or vp.fbo.height != h) {
                 const old_name = try self.allocator.dupeZ(u8, vp.name);
                 defer self.allocator.free(old_name);
+
+                // Cleanup CUDA resources first if shared
+                if (vc.shared and vc.shared_info != null) {
+                    vc.shared_info.?.deinit();
+                    vc.shared_info = null;
+                }
 
                 vp.deinit(); // old GL objects
                 vp.* = Viewport.init( // recreate
@@ -74,6 +98,13 @@ pub const ViewportSystem = struct {
                     std.debug.print("failed to resize viewport\n", .{});
                     continue;
                 };
+
+                glad.glFlush();
+                glad.glFinish();
+
+                if (vc.shared) {
+                    vc.enableSharing();
+                }
             }
         }
     }

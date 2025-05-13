@@ -105,7 +105,7 @@ pub fn spawn(
 
     const root_ctrl = try makeDroneController(alloc);
 
-    const drone_body_resource = try ecs.world.resource_manager.loadGLTFModel(
+    const drone_body_resource = try ecs.world.resource_manager.loadGLTFModelCached(
         alloc,
         "assets/drone/scene.gltf",
     );
@@ -113,7 +113,7 @@ pub fn spawn(
     const drone_body_entity = try ecs.createEntitiesFromModel(drone_body_resource);
 
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
-    const sensor_cam = try SensorCamera.generate(alloc, .{}, scene_width, scene_height);
+    const sensor_cam = try SensorCamera.generate(alloc, .{});
 
     const drone_cam_frustum = try Frustum.generate(
         alloc,

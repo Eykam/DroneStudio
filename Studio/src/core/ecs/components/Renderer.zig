@@ -230,7 +230,7 @@ pub const RenderSystem = struct {
                 const tf = transform.?;
 
                 // Skip disabled viewports
-                if (!cam.active) continue;
+                // if (!cam.active) continue;
 
                 // Bind FBO
                 glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, viewport.fbo.fbo);

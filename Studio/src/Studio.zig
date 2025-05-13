@@ -9,14 +9,27 @@ const imgui = c.imgui;
 
 const glfw = gl.glfw;
 
+var should_exit = std.atomic.Value(bool).init(false);
+
+fn handleSignal(_: c_int) callconv(.C) void {
+    should_exit.store(true, .release);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    // _ = Drone.spawn();
     // =============================================== Scene Graph Initialization ===============================================
     const ECS = try ECSManager.init(alloc);
+    defer ECS.deinit();
+
+    std.posix.sigaction(std.posix.SIG.INT, &std.posix.Sigaction{
+        .handler = .{ .handler = handleSignal },
+        .mask = std.posix.empty_sigset,
+        .flags = 0,
+    }, null);
+
     const window = ECS.globals_system.window;
     const scene_width = 1920;
     const scene_height = 1080;
@@ -27,7 +40,7 @@ pub fn main() !void {
     try Drone.spawn(alloc, ECS, scene_width, scene_height);
 
     const resource_manager = ECS.world.resource_manager;
-    const hintze_hall_resource = try resource_manager.loadGLTFModel(
+    const hintze_hall_resource = try resource_manager.loadGLTFModelCached(
         alloc,
         "assets/hintze_hall/scene.gltf",
     );
@@ -50,7 +63,7 @@ pub fn main() !void {
         },
     );
 
-    while (glfw.glfwWindowShouldClose(window) == 0) {
+    while (!should_exit.load(.acquire) and glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
 
         if (glfw.glfwGetWindowAttrib(window, glfw.GLFW_FOCUSED) == glfw.GLFW_FALSE) {

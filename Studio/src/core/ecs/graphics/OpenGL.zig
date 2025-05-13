@@ -22,7 +22,7 @@ pub const FrameBuffer = struct {
         // Create texture to render to
         glad.glGenTextures(1, &fb.texture);
         glad.glBindTexture(glad.GL_TEXTURE_2D, fb.texture);
-        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RGBA, width, height, 0, glad.GL_RGBA, glad.GL_UNSIGNED_BYTE, null);
+        glad.glTexImage2D(glad.GL_TEXTURE_2D, 0, glad.GL_RGBA8, width, height, 0, glad.GL_RGBA, glad.GL_UNSIGNED_BYTE, null);
         glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
         glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
         glad.glBindTexture(glad.GL_TEXTURE_2D, 0);
@@ -104,106 +104,6 @@ pub const Viewport = struct {
         // Free the name
         self.allocator.free(self.name);
     }
-
-    // pub fn render(self: *Self, window_width: f32, window_height: f32) void {
-    //     if (!self.enabled) return;
-
-    //     // Calculate viewport dimensions in pixels
-    //     const x = self.position[0] * window_width;
-    //     const y = self.position[1] * window_height;
-    //     const width = self.size[0] * window_width;
-    //     const height = self.size[1] * window_height;
-
-    //     // Save current OpenGL state
-    //     var last_viewport: [4]c_int = undefined;
-    //     glad.glGetIntegerv(glad.GL_VIEWPORT, &last_viewport);
-
-    //     var last_program: c_int = 0;
-    //     glad.glGetIntegerv(glad.GL_CURRENT_PROGRAM, &last_program);
-
-    //     var last_blend_enabled: c_int = 0;
-    //     glad.glGetIntegerv(glad.GL_BLEND, &last_blend_enabled);
-
-    //     var last_depth_test_enabled: c_int = 0;
-    //     glad.glGetIntegerv(glad.GL_DEPTH_TEST, &last_depth_test_enabled);
-
-    //     // Disable depth test for 2D rendering
-    //     glad.glDisable(glad.GL_DEPTH_TEST);
-
-    //     // Enable blending for transparency
-    //     glad.glEnable(glad.GL_BLEND);
-    //     glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
-
-    //     // Set viewport
-    //     glad.glViewport(
-    //         @intFromFloat(x),
-    //         @intFromFloat(y),
-    //         @intFromFloat(width),
-    //         @intFromFloat(height),
-    //     );
-
-    //     // Use the shader program
-    //     glad.glUseProgram(self.shader_program);
-
-    //     // Bind texture
-    //     glad.glActiveTexture(glad.GL_TEXTURE0);
-    //     glad.glBindTexture(glad.GL_TEXTURE_2D, self.fbo.texture);
-
-    //     // Set texture uniform
-    //     const textureLoc = glad.glGetUniformLocation(self.shader_program, "viewTexture");
-    //     if (textureLoc != -1) {
-    //         glad.glUniform1i(textureLoc, 0);
-    //     }
-
-    //     // Draw the quad using the mesh's draw function
-    //     self.mesh._draw(self.mesh);
-
-    //     // Add border
-    //     const border_width: f32 = 2.0;
-    //     const border_color = imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 0.8 });
-
-    //     const draw_list = imgui.igGetWindowDrawList();
-    //     imgui.ImDrawList_AddRect(
-    //         draw_list,
-    //         .{ .x = x, .y = y },
-    //         .{ .x = x + width, .y = y + height },
-    //         border_color,
-    //         0.0,
-    //         imgui.ImDrawFlags_None,
-    //         border_width,
-    //     );
-
-    //     // Draw the Viewport name in the top-left corner
-    //     const text_padding = 5.0;
-    //     imgui.ImDrawList_AddText_Vec2(
-    //         draw_list,
-    //         .{ .x = x + text_padding, .y = y + text_padding },
-    //         imgui.igColorConvertFloat4ToU32(.{ .x = 1.0, .y = 1.0, .z = 1.0, .w = 1.0 }),
-    //         self.name.ptr,
-    //         null,
-    //     );
-
-    //     // Restore previous OpenGL state
-    //     if (last_depth_test_enabled == glad.GL_TRUE) {
-    //         glad.glEnable(glad.GL_DEPTH_TEST);
-    //     } else {
-    //         glad.glDisable(glad.GL_DEPTH_TEST);
-    //     }
-
-    //     if (last_blend_enabled == glad.GL_TRUE) {
-    //         glad.glEnable(glad.GL_BLEND);
-    //     } else {
-    //         glad.glDisable(glad.GL_BLEND);
-    //     }
-
-    //     glad.glViewport(
-    //         last_viewport[0],
-    //         last_viewport[1],
-    //         last_viewport[2],
-    //         last_viewport[3],
-    //     );
-    //     glad.glUseProgram(@intCast(last_program));
-    // }
 };
 
 fn readShaderSource(comptime path: []const u8) ![]const u8 {

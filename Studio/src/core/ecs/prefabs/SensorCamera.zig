@@ -22,11 +22,11 @@ const Defaults = struct {
     resolution_height: u32 = 720, // Resolution height in pixels
 };
 
+const defaults = Defaults{};
+
 pub fn generate(
     alloc: std.mem.Allocator,
     desc: Defaults,
-    width: u32,
-    height: u32,
 ) !struct {
     tf: Transform.TransformComponent,
     cam: Camera.CameraComponent,
@@ -42,11 +42,13 @@ pub fn generate(
         .active = true,
     };
 
-    const vp = try Viewport.ViewportComponent.init(
+    var vp = try Viewport.ViewportComponent.init(
         alloc,
         "sensor_cam",
-        width,
-        height,
+        defaults.resolution_width,
+        defaults.resolution_height,
     );
+    vp.enableSharing();
+
     return .{ .tf = tf, .cam = cam, .vp = vp };
 }

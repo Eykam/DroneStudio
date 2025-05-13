@@ -17,6 +17,7 @@ const Camera = @import("components/Camera.zig");
 const Globals = @import("components/Globals.zig");
 const Viewports = @import("components/Viewports.zig");
 const Recorder = @import("components/Recorder.zig");
+const SharedMem = @import("components/SharedMem.zig");
 
 // Components
 const ControllerComponent = Controller.ControllerComponent;
@@ -36,6 +37,7 @@ const CameraSystem = Camera.CameraSystem;
 const GlobalsSystem = Globals.GlobalsSystem;
 const ViewportSystem = Viewports.ViewportSystem;
 const RecorderSystem = Recorder.RecorderSystem;
+const SharedMemSystem = SharedMem.SharedMemSystem;
 
 const Self = @This();
 
@@ -60,6 +62,7 @@ physics_system: PhysicsSystem,
 control_system: ControllerSytem,
 viewport_system: ViewportSystem,
 recorder_system: *RecorderSystem,
+shared_mem_system: SharedMemSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const global_system = try GlobalsSystem.init(allocator, .{});
@@ -118,6 +121,11 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             &manager.viewport_components,
             &manager.renderer_components,
         ),
+        .shared_mem_system = try SharedMemSystem.init(
+            allocator,
+            manager.globals,
+            &manager.viewport_components,
+        ),
     };
 
     global_system.camera_system = &manager.camera_system;
@@ -145,6 +153,9 @@ pub fn deinit(self: *Self) void {
     self.renderer_components.deinit();
     self.physics_components.deinit();
     self.controller_components.deinit();
+
+    // Deinit systems
+    self.shared_mem_system.deinit();
 
     // Deinit world and resource manager
     self.world.resource_manager.deinit();
@@ -182,6 +193,7 @@ pub fn update(self: *Self, time: f64) !void {
     try self.viewport_system.update();
     try self.render_system.update();
     try self.recorder_system.update(self);
+    self.shared_mem_system.update();
 }
 
 // Entity management methods

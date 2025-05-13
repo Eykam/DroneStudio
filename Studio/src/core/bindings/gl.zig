@@ -6,5 +6,7 @@ pub const glfw = @cImport({
 });
 
 pub const glad = @cImport({
+    // @cDefine("");
+    // @cDefine();
     @cInclude("glad/glad.h");
 });

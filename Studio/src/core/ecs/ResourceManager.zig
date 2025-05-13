@@ -1,10 +1,11 @@
 // src/ecs/ResourceManager.zig
 const std = @import("std");
 const Mesh = @import("../Mesh.zig");
+const Math = @import("../Math.zig");
 const gl = @import("../bindings/gl.zig");
 const ImageLoader = @import("../Image.zig");
-const GLTFPaser = @import("../GLTF.zig");
-const GLTF = GLTFPaser.GLTF;
+const GLTFParser = @import("../GLTF.zig");
+const GLTF = GLTFParser.GLTF;
 const glad = gl.glad;
 
 pub const PhongData = struct {
@@ -686,13 +687,191 @@ pub fn unloadMaterial(self: *Self, name: []const u8) void {
     }
 }
 
-pub fn loadGLTFModel(self: *Self, allocator: std.mem.Allocator, filepath: []const u8) !*GLTFPaser.ModelResource {
+const CACHE_DIR = ".asset-cache";
+const CACHE_MAGIC = 0x474C5446; // "GLTF" little‑endian
+
+fn cachePath(alloc: std.mem.Allocator, gltf_path: []const u8) []const u8 {
+    // scene.gltf -> cache/scene.gltf.bin
+    const modified_path = std.mem.replaceOwned(u8, alloc, gltf_path, "/", "-") catch @panic("Failed to create modifiedPath");
+    return std.fmt.allocPrintZ(alloc, "{s}/{s}.bin", .{ CACHE_DIR, modified_path }) catch @panic("Failed to create cachePath");
+}
+
+fn isFresh(gltf_path: []const u8, bin_path: []const u8) bool {
+    const gltf_mtime = std.fs.cwd().statFile(gltf_path) catch return false;
+    const bin_mtime = std.fs.cwd().statFile(bin_path) catch return false;
+    return bin_mtime.mtime >= gltf_mtime.mtime;
+}
+
+fn cacheWriteZString(writer: anytype, s: ?[:0]const u8) !void {
+    // 0xFFFF_FFFF → “null”
+    if (s) |str| {
+        try writer.writeInt(u32, @intCast(str.len), .little);
+        try writer.writeAll(str);
+    } else {
+        try writer.writeInt(u32, 0xFFFF_FFFF, .little);
+    }
+}
+
+fn cacheReadZString(reader: anytype, alloc: std.mem.Allocator) !?[:0]const u8 {
+    const len = try reader.readInt(u32, .little);
+    if (len == 0xFFFF_FFFF) return null;
+
+    const buf = try alloc.alloc(u8, len);
+    _ = try reader.readAll(buf);
+    return buf[0..len :0]; // slice :0 → NUL‑terminated
+}
+
+// ---------------------------------------------------------------------------
+// Helpers – optional fixed‑size float arrays
+// ---------------------------------------------------------------------------
+
+fn writeOptArray(writer: anytype, comptime N: usize, val: ?[N]f32) !void {
+    try writer.writeByte(if (val != null) 1 else 0);
+    if (val) |v| try writer.writeAll(std.mem.asBytes(&v));
+}
+
+fn readOptArray(
+    reader: anytype,
+    comptime N: usize,
+) !?[N]f32 {
+    if (try reader.readByte() == 0) return null;
+
+    var out: [N]f32 = undefined;
+    _ = try reader.readAll(std.mem.asBytes(&out));
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// writeCache – serialise ModelResource into <path>.bin
+// ---------------------------------------------------------------------------
+
+pub fn writeCache(res: *GLTFParser.ModelResource, path: []const u8) !void {
+    var file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    var w = file.writer();
+
+    try w.writeInt(u32, CACHE_MAGIC, .little);
+    try w.writeInt(u32, @intCast(res.entities.len), .little);
+
+    for (res.entities) |e| {
+        // --- variable‑length strings --------------------------------------
+        try cacheWriteZString(w, e.name);
+        try cacheWriteZString(w, e.mesh_name);
+        try cacheWriteZString(w, e.material_name);
+
+        // --- optional matrix ----------------------------------------------
+        try w.writeByte(if (e.local_transformation != null) 1 else 0);
+        if (e.local_transformation) |m|
+            try w.writeAll(std.mem.asBytes(&m));
+
+        // --- TRS arrays ----------------------------------------------------
+        try writeOptArray(w, 3, e.translation);
+        try writeOptArray(w, 4, e.rotation);
+        try writeOptArray(w, 3, e.scale);
+
+        // --- hierarchy -----------------------------------------------------
+        try w.writeInt(i32, if (e.parent_idx) |idx| @intCast(idx) else -1, .little);
+
+        try w.writeInt(u32, @intCast(e.children.len), .little);
+        for (e.children) |c|
+            try w.writeInt(u32, @intCast(c), .little);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// readCache – load ModelResource from <path>.bin
+// ---------------------------------------------------------------------------
+
+pub fn readCache(alloc: std.mem.Allocator, path: []const u8) !*GLTFParser.ModelResource {
+    var file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    var r = file.reader();
+
+    if (try r.readInt(u32, .little) != CACHE_MAGIC)
+        return error.BadCache;
+
+    const count = try r.readInt(u32, .little);
+
+    var res = try alloc.create(GLTFParser.ModelResource);
+    res.* = .{
+        .model_id = try alloc.dupeZ(u8, path), // useful for debugging
+        .entities = try alloc.alloc(GLTFParser.ModelResource.EntityInfo, count),
+        .allocator = alloc,
+    };
+
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        var e = &res.entities[i];
+
+        // --- strings ------------------------------------------------------
+        e.name = try cacheReadZString(r, alloc);
+        e.mesh_name = try cacheReadZString(r, alloc);
+        e.material_name = try cacheReadZString(r, alloc);
+
+        // --- optional matrix ---------------------------------------------
+        if (try r.readByte() == 1) {
+            var m: Math.Mat4 = undefined;
+            _ = try r.readAll(std.mem.asBytes(&m));
+            e.local_transformation = m;
+        } else e.local_transformation = null;
+
+        // --- TRS arrays ---------------------------------------------------
+        e.translation = try readOptArray(r, 3);
+        e.rotation = try readOptArray(r, 4);
+        e.scale = try readOptArray(r, 3);
+
+        // --- hierarchy ----------------------------------------------------
+        const parent_raw = try r.readInt(i32, .little);
+        e.parent_idx = if (parent_raw >= 0) @as(usize, @intCast(parent_raw)) else null;
+
+        const child_cnt = try r.readInt(u32, .little);
+        const child_buf = try alloc.alloc(usize, child_cnt);
+        var j: usize = 0;
+        while (j < child_cnt) : (j += 1)
+            child_buf[j] = @as(usize, @intCast(try r.readInt(u32, .little)));
+        e.children = child_buf;
+    }
+
+    return res;
+}
+
+pub fn loadGLTFModel(self: *Self, allocator: std.mem.Allocator, filepath: []const u8) !*GLTFParser.ModelResource {
     var gltf = try GLTF.init(allocator, filepath);
     defer gltf.deinit();
 
     const model_id = try std.fmt.allocPrint(allocator, "model_{s}", .{filepath});
     try self.processGLTFResources(gltf, model_id);
-    return GLTFPaser.createModelResource(allocator, model_id, gltf);
+    return GLTFParser.createModelResource(allocator, model_id, gltf);
+}
+
+pub fn loadGLTFModelCached(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    gltf_path: []const u8,
+) !*GLTFParser.ModelResource {
+    const bin_path = cachePath(allocator, gltf_path);
+    defer allocator.free(bin_path);
+
+    // ---------- fast path -------------------------------------------------
+    // if (isFresh(gltf_path, bin_path)) {
+    //     if (readCache(allocator, bin_path)) |mr| {
+    //         const gltf = try GLTF.init(allocator, gltf_path);
+    //         defer gltf.deinit();
+    //         try self.processGLTFTextures(gltf, mr.model_id);
+    //         try self.processGLTFMaterials(gltf, mr.model_id);
+    //         return mr;
+    //     } else |_| {
+    //         std.debug.print("cache unreadable – rebuilding\n", .{});
+    //     }
+    // }
+
+    // ---------- cold path -------------------------------------------------
+    const mr = try self.loadGLTFModel(allocator, gltf_path);
+
+    writeCache(mr, bin_path) catch |e|
+        std.debug.print("cache write failed: {}\n", .{e});
+
+    return mr;
 }
 
 fn processGLTFResources(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
@@ -773,7 +952,7 @@ fn processGLTFMaterials(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
     }
 }
 
-fn createPBRMaterial(self: *Self, material_def: GLTFPaser.Material, gltf: *GLTF, model_id: []const u8) !MaterialVariant {
+fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF, model_id: []const u8) !MaterialVariant {
     const allocator = self.allocator;
     var material = Material(.PBR){};
 
@@ -1057,7 +1236,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFPaser.Material, gltf: *GLTF,
     return MaterialVariant{ .PBR = material };
 }
 
-fn createPhongMaterial(self: *Self, material_def: GLTFPaser.Material, gltf: *GLTF, model_id: []const u8) !MaterialVariant {
+fn createPhongMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF, model_id: []const u8) !MaterialVariant {
     _ = self;
     _ = material_def;
     _ = gltf;
