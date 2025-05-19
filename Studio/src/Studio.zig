@@ -48,8 +48,8 @@ pub fn main() !void {
     const hintze_hall_entity = try ECS.createEntitiesFromModel(hintze_hall_resource);
     ECS.transform_components.get(hintze_hall_entity).?.setPosition(0, -1.0, 0);
 
-    ECS.render_system.debug();
-    resource_manager.debug();
+    // ECS.render_system.debug();
+    // resource_manager.debug();
 
     const windows = [_]type{
         UI.RootWindow,

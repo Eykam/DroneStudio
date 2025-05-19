@@ -69,22 +69,17 @@ pub const FrameBuffer = struct {
 pub const Viewport = struct {
     const Self = @This();
 
-    name: [:0]const u8, // Name of the viewport
-    fbo: FrameBuffer, // Framebuffer for rendering this viewport
+    name: [:0]const u8,
+    fbo: FrameBuffer,
     shader_program: c_uint,
     enabled: bool,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8, width: i32, height: i32) !Self {
-        // Create a copy of the name string
         const name_copy = try allocator.dupeZ(u8, name);
-
-        // Initialize the framebuffer
         const fbo = try FrameBuffer.init(width, height);
 
-        // Create shader program for rendering viewport
         const shader_program = try createShaderProgram("../../shaders/miniview_vertex.glsl", "../../shaders/miniview_fragment.glsl");
-
         const viewport = Self{
             .name = name_copy,
             .fbo = fbo,
@@ -97,11 +92,9 @@ pub const Viewport = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        // Free OpenGL resources
         self.fbo.deinit();
         glad.glDeleteProgram(self.shader_program);
 
-        // Free the name
         self.allocator.free(self.name);
     }
 };

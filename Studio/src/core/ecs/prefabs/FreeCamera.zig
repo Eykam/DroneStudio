@@ -113,12 +113,13 @@ pub fn generate(
         .active = true,
     };
 
-    const vp = try Viewport.ViewportComponent.init(
+    var vp = try Viewport.ViewportComponent.init(
         alloc,
         "free_cam",
         width,
         height,
     );
+    vp.resizable = true;
 
     const ctrl = try makeFreeController(alloc);
     return .{ .tf = tf, .cam = cam, .ctrl = ctrl, .vp = vp };

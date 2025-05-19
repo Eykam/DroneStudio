@@ -113,7 +113,10 @@ pub fn spawn(
     const drone_body_entity = try ecs.createEntitiesFromModel(drone_body_resource);
 
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
-    const sensor_cam = try SensorCamera.generate(alloc, .{});
+
+    const disparity = 0.075; // 75mm
+    const sensor_cam_left = try SensorCamera.generate(alloc, "sensor_cam_left", .{ .pos = .{ -disparity / 2.0, 0.0, 0.15 } });
+    const sensor_cam_right = try SensorCamera.generate(alloc, "sensor_cam_right", .{ .pos = .{ disparity / 2.0, 0.0, 0.15 } });
 
     const drone_cam_frustum = try Frustum.generate(
         alloc,
@@ -124,12 +127,22 @@ pub fn spawn(
         1.0,
         0.1,
     );
-    const sensor_cam_frustum = try Frustum.generate(
+    const sensor_cam_frustum_left = try Frustum.generate(
         alloc,
         ecs,
         "sensor_cam_frustum",
-        sensor_cam.cam.fov,
-        sensor_cam.cam.aspect,
+        sensor_cam_left.cam.fov,
+        sensor_cam_left.cam.aspect,
+        1.0,
+        0.1,
+    );
+
+    const sensor_cam_frustum_right = try Frustum.generate(
+        alloc,
+        ecs,
+        "sensor_cam_frustum",
+        sensor_cam_right.cam.fov,
+        sensor_cam_right.cam.aspect,
         1.0,
         0.1,
     );
@@ -137,17 +150,22 @@ pub fn spawn(
     const root_eid = try ecs.spawn(.{ root_tf, root_ctrl });
 
     const drone_cam_eid = try ecs.spawn(drone_cam);
-    const sensor_cam_eid = try ecs.spawn(sensor_cam);
+    const sensor_cam_left_eid = try ecs.spawn(sensor_cam_left);
+    const sensor_cam_right_eid = try ecs.spawn(sensor_cam_right);
 
     const drone_cam_frustum_eid = try ecs.spawn(drone_cam_frustum);
-    const sensor_cam_frustum_eid = try ecs.spawn(sensor_cam_frustum);
+    const sensor_cam_frustum_left_eid = try ecs.spawn(sensor_cam_frustum_left);
+    const sensor_cam_frustum_right_eid = try ecs.spawn(sensor_cam_frustum_right);
 
     try ecs.transform_system.addChild(root_eid, drone_body_entity);
     try ecs.transform_system.addChild(root_eid, drone_cam_eid);
     try ecs.transform_system.addChild(drone_cam_eid, drone_cam_frustum_eid);
 
-    try ecs.transform_system.addChild(root_eid, sensor_cam_eid);
-    try ecs.transform_system.addChild(sensor_cam_eid, sensor_cam_frustum_eid);
+    try ecs.transform_system.addChild(root_eid, sensor_cam_left_eid);
+    try ecs.transform_system.addChild(sensor_cam_left_eid, sensor_cam_frustum_left_eid);
+
+    try ecs.transform_system.addChild(root_eid, sensor_cam_right_eid);
+    try ecs.transform_system.addChild(sensor_cam_right_eid, sensor_cam_frustum_right_eid);
 
     return;
 }

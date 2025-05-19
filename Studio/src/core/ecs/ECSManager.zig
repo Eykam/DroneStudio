@@ -257,9 +257,9 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
         if (node.local_transformation) |local_transformation| {
             const trs = local_transformation.decomposeTRS();
 
-            std.debug.print("Entity_Id: {d}\n", .{e_id.id});
-            std.debug.print("Found Local Transform: {any}\n", .{local_transformation});
-            std.debug.print("TRS: {any}\n", .{trs});
+            // std.debug.print("Entity_Id: {d}\n", .{e_id.id});
+            // std.debug.print("Found Local Transform: {any}\n", .{local_transformation});
+            // std.debug.print("TRS: {any}\n", .{trs});
 
             transform.setPosition(trs.translation[0], trs.translation[1], trs.translation[2]);
             transform.setRotation(trs.rotation);

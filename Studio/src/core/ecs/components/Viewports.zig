@@ -16,6 +16,7 @@ pub const ViewportComponent = struct {
     const Self = @This();
 
     vp: Viewport,
+    resizable: bool = false,
     shared: bool = false,
     shared_info: ?CudaGL.CUDAGLTexture = null,
     active: bool = true,
@@ -82,7 +83,9 @@ pub const ViewportSystem = struct {
             var vc = tuple.component;
             var vp = &vc.vp;
 
-            if (vp.fbo.width != w or vp.fbo.height != h) {
+            if (vc.resizable and (vp.fbo.width != w or vp.fbo.height != h)) {
+                std.debug.print("Resizing: {s}\n", .{vp.name});
+
                 const old_name = try self.allocator.dupeZ(u8, vp.name);
                 defer self.allocator.free(old_name);
 

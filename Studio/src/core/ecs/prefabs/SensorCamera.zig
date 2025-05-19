@@ -26,6 +26,7 @@ const defaults = Defaults{};
 
 pub fn generate(
     alloc: std.mem.Allocator,
+    name: []const u8,
     desc: Defaults,
 ) !struct {
     tf: Transform.TransformComponent,
@@ -44,7 +45,7 @@ pub fn generate(
 
     var vp = try Viewport.ViewportComponent.init(
         alloc,
-        "sensor_cam",
+        name,
         defaults.resolution_width,
         defaults.resolution_height,
     );

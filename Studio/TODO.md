@@ -11,15 +11,22 @@ TODO:
         [] - 1|2|4|8x speed
     [x] - Save to path / etc
     [x] - UI to select saved configs
-    [] - Flag to ignore capture in transform
+    [] - Flag to stop transform from being captured
     [] - Automatic path generation ??
 [] - Add visualization for path
     [] - Only shown in Free Camera
     [] - Previous steps
     [] - Next steps
-[] - IPC protocol using mmap to communicate between sim & python
-    [] - Register VP buffers with cuda (maybe opencl??)
-    [] - Map available camera / VP buffers
+[x] - IPC protocol using mmap to communicate between sim & python
+    [x] - Create IPC shared mem using /dev/shm fd
+        [] - Find way to do this cross-platform
+    [x] - Create basic protocol to share viewports
+    [x] - Register VP buffers with cuda (maybe opencl??)
+        [] - Add fallback for non-cuda where write pixels to shm & read in python
+    [x] - Map available camera / VP buffers
+    [] - Python lib / package that users can plug into
+        [x] - Define cv pipeline & use decorator to run them
+        [] - Hot reloading?
     [] - Find way to access them typesafe???
     [] - Create demo depthmap using opencv
     [] - give VP back to engine to render??
@@ -65,11 +72,15 @@ TODO:
 
 
 FIX:
+[x] - Flag to stop FBO from resizing with window
+[] - Maintain aspect ratio when resizing viewport
 [] - Fix transformsystem to do a basic dfs w/ dirty flag
+[] - Figure out why asset caching isnt working properly
 [] - Make new branch to store old studio code
-[] - Push new code & make docs / write up on Engine
+[] - Write docs / landing page on Engine
 [] - Figure out why viewports initialize to black until toggleViewport 
-[] - Make main viewport larger (no max width)[] - Frustum only visible in Free / Debug mode
+[] - Make main viewport larger (no max width)
+[] - Frustum only visible in Free / Debug mode
 [] - Move Active Flags from Camera => Viewport
     [] - Update Viewport Selector in UI
 [] - Remove global component to global system

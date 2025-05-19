@@ -352,7 +352,7 @@ pub const MaterialResource = struct {
                 try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(phong.data.normalTexture != null) });
             },
             .PBR => |pbr| {
-                std.debug.print("{any}", .{pbr.data});
+                // std.debug.print("{any}", .{pbr.data});
                 try self.setUniform(allocator, "baseColorFactor", .{ .Vec4 = pbr.data.baseColorFactor });
                 try self.setUniform(allocator, "metallicFactor", .{ .Float = pbr.data.metallicFactor });
                 try self.setUniform(allocator, "roughnessFactor", .{ .Float = pbr.data.roughnessFactor });
@@ -362,7 +362,7 @@ pub const MaterialResource = struct {
                 try self.setUniform(allocator, "doubleSided", .{ .Int = @intFromBool(pbr.data.doubleSided) });
 
                 // Texture flags
-                std.debug.print("{any}", .{pbr.textures});
+                // std.debug.print("{any}", .{pbr.textures});
                 try self.setUniform(allocator, "hasBaseColorTexture", .{ .Int = @intFromBool(pbr.textures.baseColor != null) });
                 try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(pbr.textures.normal != null) });
                 try self.setUniform(allocator, "hasMetallicRoughnessTexture", .{ .Int = @intFromBool(pbr.textures.metallicRoughness != null) });
@@ -635,7 +635,7 @@ pub fn loadMaterial(self: *Self, name: []const u8, material: MaterialVariant, sh
     const material_name = try self.allocator.dupeZ(u8, name);
     var material_resource = try MaterialResource.init(self.allocator, material);
 
-    std.debug.print("Material Name: {s}", .{material_name});
+    // std.debug.print("Material Name: {s}", .{material_name});
 
     // Set shader reference if provided
     if (shader_name) |shader| {
