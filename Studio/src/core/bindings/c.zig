@@ -14,3 +14,7 @@ pub const cuda = @cImport({
 pub const bullet = @cImport({
     @cInclude("cbullet.h");
 });
+
+pub const vhacd = @cImport({
+    @cInclude("vhacd_wrapper.h");
+});

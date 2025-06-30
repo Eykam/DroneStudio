@@ -17,6 +17,7 @@ const Camera = @import("components/Camera.zig");
 const Globals = @import("components/Globals.zig");
 const Viewports = @import("components/Viewports.zig");
 const Recorder = @import("components/Recorder.zig");
+const Collisions = @import("components/Collisions.zig");
 const SharedMem = @import("components/SharedMem.zig");
 
 // Components
@@ -27,16 +28,17 @@ const Renderable = Renderer.Renderable;
 const CameraComponent = Camera.CameraComponent;
 const GlobalsComponent = Globals.GlobalsComponent;
 const ViewportComponent = Viewports.ViewportComponent;
+const ColliderComponent = Collisions.ColliderComponent;
 
 // Systems
 const ControllerSytem = Controller.ControlSystem;
 const TransformSystem = Transform.TransformSystem;
-const PhysicsSystem = Physics.PhysicsSystem;
 const RenderSystem = Renderer.RenderSystem;
 const CameraSystem = Camera.CameraSystem;
 const GlobalsSystem = Globals.GlobalsSystem;
 const ViewportSystem = Viewports.ViewportSystem;
 const RecorderSystem = Recorder.RecorderSystem;
+const CollisionSystem = Collisions.CollisionSystem;
 const SharedMemSystem = SharedMem.SharedMemSystem;
 
 const Self = @This();
@@ -52,16 +54,17 @@ renderer_components: SparseSet(Renderable),
 physics_components: SparseSet(PhysicsComponent),
 controller_components: SparseSet(ControllerComponent),
 viewport_components: SparseSet(ViewportComponent),
+collider_components: SparseSet(ColliderComponent),
 
 // Systems
 globals_system: *GlobalsSystem,
 transform_system: TransformSystem,
 camera_system: CameraSystem,
 render_system: RenderSystem,
-physics_system: PhysicsSystem,
 control_system: ControllerSytem,
 viewport_system: ViewportSystem,
 recorder_system: *RecorderSystem,
+collision_system: CollisionSystem,
 shared_mem_system: SharedMemSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
@@ -82,6 +85,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         .renderer_components = SparseSet(Renderable).init(allocator),
         .physics_components = SparseSet(PhysicsComponent).init(allocator),
         .controller_components = SparseSet(ControllerComponent).init(allocator),
+        .collider_components = SparseSet(ColliderComponent).init(allocator),
 
         // Initialize systems
         .globals_system = global_system,
@@ -100,11 +104,6 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             &manager.camera_components,
             &manager.transform_components,
         ),
-        .physics_system = PhysicsSystem.init(
-            world,
-            &manager.transform_components,
-            &manager.physics_components,
-        ),
         .control_system = ControllerSytem.init(
             world,
             manager.globals,
@@ -120,6 +119,13 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             &manager.camera_components,
             &manager.viewport_components,
             &manager.renderer_components,
+        ),
+        .collision_system = try CollisionSystem.init(
+            allocator,
+            world,
+            &manager.transform_components,
+            &manager.physics_components,
+            &manager.collider_components,
         ),
         .shared_mem_system = try SharedMemSystem.init(
             allocator,
@@ -187,13 +193,34 @@ pub fn update(self: *Self, time: f64) !void {
         std.debug.print("Avg FPS: {d:.2}\n", .{self.globals.avg_fps});
     }
 
-    self.transform_system.update();
+    // Add timing for system updates (only for first 10 frames to avoid spam)
+    // const should_time = self.globals.frame_count <= 10;
+    const should_time = false;
+    const timer = if (should_time) std.time.Timer.start() catch unreachable else undefined;
+
+    if (should_time) std.debug.print("Frame {d} system timings:\n", .{self.globals.frame_count});
+
+    if (should_time) _ = timer.lap(); // Reset timer
     self.control_system.update(dt);
-    // self.physics_system.update(dt);
+    if (should_time) std.debug.print("  Control system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.transform_system.update();
+    if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    try self.collision_system.update(@floatCast(dt));
+    if (should_time) std.debug.print("  Collision system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
     try self.viewport_system.update();
+    if (should_time) std.debug.print("  Viewport system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
     try self.render_system.update();
+    if (should_time) std.debug.print("  Render system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
     try self.recorder_system.update(self);
+    if (should_time) std.debug.print("  Recorder system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
     self.shared_mem_system.update();
+    if (should_time) std.debug.print("  SharedMem system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 }
 
 // Entity management methods
@@ -203,10 +230,10 @@ pub fn createEntity(self: *Self) !Core.EntityID {
 
 pub fn destroyEntity(self: *Self, entity_id: Core.EntityID) void {
     // Remove all components first
-    _ = self.transform_components.remove(entity_id);
-    _ = self.renderer_components.remove(entity_id);
-    _ = self.physics_components.remove(entity_id);
-    _ = self.controller_components.remove(entity_id);
+    _ = self.transform_components.remove(entity_id) catch false;
+    _ = self.renderer_components.remove(entity_id) catch false;
+    _ = self.physics_components.remove(entity_id) catch false;
+    _ = self.controller_components.remove(entity_id) catch false;
 
     // Then remove the entity from the world
     self.world.destroyEntity(entity_id);
@@ -242,7 +269,7 @@ pub fn setParent(self: *Self, child_id: Core.EntityID, parent_id: Core.EntityID)
     try self.transform_system.addChild(parent_id, child_id);
 }
 
-pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource) !Core.EntityID {
+pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource, physics_type: Collisions.PhysicsType, collider_shape: Collisions.ColliderShape) !Core.EntityID {
     var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
     defer entity_map.deinit();
 
@@ -251,21 +278,15 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
         const e_id = try self.createEntity();
         try entity_map.put(idx, e_id);
 
-        // Add transform
         const transform = try self.addTransform(e_id);
 
         if (node.local_transformation) |local_transformation| {
             const trs = local_transformation.decomposeTRS();
 
-            // std.debug.print("Entity_Id: {d}\n", .{e_id.id});
-            // std.debug.print("Found Local Transform: {any}\n", .{local_transformation});
-            // std.debug.print("TRS: {any}\n", .{trs});
-
             transform.setPosition(trs.translation[0], trs.translation[1], trs.translation[2]);
             transform.setRotation(trs.rotation);
             transform.setScale(trs.scale[0], trs.scale[1], trs.scale[2]);
         } else {
-            // If node has TRS
             if (node.translation) |t| {
                 transform.setPosition(t[0], t[1], t[2]);
             }
@@ -294,6 +315,22 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
                 }
             }
         }
+    }
+
+    // Create compound collider on root entity instead of individual colliders
+    switch (physics_type) {
+        .Static, .Dynamic => {
+            const root_entity = entity_map.get(0).?;
+            
+            // Add physics body to root entity only
+            const physics_body_type: Physics.BodyType = if (physics_type == .Dynamic) .Dynamic else .Static;
+            const physics = try self.addPhysicsBody(root_entity, physics_body_type);
+            physics.mass = if (physics_type == .Dynamic) 1.0 else 0.0;
+            
+            // Create compound collider from all meshes in the model
+            try self.collision_system.createCompoundColliderFromModel(root_entity, model_resource, entity_map, collider_shape);
+        },
+        .None => {}, // No collision setup
     }
 
     // Return the ECS entity ID of the first node (root)

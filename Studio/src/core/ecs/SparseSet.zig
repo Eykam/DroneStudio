@@ -47,7 +47,7 @@ pub fn SparseSet(comptime T: type) type {
             });
         }
 
-        pub fn remove(self: *Self, entity_id: EntityID) bool {
+        pub fn remove(self: *Self, entity_id: EntityID) !bool {
             if (self.sparse.get(entity_id.id)) |index| {
                 // Swap with the last element to maintain dense array
                 const last_index = self.dense.items.len - 1;

@@ -67,7 +67,7 @@ void main()
         }
 
         worldPos = aPosWithDistance;
-        finalColor = vec4(1.0,1.0,0, 1.0);
+        finalColor = vec4(aColor, 1.0);
         gl_Position = uProjection * uView * uModel * vec4(worldPos, 1.0);
     }
     

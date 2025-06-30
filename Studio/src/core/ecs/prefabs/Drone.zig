@@ -8,6 +8,7 @@ const ECSManager = @import("../ECSManager.zig");
 const Controller = @import("../components/Controller.zig");
 const Transform = @import("../components/Transform.zig");
 const Viewport = @import("../components/Viewports.zig");
+const Collisions = @import("../components/Collisions.zig");
 const DroneCamera = @import("DroneCamera.zig");
 const SensorCamera = @import("SensorCamera.zig");
 const Frustum = @import("Frustum.zig");
@@ -99,7 +100,7 @@ pub fn spawn(
     ecs: *ECSManager,
     scene_width: u32,
     scene_height: u32,
-) !void {
+) !Core.EntityID {
     var root_tf = Transform.TransformComponent.init(alloc);
     root_tf.setPosition(0, 2, 0);
 
@@ -110,7 +111,11 @@ pub fn spawn(
         "assets/drone/scene.gltf",
     );
 
-    const drone_body_entity = try ecs.createEntitiesFromModel(drone_body_resource);
+    const drone_body_entity = try ecs.createEntitiesFromModel(
+        drone_body_resource,
+        .Dynamic,
+        .{ .Box = .{ .half_extents = .{ 0, 0, 0 } } },
+    );
 
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
 
@@ -167,5 +172,5 @@ pub fn spawn(
     try ecs.transform_system.addChild(root_eid, sensor_cam_right_eid);
     try ecs.transform_system.addChild(sensor_cam_right_eid, sensor_cam_frustum_right_eid);
 
-    return;
+    return root_eid;
 }

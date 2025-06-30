@@ -147,6 +147,7 @@ pub const MaterialType = enum {
     PBR,
 };
 
+// TODO: Add support for Phong Textures
 pub fn Material(T: MaterialType) type {
     return struct {
         matType: MaterialType = T,
@@ -251,6 +252,7 @@ pub const ShaderResource = struct {
         return location;
     }
 
+    // TODO: Can probably avoid this by using meta programming to get fields of each Variant
     pub fn cacheCommonUniforms(self: *ShaderResource, shader_type: MaterialType) void {
         _ = self.getorPutUniformLocation("uModel");
         _ = self.getorPutUniformLocation("uView");
@@ -340,6 +342,7 @@ pub const MaterialResource = struct {
         return resource;
     }
 
+    // TODO: Why is this needed vs the uniforms on the shader
     pub fn initDefaultUniforms(self: *MaterialResource, allocator: std.mem.Allocator) !void {
         switch (self.material) {
             .Phong => |phong| {

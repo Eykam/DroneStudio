@@ -203,6 +203,7 @@ fn configureDesktopLibs(
 
     exe.addIncludePath(b.path("lib/cbullet"));
     exe.addIncludePath(b.path("lib/bullet"));
+    exe.addIncludePath(b.path("lib/vhacd"));
 
     // TODO: Use the old damping method for now otherwise there is a hang in powf().
     const flags = &.{
@@ -217,6 +218,7 @@ fn configureDesktopLibs(
             "lib/bullet/btLinearMathAll.cpp",
             "lib/bullet/btBulletCollisionAll.cpp",
             "lib/bullet/btBulletDynamicsAll.cpp",
+            "lib/vhacd/vhacd_wrapper.cpp",
         },
         .flags = flags,
     });

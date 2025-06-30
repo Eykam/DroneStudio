@@ -32,6 +32,67 @@ const UIContext = struct {
     // pose_handler: *Sensors.PoseHandler,
 };
 
+const CameraMetadataOverlay = struct {
+    const Self = @This();
+
+    visible: bool = true,
+
+    pub fn init() Self {
+        return .{};
+    }
+
+    pub fn drawOverlay(self: *Self, ctx: *const UIContext, image_pos: imgui.ImVec2, img_w: f32) void {
+        if (!self.visible) return;
+
+        if (ctx.ecs.camera_system.active_camera_eid) |camera_eid| {
+            if (ctx.ecs.transform_components.get(camera_eid)) |transform| {
+                const pos = transform.position;
+                const euler_rad = transform.rotation.to_euler();
+                const roll = Math.degrees(euler_rad[2]);
+                const pitch = Math.degrees(euler_rad[0]);
+                const yaw = Math.degrees(euler_rad[1]);
+
+                const overlay_flags = imgui.ImGuiWindowFlags_NoTitleBar |
+                    imgui.ImGuiWindowFlags_NoResize |
+                    imgui.ImGuiWindowFlags_NoMove |
+                    imgui.ImGuiWindowFlags_NoCollapse |
+                    imgui.ImGuiWindowFlags_NoScrollbar |
+                    imgui.ImGuiWindowFlags_AlwaysAutoResize |
+                    imgui.ImGuiWindowFlags_NoSavedSettings |
+                    imgui.ImGuiWindowFlags_NoInputs;
+
+                // Position in top-right corner of the rendered image (with padding)
+                const overlay_pos = imgui.ImVec2{
+                    .x = image_pos.x + img_w - 200, // 200px from right edge of image
+                    .y = image_pos.y + 10, // 10px from top of image
+                };
+
+                imgui.igSetNextWindowPos(overlay_pos, imgui.ImGuiCond_Always, .{ .x = 0, .y = 0 });
+
+                imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_WindowBg, .{ .x = 0.2, .y = 0.2, .z = 0.2, .w = 0.7 });
+                imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 8 });
+                imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_WindowRounding, 6.0);
+
+                if (imgui.igBegin("##CameraOverlay", &self.visible, overlay_flags)) {
+                    imgui.igTextColored(.{ .x = 0.9, .y = 0.9, .z = 0.9, .w = 1.0 }, "Camera Position:");
+                    imgui.igText("X: %.2f  Y: %.2f  Z: %.2f", pos[0], pos[1], pos[2]);
+
+                    imgui.igSeparator();
+
+                    imgui.igTextColored(.{ .x = 0.9, .y = 0.9, .z = 0.9, .w = 1.0 }, "Orientation:");
+                    imgui.igText("Roll:  %.1f°", roll);
+                    imgui.igText("Pitch: %.1f°", pitch);
+                    imgui.igText("Yaw:   %.1f°", yaw);
+                }
+                imgui.igEnd();
+
+                imgui.igPopStyleVar(2);
+                imgui.igPopStyleColor(1);
+            }
+        }
+    }
+};
+
 fn createWindowsStructType(Windows: []const type) type {
     var fields: [Windows.len]std.builtin.Type.StructField = undefined;
 
@@ -144,9 +205,11 @@ pub const RootWindow = struct {
     visible: bool,
     sidebar_width: f32 = 0, // Default width, will be adjusted by user
     is_resizing: bool = false, // Track if currently resizing
+    show_collision_debug: bool = false, // Toggle for collision debug visualization
 
     entities_window: *EntitiesWindow,
     timeline_recorder: TimelineRecorder,
+    camera_overlay: CameraMetadataOverlay,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
         const self = try allocator.create(Self);
@@ -154,6 +217,7 @@ pub const RootWindow = struct {
             .visible = true,
             .entities_window = try EntitiesWindow.init(allocator),
             .timeline_recorder = TimelineRecorder.init(allocator),
+            .camera_overlay = CameraMetadataOverlay.init(),
         };
         return self;
     }
@@ -233,6 +297,24 @@ pub const RootWindow = struct {
                 imgui.igEndChild();
             }
 
+            imgui.igSeparator();
+
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Debug###Debug", hdr_flags)) {
+                // Collision debug toggle
+                const old_state = self.show_collision_debug;
+                if (imgui.igCheckbox("Show Collision Debug", &self.show_collision_debug)) {
+                    // State changed, toggle collision debug visualization
+                    ctx.ecs.collision_system.toggleDebugVisualization(ctx.ecs, self.show_collision_debug) catch |err| {
+                        std.debug.print("Failed to toggle collision debug: {}\n", .{err});
+                        self.show_collision_debug = old_state; // Revert on error
+                    };
+                }
+                
+                if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                    imgui.igSetTooltip("Show wireframe boxes around colliders.\nGreen = Dynamic, Blue = Static");
+                }
+            }
+
             imgui.igEndChild();
             imgui.igPopStyleVar(1);
 
@@ -276,8 +358,15 @@ pub const RootWindow = struct {
                         if (img_w < region.x)
                             imgui.igSetCursorPosX(imgui.igGetCursorPosX() + (region.x - img_w) * 0.5);
 
+                        // Get the position of the image before drawing it
+                        var image_pos: imgui.ImVec2 = undefined;
+                        imgui.igGetCursorScreenPos(&image_pos);
+
                         const tex_id: imgui.ImTextureID = @intCast(mvp.fbo.texture);
                         imgui.igImage(tex_id, .{ .x = img_w, .y = img_h }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1, .z = 1, .w = 1 }, .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1 });
+
+                        // Draw camera metadata overlay on top of the image
+                        self.camera_overlay.drawOverlay(ctx, image_pos, img_w);
                     }
                 }
             } else {
