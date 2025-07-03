@@ -8,6 +8,7 @@ const Physics = @import("core/ecs/components/Physics.zig");
 const Collisions = @import("core/ecs/components/Collisions.zig");
 const FreeCamera = @import("core/ecs/prefabs/FreeCamera.zig");
 const Drone = @import("core/ecs/prefabs/Drone.zig");
+const Ground = @import("core/ecs/prefabs/Ground.zig");
 const c = @import("core/bindings/c.zig");
 const imgui = c.imgui;
 
@@ -25,11 +26,8 @@ pub fn main() !void {
     const alloc = arena.allocator();
 
     // =============================================== Scene Graph Initialization ===============================================
-    std.debug.print("Starting ECS initialization...\n", .{});
-    var timer = try std.time.Timer.start();
     const ECS = try ECSManager.init(alloc);
     defer ECS.deinit();
-    std.debug.print("ECS initialization took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
     std.posix.sigaction(std.posix.SIG.INT, &std.posix.Sigaction{
         .handler = .{ .handler = handleSignal },
@@ -41,48 +39,43 @@ pub fn main() !void {
     const scene_width = 1920;
     const scene_height = 1080;
 
-    std.debug.print("Creating cameras and entities...\n", .{});
     const free_cam = try FreeCamera.generate(alloc, .{}, scene_width, scene_height);
     _ = try ECS.spawn(free_cam);
-    std.debug.print("FreeCamera creation took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
     _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
-    std.debug.print("Drone creation took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
-    std.debug.print("Loading GLTF model...\n", .{});
-    const resource_manager = ECS.world.resource_manager;
-    const hintze_hall_resource = try resource_manager.loadGLTFModelCached(
-        alloc,
-        "assets/hintze_hall/scene.gltf",
-    );
-    std.debug.print("GLTF loading took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+    // const resource_manager = ECS.world.resource_manager;
+    // const hintze_hall_resource = try resource_manager.loadGLTFModelCached(
+    //     alloc,
+    //     "assets/hintze_hall/scene.gltf",
+    // );
 
-    std.debug.print("Creating collision entities...\n", .{});
-    const hintze_hall_entity = try ECS.createEntitiesFromModel(
-        hintze_hall_resource,
-        .Static,
-        .{ .TriangleMesh = .{} },
-    );
-    ECS.transform_components.get(hintze_hall_entity).?.setPosition(0, -1.0, 0);
-    std.debug.print("Collision entity creation took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+    // var hintze_hall_result = try ECS.createEntitiesFromModel(hintze_hall_resource);
+    // const hintze_hall_entity = hintze_hall_result.root_entity;
 
-    std.debug.print("Creating ground collider...\n", .{});
-    const ground_id = try ECS.createEntity();
-    const ground_transform = try ECS.addTransform(ground_id);
-    ground_transform.setPosition(0, -5, 0);
-    ground_transform.setScale(100, 1, 100);
+    // // Create static collision for the hall using the actual hall mesh
+    // var hall_collider = try Collisions.ColliderComponent.initFromModel(
+    //     alloc,
+    //     hintze_hall_resource,
+    //     .{ .TriangleMesh = .{} },
+    //     ECS.world.resource_manager,
+    // );
+    // var hall_body = Collisions.RigidBodyComponent.init(0.0, hall_collider.bullet_shape.?);
 
-    const ground_physics = try ECS.addPhysicsBody(ground_id, Physics.BodyType.Static);
-    ground_physics.mass = 0.0;
+    // // Add components to the hall entity
+    // try hall_collider.attach(ECS, hintze_hall_entity);
+    // try hall_body.attach(ECS, hintze_hall_entity);
 
-    try ECS.collision_system.createCollider(
-        ground_id,
-        .{
-            .Box = .{ .half_extents = .{ 250, 0.5, 250 } },
-        },
-        null,
-    );
-    std.debug.print("Ground collider creation took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+    // // Clean up entity map
+    // hintze_hall_result.entity_map.deinit();
+    // ECS.transform_components.get(hintze_hall_entity).?.setPosition(0, -1.0, 0);
+
+    // Create ground plane using the Ground prefab
+    _ = try Ground.spawn(alloc, ECS, .{
+        .size = 100.0,
+        .position = .{ 0.0, -10.0, 0.0 },
+        .color = .{ 0.4, 0.6, 0.4 }, // Slightly darker green
+    });
 
     std.debug.print("Initializing UI...\n", .{});
     const windows = [_]type{
@@ -96,10 +89,8 @@ pub fn main() !void {
             .ecs = ECS,
         },
     );
-    std.debug.print("UI initialization took: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
     std.debug.print("Starting main loop...\n", .{});
-
     while (!should_exit.load(.acquire) and glfw.glfwWindowShouldClose(window) == 0) {
         glfw.glfwPollEvents();
 

@@ -29,6 +29,7 @@ const CameraComponent = Camera.CameraComponent;
 const GlobalsComponent = Globals.GlobalsComponent;
 const ViewportComponent = Viewports.ViewportComponent;
 const ColliderComponent = Collisions.ColliderComponent;
+const RigidBodyComponent = Collisions.RigidBodyComponent;
 
 // Systems
 const ControllerSytem = Controller.ControlSystem;
@@ -55,6 +56,7 @@ physics_components: SparseSet(PhysicsComponent),
 controller_components: SparseSet(ControllerComponent),
 viewport_components: SparseSet(ViewportComponent),
 collider_components: SparseSet(ColliderComponent),
+rigid_body_components: SparseSet(RigidBodyComponent),
 
 // Systems
 globals_system: *GlobalsSystem,
@@ -86,6 +88,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         .physics_components = SparseSet(PhysicsComponent).init(allocator),
         .controller_components = SparseSet(ControllerComponent).init(allocator),
         .collider_components = SparseSet(ColliderComponent).init(allocator),
+        .rigid_body_components = SparseSet(RigidBodyComponent).init(allocator),
 
         // Initialize systems
         .globals_system = global_system,
@@ -108,7 +111,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             world,
             manager.globals,
             &manager.transform_components,
-            &manager.physics_components,
+            &manager.rigid_body_components,
             &manager.controller_components,
         ),
         .render_system = try RenderSystem.init(
@@ -124,7 +127,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             allocator,
             world,
             &manager.transform_components,
-            &manager.physics_components,
+            &manager.rigid_body_components,
             &manager.collider_components,
         ),
         .shared_mem_system = try SharedMemSystem.init(
@@ -138,6 +141,9 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
     global_system.control_system = &manager.control_system;
     global_system.viewport_system = &manager.viewport_system;
     global_system.transform_system = &manager.transform_system;
+
+    // Link collision system to control system for physics-based movement
+    manager.control_system.collision_system = &manager.collision_system;
 
     return manager;
 }
@@ -174,6 +180,13 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn update(self: *Self, time: f64) !void {
+    // Check for reset request first
+    if (self.globals.reset_requested) {
+        try self.resetToInitialState();
+        self.globals.reset_requested = false;
+        return;
+    }
+
     if (self.globals.last_frame_time == 0) {
         self.globals.last_frame_time = time;
         self.globals.last_fps_time = time;
@@ -223,6 +236,12 @@ pub fn update(self: *Self, time: f64) !void {
     if (should_time) std.debug.print("  SharedMem system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 }
 
+pub fn resetToInitialState(self: *Self) !void {
+    std.debug.print("Resetting ECS to initial state...\n", .{});
+    self.collision_system.resetAllDynamicBodies();
+    std.debug.print("Reset complete!\n", .{});
+}
+
 // Entity management methods
 pub fn createEntity(self: *Self) !Core.EntityID {
     return self.world.createEntity();
@@ -269,9 +288,9 @@ pub fn setParent(self: *Self, child_id: Core.EntityID, parent_id: Core.EntityID)
     try self.transform_system.addChild(parent_id, child_id);
 }
 
-pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource, physics_type: Collisions.PhysicsType, collider_shape: Collisions.ColliderShape) !Core.EntityID {
+pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource) !struct { root_entity: Core.EntityID, entity_map: std.AutoHashMap(usize, Core.EntityID) } {
     var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
-    defer entity_map.deinit();
+    // Don't defer deinit - we're returning this
 
     // Create ECS entity for every ModelResource.EntityInfo
     for (model_resource.entities, 0..) |node, idx| {
@@ -317,24 +336,10 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
         }
     }
 
-    // Create compound collider on root entity instead of individual colliders
-    switch (physics_type) {
-        .Static, .Dynamic => {
-            const root_entity = entity_map.get(0).?;
-            
-            // Add physics body to root entity only
-            const physics_body_type: Physics.BodyType = if (physics_type == .Dynamic) .Dynamic else .Static;
-            const physics = try self.addPhysicsBody(root_entity, physics_body_type);
-            physics.mass = if (physics_type == .Dynamic) 1.0 else 0.0;
-            
-            // Create compound collider from all meshes in the model
-            try self.collision_system.createCompoundColliderFromModel(root_entity, model_resource, entity_map, collider_shape);
-        },
-        .None => {}, // No collision setup
-    }
-
-    // Return the ECS entity ID of the first node (root)
-    return entity_map.get(0).?;
+    return .{
+        .root_entity = entity_map.get(0).?,
+        .entity_map = entity_map,
+    };
 }
 
 pub fn findControllerAncestor(self: *Self, start: Core.EntityID) ?Core.EntityID {

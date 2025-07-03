@@ -6,6 +6,7 @@ const SparseSet = @import("../SparseSet.zig").SparseSet;
 const Globals = @import("Globals.zig");
 const Transform = @import("../components/Transform.zig");
 const Physics = @import("../components/Physics.zig");
+const Collisions = @import("Collisions.zig");
 const ECSManager = @import("../ECSManager.zig");
 
 const GlobalsComponent = Globals.GlobalsComponent;
@@ -22,11 +23,13 @@ pub const ControllerComponent = struct {
         onPressed: *const fn (
             eid: Core.EntityID,
             transform: *Transform.TransformComponent,
+            rigid_body: ?*Collisions.RigidBodyComponent,
+            collision_system: ?*Collisions.CollisionSystem, 
             dt: f32,
         ) void,
     };
 
-    pub const MouseMoveFn = *const fn (eid: Core.EntityID, tf: *TransformComponent, dx: f32, dy: f32, dt: f64) void;
+    pub const MouseMoveFn = *const fn (eid: Core.EntityID, tf: *TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*Collisions.CollisionSystem, dx: f32, dy: f32, dt: f64) void;
 
     move_speed: f32 = 5.0,
     mouse_move: ?MouseMoveFn = null,
@@ -44,6 +47,7 @@ pub const ControllerComponent = struct {
         self.key_bindings.deinit();
     }
 
+
     pub fn attach(self: *ControllerComponent, ecs: *ECSManager, eid: Core.EntityID) !void {
         if (ecs.control_system.active_controller_eid == null) {
             ecs.control_system.active_controller_eid = eid;
@@ -59,22 +63,23 @@ pub const ControlSystem = struct {
     world: *Core.World,
     globals: *GlobalsComponent,
     transform_components: *SparseSet(TransformComponent),
-    physics_components: *SparseSet(PhysicsComponent),
+    rigid_body_components: *SparseSet(Collisions.RigidBodyComponent),
     controller_components: *SparseSet(ControllerComponent),
     active_controller_eid: ?Core.EntityID = null,
+    collision_system: ?*Collisions.CollisionSystem = null,
 
     pub fn init(
         world: *Core.World,
         globals: *GlobalsComponent,
         transform_components: *SparseSet(TransformComponent),
-        physics_components: *SparseSet(PhysicsComponent),
+        rigid_body_components: *SparseSet(Collisions.RigidBodyComponent),
         controller_components: *SparseSet(ControllerComponent),
     ) Self {
         return .{
             .world = world,
             .globals = globals,
             .transform_components = transform_components,
-            .physics_components = physics_components,
+            .rigid_body_components = rigid_body_components,
             .controller_components = controller_components,
         };
     }
@@ -85,14 +90,20 @@ pub const ControlSystem = struct {
         if (self.active_controller_eid) |eid| {
             const ctrl = self.controller_components.get(eid).?;
             const tf = self.transform_components.get(eid).?;
+            
+            // In new architecture, rigid body components are on the same entity as controller
+            const rigid_body = self.rigid_body_components.get(eid);
 
             for (ctrl.key_bindings.items) |kb| {
-                if (self.globals.keys[@intCast(kb.key)]) kb.onPressed(eid, tf, @floatCast(dt));
+                if (self.globals.keys[@intCast(kb.key)]) {
+                    std.debug.print("Key {} pressed for eid {d}\n", .{ kb.key, eid.id });
+                    kb.onPressed(eid, tf, rigid_body, self.collision_system, @floatCast(dt));
+                }
             }
 
             if (ctrl.mouse_move) |fnPtr| {
                 if (self.globals.mouse_dx != 0 or self.globals.mouse_dy != 0)
-                    fnPtr(eid, tf, @floatCast(self.globals.mouse_dx), @floatCast(self.globals.mouse_dy), dt);
+                    fnPtr(eid, tf, rigid_body, self.collision_system, @floatCast(self.globals.mouse_dx), @floatCast(self.globals.mouse_dy), dt);
             }
         }
 

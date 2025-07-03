@@ -8,6 +8,8 @@ const Globals = @import("../components/Globals.zig");
 const Controller = @import("../components/Controller.zig");
 const Transform = @import("../components/Transform.zig");
 const Viewport = @import("../components/Viewports.zig");
+const Physics = @import("../components/Physics.zig");
+const Collisions = @import("../components/Collisions.zig");
 
 const glfw = gl.glfw;
 const Vec3 = Math.Vec3;
@@ -33,46 +35,39 @@ const d = Defaults{};
 
 /// FPS‑style movement callbacks
 /// Signature must match Controller.KeyBinding.onPressed
-fn forward(eid: Core.EntityID, tf: *TransformComponent, dt: f32) void {
-    _ = eid;
+fn forward(_: Core.EntityID, tf: *TransformComponent, _: ?*Collisions.RigidBodyComponent, _: ?*Collisions.CollisionSystem, dt: f32) void {
     const dir = tf.world_transform.get_forward();
     move(tf, dir, d.speed, dt);
 }
-fn back(eid: Core.EntityID, tf: *TransformComponent, dt: f32) void {
-    _ = eid;
+fn back(_: Core.EntityID, tf: *TransformComponent, _: ?*Collisions.RigidBodyComponent, _: ?*Collisions.CollisionSystem, dt: f32) void {
     const dir = tf.world_transform.get_forward().scale(-1);
     move(tf, dir, d.speed, dt);
 }
-fn left(eid: Core.EntityID, tf: *TransformComponent, dt: f32) void {
-    _ = eid;
+fn left(_: Core.EntityID, tf: *TransformComponent, _: ?*Collisions.RigidBodyComponent, _: ?*Collisions.CollisionSystem, dt: f32) void {
     const dir = tf.world_transform.get_right();
     move(tf, dir, d.speed, dt);
 }
-fn right(eid: Core.EntityID, tf: *TransformComponent, dt: f32) void {
-    _ = eid;
+fn right(_: Core.EntityID, tf: *TransformComponent, _: ?*Collisions.RigidBodyComponent, _: ?*Collisions.CollisionSystem, dt: f32) void {
     const dir = tf.world_transform.get_right().scale(-1);
     move(tf, dir, d.speed, dt);
 }
-fn up(eid: Core.EntityID, tf: *TransformComponent, dt: f32) void {
-    _ = eid;
+fn up(_: Core.EntityID, tf: *TransformComponent, _: ?*Collisions.RigidBodyComponent, _: ?*Collisions.CollisionSystem, dt: f32) void {
     move(tf, Vec3.init(0, 1, 0), d.speed, dt);
 }
-fn down(eid: Core.EntityID, tf: *TransformComponent, dt: f32) void {
-    _ = eid;
+fn down(_: Core.EntityID, tf: *TransformComponent, _: ?*Collisions.RigidBodyComponent, _: ?*Collisions.CollisionSystem, dt: f32) void {
     move(tf, Vec3.init(0, -1, 0), d.speed, dt);
 }
 
 /// Called every frame to apply mouse yaw/pitch
 fn mouseLook(
-    eid: Core.EntityID,
+    _: Core.EntityID,
     tf: *TransformComponent,
+    _: ?*Collisions.RigidBodyComponent,
+    _: ?*Collisions.CollisionSystem,
     yawDelta: f32,
     pitchDelta: f32,
-    dt: f64,
+    _: f64,
 ) void {
-    _ = eid;
-    _ = dt;
-
     const sy = @as(f32, @floatCast(yawDelta)) * d.sensitivity;
     const sp = @as(f32, @floatCast(pitchDelta)) * d.sensitivity;
 

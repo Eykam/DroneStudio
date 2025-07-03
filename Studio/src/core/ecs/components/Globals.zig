@@ -37,6 +37,7 @@ pub const GlobalsComponent = struct {
     paused: bool = false,
     fly: bool = false,
     menu: bool = false,
+    reset_requested: bool = false,
 
     first_person_view: bool = true,
 };
@@ -304,6 +305,10 @@ pub const GlobalsSystem = struct {
 
                 glfw.GLFW_KEY_V => {
                     scene.toggleViewport();
+                },
+                glfw.GLFW_KEY_R => {
+                    scene.globals.reset_requested = true;
+                    std.debug.print("Reset requested!\n", .{});
                 },
 
                 else => {},

@@ -18,12 +18,7 @@ const bullet = c.bullet;
 const vhacd = c.vhacd;
 const Vec3 = Math.Vec3;
 const Mat4 = Math.Mat4;
-
-pub const PhysicsType = enum {
-    Static, // Collision only, no physics simulation
-    Dynamic, // Full physics simulation
-    None, // No collision or physics
-};
+const Quaternion = Math.Quaternion;
 
 // Shape-specific data structures
 pub const BoxShape = struct {
@@ -387,57 +382,129 @@ fn calculateMeshBounds(mesh: *Mesh) struct { min_bounds: [3]f32, max_bounds: [3]
 // Create a collider based on mesh data with specified shape
 pub fn createColliderFromMesh(allocator: std.mem.Allocator, mesh: *Mesh, shape: ColliderShape) !ColliderComponent {
     switch (shape) {
-        .TriangleMesh => return ColliderComponent.init(.{ .TriangleMesh = TriangleMeshShape{} }),
+        .TriangleMesh => return ColliderComponent.init(allocator, .{ .TriangleMesh = TriangleMeshShape{} }, mesh),
         .ConvexHull => |hulls| {
             // If hulls are empty, generate them from the mesh
             if (hulls.len == 0) {
                 const generated_hulls = try ConvexHullShape.generateFromMesh(allocator, mesh);
-                return ColliderComponent.init(.{ .ConvexHull = generated_hulls });
+                return ColliderComponent.init(allocator, .{ .ConvexHull = generated_hulls }, mesh);
             } else {
                 // Use provided hulls
-                return ColliderComponent.init(.{ .ConvexHull = hulls });
+                return ColliderComponent.init(allocator, .{ .ConvexHull = hulls }, mesh);
             }
         },
         .Box => {
             const bounds = calculateMeshBounds(mesh);
-            return ColliderComponent.init(.{ .Box = BoxShape{ .half_extents = bounds.half_extents } });
+            return ColliderComponent.init(allocator, .{ .Box = BoxShape{ .half_extents = bounds.half_extents } }, mesh);
         },
         .Sphere => {
             const bounds = calculateMeshBounds(mesh);
             const radius = (bounds.half_extents[0] + bounds.half_extents[1] + bounds.half_extents[2]) / 3.0;
-            return ColliderComponent.init(.{ .Sphere = SphereShape{ .radius = radius } });
+            return ColliderComponent.init(allocator, .{ .Sphere = SphereShape{ .radius = radius } }, mesh);
         },
         .Capsule => {
             const bounds = calculateMeshBounds(mesh);
             const radius = (bounds.dimensions[0] + bounds.dimensions[2]) / 4.0;
             const height = bounds.dimensions[1];
-            return ColliderComponent.init(.{ .Capsule = CapsuleShape{ .radius = radius, .height = height } });
+            return ColliderComponent.init(allocator, .{ .Capsule = CapsuleShape{ .radius = radius, .height = height } }, mesh);
         },
         .Cylinder => {
             const bounds = calculateMeshBounds(mesh);
-            return ColliderComponent.init(.{ .Cylinder = CylinderShape{ .half_extents = bounds.half_extents } });
+            return ColliderComponent.init(allocator, .{ .Cylinder = CylinderShape{ .half_extents = bounds.half_extents } }, mesh);
         },
         .Cone => {
             const bounds = calculateMeshBounds(mesh);
             const radius = @max(bounds.dimensions[0], bounds.dimensions[2]) / 2.0;
             const height = bounds.dimensions[1];
-            return ColliderComponent.init(.{ .Cone = ConeShape{ .radius = radius, .height = height } });
+            return ColliderComponent.init(allocator, .{ .Cone = ConeShape{ .radius = radius, .height = height } }, mesh);
         },
         .CompoundShape => {
             const bounds = calculateMeshBounds(mesh);
-            return ColliderComponent.init(.{ .Box = BoxShape{ .half_extents = bounds.half_extents } });
+            return ColliderComponent.init(allocator, .{ .Box = BoxShape{ .half_extents = bounds.half_extents } }, mesh);
         },
     }
 }
 
+// Separate RigidBody component for physics dynamics
+pub const RigidBodyComponent = struct {
+    const Self = @This();
+
+    entity_id: Core.EntityID = undefined,
+    bullet_body: ?bullet.CbtBodyHandle = null,
+    bullet_shape: bullet.CbtShapeHandle,
+    mass: f32 = 1.0,
+    initial_position: [3]f32 = .{ 0.0, 0.0, 0.0 },
+    initial_rotation: [4]f32 = .{ 0.0, 0.0, 0.0, 1.0 }, // quaternion (x, y, z, w)
+
+    pub fn init(mass: f32, shape: bullet.CbtShapeHandle) Self {
+        return .{ .mass = mass, .bullet_shape = shape };
+    }
+
+    pub fn setInitialTransform(self: *Self, position: [3]f32, rotation: [4]f32) void {
+        self.initial_position = position;
+        self.initial_rotation = rotation;
+    }
+
+    pub fn attach(self: *Self, ecs: *ECSManager, eid: Core.EntityID) !void {
+        self.entity_id = eid;
+
+        // Create Bullet rigid body
+        self.bullet_body = bullet.cbtBodyAllocate();
+        if (self.bullet_body == null) return error.BodyAllocationFailed;
+
+        // Get transform for initial position/rotation
+        if (ecs.transform_components.get(eid)) |transform| {
+            const mat4 = transform.local_transform;
+            const right = mat4.get_right();
+            const up = mat4.get_up();
+            const forward = mat4.get_forward();
+            const position = mat4.get_position();
+
+            // Convert to Bullet format (4x3 matrix: 3 basis vectors + position)
+            var transform_matrix = [4][3]f32{
+                [3]f32{ right.x(), right.y(), right.z() }, // Right vector
+                [3]f32{ up.x(), up.y(), up.z() }, // Up vector
+                [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
+                [3]f32{ position.x(), position.y(), position.z() }, // Position
+            };
+
+            // Create body with the provided shape
+            bullet.cbtBodyCreate(self.bullet_body.?, self.mass, &transform_matrix, self.bullet_shape);
+
+            // Set physics properties
+            bullet.cbtBodySetDamping(self.bullet_body.?, 0.05, 0.05);
+
+            // For dynamic bodies (mass > 0), disable automatic deactivation
+            if (self.mass > 0.0) {
+                bullet.cbtBodySetActivationState(self.bullet_body.?, bullet.CBT_DISABLE_DEACTIVATION);
+                std.debug.print("Disabled deactivation for dynamic body eid {d}\n", .{eid.id});
+            }
+
+            // Add to physics world
+            if (ecs.collision_system.bullet_world) |world| {
+                bullet.cbtWorldAddBody(world, self.bullet_body.?);
+            }
+        }
+
+        try ecs.rigid_body_components.add(eid, self.*);
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (self.bullet_body) |body| {
+            bullet.cbtBodyDeallocate(body);
+            self.bullet_body = null;
+        }
+    }
+};
+
+// Collider component now focuses only on shape and collision properties
 pub const ColliderComponent = struct {
     const Self = @This();
 
-    // Common properties
+    // Shape and collision properties only (no physics)
     entity_id: Core.EntityID = undefined,
     shape: ColliderShape,
     bullet_shape: ?bullet.CbtShapeHandle = null,
-    bullet_body: ?bullet.CbtBodyHandle = null,
 
     // Collision properties
     friction: f32 = 0.5,
@@ -449,18 +516,139 @@ pub const ColliderComponent = struct {
     // Debug visualization
     debug_entity_id: ?Core.EntityID = null,
 
-    pub fn init(shape: ColliderShape) Self {
-        return .{
+    // For simple shapes (box, sphere, triangle mesh, etc.)
+    pub fn init(allocator: std.mem.Allocator, shape: ColliderShape, mesh: ?*Mesh) !Self {
+        var collider = Self{
             .shape = shape,
         };
+
+        collider.bullet_shape = bullet.cbtShapeAllocate(shape.getBulletShapeType());
+        if (collider.bullet_shape == null) return error.ShapeAllocationFailed;
+
+        try shape.createBulletShape(allocator, collider.bullet_shape.?, mesh);
+
+        return collider;
+    }
+
+    // For compound shapes from GLTF models
+    pub fn initFromModel(
+        allocator: std.mem.Allocator,
+        model_resource: *GLTF.ModelResource,
+        base_shape: ColliderShape,
+        resource_manager: *ResourceManager,
+    ) !Self {
+        // Count meshes to allocate compound shape properly
+        var mesh_count: u32 = 0;
+        for (model_resource.entities) |node| {
+            if (node.mesh_name != null) mesh_count += 1;
+        }
+
+        if (mesh_count == 0) return error.NoMeshesToCreateColliderFrom;
+
+        // Create a compound shape collider
+        var compound_collider = Self{
+            .shape = .{ .CompoundShape = CompoundShape{} },
+        };
+
+        // Allocate compound shape
+        compound_collider.bullet_shape = bullet.cbtShapeAllocate(bullet.CBT_SHAPE_TYPE_COMPOUND);
+        if (compound_collider.bullet_shape == null) return error.ShapeAllocationFailed;
+
+        bullet.cbtShapeCompoundCreate(
+            compound_collider.bullet_shape.?,
+            true,
+            @intCast(mesh_count),
+        );
+
+        // Add each mesh as a child shape with its relative transform
+        for (model_resource.entities) |node| {
+            if (node.mesh_name) |mesh_name| {
+                if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
+                    // Create child shape based on the base collider shape type
+                    const child_shape = bullet.cbtShapeAllocate(switch (base_shape) {
+                        .Box => bullet.CBT_SHAPE_TYPE_BOX,
+                        .Sphere => bullet.CBT_SHAPE_TYPE_SPHERE,
+                        .Capsule => bullet.CBT_SHAPE_TYPE_CAPSULE,
+                        .Cylinder => bullet.CBT_SHAPE_TYPE_CYLINDER,
+                        .Cone => bullet.CBT_SHAPE_TYPE_CONE,
+                        .TriangleMesh => bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH,
+                        .ConvexHull => bullet.CBT_SHAPE_TYPE_COMPOUND,
+                        .CompoundShape => bullet.CBT_SHAPE_TYPE_COMPOUND,
+                    });
+
+                    if (child_shape == null) continue;
+
+                    // Create shape from mesh using existing createColliderFromMesh logic
+                    const mesh_collider = try createColliderFromMesh(allocator, mesh_res.mesh, base_shape);
+
+                    // Use the unified createBulletShape method that all shapes support
+                    try mesh_collider.shape.createBulletShape(allocator, child_shape, mesh_res.mesh);
+
+                    // Extract transform from GLTF node data
+                    var child_transform: [4][3]f32 = undefined;
+
+                    if (node.local_transformation) |local_transformation| {
+                        // Use the full transformation matrix if available
+                        const mat4 = local_transformation;
+                        const right = mat4.get_right();
+                        const up = mat4.get_up();
+                        const forward = mat4.get_forward();
+                        const position = mat4.get_position();
+
+                        child_transform = [4][3]f32{
+                            [3]f32{ right.x(), right.y(), right.z() }, // Right vector
+                            [3]f32{ up.x(), up.y(), up.z() }, // Up vector
+                            [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
+                            [3]f32{ position.x(), position.y(), position.z() }, // Position
+                        };
+                    } else {
+                        // Build transform from individual TRS components
+                        var transform_matrix = Mat4.identity();
+
+                        // Apply translation
+                        if (node.translation) |t| {
+                            transform_matrix = transform_matrix.translate(t[0], t[1], t[2]);
+                        }
+
+                        // Apply rotation
+                        if (node.rotation) |r| {
+                            const quat = Quaternion.init(r[0], r[1], r[2], r[3]);
+                            transform_matrix = transform_matrix.multiply(Mat4.from_quaternion(quat));
+                        }
+
+                        // Apply scale
+                        if (node.scale) |s| {
+                            transform_matrix = transform_matrix.scale(s[0], s[1], s[2]);
+                        }
+
+                        // Extract vectors from the built matrix
+                        const right = transform_matrix.get_right();
+                        const up = transform_matrix.get_up();
+                        const forward = transform_matrix.get_forward();
+                        const position = transform_matrix.get_position();
+
+                        child_transform = [4][3]f32{
+                            [3]f32{ right.x(), right.y(), right.z() }, // Right vector
+                            [3]f32{ up.x(), up.y(), up.z() }, // Up vector
+                            [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
+                            [3]f32{ position.x(), position.y(), position.z() }, // Position
+                        };
+                    }
+
+                    // Add child shape to compound with its local transform
+                    bullet.cbtShapeCompoundAddChild(
+                        compound_collider.bullet_shape.?,
+                        &child_transform,
+                        child_shape,
+                    );
+                }
+            }
+        }
+
+        return compound_collider;
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-        if (self.bullet_body) |body| {
-            bullet.cbtBodyDeallocate(body);
-            self.bullet_body = null;
-        }
-
         if (self.bullet_shape) |shape| {
             bullet.cbtShapeDeallocate(shape);
             self.bullet_shape = null;
@@ -491,7 +679,7 @@ pub const CollisionSystem = struct {
     world: *Core.World,
     allocator: std.mem.Allocator,
     transform_components: *SparseSet(TransformComponent),
-    physics_components: *SparseSet(PhysicsComponent),
+    rigid_body_components: *SparseSet(RigidBodyComponent),
     collider_components: *SparseSet(ColliderComponent),
 
     // Bullet physics world
@@ -501,14 +689,14 @@ pub const CollisionSystem = struct {
         allocator: std.mem.Allocator,
         world: *Core.World,
         transform_components: *SparseSet(TransformComponent),
-        physics_components: *SparseSet(PhysicsComponent),
+        rigid_body_components: *SparseSet(RigidBodyComponent),
         collider_components: *SparseSet(ColliderComponent),
     ) !Self {
         var system = Self{
             .world = world,
             .allocator = allocator,
             .transform_components = transform_components,
-            .physics_components = physics_components,
+            .rigid_body_components = rigid_body_components,
             .collider_components = collider_components,
         };
 
@@ -536,47 +724,38 @@ pub const CollisionSystem = struct {
         // Initialize task scheduler for multi-threading (optional)
         bullet.cbtTaskSchedInit();
 
-        // Create the dynamic world
         self.bullet_world = bullet.cbtWorldCreate();
         if (self.bullet_world == null) return error.BulletInitFailed;
 
-        // Set default gravity
         var gravity = [3]f32{ 0.0, -9.81, 0.0 };
         bullet.cbtWorldSetGravity(self.bullet_world.?, &gravity);
     }
 
     pub fn update(self: *Self, dt: f32) !void {
-        // Step the physics simulation
+        // Step the physics simulation TODO: Separate this system into own thread with a fixed time step
         if (self.bullet_world) |world| {
             _ = bullet.cbtWorldStepSimulation(world, dt, 10, 1.0 / 60.0);
         }
 
-        // Update transforms of all entities based on the physics simulation
-        var it = self.collider_components.iterator();
+        var it = self.rigid_body_components.iterator();
         while (it.next()) |entry| {
             const entity_id = entry.entity_id;
-            const collider = entry.component;
+            const rigid_body = entry.component;
 
-            if (collider.bullet_body) |body| {
-                // Skip if not a dynamic body
-
-                // std.debug.print("Before Collider for {d}\n", .{entity_id.id});
+            if (rigid_body.bullet_body) |body| {
                 if (bullet.cbtBodyIsStaticOrKinematic(body)) continue;
 
                 if (self.transform_components.get(entity_id)) |transform| {
-                    // std.debug.print("After Collider for {d}\n", .{entity_id.id});
                     // Get the world transform from Bullet
                     var transform_matrix: [4][3]f32 = undefined;
                     bullet.cbtBodyGetCenterOfMassTransform(body, &transform_matrix);
 
-                    // Update position from the first column of the transform matrix
                     transform.position = .{
                         transform_matrix[3][0],
                         transform_matrix[3][1],
                         transform_matrix[3][2],
                     };
 
-                    // Extract rotation from the transform matrix
                     const basis = Mat4.from_array(
                         [16]f32{
                             transform_matrix[0][0], transform_matrix[0][1], transform_matrix[0][2], 0.0,
@@ -590,14 +769,14 @@ pub const CollisionSystem = struct {
                     transform.rotation = trs.rotation;
 
                     // Simple ground collision - prevent falling below Y = 0
-                    if (transform.position[1] < 0.0) {
-                        transform.position[1] = 0.0;
-                        // Reset vertical velocity in Bullet to stop bouncing
-                        var velocity: [3]f32 = undefined;
-                        bullet.cbtBodyGetLinearVelocity(body, &velocity);
-                        velocity[1] = 0.0;
-                        bullet.cbtBodySetLinearVelocity(body, &velocity);
-                    }
+                    // if (transform.position[1] < 0.0) {
+                    //     transform.position[1] = 0.0;
+                    //     // Reset vertical velocity in Bullet to stop bouncing
+                    //     var velocity: [3]f32 = undefined;
+                    //     bullet.cbtBodyGetLinearVelocity(body, &velocity);
+                    //     velocity[1] = 0.0;
+                    //     bullet.cbtBodySetLinearVelocity(body, &velocity);
+                    // }
 
                     transform.updateLocalTransform();
                 }
@@ -605,94 +784,99 @@ pub const CollisionSystem = struct {
         }
     }
 
-    pub fn createBulletShape(self: *Self, collider: *ColliderComponent, mesh: ?*Mesh) !void {
-        if (collider.bullet_shape != null) return; // Already created
+    // Reset all dynamic bodies to their initial state
+    pub fn resetAllDynamicBodies(self: *Self) void {
+        std.debug.print("Starting resetAllDynamicBodies...\n", .{});
+        var it = self.rigid_body_components.iterator();
+        var reset_count: u32 = 0;
+        
+        while (it.next()) |entry| {
+            const entity_id = entry.entity_id;
+            const rigid_body = entry.component;
+            
+            std.debug.print("Checking entity {d}: mass={d:.2}, has_body={any}\n", .{ entity_id.id, rigid_body.mass, rigid_body.bullet_body != null });
+            
+            // Only reset dynamic bodies (mass > 0)
+            if (rigid_body.mass > 0.0 and rigid_body.bullet_body != null) {
+                const body = rigid_body.bullet_body.?;
+                
+                std.debug.print("Resetting entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n", .{ entity_id.id, rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2] });
+                
+                // Create identity rotation matrix with initial position
+                var transform_matrix = [4][3]f32{
+                    [3]f32{ 1.0, 0.0, 0.0 }, // Right vector (identity)
+                    [3]f32{ 0.0, 1.0, 0.0 }, // Up vector (identity)
+                    [3]f32{ 0.0, 0.0, 1.0 }, // Forward vector (identity)
+                    [3]f32{ rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2] }, // Position
+                };
 
-        // Allocate the shape using the unified shape type getter
-        collider.bullet_shape = bullet.cbtShapeAllocate(collider.shape.getBulletShapeType());
-        if (collider.bullet_shape == null) return error.ShapeAllocationFailed;
-
-        // Create the shape using the unified shape creation method
-        try collider.shape.createBulletShape(self.allocator, collider.bullet_shape.?, mesh);
-    }
-
-    // TODO: Refactor this function to use Math helpers to get basis vectors / positions and make sure behavior is expected
-    pub fn createRigidBody(self: *Self, collider: *ColliderComponent, transform: *TransformComponent, physics: *PhysicsComponent) !void {
-        if (collider.bullet_shape == null) {
-            try self.createBulletShape(collider, null);
+                // Reset physics body transform
+                bullet.cbtBodySetCenterOfMassTransform(body, &transform_matrix);
+                
+                // Reset velocities
+                const zero_vel = [3]f32{ 0.0, 0.0, 0.0 };
+                bullet.cbtBodySetLinearVelocity(body, &zero_vel);
+                bullet.cbtBodySetAngularVelocity(body, &zero_vel);
+                
+                // Force activation to ensure physics updates
+                bullet.cbtBodySetActivationState(body, bullet.CBT_ACTIVE_TAG);
+                
+                // Also update the transform component to match
+                if (self.transform_components.get(entity_id)) |transform| {
+                    transform.setPosition(rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2]);
+                    // Reset rotation to identity quaternion
+                    const identity_quat = Math.Quaternion.identity();
+                    transform.setRotation(identity_quat);
+                }
+                
+                reset_count += 1;
+                std.debug.print("Successfully reset entity {d} to initial state\n", .{entity_id.id});
+            }
         }
-
-        if (collider.bullet_body != null) return; // Already created
-
-        // Allocate a rigid body
-        collider.bullet_body = bullet.cbtBodyAllocate();
-        if (collider.bullet_body == null) return error.BodyAllocationFailed;
-
-        // Calculate local inertia
-        var local_inertia = [3]f32{ 0.0, 0.0, 0.0 };
-        if (physics.body_type == .Dynamic) {
-            bullet.cbtShapeCalculateLocalInertia(collider.bullet_shape.?, physics.mass, &local_inertia);
-        }
-
-        // Prepare transform matrix from our TransformComponent
-        var transform_matrix: [4][3]f32 = undefined;
-        const mat4 = transform.world_transform;
-
-        // Convert our Mat4 to the format expected by Bullet (column-major 4x3)
-        transform_matrix[0][0] = mat4.base.data[0 * 4 + 0];
-        transform_matrix[0][1] = mat4.base.data[0 * 4 + 1];
-        transform_matrix[0][2] = mat4.base.data[0 * 4 + 2];
-
-        transform_matrix[1][0] = mat4.base.data[1 * 4 + 0];
-        transform_matrix[1][1] = mat4.base.data[1 * 4 + 1];
-        transform_matrix[1][2] = mat4.base.data[1 * 4 + 2];
-
-        transform_matrix[2][0] = mat4.base.data[2 * 4 + 0];
-        transform_matrix[2][1] = mat4.base.data[2 * 4 + 1];
-        transform_matrix[2][2] = mat4.base.data[2 * 4 + 2];
-
-        transform_matrix[3][0] = mat4.base.data[3 * 4 + 0]; // X position
-        transform_matrix[3][1] = mat4.base.data[3 * 4 + 1]; // Y position
-        transform_matrix[3][2] = mat4.base.data[3 * 4 + 2]; // Z position
-
-        // Create the rigid body with the shape and transform
-        var mass = physics.mass;
-        if (physics.body_type == .Static) mass = 0.0;
-
-        bullet.cbtBodyCreate(collider.bullet_body.?, mass, &transform_matrix, collider.bullet_shape.?);
-
-        // Set collision properties
-        bullet.cbtBodySetRestitution(collider.bullet_body.?, collider.restitution);
-        bullet.cbtBodySetFriction(collider.bullet_body.?, collider.friction);
-        bullet.cbtBodySetRollingFriction(collider.bullet_body.?, collider.rolling_friction);
-
-        // Set physics properties
-        bullet.cbtBodySetDamping(collider.bullet_body.?, 0.05, 0.05); // Linear and angular damping
-
-        // Handle kinematic bodies
-        if (physics.body_type == .Kinematic) {
-            bullet.cbtBodySetActivationState(collider.bullet_body.?, bullet.CBT_DISABLE_DEACTIVATION);
-        }
-
-        // Add the body to the world
-        if (self.bullet_world) |world| {
-            bullet.cbtWorldAddBody(world, collider.bullet_body.?);
-        }
+        
+        std.debug.print("Reset complete! {d} dynamic bodies reset.\n", .{reset_count});
     }
 
     // Apply a central force to an entity
     pub fn applyCentralForce(self: *Self, entity_id: Core.EntityID, force: [3]f32) void {
-        if (self.collider_components.get(entity_id)) |collider| {
-            if (collider.bullet_body) |body| {
+        if (self.rigid_body_components.get(entity_id)) |rigid_body| {
+            if (rigid_body.bullet_body) |body| {
+                std.debug.print("Applying force [{d:.2}, {d:.2}, {d:.2}] to bullet body for eid {d}\n", .{ force[0], force[1], force[2], entity_id.id });
+
                 bullet.cbtBodyApplyCentralForce(body, &force);
+
+                // Debug: Check if body is static/kinematic
+                if (bullet.cbtBodyIsStaticOrKinematic(body)) {
+                    std.debug.print("WARNING: Body for eid {d} is static/kinematic!\n", .{entity_id.id});
+                } else {
+                    // Check if body is active and has reasonable mass
+                    const mass = bullet.cbtBodyGetMass(body);
+                    const is_active = bullet.cbtBodyIsActive(body);
+                    std.debug.print("Body for eid {d}: mass={d:.2}, active={any}\n", .{ entity_id.id, mass, is_active });
+                    
+                    // Force activation if not active
+                    if (!is_active) {
+                        bullet.cbtBodySetActivationState(body, bullet.CBT_ACTIVE_TAG);
+                        std.debug.print("Forced activation of body for eid {d}\n", .{entity_id.id});
+                    }
+                    
+                    // Check current velocity after applying force
+                    var velocity: [3]f32 = undefined;
+                    bullet.cbtBodyGetLinearVelocity(body, &velocity);
+                    std.debug.print("Body velocity after force: [{d:.2}, {d:.2}, {d:.2}]\n", .{ velocity[0], velocity[1], velocity[2] });
+                }
+            } else {
+                std.debug.print("No bullet body found for eid {d}\n", .{entity_id.id});
             }
+        } else {
+            std.debug.print("No rigid body found for eid {d}\n", .{entity_id.id});
         }
     }
 
     // Apply a central impulse to an entity
     pub fn applyCentralImpulse(self: *Self, entity_id: Core.EntityID, impulse: [3]f32) void {
-        if (self.collider_components.get(entity_id)) |collider| {
-            if (collider.bullet_body) |body| {
+        if (self.rigid_body_components.get(entity_id)) |rigid_body| {
+            if (rigid_body.bullet_body) |body| {
                 bullet.cbtBodyApplyCentralImpulse(body, &impulse);
             }
         }
@@ -700,10 +884,30 @@ pub const CollisionSystem = struct {
 
     // Apply a torque to an entity
     pub fn applyTorque(self: *Self, entity_id: Core.EntityID, torque: [3]f32) void {
-        if (self.collider_components.get(entity_id)) |collider| {
-            if (collider.bullet_body) |body| {
+        if (self.rigid_body_components.get(entity_id)) |rigid_body| {
+            if (rigid_body.bullet_body) |body| {
                 bullet.cbtBodyApplyTorque(body, &torque);
             }
+        }
+    }
+
+    // Apply collider properties to a rigid body (collision properties, inertia, etc.)
+    pub fn linkColliderToRigidBody(self: *Self, entity_id: Core.EntityID) !void {
+        const collider = self.collider_components.get(entity_id) orelse return error.NoCollider;
+        const rigid_body = self.rigid_body_components.get(entity_id) orelse return error.NoRigidBody;
+
+        if (rigid_body.bullet_body == null) return error.NoRigidBody;
+
+        // Set collision properties from collider
+        bullet.cbtBodySetRestitution(rigid_body.bullet_body.?, collider.restitution);
+        bullet.cbtBodySetFriction(rigid_body.bullet_body.?, collider.friction);
+        bullet.cbtBodySetRollingFriction(rigid_body.bullet_body.?, collider.rolling_friction);
+
+        // Calculate and set inertia for dynamic bodies
+        if (rigid_body.mass > 0.0) {
+            var local_inertia = [3]f32{ 0.0, 0.0, 0.0 };
+            bullet.cbtShapeCalculateLocalInertia(rigid_body.bullet_shape, rigid_body.mass, &local_inertia);
+            bullet.cbtBodySetMassProps(rigid_body.bullet_body.?, rigid_body.mass, &local_inertia);
         }
     }
 
@@ -749,168 +953,6 @@ pub const CollisionSystem = struct {
         }
 
         return null;
-    }
-
-    // Create collider for an entity (unified function for both mesh-based and non-mesh-based colliders)
-    pub fn createCollider(self: *Self, eid: Core.EntityID, shape: ColliderShape, mesh_name: ?[]const u8) !void {
-        var collider_component: ColliderComponent = undefined;
-        var mesh_data: ?*Mesh = null;
-
-        if (mesh_name) |name| {
-            // Mesh-based collider - get the mesh resource and create collider from it
-            if (self.world.resource_manager.meshes.get(name)) |*mesh_resource| {
-                mesh_data = mesh_resource.mesh;
-                collider_component = try createColliderFromMesh(self.allocator, mesh_resource.mesh, shape);
-            } else {
-                return error.MeshNotFound;
-            }
-        } else {
-            // Non-mesh-based collider - use the shape directly
-            collider_component = ColliderComponent.init(shape);
-        }
-
-        // Create the bullet shape
-        try self.createBulletShape(&collider_component, mesh_data);
-
-        // Configure physics based on the existing physics component
-        if (self.transform_components.get(eid)) |transform| {
-            if (self.physics_components.get(eid)) |physics| {
-                // Physics type and mass are already set by the caller - just create the rigid body
-                try self.createRigidBody(&collider_component, transform, physics);
-            }
-        }
-
-        // Attach the collider to the entity
-        collider_component.entity_id = eid;
-        try self.collider_components.add(eid, collider_component);
-    }
-
-    // Create compound collider from hierarchical model (for GLTF models with multiple meshes)
-    pub fn createCompoundColliderFromModel(
-        self: *Self,
-        root_eid: Core.EntityID,
-        model_resource: *GLTF.ModelResource,
-        entity_map: std.AutoHashMap(usize, Core.EntityID),
-        base_collider_shape: ColliderShape,
-    ) !void {
-        // Count meshes to allocate compound shape properly
-        var mesh_count: u32 = 0;
-        for (model_resource.entities) |node| {
-            if (node.mesh_name != null) mesh_count += 1;
-        }
-
-        if (mesh_count == 0) return; // No meshes to create colliders from
-
-        // Create a compound shape collider
-        var compound_collider = ColliderComponent.init(.{ .CompoundShape = CompoundShape{} });
-
-        // Allocate compound shape
-        compound_collider.bullet_shape = bullet.cbtShapeAllocate(bullet.CBT_SHAPE_TYPE_COMPOUND);
-        if (compound_collider.bullet_shape == null) return error.ShapeAllocationFailed;
-
-        bullet.cbtShapeCompoundCreate(
-            compound_collider.bullet_shape.?,
-            true,
-            @intCast(mesh_count),
-        );
-
-        // Add each mesh as a child shape with its relative transform
-        for (model_resource.entities, 0..) |node, idx| {
-            if (node.mesh_name) |mesh_name| {
-                if (self.world.resource_manager.meshes.get(mesh_name)) |*mesh_res| {
-                    // Create child shape based on the base collider shape type
-                    const child_shape = bullet.cbtShapeAllocate(switch (base_collider_shape) {
-                        .TriangleMesh => bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH,
-                        .ConvexHull => bullet.CBT_SHAPE_TYPE_COMPOUND, // ConvexHull is also compound
-                        else => bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH, // Default to triangle mesh for complex shapes
-                    });
-
-                    if (child_shape == null) continue;
-
-                    // Create the child shape using the base collider shape logic
-                    switch (base_collider_shape) {
-                        .TriangleMesh => {
-                            const triangle_mesh_shape = TriangleMeshShape{};
-                            try triangle_mesh_shape.createBulletShape(self.allocator, child_shape, mesh_res.mesh);
-                        },
-                        .ConvexHull => {
-                            // Generate convex hulls for this specific mesh
-                            const hulls = try ConvexHullShape.generateFromMesh(self.allocator, mesh_res.mesh);
-                            defer {
-                                for (hulls) |hull| {
-                                    self.allocator.free(hull.points);
-                                    self.allocator.free(hull.triangles);
-                                }
-                                self.allocator.free(hulls);
-                            }
-
-                            // Create compound shape from convex hulls
-                            bullet.cbtShapeCompoundCreate(child_shape, true, @intCast(hulls.len));
-                            for (hulls) |hull| {
-                                const hull_child_shape = hull.createBulletShape(self.allocator);
-                                if (hull_child_shape != null) {
-                                    // Add with identity transform
-                                    var identity_transform = [4][3]f32{
-                                        [3]f32{ 1.0, 0.0, 0.0 },
-                                        [3]f32{ 0.0, 1.0, 0.0 },
-                                        [3]f32{ 0.0, 0.0, 1.0 },
-                                        [3]f32{ 0.0, 0.0, 0.0 },
-                                    };
-                                    bullet.cbtShapeCompoundAddChild(
-                                        child_shape,
-                                        &identity_transform,
-                                        hull_child_shape.?,
-                                    );
-                                }
-                            }
-                        },
-                        else => {
-                            // For other shapes, default to triangle mesh
-                            const triangle_mesh_shape = TriangleMeshShape{};
-                            try triangle_mesh_shape.createBulletShape(self.allocator, child_shape, mesh_res.mesh);
-                        },
-                    }
-
-                    // Get the entity's transform relative to root using Math library helpers
-                    if (entity_map.get(idx)) |entity_id| {
-                        if (self.transform_components.get(entity_id)) |transform| {
-                            // Use Math library helper functions to extract basis vectors
-                            const mat4 = transform.local_transform;
-                            const right = mat4.get_right();
-                            const up = mat4.get_up();
-                            const forward = mat4.get_forward();
-                            const position = mat4.get_position();
-
-                            // Convert to Bullet format (4x3 matrix: 3 basis vectors + position)
-                            var child_transform = [4][3]f32{
-                                [3]f32{ right.x(), right.y(), right.z() }, // Right vector
-                                [3]f32{ up.x(), up.y(), up.z() }, // Up vector
-                                [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
-                                [3]f32{ position.x(), position.y(), position.z() }, // Position
-                            };
-
-                            // Add child shape to compound with its local transform
-                            bullet.cbtShapeCompoundAddChild(
-                                compound_collider.bullet_shape.?,
-                                &child_transform,
-                                child_shape,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        // Create physics body
-        if (self.transform_components.get(root_eid)) |transform| {
-            if (self.physics_components.get(root_eid)) |physics| {
-                try self.createRigidBody(&compound_collider, transform, physics);
-            }
-        }
-
-        // Attach the compound collider to the root entity
-        compound_collider.entity_id = root_eid;
-        try self.collider_components.add(root_eid, compound_collider);
     }
 
     // Create debug visualization for a collider
@@ -985,10 +1027,10 @@ pub const CollisionSystem = struct {
             const collider = entry.component;
 
             if (show_debug and collider.debug_entity_id == null) {
-                // Determine if it's dynamic based on physics component
+                // Determine if it's dynamic based on rigid body component
                 var is_dynamic = false;
-                if (self.physics_components.get(collider_eid)) |physics| {
-                    is_dynamic = physics.body_type == .Dynamic;
+                if (self.rigid_body_components.get(collider_eid)) |rigid_body| {
+                    is_dynamic = rigid_body.mass > 0.0; // Dynamic bodies have mass > 0
                 }
                 try self.createDebugVisualization(ecs_manager, collider_eid, is_dynamic);
             } else if (!show_debug and collider.debug_entity_id != null) {
