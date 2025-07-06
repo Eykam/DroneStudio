@@ -36,6 +36,7 @@
 #define CBT_SHAPE_TYPE_CYLINDER 13
 #define CBT_SHAPE_TYPE_COMPOUND 31
 #define CBT_SHAPE_TYPE_TRIANGLE_MESH 21
+#define CBT_SHAPE_TYPE_CONVEX_HULL 4
 
 // cbtConGetType, cbtConAllocate
 #define CBT_CONSTRAINT_TYPE_POINT2POINT 3
@@ -258,6 +259,8 @@ void cbtShapeConeCreate(CbtShapeHandle shape_handle, float radius, float height,
 float cbtShapeConeGetRadius(CbtShapeHandle shape_handle);
 float cbtShapeConeGetHeight(CbtShapeHandle shape_handle);
 int cbtShapeConeGetUpAxis(CbtShapeHandle shape_handle);
+
+void cbtShapeConvexHullCreate(CbtShapeHandle shape_handle, const float* points, int num_points, int stride);
 
 void cbtShapeCompoundCreate(
     CbtShapeHandle shape_handle,

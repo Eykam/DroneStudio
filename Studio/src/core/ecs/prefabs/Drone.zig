@@ -45,8 +45,8 @@ inline fn move(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body
 // Physics-aware rotation: use torque if physics is available, otherwise direct transform
 inline fn rotate(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, axis: Vec3, deg: f32, dt: f32) void {
     if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
-        // Use physics torque for dynamic bodies
-        const torque = axis.scale(Math.radians(deg) * rigid_body.?.mass * 25.0); // Scale by mass and convert to radians
+        // Use physics torque for dynamic bodies - increased multiplier to match mouse sensitivity
+        const torque = axis.scale(Math.radians(deg) * rigid_body.?.mass * 500.0); // Scale by mass and convert to radians
         std.debug.print("Applying torque to eid {d}: [{d:.2}, {d:.2}, {d:.2}]\n", .{ eid.id, torque.data[0], torque.data[1], torque.data[2] });
         collision_system.?.applyTorque(eid, torque.data);
     } else {
@@ -65,10 +65,10 @@ fn down(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Col
     move(eid, tf, rigid_body, collision_system, tf.world_transform.get_up().scale(-1), Defaults.thrust, dt);
 }
 fn yawLeft(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    rotate(eid, tf, rigid_body, collision_system, Vec3.init(0, 1, 0), -Defaults.yawRate, dt);
+    rotate(eid, tf, rigid_body, collision_system, tf.world_transform.get_up(), -Defaults.yawRate, dt);
 }
 fn yawRight(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    rotate(eid, tf, rigid_body, collision_system, Vec3.init(0, 1, 0), Defaults.yawRate, dt);
+    rotate(eid, tf, rigid_body, collision_system, tf.world_transform.get_up(), Defaults.yawRate, dt);
 }
 
 /// Mouse‑look (pitch / roll) ----------------------------------------------
@@ -152,17 +152,17 @@ pub fn spawn(
     var entities = try ecs.createEntitiesFromModel(drone_body_resource);
     const drone_body_entity = entities.root_entity;
 
-    // Create compound collider from model
+    // Create convex hull collider from model (proper for dynamic bodies)
     const collider = try Collisions.ColliderComponent.initFromModel(
         alloc,
         drone_body_resource,
-        .{ .TriangleMesh = .{} },
+        .{ .ConvexHull = &[_]Collisions.ConvexHullShape{} },
         ecs.world.resource_manager,
     );
 
     // Create physics body with the collider's shape
     var rigid_body = Collisions.RigidBodyComponent.init(1.0, collider.bullet_shape.?);
-    
+
     // Set initial transform for reset functionality
     rigid_body.setInitialTransform(.{ 0, 10, 0 }, .{ 0, 0, 0, 1 });
 
@@ -204,8 +204,7 @@ pub fn spawn(
     // No need for physics target in new architecture - physics is on the same entity as controller
     const root_eid = try ecs.spawn(.{ root_tf, root_ctrl, collider, rigid_body });
 
-    // Link collider to physics body
-    try ecs.collision_system.linkColliderToRigidBody(root_eid);
+    // Physics body creation now handles collision properties automatically in threaded physics
 
     // Clean up the entity map since we no longer need it
     entities.entity_map.deinit();

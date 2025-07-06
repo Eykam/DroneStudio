@@ -167,6 +167,7 @@ pub fn deinit(self: *Self) void {
     self.controller_components.deinit();
 
     // Deinit systems
+    self.collision_system.deinit();
     self.shared_mem_system.deinit();
 
     // Deinit world and resource manager

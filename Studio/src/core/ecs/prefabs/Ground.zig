@@ -62,9 +62,9 @@ pub fn spawn(
     
     try renderer.setMaterial(allocator, material_name_owned);
 
-    // Create physics collider (box shape for ground plane)
+    // Create physics collider (box shape for ground plane) - made thicker to prevent tunneling
     const half_size = config.size / 2.0;
-    const collider = try Collisions.ColliderComponent.init(allocator, .{ .Box = .{ .half_extents = .{ half_size, 0.1, half_size } } }, null);
+    const collider = try Collisions.ColliderComponent.init(allocator, .{ .Box = .{ .half_extents = .{ half_size, 1.0, half_size } } }, null);
 
     // Create static rigid body (mass = 0)
     const rigid_body = Collisions.RigidBodyComponent.init(0.0, collider.bullet_shape.?);
@@ -72,8 +72,7 @@ pub fn spawn(
     // Spawn entity with all components
     const ground_entity = try ecs.spawn(.{ transform, renderer, collider, rigid_body });
 
-    // Link collider to rigid body for physics
-    try ecs.collision_system.linkColliderToRigidBody(ground_entity);
+    // Physics body creation now handles collision properties automatically in threaded physics
 
     std.debug.print("Created ground plane: size={d}, entity={d}\n", .{ config.size, ground_entity.id });
 

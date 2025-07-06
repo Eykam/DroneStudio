@@ -46,8 +46,10 @@ const CameraMetadataOverlay = struct {
 
         if (ctx.ecs.camera_system.active_camera_eid) |camera_eid| {
             if (ctx.ecs.transform_components.get(camera_eid)) |transform| {
-                const pos = transform.position;
-                const euler_rad = transform.rotation.to_euler();
+                const pos = transform.world_transform.get_position();
+                const trs = transform.world_transform.decomposeTRS();
+                const euler_rad = trs.rotation.to_euler();
+
                 const roll = Math.degrees(euler_rad[2]);
                 const pitch = Math.degrees(euler_rad[0]);
                 const yaw = Math.degrees(euler_rad[1]);
@@ -75,7 +77,7 @@ const CameraMetadataOverlay = struct {
 
                 if (imgui.igBegin("##CameraOverlay", &self.visible, overlay_flags)) {
                     imgui.igTextColored(.{ .x = 0.9, .y = 0.9, .z = 0.9, .w = 1.0 }, "Camera Position:");
-                    imgui.igText("X: %.2f  Y: %.2f  Z: %.2f", pos[0], pos[1], pos[2]);
+                    imgui.igText("X: %.2f  Y: %.2f  Z: %.2f", pos.x(), pos.y(), pos.z());
 
                     imgui.igSeparator();
 
@@ -309,7 +311,7 @@ pub const RootWindow = struct {
                         self.show_collision_debug = old_state; // Revert on error
                     };
                 }
-                
+
                 if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
                     imgui.igSetTooltip("Show wireframe boxes around colliders.\nGreen = Dynamic, Blue = Static");
                 }

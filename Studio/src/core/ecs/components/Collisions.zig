@@ -10,6 +10,7 @@ const Physics = @import("../components/Physics.zig");
 const Mesh = @import("../../Mesh.zig");
 const ResourceManager = @import("../ResourceManager.zig");
 const Math = @import("../../Math.zig");
+const PhysicsThread = @import("PhysicsThread.zig");
 
 const TransformComponent = Transform.TransformComponent;
 const PhysicsComponent = Physics.PhysicsComponent;
@@ -69,6 +70,7 @@ pub const ConvexHullShape = struct {
     n_points: u32,
     n_triangles: u32,
 
+    // TODO: Create caching mechanism for this. Possibly using the resource manager
     // Generate convex hulls from mesh using V-HACD
     pub fn generateFromMesh(allocator: std.mem.Allocator, mesh: *Mesh) ![]ConvexHullShape {
         // Create V-HACD instance
@@ -78,13 +80,13 @@ pub const ConvexHullShape = struct {
         }
         defer vhacd.vhacd_release(vhacd_handle);
 
-        // Set V-HACD parameters for maximum accuracy
-        vhacd.vhacd_set_resolution(vhacd_handle, 1000000); // Increased from 100k to 1M for much higher detail
-        vhacd.vhacd_set_max_convex_hulls(vhacd_handle, 512); // Allow more hulls for complex geometry
-        vhacd.vhacd_set_max_num_vertices_per_ch(vhacd_handle, 128); // More vertices per hull for better approximation
-        vhacd.vhacd_set_minimum_volume_percent_error_allowed(vhacd_handle, 0.01); // Very low error tolerance (1%)
-        vhacd.vhacd_set_max_recursion_depth(vhacd_handle, 20); // Deeper recursion for finer detail
-        vhacd.vhacd_set_shrink_wrap(vhacd_handle, 1); // Enable shrink wrap for tighter fit
+        // Set V-HACD parameters optimized for speed/accuracy balance
+        vhacd.vhacd_set_resolution(vhacd_handle, 100000); // Balanced resolution (100k)
+        vhacd.vhacd_set_max_convex_hulls(vhacd_handle, 32); // Reasonable hull count for performance
+        vhacd.vhacd_set_max_num_vertices_per_ch(vhacd_handle, 64); // Balanced vertex count per hull
+        vhacd.vhacd_set_minimum_volume_percent_error_allowed(vhacd_handle, 1.0); // 1% error tolerance (reasonable)
+        vhacd.vhacd_set_max_recursion_depth(vhacd_handle, 10); // Moderate recursion depth
+        vhacd.vhacd_set_shrink_wrap(vhacd_handle, 1); // Keep shrink wrap for better fit
         vhacd.vhacd_set_fill_mode(vhacd_handle, vhacd.VHACD_FILL_FLOOD_FILL);
 
         // Convert mesh vertices to float array for V-HACD
@@ -178,41 +180,20 @@ pub const ConvexHullShape = struct {
     }
 
     pub fn createBulletShape(hull: ConvexHullShape, allocator: std.mem.Allocator) ?bullet.CbtShapeHandle {
-        const child_shape = bullet.cbtShapeAllocate(bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH);
+        
+        const child_shape = bullet.cbtShapeAllocate(bullet.CBT_SHAPE_TYPE_CONVEX_HULL);
         if (child_shape == null) return null;
 
-        // Create a mesh structure from hull data
-        var hull_vertices = allocator.alloc(Mesh.Vertex, hull.n_points) catch return null;
-        defer allocator.free(hull_vertices);
-
-        for (0..hull.n_points) |i| {
-            hull_vertices[i] = Mesh.Vertex{
-                .position = [3]f32{
-                    @floatCast(hull.points[i * 3 + 0]),
-                    @floatCast(hull.points[i * 3 + 1]),
-                    @floatCast(hull.points[i * 3 + 2]),
-                },
-                .color = [3]f32{ 1.0, 1.0, 1.0 },
-                .texture = null,
-                .normal = null,
-                .tangent = null,
-                .bitangent = null,
-            };
+        // Convert points from f64 to f32 for Bullet
+        var points_f32 = allocator.alloc(f32, hull.n_points * 3) catch return null;
+        defer allocator.free(points_f32);
+        
+        for (0..hull.n_points * 3) |i| {
+            points_f32[i] = @floatCast(hull.points[i]);
         }
 
-        const triangle_stride = @sizeOf(u32) * 3;
-        const vertex_stride = @sizeOf(Mesh.Vertex);
-        bullet.cbtShapeTriMeshCreateBegin(child_shape);
-        bullet.cbtShapeTriMeshAddIndexVertexArray(
-            child_shape,
-            @intCast(hull.n_triangles),
-            hull.triangles.ptr,
-            triangle_stride,
-            @intCast(hull.n_points),
-            hull_vertices.ptr,
-            vertex_stride,
-        );
-        bullet.cbtShapeTriMeshCreateEnd(child_shape);
+        // Create convex hull shape using Bullet's convex hull API
+        bullet.cbtShapeConvexHullCreate(child_shape, points_f32.ptr, @intCast(hull.n_points), @sizeOf(f32) * 3);
 
         return child_shape;
     }
@@ -448,42 +429,52 @@ pub const RigidBodyComponent = struct {
     pub fn attach(self: *Self, ecs: *ECSManager, eid: Core.EntityID) !void {
         self.entity_id = eid;
 
-        // Create Bullet rigid body
-        self.bullet_body = bullet.cbtBodyAllocate();
-        if (self.bullet_body == null) return error.BodyAllocationFailed;
+        // Send command to physics thread to create body instead of creating in main thread
+        if (ecs.collision_system.physics_thread) |physics| {
+            // Get initial transform from ECS
+            var initial_pos = self.initial_position;
+            var initial_rot = self.initial_rotation;
 
-        // Get transform for initial position/rotation
-        if (ecs.transform_components.get(eid)) |transform| {
-            const mat4 = transform.local_transform;
-            const right = mat4.get_right();
-            const up = mat4.get_up();
-            const forward = mat4.get_forward();
-            const position = mat4.get_position();
-
-            // Convert to Bullet format (4x3 matrix: 3 basis vectors + position)
-            var transform_matrix = [4][3]f32{
-                [3]f32{ right.x(), right.y(), right.z() }, // Right vector
-                [3]f32{ up.x(), up.y(), up.z() }, // Up vector
-                [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
-                [3]f32{ position.x(), position.y(), position.z() }, // Position
-            };
-
-            // Create body with the provided shape
-            bullet.cbtBodyCreate(self.bullet_body.?, self.mass, &transform_matrix, self.bullet_shape);
-
-            // Set physics properties
-            bullet.cbtBodySetDamping(self.bullet_body.?, 0.05, 0.05);
-
-            // For dynamic bodies (mass > 0), disable automatic deactivation
-            if (self.mass > 0.0) {
-                bullet.cbtBodySetActivationState(self.bullet_body.?, bullet.CBT_DISABLE_DEACTIVATION);
-                std.debug.print("Disabled deactivation for dynamic body eid {d}\n", .{eid.id});
+            if (ecs.transform_components.get(eid)) |transform| {
+                initial_pos = transform.position;
+                // Convert rotation to quaternion array
+                initial_rot = .{ transform.rotation.x(), transform.rotation.y(), transform.rotation.z(), transform.rotation.w() };
             }
 
-            // Add to physics world
-            if (ecs.collision_system.bullet_world) |world| {
-                bullet.cbtWorldAddBody(world, self.bullet_body.?);
+            // Get collision properties from collider component (if it exists)
+            var restitution: f32 = 0.5;
+            var friction: f32 = 0.5;
+            var rolling_friction: f32 = 0.1;
+
+            if (ecs.collision_system.collider_components.get(eid)) |collider| {
+                restitution = collider.restitution;
+                friction = collider.friction;
+                rolling_friction = collider.rolling_friction;
             }
+
+            const command = PhysicsThread.PhysicsCommand{ .CreateRigidBody = .{
+                .entity_id = eid,
+                .mass = self.mass,
+                .shape_handle = self.bullet_shape,
+                .initial_pos = initial_pos,
+                .initial_rot = initial_rot,
+                .restitution = restitution,
+                .friction = friction,
+                .rolling_friction = rolling_friction,
+            } };
+
+            const success = physics.sendCommand(command);
+            if (success) {
+                std.debug.print("Sent CreateRigidBody command for entity {d} to physics thread\n", .{eid.id});
+                // Note: bullet_body remains null in main thread - physics thread manages the actual body
+                self.bullet_body = null;
+            } else {
+                std.debug.print("Failed to send CreateRigidBody command for entity {d} - queue full\n", .{eid.id});
+                return error.FailedToCreatePhysicsBody;
+            }
+        } else {
+            std.debug.print("No physics thread available for entity {d}\n", .{eid.id});
+            return error.NoPhysicsThread;
         }
 
         try ecs.rigid_body_components.add(eid, self.*);
@@ -682,8 +673,8 @@ pub const CollisionSystem = struct {
     rigid_body_components: *SparseSet(RigidBodyComponent),
     collider_components: *SparseSet(ColliderComponent),
 
-    // Bullet physics world
-    bullet_world: ?bullet.CbtWorldHandle = null,
+    // Threaded physics system
+    physics_thread: ?*PhysicsThread.ThreadedPhysicsSystem = null,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -692,6 +683,7 @@ pub const CollisionSystem = struct {
         rigid_body_components: *SparseSet(RigidBodyComponent),
         collider_components: *SparseSet(ColliderComponent),
     ) !Self {
+        std.debug.print("COLLISION SYSTEM: CollisionSystem.init() called\n", .{});
         var system = Self{
             .world = world,
             .allocator = allocator,
@@ -700,84 +692,41 @@ pub const CollisionSystem = struct {
             .collider_components = collider_components,
         };
 
-        try system.initBulletPhysics();
+        try system.initThreadedPhysics();
 
         return system;
     }
 
     pub fn deinit(self: *Self) void {
-        // Clean up all bullet physics objects
-        if (self.bullet_world) |world| {
-            // First remove all bodies
-            while (bullet.cbtWorldGetNumBodies(world) > 0) {
-                const body = bullet.cbtWorldGetBody(world, 0);
-                bullet.cbtWorldRemoveBody(world, body);
-            }
-
-            // Then destroy the world
-            bullet.cbtWorldDestroy(world);
-            self.bullet_world = null;
+        // Clean up threaded physics system
+        if (self.physics_thread) |physics| {
+            physics.deinit();
+            self.physics_thread = null;
         }
     }
 
-    fn initBulletPhysics(self: *Self) !void {
-        // Initialize task scheduler for multi-threading (optional)
-        bullet.cbtTaskSchedInit();
-
-        self.bullet_world = bullet.cbtWorldCreate();
-        if (self.bullet_world == null) return error.BulletInitFailed;
-
-        var gravity = [3]f32{ 0.0, -9.81, 0.0 };
-        bullet.cbtWorldSetGravity(self.bullet_world.?, &gravity);
+    fn initThreadedPhysics(self: *Self) !void {
+        // Initialize the threaded physics system
+        self.physics_thread = try PhysicsThread.ThreadedPhysicsSystem.init(self.allocator);
     }
 
     pub fn update(self: *Self, dt: f32) !void {
-        // Step the physics simulation TODO: Separate this system into own thread with a fixed time step
-        if (self.bullet_world) |world| {
-            _ = bullet.cbtWorldStepSimulation(world, dt, 10, 1.0 / 60.0);
-        }
+        _ = dt; // Physics now runs on fixed timestep in separate thread
 
-        var it = self.rigid_body_components.iterator();
-        while (it.next()) |entry| {
-            const entity_id = entry.entity_id;
-            const rigid_body = entry.component;
+        // Get latest physics states from the physics thread
+        if (self.physics_thread) |physics| {
+            const physics_states = physics.getPhysicsStates();
 
-            if (rigid_body.bullet_body) |body| {
-                if (bullet.cbtBodyIsStaticOrKinematic(body)) continue;
+            // Update transform components with latest physics data
+            for (physics_states) |state| {
+                if (self.transform_components.get(state.entity_id)) |transform| {
+                    // Update position and rotation from physics thread
+                    transform.position = state.position;
 
-                if (self.transform_components.get(entity_id)) |transform| {
-                    // Get the world transform from Bullet
-                    var transform_matrix: [4][3]f32 = undefined;
-                    bullet.cbtBodyGetCenterOfMassTransform(body, &transform_matrix);
-
-                    transform.position = .{
-                        transform_matrix[3][0],
-                        transform_matrix[3][1],
-                        transform_matrix[3][2],
-                    };
-
-                    const basis = Mat4.from_array(
-                        [16]f32{
-                            transform_matrix[0][0], transform_matrix[0][1], transform_matrix[0][2], 0.0,
-                            transform_matrix[1][0], transform_matrix[1][1], transform_matrix[1][2], 0.0,
-                            transform_matrix[2][0], transform_matrix[2][1], transform_matrix[2][2], 0.0,
-                            0.0,                    0.0,                    0.0,                    1.0,
-                        },
-                    );
-
-                    const trs = basis.decomposeTRS();
-                    transform.rotation = trs.rotation;
-
-                    // Simple ground collision - prevent falling below Y = 0
-                    // if (transform.position[1] < 0.0) {
-                    //     transform.position[1] = 0.0;
-                    //     // Reset vertical velocity in Bullet to stop bouncing
-                    //     var velocity: [3]f32 = undefined;
-                    //     bullet.cbtBodyGetLinearVelocity(body, &velocity);
-                    //     velocity[1] = 0.0;
-                    //     bullet.cbtBodySetLinearVelocity(body, &velocity);
-                    // }
-
+                    // Convert quaternion to our rotation representation
+                    // TODO: Implement proper quaternion handling
+                    const quat = Math.Quaternion{ .data = state.rotation };
+                    transform.rotation = quat.normalize();
                     transform.updateLocalTransform();
                 }
             }
@@ -787,129 +736,104 @@ pub const CollisionSystem = struct {
     // Reset all dynamic bodies to their initial state
     pub fn resetAllDynamicBodies(self: *Self) void {
         std.debug.print("Starting resetAllDynamicBodies...\n", .{});
-        var it = self.rigid_body_components.iterator();
-        var reset_count: u32 = 0;
-        
-        while (it.next()) |entry| {
-            const entity_id = entry.entity_id;
-            const rigid_body = entry.component;
-            
-            std.debug.print("Checking entity {d}: mass={d:.2}, has_body={any}\n", .{ entity_id.id, rigid_body.mass, rigid_body.bullet_body != null });
-            
-            // Only reset dynamic bodies (mass > 0)
-            if (rigid_body.mass > 0.0 and rigid_body.bullet_body != null) {
-                const body = rigid_body.bullet_body.?;
-                
-                std.debug.print("Resetting entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n", .{ entity_id.id, rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2] });
-                
-                // Create identity rotation matrix with initial position
-                var transform_matrix = [4][3]f32{
-                    [3]f32{ 1.0, 0.0, 0.0 }, // Right vector (identity)
-                    [3]f32{ 0.0, 1.0, 0.0 }, // Up vector (identity)
-                    [3]f32{ 0.0, 0.0, 1.0 }, // Forward vector (identity)
-                    [3]f32{ rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2] }, // Position
-                };
 
-                // Reset physics body transform
-                bullet.cbtBodySetCenterOfMassTransform(body, &transform_matrix);
-                
-                // Reset velocities
-                const zero_vel = [3]f32{ 0.0, 0.0, 0.0 };
-                bullet.cbtBodySetLinearVelocity(body, &zero_vel);
-                bullet.cbtBodySetAngularVelocity(body, &zero_vel);
-                
-                // Force activation to ensure physics updates
-                bullet.cbtBodySetActivationState(body, bullet.CBT_ACTIVE_TAG);
-                
-                // Also update the transform component to match
-                if (self.transform_components.get(entity_id)) |transform| {
-                    transform.setPosition(rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2]);
-                    // Reset rotation to identity quaternion
-                    const identity_quat = Math.Quaternion.identity();
-                    transform.setRotation(identity_quat);
-                }
-                
-                reset_count += 1;
-                std.debug.print("Successfully reset entity {d} to initial state\n", .{entity_id.id});
-            }
-        }
-        
-        std.debug.print("Reset complete! {d} dynamic bodies reset.\n", .{reset_count});
-    }
+        // In threaded physics, send reset command to physics thread
+        if (self.physics_thread) |physics| {
+            const command = PhysicsThread.PhysicsCommand{ .ResetDynamicBodies = .{} };
+            const success = physics.sendCommand(command);
 
-    // Apply a central force to an entity
-    pub fn applyCentralForce(self: *Self, entity_id: Core.EntityID, force: [3]f32) void {
-        if (self.rigid_body_components.get(entity_id)) |rigid_body| {
-            if (rigid_body.bullet_body) |body| {
-                std.debug.print("Applying force [{d:.2}, {d:.2}, {d:.2}] to bullet body for eid {d}\n", .{ force[0], force[1], force[2], entity_id.id });
+            if (success) {
+                std.debug.print("Sent ResetDynamicBodies command to physics thread\n", .{});
 
-                bullet.cbtBodyApplyCentralForce(body, &force);
+                // Also send SetTransform commands for each dynamic body to reset positions
+                var it = self.rigid_body_components.iterator();
+                var reset_count: u32 = 0;
 
-                // Debug: Check if body is static/kinematic
-                if (bullet.cbtBodyIsStaticOrKinematic(body)) {
-                    std.debug.print("WARNING: Body for eid {d} is static/kinematic!\n", .{entity_id.id});
-                } else {
-                    // Check if body is active and has reasonable mass
-                    const mass = bullet.cbtBodyGetMass(body);
-                    const is_active = bullet.cbtBodyIsActive(body);
-                    std.debug.print("Body for eid {d}: mass={d:.2}, active={any}\n", .{ entity_id.id, mass, is_active });
-                    
-                    // Force activation if not active
-                    if (!is_active) {
-                        bullet.cbtBodySetActivationState(body, bullet.CBT_ACTIVE_TAG);
-                        std.debug.print("Forced activation of body for eid {d}\n", .{entity_id.id});
+                while (it.next()) |entry| {
+                    const entity_id = entry.entity_id;
+                    const rigid_body = entry.component;
+
+                    // Only reset dynamic bodies (mass > 0)
+                    if (rigid_body.mass > 0.0) {
+                        // Send SetTransform command to physics thread
+                        const transform_command = PhysicsThread.PhysicsCommand{ .SetTransform = .{
+                            .entity_id = entity_id,
+                            .position = rigid_body.initial_position,
+                            .rotation = rigid_body.initial_rotation,
+                        } };
+
+                        if (physics.sendCommand(transform_command)) {
+                            // Update the transform component in main thread to match
+                            if (self.transform_components.get(entity_id)) |transform| {
+                                transform.setPosition(rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2]);
+                                // Reset rotation to identity quaternion (should match initial_rotation but using identity for simplicity)
+                                const identity_quat = Math.Quaternion.identity();
+                                transform.setRotation(identity_quat);
+                            }
+
+                            reset_count += 1;
+                            std.debug.print("Reset entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n", .{ entity_id.id, rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2] });
+                        } else {
+                            std.debug.print("Failed to send SetTransform command for entity {d} - queue full\n", .{entity_id.id});
+                        }
                     }
-                    
-                    // Check current velocity after applying force
-                    var velocity: [3]f32 = undefined;
-                    bullet.cbtBodyGetLinearVelocity(body, &velocity);
-                    std.debug.print("Body velocity after force: [{d:.2}, {d:.2}, {d:.2}]\n", .{ velocity[0], velocity[1], velocity[2] });
                 }
+
+                std.debug.print("Reset complete! {d} dynamic bodies reset via physics thread commands.\n", .{reset_count});
             } else {
-                std.debug.print("No bullet body found for eid {d}\n", .{entity_id.id});
+                std.debug.print("Failed to send ResetDynamicBodies command - physics command queue full\n", .{});
             }
         } else {
-            std.debug.print("No rigid body found for eid {d}\n", .{entity_id.id});
+            std.debug.print("No physics thread available for reset operation\n", .{});
         }
     }
 
-    // Apply a central impulse to an entity
+    // Apply a central force to an entity via physics thread
+    pub fn applyCentralForce(self: *Self, entity_id: Core.EntityID, force: [3]f32) void {
+        if (self.physics_thread) |physics| {
+            const command = PhysicsThread.PhysicsCommand{ .ApplyForce = .{ .entity_id = entity_id, .force = force } };
+            const success = physics.sendCommand(command);
+
+            if (success) {
+                std.debug.print("Sent force command [{d:.2}, {d:.2}, {d:.2}] for eid {d}\n", .{ force[0], force[1], force[2], entity_id.id });
+            } else {
+                std.debug.print("Failed to send force command for eid {d} - command queue full\n", .{entity_id.id});
+            }
+        } else {
+            std.debug.print("No physics thread available for eid {d}\n", .{entity_id.id});
+        }
+    }
+
+    // Apply a central impulse to an entity via physics thread
     pub fn applyCentralImpulse(self: *Self, entity_id: Core.EntityID, impulse: [3]f32) void {
-        if (self.rigid_body_components.get(entity_id)) |rigid_body| {
-            if (rigid_body.bullet_body) |body| {
-                bullet.cbtBodyApplyCentralImpulse(body, &impulse);
+        if (self.physics_thread) |physics| {
+            const command = PhysicsThread.PhysicsCommand{ .ApplyImpulse = .{ .entity_id = entity_id, .impulse = impulse } };
+            const success = physics.sendCommand(command);
+
+            if (!success) {
+                std.debug.print("Failed to send impulse command for eid {d} - command queue full\n", .{entity_id.id});
             }
+        } else {
+            std.debug.print("No physics thread available for impulse on eid {d}\n", .{entity_id.id});
         }
     }
 
-    // Apply a torque to an entity
+    // Apply a torque to an entity via physics thread
     pub fn applyTorque(self: *Self, entity_id: Core.EntityID, torque: [3]f32) void {
-        if (self.rigid_body_components.get(entity_id)) |rigid_body| {
-            if (rigid_body.bullet_body) |body| {
-                bullet.cbtBodyApplyTorque(body, &torque);
+        if (self.physics_thread) |physics| {
+            const command = PhysicsThread.PhysicsCommand{ .ApplyTorque = .{ .entity_id = entity_id, .torque = torque } };
+            const success = physics.sendCommand(command);
+
+            if (!success) {
+                std.debug.print("Failed to send torque command for eid {d} - command queue full\n", .{entity_id.id});
             }
+        } else {
+            std.debug.print("No physics thread available for torque on eid {d}\n", .{entity_id.id});
         }
     }
 
-    // Apply collider properties to a rigid body (collision properties, inertia, etc.)
-    pub fn linkColliderToRigidBody(self: *Self, entity_id: Core.EntityID) !void {
-        const collider = self.collider_components.get(entity_id) orelse return error.NoCollider;
-        const rigid_body = self.rigid_body_components.get(entity_id) orelse return error.NoRigidBody;
-
-        if (rigid_body.bullet_body == null) return error.NoRigidBody;
-
-        // Set collision properties from collider
-        bullet.cbtBodySetRestitution(rigid_body.bullet_body.?, collider.restitution);
-        bullet.cbtBodySetFriction(rigid_body.bullet_body.?, collider.friction);
-        bullet.cbtBodySetRollingFriction(rigid_body.bullet_body.?, collider.rolling_friction);
-
-        // Calculate and set inertia for dynamic bodies
-        if (rigid_body.mass > 0.0) {
-            var local_inertia = [3]f32{ 0.0, 0.0, 0.0 };
-            bullet.cbtShapeCalculateLocalInertia(rigid_body.bullet_shape, rigid_body.mass, &local_inertia);
-            bullet.cbtBodySetMassProps(rigid_body.bullet_body.?, rigid_body.mass, &local_inertia);
-        }
-    }
+    // Note: linkColliderToRigidBody function removed - collision properties are now
+    // automatically set during physics body creation in the threaded physics system
 
     // Perform a ray test in the world
     pub fn rayTest(self: *Self, ray_from: [3]f32, ray_to: [3]f32, collision_filter_group: i32, collision_filter_mask: i32) ?struct {

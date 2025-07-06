@@ -44,31 +44,31 @@ pub fn main() !void {
 
     _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
 
-    // const resource_manager = ECS.world.resource_manager;
-    // const hintze_hall_resource = try resource_manager.loadGLTFModelCached(
-    //     alloc,
-    //     "assets/hintze_hall/scene.gltf",
-    // );
+    const resource_manager = ECS.world.resource_manager;
+    const hintze_hall_resource = try resource_manager.loadGLTFModelCached(
+        alloc,
+        "assets/hintze_hall/scene.gltf",
+    );
 
-    // var hintze_hall_result = try ECS.createEntitiesFromModel(hintze_hall_resource);
-    // const hintze_hall_entity = hintze_hall_result.root_entity;
+    var hintze_hall_result = try ECS.createEntitiesFromModel(hintze_hall_resource);
+    const hintze_hall_entity = hintze_hall_result.root_entity;
 
-    // // Create static collision for the hall using the actual hall mesh
-    // var hall_collider = try Collisions.ColliderComponent.initFromModel(
-    //     alloc,
-    //     hintze_hall_resource,
-    //     .{ .TriangleMesh = .{} },
-    //     ECS.world.resource_manager,
-    // );
-    // var hall_body = Collisions.RigidBodyComponent.init(0.0, hall_collider.bullet_shape.?);
+    // Create static collision for the hall using the actual hall mesh
+    var hall_collider = try Collisions.ColliderComponent.initFromModel(
+        alloc,
+        hintze_hall_resource,
+        .{ .TriangleMesh = .{} },
+        ECS.world.resource_manager,
+    );
+    var hall_body = Collisions.RigidBodyComponent.init(0.0, hall_collider.bullet_shape.?);
 
-    // // Add components to the hall entity
-    // try hall_collider.attach(ECS, hintze_hall_entity);
-    // try hall_body.attach(ECS, hintze_hall_entity);
+    // Add components to the hall entity
+    try hall_collider.attach(ECS, hintze_hall_entity);
+    try hall_body.attach(ECS, hintze_hall_entity);
 
-    // // Clean up entity map
-    // hintze_hall_result.entity_map.deinit();
-    // ECS.transform_components.get(hintze_hall_entity).?.setPosition(0, -1.0, 0);
+    // Clean up entity map
+    hintze_hall_result.entity_map.deinit();
+    ECS.transform_components.get(hintze_hall_entity).?.setPosition(0, -1.0, 0);
 
     // Create ground plane using the Ground prefab
     _ = try Ground.spawn(alloc, ECS, .{

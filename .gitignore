@@ -9,7 +9,7 @@ ffmpeg-windows
 cuda-windows
 gprof2dot.py
 generate_brief_pattern.py
-kernels.o
+*.o
 out.dot
 callgrind*
 sass.txt
