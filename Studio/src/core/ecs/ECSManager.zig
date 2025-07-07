@@ -293,10 +293,12 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
     var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
     // Don't defer deinit - we're returning this
 
+
     // Create ECS entity for every ModelResource.EntityInfo
     for (model_resource.entities, 0..) |node, idx| {
         const e_id = try self.createEntity();
         try entity_map.put(idx, e_id);
+
 
         const transform = try self.addTransform(e_id);
 
@@ -321,8 +323,11 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
         // If there is a mesh_name, add a renderer
         if (node.mesh_name) |mesh_str| {
             const renderer = try self.addRenderer(e_id, mesh_str);
+            
             // If material_name, bind material
-            try renderer.setMaterial(self.allocator, node.material_name);
+            if (node.material_name) |mat_str| {
+                try renderer.setMaterial(self.allocator, mat_str);
+            }
         }
     }
 

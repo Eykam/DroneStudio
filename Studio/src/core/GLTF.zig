@@ -220,7 +220,7 @@ pub const ModelResource = struct {
             if (entity.material_name) |name| self.allocator.free(name);
             self.allocator.free(entity.children);
         }
-        self.allocator.free(self.entity);
+        self.allocator.free(self.entities);
         self.allocator.destroy(self);
     }
 };

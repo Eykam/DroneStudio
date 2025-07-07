@@ -70,8 +70,7 @@ pub const ConvexHullShape = struct {
     n_points: u32,
     n_triangles: u32,
 
-    // TODO: Create caching mechanism for this. Possibly using the resource manager
-    // Generate convex hulls from mesh using V-HACD
+    // Generate convex hulls from mesh using V-HACD (pure generation, no caching)
     pub fn generateFromMesh(allocator: std.mem.Allocator, mesh: *Mesh) ![]ConvexHullShape {
         // Create V-HACD instance
         const vhacd_handle = vhacd.vhacd_create();
@@ -167,8 +166,27 @@ pub const ConvexHullShape = struct {
             // Copy hull data
             hulls[i].n_points = n_points;
             hulls[i].n_triangles = n_triangles;
-            hulls[i].points = try allocator.dupe(f64, hull_points[0 .. n_points * 3]);
-            hulls[i].triangles = try allocator.dupe(u32, hull_triangles[0 .. n_triangles * 3]);
+
+            // Handle empty hulls safely
+            if (n_points > 0 and n_points <= 10000) { // Reasonable upper bound
+                const points_len = n_points * 3;
+                hulls[i].points = try allocator.alloc(f64, points_len);
+                for (0..points_len) |j| {
+                    hulls[i].points[j] = hull_points[j];
+                }
+            } else {
+                hulls[i].points = try allocator.alloc(f64, 0);
+            }
+
+            if (n_triangles > 0 and n_triangles <= 10000) { // Reasonable upper bound
+                const triangles_len = n_triangles * 3;
+                hulls[i].triangles = try allocator.alloc(u32, triangles_len);
+                for (0..triangles_len) |j| {
+                    hulls[i].triangles[j] = hull_triangles[j];
+                }
+            } else {
+                hulls[i].triangles = try allocator.alloc(u32, 0);
+            }
 
             std.debug.print("Hull: {d}\n", .{i});
             std.debug.print("Points: {d} Triangles: {d}\n", .{ n_points, n_triangles });
@@ -180,14 +198,13 @@ pub const ConvexHullShape = struct {
     }
 
     pub fn createBulletShape(hull: ConvexHullShape, allocator: std.mem.Allocator) ?bullet.CbtShapeHandle {
-        
         const child_shape = bullet.cbtShapeAllocate(bullet.CBT_SHAPE_TYPE_CONVEX_HULL);
         if (child_shape == null) return null;
 
         // Convert points from f64 to f32 for Bullet
         var points_f32 = allocator.alloc(f32, hull.n_points * 3) catch return null;
         defer allocator.free(points_f32);
-        
+
         for (0..hull.n_points * 3) |i| {
             points_f32[i] = @floatCast(hull.points[i]);
         }
@@ -361,13 +378,13 @@ fn calculateMeshBounds(mesh: *Mesh) struct { min_bounds: [3]f32, max_bounds: [3]
 }
 
 // Create a collider based on mesh data with specified shape
-pub fn createColliderFromMesh(allocator: std.mem.Allocator, mesh: *Mesh, shape: ColliderShape) !ColliderComponent {
+pub fn createColliderFromMesh(allocator: std.mem.Allocator, resource_manager: *ResourceManager, mesh: *Mesh, shape: ColliderShape) !ColliderComponent {
     switch (shape) {
         .TriangleMesh => return ColliderComponent.init(allocator, .{ .TriangleMesh = TriangleMeshShape{} }, mesh),
         .ConvexHull => |hulls| {
             // If hulls are empty, generate them from the mesh
             if (hulls.len == 0) {
-                const generated_hulls = try ConvexHullShape.generateFromMesh(allocator, mesh);
+                const generated_hulls = try resource_manager.getOrGenerateCollisionMesh(mesh);
                 return ColliderComponent.init(allocator, .{ .ConvexHull = generated_hulls }, mesh);
             } else {
                 // Use provided hulls
@@ -521,6 +538,135 @@ pub const ColliderComponent = struct {
         return collider;
     }
 
+    // Depth-first traversal helper for processing GLTF nodes with accumulated transforms
+    fn processNodeDFS(allocator: std.mem.Allocator, resource_manager: *ResourceManager, model_resource: *GLTF.ModelResource, compound_shape: bullet.CbtShapeHandle, base_shape: ColliderShape, node_index: usize, accumulated_transform: Mat4) !void {
+        if (node_index >= model_resource.entities.len) return;
+
+        const node = model_resource.entities[node_index];
+
+        // Calculate this node's world transform by combining accumulated + local
+        var world_transform = accumulated_transform;
+
+        if (node.local_transformation) |local_transform| {
+            std.debug.print("Node {d}: has local_transformation\n", .{node_index});
+            // Extract scale from matrix BEFORE normalization
+            world_transform = local_transform.multiply(world_transform);
+        } else {
+            // std.debug.print("building from TRS components\n", .{});
+            // Build local transform from individual TRS components
+            var local_matrix = Mat4.identity();
+
+            // Apply translation
+            if (node.translation) |t| {
+                // std.debug.print("  Translation: [{d:.3}, {d:.3}, {d:.3}]\n", .{ t[0], t[1], t[2] });
+                local_matrix = local_matrix.translate(t[0], t[1], t[2]);
+            }
+
+            // Apply rotation
+            if (node.rotation) |r| {
+                // std.debug.print("  Rotation: [{d:.3}, {d:.3}, {d:.3}, {d:.3}]\n", .{ r[0], r[1], r[2], r[3] });
+                const quat = Quaternion.init(r[0], r[1], r[2], r[3]);
+                local_matrix = local_matrix.multiply(Mat4.from_quaternion(quat));
+            }
+
+            // Apply scale
+            if (node.scale) |s| {
+                std.debug.print("Node {d}: Scale: [{d:.3}, {d:.3}, {d:.3}]\n", .{ node_index, s[0], s[1], s[2] });
+                local_matrix = local_matrix.scale(s[0], s[1], s[2]);
+            } else {
+                // std.debug.print("  No scale component\n", .{});
+            }
+
+            world_transform = local_matrix.multiply(world_transform);
+        }
+
+        // If this node has a mesh, create collision shape with accumulated scale
+        if (node.mesh_name) |mesh_name| {
+            if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
+                // TODO: There is probably a more efficient way to calculate the scale without
+                // doing an entire TRS decomposition, but this works for now.
+                // Extract scale from the accumulated world transform
+                const trs = world_transform.decomposeTRS();
+                const scale = trs.scale;
+
+                // Create child shape
+                const child_shape = bullet.cbtShapeAllocate(switch (base_shape) {
+                    .Box => bullet.CBT_SHAPE_TYPE_BOX,
+                    .Sphere => bullet.CBT_SHAPE_TYPE_SPHERE,
+                    .Capsule => bullet.CBT_SHAPE_TYPE_CAPSULE,
+                    .Cylinder => bullet.CBT_SHAPE_TYPE_CYLINDER,
+                    .Cone => bullet.CBT_SHAPE_TYPE_CONE,
+                    .TriangleMesh => bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH,
+                    .ConvexHull => bullet.CBT_SHAPE_TYPE_COMPOUND,
+                    .CompoundShape => bullet.CBT_SHAPE_TYPE_COMPOUND,
+                });
+
+                if (child_shape != null) {
+                    // Apply scale to mesh vertices
+                    const scaled_vertices = try allocator.dupe(Mesh.Vertex, mesh_res.mesh.vertices);
+                    defer allocator.free(scaled_vertices);
+
+                    std.debug.print("  Mesh: {s}, World Scale: [{d:.3}, {d:.3}, {d:.3}]\n", .{ mesh_name, scale[0], scale[1], scale[2] });
+
+                    for (scaled_vertices) |*vertex| {
+                        vertex.position[0] *= scale[0];
+                        vertex.position[1] *= scale[1];
+                        vertex.position[2] *= scale[2];
+                    }
+
+                    var scaled_indices: ?[]u32 = null;
+                    defer if (scaled_indices) |indices| allocator.free(indices);
+
+                    if (mesh_res.mesh.indices) |indices| {
+                        scaled_indices = try allocator.dupe(u32, indices);
+                    }
+
+                    // Create temporary scaled mesh
+                    var temp_mesh = try Mesh.init(allocator, scaled_vertices, scaled_indices, mesh_res.mesh._draw);
+                    defer temp_mesh.deinit();
+
+                    // Create collision shape from scaled mesh
+                    var mesh_collider = try createColliderFromMesh(allocator, resource_manager, temp_mesh, base_shape);
+
+                    // Use the collision shape to create the bullet shape
+                    try mesh_collider.shape.createBulletShape(allocator, child_shape.?, temp_mesh);
+
+                    // Don't deinit mesh_collider since child_shape is now owned by the compound shape
+
+                    // Create transform matrix without scale (since scale is baked into mesh)
+                    const right = world_transform.get_right().normalize();
+                    const up = world_transform.get_up().normalize();
+                    const forward = world_transform.get_forward().normalize();
+
+                    const position = world_transform.get_position();
+
+                    var child_transform = [4][3]f32{
+                        [3]f32{ right.x(), right.y(), right.z() },
+                        [3]f32{ up.x(), up.y(), up.z() },
+                        [3]f32{ forward.x(), forward.y(), forward.z() },
+                        [3]f32{ position.x(), position.y(), position.z() },
+                    };
+
+                    // Add child shape to compound
+                    bullet.cbtShapeCompoundAddChild(compound_shape, &child_transform, child_shape.?);
+                }
+            }
+        }
+
+        // TODO: Fix the GLTF parser to properly populate children arrays with entity indices
+        // instead of GLTF node indices. For now, use O(n²) solution.
+
+        // Process all nodes that have this node as their parent
+        for (model_resource.entities, 0..) |child_node, child_idx| {
+            if (child_node.parent_idx) |parent| {
+                if (parent == node_index) {
+                    std.debug.print("  Node {d} has child {d}\n", .{ node_index, child_idx });
+                    try processNodeDFS(allocator, resource_manager, model_resource, compound_shape, base_shape, child_idx, world_transform);
+                }
+            }
+        }
+    }
+
     // For compound shapes from GLTF models
     pub fn initFromModel(
         allocator: std.mem.Allocator,
@@ -551,88 +697,13 @@ pub const ColliderComponent = struct {
             @intCast(mesh_count),
         );
 
-        // Add each mesh as a child shape with its relative transform
-        for (model_resource.entities) |node| {
-            if (node.mesh_name) |mesh_name| {
-                if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
-                    // Create child shape based on the base collider shape type
-                    const child_shape = bullet.cbtShapeAllocate(switch (base_shape) {
-                        .Box => bullet.CBT_SHAPE_TYPE_BOX,
-                        .Sphere => bullet.CBT_SHAPE_TYPE_SPHERE,
-                        .Capsule => bullet.CBT_SHAPE_TYPE_CAPSULE,
-                        .Cylinder => bullet.CBT_SHAPE_TYPE_CYLINDER,
-                        .Cone => bullet.CBT_SHAPE_TYPE_CONE,
-                        .TriangleMesh => bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH,
-                        .ConvexHull => bullet.CBT_SHAPE_TYPE_COMPOUND,
-                        .CompoundShape => bullet.CBT_SHAPE_TYPE_COMPOUND,
-                    });
-
-                    if (child_shape == null) continue;
-
-                    // Create shape from mesh using existing createColliderFromMesh logic
-                    const mesh_collider = try createColliderFromMesh(allocator, mesh_res.mesh, base_shape);
-
-                    // Use the unified createBulletShape method that all shapes support
-                    try mesh_collider.shape.createBulletShape(allocator, child_shape, mesh_res.mesh);
-
-                    // Extract transform from GLTF node data
-                    var child_transform: [4][3]f32 = undefined;
-
-                    if (node.local_transformation) |local_transformation| {
-                        // Use the full transformation matrix if available
-                        const mat4 = local_transformation;
-                        const right = mat4.get_right();
-                        const up = mat4.get_up();
-                        const forward = mat4.get_forward();
-                        const position = mat4.get_position();
-
-                        child_transform = [4][3]f32{
-                            [3]f32{ right.x(), right.y(), right.z() }, // Right vector
-                            [3]f32{ up.x(), up.y(), up.z() }, // Up vector
-                            [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
-                            [3]f32{ position.x(), position.y(), position.z() }, // Position
-                        };
-                    } else {
-                        // Build transform from individual TRS components
-                        var transform_matrix = Mat4.identity();
-
-                        // Apply translation
-                        if (node.translation) |t| {
-                            transform_matrix = transform_matrix.translate(t[0], t[1], t[2]);
-                        }
-
-                        // Apply rotation
-                        if (node.rotation) |r| {
-                            const quat = Quaternion.init(r[0], r[1], r[2], r[3]);
-                            transform_matrix = transform_matrix.multiply(Mat4.from_quaternion(quat));
-                        }
-
-                        // Apply scale
-                        if (node.scale) |s| {
-                            transform_matrix = transform_matrix.scale(s[0], s[1], s[2]);
-                        }
-
-                        // Extract vectors from the built matrix
-                        const right = transform_matrix.get_right();
-                        const up = transform_matrix.get_up();
-                        const forward = transform_matrix.get_forward();
-                        const position = transform_matrix.get_position();
-
-                        child_transform = [4][3]f32{
-                            [3]f32{ right.x(), right.y(), right.z() }, // Right vector
-                            [3]f32{ up.x(), up.y(), up.z() }, // Up vector
-                            [3]f32{ forward.x(), forward.y(), forward.z() }, // Forward vector
-                            [3]f32{ position.x(), position.y(), position.z() }, // Position
-                        };
-                    }
-
-                    // Add child shape to compound with its local transform
-                    bullet.cbtShapeCompoundAddChild(
-                        compound_collider.bullet_shape.?,
-                        &child_transform,
-                        child_shape,
-                    );
-                }
+        // The entities array is flattened, so we need to process all nodes
+        // and accumulate transforms based on parent_idx relationships
+        // Process nodes starting from those with no parent (parent_idx == null)
+        for (model_resource.entities, 0..) |node, i| {
+            if (node.parent_idx == null) {
+                std.debug.print("Processing root node {d} with no parent\n", .{i});
+                try processNodeDFS(allocator, resource_manager, model_resource, compound_collider.bullet_shape.?, base_shape, i, Mat4.identity());
             }
         }
 

@@ -89,18 +89,18 @@ fn mouseLook(
     const pitch_angle = @as(f32, @floatCast(-dy)) * 0.1; // Reduced sensitivity
 
     if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
-        // Debug the axes first
+        // DEBUG: Let's see what axes we're working with
+        std.debug.print("Mouse input: dx={d:.2}, dy={d:.2} -> roll={d:.2}, pitch={d:.2}\n", .{ dx, dy, roll_angle, pitch_angle });
         std.debug.print("Local axes - forward: [{d:.2}, {d:.2}, {d:.2}], right: [{d:.2}, {d:.2}, {d:.2}]\n", .{ local_forward.x(), local_forward.y(), local_forward.z(), local_right.x(), local_right.y(), local_right.z() });
 
-        // Use physics torque for dynamic bodies - much higher torque values
-        const roll_torque_vec = local_forward.scale(Math.radians(roll_angle) * rigid_body.?.mass * 15000.0);
-        const pitch_torque_vec = local_right.scale(Math.radians(pitch_angle) * rigid_body.?.mass * 15000.0);
+        // Use physics torque for dynamic bodies - try much larger values
+        const roll_torque_vec = local_forward.scale(-Math.radians(roll_angle) * rigid_body.?.mass * 50000.0);
+        const pitch_torque_vec = local_right.scale(-Math.radians(pitch_angle) * rigid_body.?.mass * 50000.0);
 
         // Combine the torques
         const combined_torque = Vec3.init(roll_torque_vec.x() + pitch_torque_vec.x(), roll_torque_vec.y() + pitch_torque_vec.y(), roll_torque_vec.z() + pitch_torque_vec.z());
 
-        std.debug.print("Mouse look torque: roll={d:.2}, pitch={d:.2}, combined=[{d:.2}, {d:.2}, {d:.2}]\n", .{ roll_angle, pitch_angle, combined_torque.x(), combined_torque.y(), combined_torque.z() });
-
+        std.debug.print("Applied torque: [{d:.2}, {d:.2}, {d:.2}] (mass: {d:.2})\n", .{ combined_torque.x(), combined_torque.y(), combined_torque.z(), rigid_body.?.mass });
         collision_system.?.applyTorque(eid, combined_torque.data);
     } else {
         // Fallback to direct transform manipulation
@@ -203,8 +203,6 @@ pub fn spawn(
 
     // No need for physics target in new architecture - physics is on the same entity as controller
     const root_eid = try ecs.spawn(.{ root_tf, root_ctrl, collider, rigid_body });
-
-    // Physics body creation now handles collision properties automatically in threaded physics
 
     // Clean up the entity map since we no longer need it
     entities.entity_map.deinit();

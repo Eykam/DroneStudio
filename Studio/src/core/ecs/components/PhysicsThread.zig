@@ -340,7 +340,7 @@ pub const ThreadedPhysicsSystem = struct {
     should_shutdown: std.atomic.Value(bool),
 
     // Timing
-    target_hz: f64 = 60.0,
+    target_hz: f64 = 240.0,
     fixed_timestep: f64,
 
     // Entity tracking
@@ -579,7 +579,6 @@ pub const ThreadedPhysicsSystem = struct {
             write_buffer.append(state) catch {
                 std.debug.print("Failed to append physics state for entity {d}\n", .{entity_id.id});
             };
-
         }
 
         self.state_buffer.endWrite();
@@ -655,7 +654,7 @@ fn generateTetrahedronMesh(allocator: std.mem.Allocator) !*Mesh {
 
     // Define tetrahedron vertices (pyramid with triangular base)
     vertices[0] = Mesh.Vertex{
-        .position = .{ 0.0, 1.0, 0.0 },  // Top
+        .position = .{ 0.0, 1.0, 0.0 }, // Top
         .color = .{ 1.0, 0.0, 0.0 },
         .texture = .{ 0.5, 1.0 },
         .normal = .{ 0.0, 1.0, 0.0 },
@@ -669,7 +668,7 @@ fn generateTetrahedronMesh(allocator: std.mem.Allocator) !*Mesh {
         .tangent = .{ 1.0, 0.0, 0.0 },
     };
     vertices[2] = Mesh.Vertex{
-        .position = .{ 0.5, -0.5, 0.5 },  // Front right
+        .position = .{ 0.5, -0.5, 0.5 }, // Front right
         .color = .{ 0.0, 0.0, 1.0 },
         .texture = .{ 1.0, 0.0 },
         .normal = .{ 0.5, -0.5, 0.5 },
@@ -685,13 +684,21 @@ fn generateTetrahedronMesh(allocator: std.mem.Allocator) !*Mesh {
 
     // Define triangular faces (counter-clockwise winding)
     // Front face
-    indices[0] = 0; indices[1] = 1; indices[2] = 2;
-    // Right face  
-    indices[3] = 0; indices[4] = 2; indices[5] = 3;
+    indices[0] = 0;
+    indices[1] = 1;
+    indices[2] = 2;
+    // Right face
+    indices[3] = 0;
+    indices[4] = 2;
+    indices[5] = 3;
     // Left face
-    indices[6] = 0; indices[7] = 3; indices[8] = 1;
+    indices[6] = 0;
+    indices[7] = 3;
+    indices[8] = 1;
     // Bottom face
-    indices[9] = 1; indices[10] = 3; indices[11] = 2;
+    indices[9] = 1;
+    indices[10] = 3;
+    indices[11] = 2;
 
     return try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(gl.glad.GL_TRIANGLES));
 }
@@ -722,9 +729,9 @@ test "ConvexHull vs TriangleMesh collision detection" {
 
     // Create complex tetrahedron mesh and generate convex hull decomposition
     const falling_mesh = try generateTetrahedronMesh(allocator);
-    
-    // Generate convex hulls from the complex mesh using V-HACD
-    const convex_hulls = try Collisions.ConvexHullShape.generateFromMesh(allocator, falling_mesh);
+
+    // Generate convex hulls from the complex mesh using V-HACD with caching
+    const convex_hulls = try ecs.world.resource_manager.getOrGenerateCollisionMesh(falling_mesh);
     defer {
         for (convex_hulls) |hull| {
             allocator.free(hull.points);
@@ -732,7 +739,7 @@ test "ConvexHull vs TriangleMesh collision detection" {
         }
         allocator.free(convex_hulls);
     }
-    
+
     var falling_collider = try Collisions.ColliderComponent.init(allocator, .{ .ConvexHull = convex_hulls }, falling_mesh);
     try falling_collider.attach(ecs, falling_entity);
 
@@ -760,9 +767,9 @@ test "ConvexHull vs TriangleMesh collision detection" {
         const elapsed = @as(f32, @floatFromInt(current_time - start_time)) / 1000.0;
         const dt = @as(f32, @floatFromInt(current_time - last_time)) / 1000.0;
         last_time = current_time;
-        
+
         if (elapsed >= simulation_time) break;
-        
+
         main_loop_count += 1;
 
         // Update collision system (includes physics)
@@ -776,7 +783,7 @@ test "ConvexHull vs TriangleMesh collision detection" {
         const sample_interval: f32 = 0.1;
         if ((elapsed - S.last_sample_time) >= sample_interval) {
             S.last_sample_time = elapsed;
-            
+
             const current_transform = ecs.transform_components.get(falling_entity).?;
             const current_y = current_transform.position[1];
             const delta_y = initial_y - current_y;
@@ -797,7 +804,7 @@ test "ConvexHull vs TriangleMesh collision detection" {
             // Check if object stopped moving (collision occurred)
             if (!collision_detected and current_y < 1.0 and delta_y > 3.0) {
                 collision_detected = true;
-                std.debug.print(">>> ConvexHull vs TriangleMesh collision confirmed: Object at Y={d:.3} (fell {d:.3} units)\n", .{current_y, delta_y});
+                std.debug.print(">>> ConvexHull vs TriangleMesh collision confirmed: Object at Y={d:.3} (fell {d:.3} units)\n", .{ current_y, delta_y });
             }
         }
     }
@@ -913,11 +920,10 @@ test "Physics Thread - Box falling with gravity integration test" {
         const elapsed = @as(f32, @floatFromInt(current_time - start_time)) / 1000.0;
         const dt = @as(f32, @floatFromInt(current_time - last_time)) / 1000.0;
         last_time = current_time;
-        
-        if (elapsed >= simulation_limit) break;
-        
-        main_loop_count += 1;
 
+        if (elapsed >= simulation_limit) break;
+
+        main_loop_count += 1;
 
         // Update collision system (includes physics)
         try ecs.collision_system.update(dt);

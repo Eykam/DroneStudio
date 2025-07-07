@@ -39,10 +39,10 @@ pub fn spawn(
 
     // Create renderer component
     var renderer = try Renderer.Renderable.init(allocator, mesh_name_owned);
-    
+
     // Create a double-sided PBR material for the ground plane
     const ResourceManager = @import("../ResourceManager.zig");
-    const ground_material = ResourceManager.MaterialVariant{ 
+    const ground_material = ResourceManager.MaterialVariant{
         .PBR = ResourceManager.Material(.PBR){
             .data = .{
                 .doubleSided = true,
@@ -50,21 +50,20 @@ pub fn spawn(
             },
         },
     };
-    
+
     // Create unique material name based on config
     const material_name = try std.fmt.allocPrint(allocator, "ground_material_{d}_{d}_{d}", .{ @as(u32, @intFromFloat(config.color[0] * 1000)), @as(u32, @intFromFloat(config.color[1] * 1000)), @as(u32, @intFromFloat(config.color[2] * 1000)) });
     defer allocator.free(material_name);
-    
+
     const material_name_owned = try allocator.dupeZ(u8, material_name);
-    
+
     // Load the material into the resource manager
     try ecs.world.resource_manager.loadMaterial(material_name_owned, ground_material, null);
-    
+
     try renderer.setMaterial(allocator, material_name_owned);
 
     // Create physics collider (box shape for ground plane) - made thicker to prevent tunneling
-    const half_size = config.size / 2.0;
-    const collider = try Collisions.ColliderComponent.init(allocator, .{ .Box = .{ .half_extents = .{ half_size, 1.0, half_size } } }, null);
+    const collider = try Collisions.ColliderComponent.init(allocator, .{ .TriangleMesh = .{} }, plane_mesh);
 
     // Create static rigid body (mass = 0)
     const rigid_body = Collisions.RigidBodyComponent.init(0.0, collider.bullet_shape.?);
@@ -126,6 +125,6 @@ fn generatePlaneMesh(allocator: std.mem.Allocator, config: GroundConfig) !*Mesh 
 
     // Create mesh using the proper init function with triangle draw mode
     const mesh = try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(glad.GL_TRIANGLES));
-    
+
     return mesh;
 }

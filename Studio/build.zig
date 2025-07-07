@@ -211,6 +211,12 @@ fn configureDesktopLibs(
         "-DBT_THREADSAFE=1",
         "-std=c++11",
         "-fno-sanitize=undefined",
+        "-O3", // Maximum optimization
+        "-ffast-math", // Enable fast math optimizations
+        "-march=native", // Use native CPU instructions
+        "-mtune=native", // Tune for native CPU
+        "-fomit-frame-pointer", // Omit frame pointer for better performance
+        "-funroll-loops", // Unroll loops for better performance
     };
     exe.addCSourceFiles(.{
         .files = &.{
@@ -267,6 +273,7 @@ pub fn build(b: *std.Build) void {
     const build_desktop = b.option(bool, "desktop", "Build the desktop application") orelse true;
     const build_pi = b.option(bool, "pi", "Build the Raspberry Pi applications") orelse true;
     const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration for desktop") orelse false;
+    const test_gui = b.option(bool, "test-gui", "Enable GUI mode for physics tests") orelse false;
 
     // Get target modification options
     const global_target = b.option(bool, "global-target", "Apply target settings to both desktop and Pi builds") orelse false;
@@ -408,10 +415,47 @@ pub fn build(b: *std.Build) void {
             ffmpeg_path,
         );
 
+        // Configure kernels for tests
+        configureKernels(
+            b,
+            desktop_tests,
+            desktop_target,
+            optimize,
+            use_cuda,
+        );
+
+        // Add test GUI configuration
+        desktop_tests.root_module.addAnonymousImport("test_config", .{
+            .root_source_file = b.addWriteFiles().add("test_config.zig", 
+                b.fmt("pub const GUI_ENABLED = {any};\n", .{test_gui})),
+        });
+
         // Run command for the desktop test executable
         const run_desktop_tests = b.addRunArtifact(desktop_tests);
         test_desktop_step = b.step("test-desktop", "Run desktop application unit tests");
         test_desktop_step.?.dependOn(&run_desktop_tests.step);
+
+        // // Add collision tests as a test, not an executable
+        // const collision_tests = b.addTest(.{
+        //     .name = "collision_tests",
+        //     .root_source_file = b.path("src/core/ecs/components/PhysicsThread.zig"),
+        //     .target = desktop_target,
+        //     .optimize = optimize,
+        // });
+
+        // // Configure libraries for collision tests
+        // configureDesktopLibs(
+        //     collision_tests,
+        //     b,
+        //     desktop_target,
+        //     use_cuda,
+        //     ffmpeg_path,
+        // );
+
+        // // Run command for collision tests
+        // const run_collision_tests = b.addRunArtifact(collision_tests);
+        // const test_collision_step = b.step("test-collision", "Run collision system tests");
+        // test_collision_step.dependOn(&run_collision_tests.step);
     }
 
     // Raspberry Pi Applications
