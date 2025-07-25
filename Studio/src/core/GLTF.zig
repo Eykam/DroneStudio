@@ -196,7 +196,7 @@ pub const Sampler = struct {
 };
 
 pub const ModelResource = struct {
-    model_id: []const u8,
+    model_id: [:0]const u8,
     entities: []EntityInfo,
     allocator: std.mem.Allocator,
 
@@ -227,21 +227,21 @@ pub const ModelResource = struct {
 
 pub fn createModelResource(
     allocator: std.mem.Allocator,
-    model_id: []const u8,
+    model_id: [:0]const u8,
     gltf: *GLTF,
 ) !*ModelResource {
-    const scene_idx = gltf.document.scene orelse 0;
-    if (gltf.document.scenes == null or gltf.document.scenes.?.len == 0 or gltf.document.nodes == null) {
+    const scene_idx = gltf.document.value.scene orelse 0;
+    if (gltf.document.value.scenes == null or gltf.document.value.scenes.?.len == 0 or gltf.document.value.nodes == null) {
         const empty_model = try allocator.create(ModelResource);
         empty_model.* = .{
-            .model_id = try allocator.dupe(u8, model_id),
+            .model_id = try allocator.dupeZ(u8, model_id),
             .entities = &.{},
             .allocator = allocator,
         };
         return empty_model;
     }
 
-    const gltf_scene = gltf.document.scenes.?[scene_idx];
+    const gltf_scene = gltf.document.value.scenes.?[scene_idx];
     var entity_list = std.ArrayList(ModelResource.EntityInfo).init(allocator);
 
     // Recursively build up node/primitive entities
@@ -252,7 +252,7 @@ pub fn createModelResource(
     }
 
     const model_resource = try allocator.create(ModelResource);
-    model_resource.model_id = try allocator.dupe(u8, model_id);
+    model_resource.model_id = try allocator.dupeZ(u8, model_id);
     model_resource.allocator = allocator;
     model_resource.entities = try allocator.alloc(ModelResource.EntityInfo, entity_list.items.len);
 
@@ -273,11 +273,11 @@ fn processNodeAndChildren(
     parent_idx: ?usize,
     entity_list: *std.ArrayList(ModelResource.EntityInfo),
 ) !void {
-    if (gltf.document.nodes == null or node_idx >= gltf.document.nodes.?.len) {
+    if (gltf.document.value.nodes == null or node_idx >= gltf.document.value.nodes.?.len) {
         return;
     }
 
-    const gltf_node = gltf.document.nodes.?[node_idx];
+    const gltf_node = gltf.document.value.nodes.?[node_idx];
 
     // -------------------------------
     // 1) Create an entity for this node
@@ -301,6 +301,10 @@ fn processNodeAndChildren(
 
     // If the node has a matrix, use it directly
     if (gltf_node.matrix) |mat_array| {
+        // TODO: Investigate matrix format - GLTF spec uses column-major matrices,
+        // need to verify if our Mat4 expects row-major or column-major format.
+        // Models appearing upside-down might be related to coordinate system differences
+        // (Y-up vs Z-up) or matrix interpretation issues.
         node_entity_info.local_transformation = Mat4.from_array(mat_array);
     } else {
         // Otherwise, store TRS
@@ -323,7 +327,7 @@ fn processNodeAndChildren(
     // 2) If the node has a mesh, create child-entities for each primitive
     // -------------------------------
     if (gltf_node.mesh) |mesh_idx| {
-        if (gltf.document.meshes) |all_meshes| {
+        if (gltf.document.value.meshes) |all_meshes| {
             if (mesh_idx < all_meshes.len) {
                 const gltf_mesh = all_meshes[mesh_idx];
                 // The glTF mesh can have multiple primitives each with its own material
@@ -353,7 +357,7 @@ fn processNodeAndChildren(
 
                     // Material (if any)
                     if (primitive.material) |material_idx| {
-                        if (gltf.document.materials) |all_mats| {
+                        if (gltf.document.value.materials) |all_mats| {
                             if (material_idx < all_mats.len) {
                                 const mat_def = all_mats[material_idx];
                                 const mat_name = if (mat_def.name) |mat_n|
@@ -384,7 +388,7 @@ fn processNodeAndChildren(
 pub const GLTF = struct {
     allocator: Allocator,
     raw_json: []const u8,
-    document: Document,
+    document: json.Parsed(Document),
     buffers: std.ArrayList([]const u8),
     base_path: []const u8,
     textures: std.ArrayList(Mesh.TextureID),
@@ -426,14 +430,13 @@ pub const GLTF = struct {
                 .ignore_unknown_fields = true,
             },
         );
-        defer document.deinit();
 
         // Create the GLTF instance
         const gltf = try allocator.create(GLTF);
         gltf.* = GLTF{
             .allocator = allocator,
             .raw_json = raw_json,
-            .document = document.value,
+            .document = document,
             .buffers = std.ArrayList([]const u8).init(allocator),
             .base_path = base_path,
             .textures = std.ArrayList(Mesh.TextureID).init(allocator),
@@ -452,6 +455,7 @@ pub const GLTF = struct {
             self.allocator.free(buffer);
         }
 
+        self.document.deinit();
         self.buffers.deinit();
         self.textures.deinit();
         self.materials.deinit();
@@ -465,7 +469,7 @@ pub const GLTF = struct {
     }
 
     fn loadBuffers(self: *GLTF) !void {
-        if (self.document.buffers) |buffers| {
+        if (self.document.value.buffers) |buffers| {
             try self.buffers.ensureTotalCapacity(buffers.len);
 
             for (buffers) |buffer_def| {
@@ -517,11 +521,11 @@ pub const GLTF = struct {
     }
 
     pub fn loadMesh(self: *GLTF, allocator: Allocator, mesh_idx: usize) !?*Mesh {
-        if (self.document.meshes == null or mesh_idx >= self.document.meshes.?.len) {
+        if (self.document.value.meshes == null or mesh_idx >= self.document.value.meshes.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const mesh_def = self.document.meshes.?[mesh_idx];
+        const mesh_def = self.document.value.meshes.?[mesh_idx];
 
         // For simplicity, we only load the first primitive
         if (mesh_def.primitives.len == 0) {
@@ -608,7 +612,7 @@ pub const GLTF = struct {
         }
 
         // Create mesh
-        const mesh = try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(glad.GL_TRIANGLES));
+        const mesh = try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(.triangles));
 
         // Load texture if present
         if (primitive.material != null) {
@@ -638,11 +642,11 @@ pub const GLTF = struct {
     }
 
     pub fn loadBufferViewImage(self: *GLTF, allocator: Allocator, buffer_view_idx: usize) !*ImageLoader.Image {
-        if (self.document.bufferViews == null or buffer_view_idx >= self.document.bufferViews.?.len) {
+        if (self.document.value.bufferViews == null or buffer_view_idx >= self.document.value.bufferViews.?.len) {
             return error.ImageErrorResourceNotFound;
         }
 
-        const buffer_view = self.document.bufferViews.?[buffer_view_idx];
+        const buffer_view = self.document.value.bufferViews.?[buffer_view_idx];
 
         const buffer_idx = buffer_view.buffer;
         if (buffer_idx >= self.buffers.items.len) {
@@ -659,11 +663,11 @@ pub const GLTF = struct {
     }
 
     fn loadAccessorVec4(self: *GLTF, accessor_idx: usize) ![][4]f32 {
-        if (self.document.accessors == null or accessor_idx >= self.document.accessors.?.len) {
+        if (self.document.value.accessors == null or accessor_idx >= self.document.value.accessors.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const accessor = self.document.accessors.?[accessor_idx];
+        const accessor = self.document.value.accessors.?[accessor_idx];
 
         // Check type compatibility
         if (accessor.type == null or !std.mem.eql(u8, accessor.type.?, "VEC4") or
@@ -678,11 +682,11 @@ pub const GLTF = struct {
         }
 
         const buffer_view_idx = accessor.bufferView.?;
-        if (self.document.bufferViews == null or buffer_view_idx >= self.document.bufferViews.?.len) {
+        if (self.document.value.bufferViews == null or buffer_view_idx >= self.document.value.bufferViews.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const buffer_view = self.document.bufferViews.?[buffer_view_idx];
+        const buffer_view = self.document.value.bufferViews.?[buffer_view_idx];
 
         // Get buffer
         const buffer_idx = buffer_view.buffer;
@@ -724,11 +728,11 @@ pub const GLTF = struct {
     }
 
     fn loadAccessorVec3(self: *GLTF, accessor_idx: usize) ![][3]f32 {
-        if (self.document.accessors == null or accessor_idx >= self.document.accessors.?.len) {
+        if (self.document.value.accessors == null or accessor_idx >= self.document.value.accessors.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const accessor = self.document.accessors.?[accessor_idx];
+        const accessor = self.document.value.accessors.?[accessor_idx];
 
         // Check type compatibility
         if (accessor.type == null or !std.mem.eql(u8, accessor.type.?, "VEC3") or
@@ -743,11 +747,11 @@ pub const GLTF = struct {
         }
 
         const buffer_view_idx = accessor.bufferView.?;
-        if (self.document.bufferViews == null or buffer_view_idx >= self.document.bufferViews.?.len) {
+        if (self.document.value.bufferViews == null or buffer_view_idx >= self.document.value.bufferViews.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const buffer_view = self.document.bufferViews.?[buffer_view_idx];
+        const buffer_view = self.document.value.bufferViews.?[buffer_view_idx];
 
         // Get buffer
         const buffer_idx = buffer_view.buffer;
@@ -789,11 +793,11 @@ pub const GLTF = struct {
     }
 
     fn loadAccessorVec2(self: *GLTF, accessor_idx: usize) ![][2]f32 {
-        if (self.document.accessors == null or accessor_idx >= self.document.accessors.?.len) {
+        if (self.document.value.accessors == null or accessor_idx >= self.document.value.accessors.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const accessor = self.document.accessors.?[accessor_idx];
+        const accessor = self.document.value.accessors.?[accessor_idx];
 
         // Check type compatibility
         if (accessor.type == null or !std.mem.eql(u8, accessor.type.?, "VEC2") or
@@ -808,11 +812,11 @@ pub const GLTF = struct {
         }
 
         const buffer_view_idx = accessor.bufferView.?;
-        if (self.document.bufferViews == null or buffer_view_idx >= self.document.bufferViews.?.len) {
+        if (self.document.value.bufferViews == null or buffer_view_idx >= self.document.value.bufferViews.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const buffer_view = self.document.bufferViews.?[buffer_view_idx];
+        const buffer_view = self.document.value.bufferViews.?[buffer_view_idx];
 
         // Get buffer
         const buffer_idx = buffer_view.buffer;
@@ -854,11 +858,11 @@ pub const GLTF = struct {
     }
 
     fn loadAccessorIndices(self: *GLTF, accessor_idx: usize) ![]u32 {
-        if (self.document.accessors == null or accessor_idx >= self.document.accessors.?.len) {
+        if (self.document.value.accessors == null or accessor_idx >= self.document.value.accessors.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const accessor = self.document.accessors.?[accessor_idx];
+        const accessor = self.document.value.accessors.?[accessor_idx];
 
         // Check type compatibility
         if (accessor.type == null or !std.mem.eql(u8, accessor.type.?, "SCALAR")) {
@@ -871,11 +875,11 @@ pub const GLTF = struct {
         }
 
         const buffer_view_idx = accessor.bufferView.?;
-        if (self.document.bufferViews == null or buffer_view_idx >= self.document.bufferViews.?.len) {
+        if (self.document.value.bufferViews == null or buffer_view_idx >= self.document.value.bufferViews.?.len) {
             return GLTFError.ResourceNotFound;
         }
 
-        const buffer_view = self.document.bufferViews.?[buffer_view_idx];
+        const buffer_view = self.document.value.bufferViews.?[buffer_view_idx];
 
         // Get buffer
         const buffer_idx = buffer_view.buffer;

@@ -6,6 +6,7 @@ const Core = @import("../Core.zig");
 const Viewports = @import("Viewports.zig");
 const Controller = @import("Controller.zig");
 const Transform = @import("Transform.zig");
+const Collisions = @import("Collisions.zig");
 
 const glfw = gl.glfw;
 const glad = gl.glad;
@@ -14,6 +15,7 @@ const CameraSystem = Camera.CameraSystem;
 const ControlSystem = Controller.ControlSystem;
 const ViewportSystem = Viewports.ViewportSystem;
 const TransformSystem = Transform.TransformSystem;
+const CollisionSystem = Collisions.CollisionSystem;
 
 pub const GlobalsComponent = struct {
     last_frame_time: f64 = 0,
@@ -51,6 +53,7 @@ pub const GlobalsSystem = struct {
     control_system: *ControlSystem,
     viewport_system: *ViewportSystem,
     transform_system: *TransformSystem,
+    collision_system: ?*CollisionSystem = null, // Optional reference to collision system
     window: ?*glfw.GLFWwindow,
 
     pub fn init(allocator: std.mem.Allocator, globals: GlobalsComponent) !*Self {
@@ -85,6 +88,7 @@ pub const GlobalsSystem = struct {
     pub fn deinit(self: *Self) void {
         self.cleanupImGui();
     }
+
 
     pub fn setupCallbacks(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
         if (window == null) return;
@@ -164,6 +168,7 @@ pub const GlobalsSystem = struct {
 
         // Set up cursor mode BEFORE changing monitor settings
         glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_DISABLED);
+        // glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, glfw.GLFW_CURSOR_NORMAL);
         if (glfw.glfwRawMouseMotionSupported() == glfw.GLFW_TRUE) {
             glfw.glfwSetInputMode(window, glfw.GLFW_RAW_MOUSE_MOTION, glfw.GLFW_TRUE);
         }
@@ -298,6 +303,11 @@ pub const GlobalsSystem = struct {
                 },
                 glfw.GLFW_KEY_P => {
                     scene.globals.paused = !scene.globals.paused;
+                    // Also pause/unpause physics simulation
+                    if (scene.collision_system) |collision_system| {
+                        collision_system.setPhysicsPaused(scene.globals.paused);
+                    }
+                    std.debug.print("Toggled pause: {}\n", .{scene.globals.paused});
                 },
                 glfw.GLFW_KEY_F => {
                     scene.globals.fly = !scene.globals.fly;

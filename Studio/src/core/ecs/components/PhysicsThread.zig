@@ -1,6 +1,7 @@
 const std = @import("std");
 const Math = @import("../../Math.zig");
 const Core = @import("../Core.zig");
+const Mesh = @import("../../Mesh.zig");
 const bullet = @import("../../bindings/c.zig").bullet;
 
 pub const ApplyForce = struct {
@@ -81,32 +82,62 @@ pub const CreateRigidBody = struct {
     rolling_friction: f32 = 0.1,
 
     pub fn execute(self: CreateRigidBody, physics_thread: *ThreadedPhysicsSystem) void {
-        // Create physics body in physics thread
         const body_handle = bullet.cbtBodyAllocate();
         if (body_handle != null) {
             std.debug.print("CreateRigidBody: Entity {d} initial_pos=[{d:.3}, {d:.3}, {d:.3}]\n", .{ self.entity_id.id, self.initial_pos[0], self.initial_pos[1], self.initial_pos[2] });
 
-            // Initialize with mass and shape
-            bullet.cbtBodyCreate(body_handle, self.mass, &self.initial_pos, self.shape_handle);
+            var identity_transform = [4][3]f32{
+                .{ 1.0, 0.0, 0.0 }, // X axis
+                .{ 0.0, 1.0, 0.0 }, // Y axis
+                .{ 0.0, 0.0, 1.0 }, // Z axis
+                .{ 0.0, 0.0, 0.0 }, // Position
+            };
+            bullet.cbtBodyCreate(body_handle, self.mass, &identity_transform, self.shape_handle);
 
-            // Set initial transform explicitly
+            // Get the center of mass transform that Bullet calculated from the collision shape
+            var bullet_com_transform: [4][3]f32 = undefined;
+            bullet.cbtBodyGetCenterOfMassTransform(body_handle, &bullet_com_transform);
+
+            std.debug.print("Entity {d} - Bullet calculated CoM transform:\n", .{self.entity_id.id});
+            std.debug.print("  Row 0: [{d:.3}, {d:.3}, {d:.3}] (X axis)\n", .{ bullet_com_transform[0][0], bullet_com_transform[0][1], bullet_com_transform[0][2] });
+            std.debug.print("  Row 1: [{d:.3}, {d:.3}, {d:.3}] (Y axis)\n", .{ bullet_com_transform[1][0], bullet_com_transform[1][1], bullet_com_transform[1][2] });
+            std.debug.print("  Row 2: [{d:.3}, {d:.3}, {d:.3}] (Z axis)\n", .{ bullet_com_transform[2][0], bullet_com_transform[2][1], bullet_com_transform[2][2] });
+            std.debug.print("  Row 3: [{d:.3}, {d:.3}, {d:.3}] (Position)\n", .{ bullet_com_transform[3][0], bullet_com_transform[3][1], bullet_com_transform[3][2] });
+            std.debug.print("  User requested: pos=[{d:.3}, {d:.3}, {d:.3}], rot=[{d:.3}, {d:.3}, {d:.3}, {d:.3}]\n", .{ self.initial_pos[0], self.initial_pos[1], self.initial_pos[2], self.initial_rot[0], self.initial_rot[1], self.initial_rot[2], self.initial_rot[3] });
+
+            // Convert Bullet's CoM transform to Mat4
+            const bullet_com_mat4 = Math.Mat4{ .base = .{ .data = [16]f32{
+                bullet_com_transform[0][0], bullet_com_transform[0][1], bullet_com_transform[0][2], 0.0,
+                bullet_com_transform[1][0], bullet_com_transform[1][1], bullet_com_transform[1][2], 0.0,
+                bullet_com_transform[2][0], bullet_com_transform[2][1], bullet_com_transform[2][2], 0.0,
+                bullet_com_transform[3][0], bullet_com_transform[3][1], bullet_com_transform[3][2], 1.0,
+            } } };
+
+            // Create user transform from initial position and rotation
             const quat = Math.Quaternion{ .data = self.initial_rot };
-            var transform_matrix = Math.Mat4.from_quaternion(quat);
+            var user_transform = Math.Mat4.from_quaternion(quat);
+            user_transform.base.data[12] = self.initial_pos[0];
+            user_transform.base.data[13] = self.initial_pos[1];
+            user_transform.base.data[14] = self.initial_pos[2];
 
-            // Set position in the transform matrix
-            transform_matrix.base.data[12] = self.initial_pos[0];
-            transform_matrix.base.data[13] = self.initial_pos[1];
-            transform_matrix.base.data[14] = self.initial_pos[2];
+            // Compose transforms: final = bullet_com_transform * user_transform
+            const final_transform_mat4 = bullet_com_mat4.multiply(user_transform);
 
-            // Convert to Bullet's 4x3 format
-            var bullet_transform = [4][3]f32{
-                .{ transform_matrix.base.data[0], transform_matrix.base.data[1], transform_matrix.base.data[2] },
-                .{ transform_matrix.base.data[4], transform_matrix.base.data[5], transform_matrix.base.data[6] },
-                .{ transform_matrix.base.data[8], transform_matrix.base.data[9], transform_matrix.base.data[10] },
-                .{ self.initial_pos[0], self.initial_pos[1], self.initial_pos[2] }, // Use position directly
+            // Convert back to Bullet's 4x3 format
+            var final_transform = [4][3]f32{
+                .{ final_transform_mat4.base.data[0], final_transform_mat4.base.data[1], final_transform_mat4.base.data[2] },
+                .{ final_transform_mat4.base.data[4], final_transform_mat4.base.data[5], final_transform_mat4.base.data[6] },
+                .{ final_transform_mat4.base.data[8], final_transform_mat4.base.data[9], final_transform_mat4.base.data[10] },
+                .{ final_transform_mat4.base.data[12], final_transform_mat4.base.data[13], final_transform_mat4.base.data[14] },
             };
 
-            bullet.cbtBodySetCenterOfMassTransform(body_handle, &bullet_transform);
+            bullet.cbtBodySetCenterOfMassTransform(body_handle, &final_transform);
+
+            std.debug.print("  Final rigid body transform:\n", .{});
+            std.debug.print("    Row 0: [{d:.3}, {d:.3}, {d:.3}] (X axis)\n", .{ final_transform[0][0], final_transform[0][1], final_transform[0][2] });
+            std.debug.print("    Row 1: [{d:.3}, {d:.3}, {d:.3}] (Y axis)\n", .{ final_transform[1][0], final_transform[1][1], final_transform[1][2] });
+            std.debug.print("    Row 2: [{d:.3}, {d:.3}, {d:.3}] (Z axis)\n", .{ final_transform[2][0], final_transform[2][1], final_transform[2][2] });
+            std.debug.print("    Row 3: [{d:.3}, {d:.3}, {d:.3}] (Position)\n", .{ final_transform[3][0], final_transform[3][1], final_transform[3][2] });
             std.debug.print("Set initial transform for entity {d}: pos=[{d:.3}, {d:.3}, {d:.3}]\n", .{ self.entity_id.id, self.initial_pos[0], self.initial_pos[1], self.initial_pos[2] });
 
             // Set physics properties
@@ -190,6 +221,85 @@ pub const ResetDynamicBodies = struct {
     }
 };
 
+// LineCollector struct for debug wireframe extraction
+const LineCollector = struct {
+    vertices: std.ArrayList(Mesh.Vertex),
+    allocator: std.mem.Allocator,
+    color: [3]f32,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, color: [3]f32) Self {
+        return .{
+            .vertices = std.ArrayList(Mesh.Vertex).init(allocator),
+            .allocator = allocator,
+            .color = color,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.vertices.deinit();
+    }
+
+    pub fn toOwnedSlice(self: *Self) ![]Mesh.Vertex {
+        return try self.vertices.toOwnedSlice();
+    }
+};
+
+// C callback function that Bullet will call
+export fn physicsDebugDrawLineCallback(context: ?*anyopaque, p0: [*c]const f32, p1: [*c]const f32, color: [*c]const f32) void {
+    _ = color; // Ignore Bullet's color, use our own
+    if (context) |ctx| {
+        const collector: *LineCollector = @ptrCast(@alignCast(ctx));
+
+        // Add two vertices for the line
+        collector.vertices.append(.{
+            .position = .{ p0[0], p0[1], p0[2] },
+            .color = collector.color,
+        }) catch return;
+
+        collector.vertices.append(.{
+            .position = .{ p1[0], p1[1], p1[2] },
+            .color = collector.color,
+        }) catch return;
+    }
+}
+
+pub const SetDebugWireframes = struct {
+    enabled: bool,
+    dynamic_color: [3]f32, // Color for dynamic bodies (mass > 0)
+    static_color: [3]f32, // Color for static bodies (mass == 0)
+
+    pub fn execute(self: SetDebugWireframes, physics_thread: *ThreadedPhysicsSystem) void {
+        physics_thread.debug_wireframes_enabled.store(self.enabled, .release);
+        if (self.enabled) {
+            physics_thread.debug_dynamic_color = self.dynamic_color;
+            physics_thread.debug_static_color = self.static_color;
+            
+            // Extract wireframes once when debug is enabled
+            physics_thread.extractDebugWireframes();
+        }
+        std.debug.print("{s} debug wireframes for physics world\n", .{if (self.enabled) "Enabled" else "Disabled"});
+    }
+};
+
+pub const ExtractWireframes = struct {
+    pub fn execute(self: ExtractWireframes, physics_thread: *ThreadedPhysicsSystem) void {
+        _ = self;
+        physics_thread.extractDebugWireframes();
+        std.debug.print("Extracted debug wireframes on demand\n", .{});
+    }
+};
+
+pub const PausePhysics = struct {
+    paused: bool,
+
+    pub fn execute(self: PausePhysics, physics_thread: *ThreadedPhysicsSystem) void {
+        physics_thread.physics_paused.store(self.paused, .release);
+        std.debug.print("Physics simulation {s}\n", .{if (self.paused) "paused" else "resumed"});
+    }
+};
+
 /// Physics commands sent from main thread to physics thread
 pub const PhysicsCommand = union(enum) {
     ApplyForce: ApplyForce,
@@ -199,6 +309,9 @@ pub const PhysicsCommand = union(enum) {
     CreateRigidBody: CreateRigidBody,
     RemoveRigidBody: RemoveRigidBody,
     ResetDynamicBodies: ResetDynamicBodies,
+    SetDebugWireframes: SetDebugWireframes,
+    ExtractWireframes: ExtractWireframes,
+    PausePhysics: PausePhysics,
     Shutdown: void,
 
     pub fn execute(self: PhysicsCommand, physics_thread: *ThreadedPhysicsSystem) void {
@@ -210,6 +323,9 @@ pub const PhysicsCommand = union(enum) {
             .CreateRigidBody => |cmd| cmd.execute(physics_thread),
             .RemoveRigidBody => |cmd| cmd.execute(physics_thread),
             .ResetDynamicBodies => |cmd| cmd.execute(physics_thread),
+            .SetDebugWireframes => |cmd| cmd.execute(physics_thread),
+            .ExtractWireframes => |cmd| cmd.execute(physics_thread),
+            .PausePhysics => |cmd| cmd.execute(physics_thread),
             .Shutdown => {
                 physics_thread.should_shutdown.store(true, .release);
             },
@@ -226,6 +342,71 @@ pub const PhysicsState = struct {
     angular_velocity: [3]f32,
     is_active: bool,
     frame_number: u64, // Debug: track which physics frame this state is from
+};
+
+/// Debug wireframe data for an entity
+pub const DebugWireframeData = struct {
+    entity_id: Core.EntityID,
+    vertices: []Mesh.Vertex,
+    frame_number: u64,
+
+    pub fn deinit(self: *DebugWireframeData, allocator: std.mem.Allocator) void {
+        allocator.free(self.vertices);
+    }
+};
+
+/// Debug wireframe buffer for thread-safe reading
+pub const DebugWireframeBuffer = struct {
+    const Self = @This();
+
+    wireframes: [2]std.ArrayList(DebugWireframeData),
+    write_buffer: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .wireframes = .{
+                std.ArrayList(DebugWireframeData).init(allocator),
+                std.ArrayList(DebugWireframeData).init(allocator),
+            },
+        };
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        // Clean up any existing wireframe data
+        for (&self.wireframes) |*buffer| {
+            for (buffer.items) |*wireframe| {
+                wireframe.deinit(allocator);
+            }
+            buffer.deinit();
+        }
+    }
+
+    /// Physics thread writes to current write buffer
+    pub fn beginWrite(self: *Self, allocator: std.mem.Allocator) *std.ArrayList(DebugWireframeData) {
+        const write_idx = self.write_buffer.load(.seq_cst);
+
+        // Clean up old wireframe data and clear buffer
+        for (self.wireframes[write_idx].items) |*wireframe| {
+            wireframe.deinit(allocator);
+        }
+        self.wireframes[write_idx].clearRetainingCapacity();
+
+        return &self.wireframes[write_idx];
+    }
+
+    /// Physics thread signals write completion and swaps buffers
+    pub fn endWrite(self: *Self) void {
+        const current_write = self.write_buffer.load(.acquire);
+        const next_write = 1 - current_write;
+        self.write_buffer.store(next_write, .seq_cst);
+    }
+
+    /// Main thread reads from the most recently completed buffer
+    pub fn read(self: *Self) []const DebugWireframeData {
+        const current_write_idx = self.write_buffer.load(.seq_cst);
+        const read_idx = 1 - current_write_idx;
+        return self.wireframes[read_idx].items;
+    }
 };
 
 /// Lock-free ring buffer for commands (single producer, single consumer)
@@ -332,6 +513,7 @@ pub const ThreadedPhysicsSystem = struct {
     // Thread communication
     command_queue: RingBuffer(PhysicsCommand, 1024),
     state_buffer: PhysicsStateBuffer,
+    wireframe_buffer: DebugWireframeBuffer,
     physics_thread: std.Thread,
 
     // Physics world state
@@ -346,22 +528,36 @@ pub const ThreadedPhysicsSystem = struct {
     // Entity tracking
     entity_bodies: std.AutoHashMap(Core.EntityID, bullet.CbtBodyHandle),
 
+    // Debug wireframes
+    debug_wireframes_enabled: std.atomic.Value(bool),
+    debug_wireframes_version: std.atomic.Value(u32),
+    debug_dynamic_color: [3]f32,
+    debug_static_color: [3]f32,
+
+    // Physics simulation control
+    physics_paused: std.atomic.Value(bool),
+
     // Debug tracking
     frame_count: u64 = 0,
     physics_time: f64 = 0.0,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
         const self = try allocator.create(Self);
-
         self.* = .{
             .command_queue = .{},
             .state_buffer = PhysicsStateBuffer.init(allocator),
+            .wireframe_buffer = DebugWireframeBuffer.init(allocator),
             .physics_thread = undefined,
             .allocator = allocator,
             .bullet_world = undefined,
             .should_shutdown = std.atomic.Value(bool).init(false),
             .fixed_timestep = undefined, // 60 Hz
             .entity_bodies = std.AutoHashMap(Core.EntityID, bullet.CbtBodyHandle).init(allocator),
+            .debug_wireframes_enabled = std.atomic.Value(bool).init(false),
+            .debug_wireframes_version = std.atomic.Value(u32).init(0),
+            .debug_dynamic_color = .{ 0.0, 1.0, 0.0 }, // Green for dynamic
+            .debug_static_color = .{ 0.0, 0.0, 1.0 }, // Blue for static
+            .physics_paused = std.atomic.Value(bool).init(false),
         };
         self.fixed_timestep = 1.0 / self.target_hz;
 
@@ -397,6 +593,8 @@ pub const ThreadedPhysicsSystem = struct {
 
         self.entity_bodies.deinit();
         self.state_buffer.deinit();
+        self.wireframe_buffer.deinit(self.allocator);
+
         self.allocator.destroy(self);
     }
 
@@ -408,6 +606,45 @@ pub const ThreadedPhysicsSystem = struct {
     /// Main thread interface: Get latest physics state
     pub fn getPhysicsStates(self: *Self) []const PhysicsState {
         return self.state_buffer.read();
+    }
+
+    /// Main thread interface: Get debug wireframes
+    pub fn getDebugWireframes(self: *Self) []const DebugWireframeData {
+        return self.wireframe_buffer.read();
+    }
+
+    /// Get the current wireframe version (increments each time wireframes are extracted)
+    pub fn getWireframeVersion(self: *Self) u32 {
+        return self.debug_wireframes_version.load(.acquire);
+    }
+
+    /// Main thread interface: Enable/disable debug wireframes for the entire world
+    pub fn setDebugWireframes(self: *Self, enabled: bool, dynamic_color: [3]f32, static_color: [3]f32) bool {
+        const command = PhysicsCommand{
+            .SetDebugWireframes = .{
+                .enabled = enabled,
+                .dynamic_color = dynamic_color,
+                .static_color = static_color,
+            },
+        };
+        return self.sendCommand(command);
+    }
+
+    /// Main thread interface: Extract wireframes once (for dynamic mesh creation)
+    pub fn extractWireframes(self: *Self) bool {
+        const command = PhysicsCommand{ .ExtractWireframes = .{} };
+        return self.sendCommand(command);
+    }
+
+    /// Main thread interface: Pause or resume physics simulation
+    pub fn setPhysicsPaused(self: *Self, paused: bool) bool {
+        const command = PhysicsCommand{ .PausePhysics = .{ .paused = paused } };
+        return self.sendCommand(command);
+    }
+
+    /// Main thread interface: Get current pause state
+    pub fn isPhysicsPaused(self: *Self) bool {
+        return self.physics_paused.load(.acquire);
     }
 
     /// Register a physics body for an entity (called from main thread during entity creation)
@@ -433,83 +670,34 @@ pub const ThreadedPhysicsSystem = struct {
             // Process commands from main thread
             self.processCommands();
 
-            // Step physics simulation
-            const max_substeps: i32 = 10;
-            const fixed_timestep_f32: f32 = @floatCast(self.fixed_timestep);
-            const num_steps = bullet.cbtWorldStepSimulation(self.bullet_world, fixed_timestep_f32, max_substeps, fixed_timestep_f32);
+            // Step physics simulation (only if not paused)
+            var num_steps: i32 = 0;
+            if (!self.physics_paused.load(.acquire)) {
+                const max_substeps: i32 = 10;
+                const fixed_timestep_f32: f32 = @floatCast(self.fixed_timestep);
+                num_steps = bullet.cbtWorldStepSimulation(self.bullet_world, fixed_timestep_f32, max_substeps, fixed_timestep_f32);
 
-            if (num_steps > 0) {
-                self.physics_time += @as(f64, @floatFromInt(num_steps)) * self.fixed_timestep;
-            }
+                if (num_steps > 0) {
+                    self.physics_time += @as(f64, @floatFromInt(num_steps)) * self.fixed_timestep;
+                }
 
-            // Debug: Log actual steps taken
-            if (self.frame_count % 60 == 0 and num_steps > 0) {
-                std.debug.print("Physics stepping: took {d} substeps, timestep={d:.4}s, physics_time={d:.2}s\n", .{ num_steps, fixed_timestep_f32, self.physics_time });
+                // Debug: Log actual steps taken
+                if (self.frame_count % 60 == 0 and num_steps > 0) {
+                    std.debug.print("Physics stepping: took {d} substeps, timestep={d:.4}s, physics_time={d:.2}s\n", .{ num_steps, fixed_timestep_f32, self.physics_time });
+                }
+            } else {
+                // Debug: Log pause status occasionally
+                if (self.frame_count % 180 == 0) {
+                    std.debug.print("Physics simulation paused\n", .{});
+                }
             }
 
             // Debug: Check for contact points every 60 frames (1 second at 60Hz)
             self.frame_count += 1;
 
-            // More frequent debug output during early frames
-            if (self.frame_count <= 10 or self.frame_count % 60 == 0) {
-                const elapsed_seconds = @as(f64, @floatFromInt(self.frame_count)) * self.fixed_timestep;
-                std.debug.print("Physics frame {d}: {d} bodies, physics_time={d:.3}s, real_time={d:.3}s\n", .{ self.frame_count, self.entity_bodies.count(), self.physics_time, elapsed_seconds });
-
-                // Debug: Print positions of all bodies
-                var it = self.entity_bodies.iterator();
-                while (it.next()) |entry| {
-                    const entity_id = entry.key_ptr.*;
-                    const body = entry.value_ptr.*;
-
-                    var transform_matrix: [4][3]f32 = undefined;
-                    bullet.cbtBodyGetCenterOfMassTransform(body, &transform_matrix);
-                    const pos = [3]f32{ transform_matrix[3][0], transform_matrix[3][1], transform_matrix[3][2] };
-
-                    var linear_vel: [3]f32 = undefined;
-                    bullet.cbtBodyGetLinearVelocity(body, &linear_vel);
-
-                    const activation_state = bullet.cbtBodyGetActivationState(body);
-
-                    std.debug.print("  Entity {d}: pos=[{d:.2},{d:.2},{d:.2}] vel=[{d:.2},{d:.2},{d:.2}] active={d}\n", .{ entity_id.id, pos[0], pos[1], pos[2], linear_vel[0], linear_vel[1], linear_vel[2], activation_state });
-                }
-
-                // Debug: Test for collisions and break if found
-                var bodies_array = std.ArrayList(struct { id: Core.EntityID, body: bullet.CbtBodyHandle }).init(std.heap.page_allocator);
-                defer bodies_array.deinit();
-
-                var it_collect = self.entity_bodies.iterator();
-                while (it_collect.next()) |entry| {
-                    bodies_array.append(.{ .id = entry.key_ptr.*, .body = entry.value_ptr.* }) catch continue;
-                }
-
-                // Check if any dynamic body is close to ground level (potential collision)
-                for (bodies_array.items) |body_info| {
-                    var transform_matrix: [4][3]f32 = undefined;
-                    bullet.cbtBodyGetCenterOfMassTransform(body_info.body, &transform_matrix);
-                    const pos = [3]f32{ transform_matrix[3][0], transform_matrix[3][1], transform_matrix[3][2] };
-
-                    var linear_vel: [3]f32 = undefined;
-                    bullet.cbtBodyGetLinearVelocity(body_info.body, &linear_vel);
-
-                    // Check if this is a dynamic body (has velocity) near ground level
-                    if (@abs(linear_vel[0]) > 0.01 or @abs(linear_vel[1]) > 0.01 or @abs(linear_vel[2]) > 0.01) {
-                        // This is a moving body
-                        if (pos[1] < 2.0 and pos[1] > -1.0) {
-                            // Body is near ground level - should be colliding
-                            std.debug.print("POTENTIAL COLLISION: Entity {d} at Y={d:.2} with velocity Y={d:.2}\n", .{ body_info.id.id, pos[1], linear_vel[1] });
-
-                            if (pos[1] < 1.1 and linear_vel[1] < 0.0) {
-                                // Body is very close to ground and still falling - collision should have occurred
-                                std.debug.print("COLLISION SHOULD HAVE OCCURRED for Entity {d}!\n", .{body_info.id.id});
-                                // @breakpoint(); // Break here when collision should have occurred
-                            }
-                        }
-                    }
-                }
-            }
-
             // Update physics state buffer
             self.updateStateBuffer();
+
 
             // Sleep to maintain fixed timestep
             const frame_time = timer.read() - frame_start;
@@ -549,18 +737,21 @@ pub const ThreadedPhysicsSystem = struct {
             bullet.cbtBodyGetLinearVelocity(body, &linear_vel);
             bullet.cbtBodyGetAngularVelocity(body, &angular_vel);
 
-            // Extract position from transform matrix
-            const position = [3]f32{ transform_matrix[3][0], transform_matrix[3][1], transform_matrix[3][2] };
+            // TODO: There should be a more efficient way to extract quaternion from 3x3 rotation matrix
+            // without converting to Mat4 and using decomposeTRS, but this works for now
 
-            // Skip suspicious position values - don't apply to main thread
-            if (position[1] > 100.0 or position[1] < -100.0) {
-                std.debug.print("WARNING: Entity {d} has extreme Y position: {d:.2} - SKIPPING UPDATE\n", .{ entity_id.id, position[1] });
-                std.debug.print("  Transform matrix row 3: [{d:.2}, {d:.2}, {d:.2}]\n", .{ transform_matrix[3][0], transform_matrix[3][1], transform_matrix[3][2] });
-                continue; // Skip this entity's state update
-            }
+            // Convert Bullet's 4x3 transform matrix to Mat4
+            const mat4 = Math.Mat4{ .base = .{ .data = [16]f32{
+                transform_matrix[0][0], transform_matrix[0][1], transform_matrix[0][2], 0.0,
+                transform_matrix[1][0], transform_matrix[1][1], transform_matrix[1][2], 0.0,
+                transform_matrix[2][0], transform_matrix[2][1], transform_matrix[2][2], 0.0,
+                transform_matrix[3][0], transform_matrix[3][1], transform_matrix[3][2], 1.0,
+            } } };
 
-            // TODO: Extract rotation quaternion from transform matrix
-            const rotation = [4]f32{ 0.0, 0.0, 0.0, 1.0 }; // Identity for now
+            // Extract position and rotation using decomposeTRS
+            const trs = mat4.decomposeTRS();
+            const position = trs.translation;
+            const rotation = trs.rotation.data;
 
             // Check if body is active
             const activation_state = bullet.cbtBodyGetActivationState(body);
@@ -583,6 +774,73 @@ pub const ThreadedPhysicsSystem = struct {
 
         self.state_buffer.endWrite();
     }
+
+    /// Extract debug wireframes for all bodies in the physics world
+    fn extractDebugWireframes(self: *Self) void {
+        const wireframe_buffer = self.wireframe_buffer.beginWrite(self.allocator);
+
+        var collector = LineCollector.init(self.allocator, .{ 1.0, 1.0, 1.0 }); // Default white, will be overridden per body
+        defer collector.deinit();
+
+        var debug_draw = bullet.CbtDebugDraw{
+            .drawLine1 = physicsDebugDrawLineCallback,
+            .drawLine2 = null,
+            .drawContactPoint = null,
+            .context = &collector,
+        };
+
+        // Configure Bullet to draw wireframes
+        bullet.cbtWorldDebugSetDrawer(self.bullet_world, &debug_draw);
+        bullet.cbtWorldDebugSetMode(self.bullet_world, bullet.CBT_DBGMODE_DRAW_WIREFRAME);
+
+        // Extract wireframes for each entity
+        var it = self.entity_bodies.iterator();
+        while (it.next()) |entry| {
+            const entity_id = entry.key_ptr.*;
+            const body = entry.value_ptr.*;
+
+            // Get body mass to determine if it's dynamic or static
+            const mass = bullet.cbtBodyGetMass(body);
+            const color = if (mass > 0.0) self.debug_dynamic_color else self.debug_static_color;
+
+            // Clear collector and set color for this body
+            collector.vertices.clearRetainingCapacity();
+            collector.color = color;
+
+            // TODO: Currently draws all bodies at once - in the future we could draw individual bodies
+            // For now, we'll draw all and associate with the first entity
+            if (entity_id.id == entry.key_ptr.*.id) {
+                bullet.cbtWorldDebugDrawAll(self.bullet_world);
+
+                // Create wireframe data for this entity
+                const vertices = collector.toOwnedSlice() catch |err| {
+                    std.debug.print("Failed to extract wireframe vertices for entity {d}: {any}\n", .{ entity_id.id, err });
+                    continue;
+                };
+
+                const wireframe_data = DebugWireframeData{
+                    .entity_id = entity_id,
+                    .vertices = vertices,
+                    .frame_number = self.frame_count,
+                };
+
+                wireframe_buffer.append(wireframe_data) catch {
+                    std.debug.print("Failed to append wireframe data for entity {d}\n", .{entity_id.id});
+                    self.allocator.free(vertices);
+                };
+
+                // For now, only extract wireframes once per frame for all bodies
+                break;
+            }
+        }
+
+        self.wireframe_buffer.endWrite();
+        
+        // Increment version to signal completion
+        const old_version = self.debug_wireframes_version.load(.acquire);
+        self.debug_wireframes_version.store(old_version + 1, .release);
+        std.debug.print("Debug wireframes extracted, version: {d}\n", .{old_version + 1});
+    }
 };
 
 // Test-specific imports (only needed for testing)
@@ -594,7 +852,6 @@ const Collisions = @import("Collisions.zig");
 fn skip() !void {
     return error.SkipZigTest;
 }
-const Mesh = @import("../../Mesh.zig");
 const gl = @import("../../bindings/gl.zig");
 
 // Simple box mesh generator for test visualization
@@ -643,7 +900,7 @@ fn generateBoxMesh(allocator: std.mem.Allocator, width: f32, height: f32, depth:
     indices[4] = 2;
     indices[5] = 3;
 
-    return try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(gl.glad.GL_TRIANGLES));
+    return try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(.triangles));
 }
 
 // Generate a more complex mesh (tetrahedron) for testing convex hull decomposition
@@ -700,7 +957,7 @@ fn generateTetrahedronMesh(allocator: std.mem.Allocator) !*Mesh {
     indices[10] = 3;
     indices[11] = 2;
 
-    return try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(gl.glad.GL_TRIANGLES));
+    return try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(.triangles));
 }
 
 test "ConvexHull vs TriangleMesh collision detection" {
@@ -765,7 +1022,6 @@ test "ConvexHull vs TriangleMesh collision detection" {
     while (true) {
         const current_time = std.time.milliTimestamp();
         const elapsed = @as(f32, @floatFromInt(current_time - start_time)) / 1000.0;
-        const dt = @as(f32, @floatFromInt(current_time - last_time)) / 1000.0;
         last_time = current_time;
 
         if (elapsed >= simulation_time) break;
@@ -773,7 +1029,7 @@ test "ConvexHull vs TriangleMesh collision detection" {
         main_loop_count += 1;
 
         // Update collision system (includes physics)
-        try ecs.collision_system.update(dt);
+        try ecs.collision_system.update();
         ecs.transform_system.update();
 
         // Sample every 0.1 seconds
@@ -918,7 +1174,6 @@ test "Physics Thread - Box falling with gravity integration test" {
     while (true) {
         const current_time = std.time.milliTimestamp();
         const elapsed = @as(f32, @floatFromInt(current_time - start_time)) / 1000.0;
-        const dt = @as(f32, @floatFromInt(current_time - last_time)) / 1000.0;
         last_time = current_time;
 
         if (elapsed >= simulation_limit) break;
@@ -926,7 +1181,7 @@ test "Physics Thread - Box falling with gravity integration test" {
         main_loop_count += 1;
 
         // Update collision system (includes physics)
-        try ecs.collision_system.update(dt);
+        try ecs.collision_system.update();
         ecs.transform_system.update();
 
         if (enable_gui) {
@@ -965,7 +1220,7 @@ test "Physics Thread - Box falling with gravity integration test" {
                 });
             } else {
                 // In GUI mode, just update occasionally
-                if (@mod(@as(i32, @intFromFloat(elapsed / dt)), 60) == 0) {
+                if (@mod(@as(i32, @intFromFloat(elapsed * 60)), 60) == 0) {
                     std.debug.print("Time: {d:.1}s, Box Y: {d:.3}, Fall: {d:.3}\n", .{ elapsed, current_y, delta_y });
                 }
             }

@@ -226,7 +226,6 @@ pub const TextureResource = struct {
     }
 };
 
-
 pub const ShaderResource = struct {
     program_id: c_uint,
     ref_count: usize,
@@ -477,7 +476,6 @@ pub fn deinit(self: *Self) void {
         entry.value_ptr.deinit(self.allocator);
     }
     self.materials.deinit();
-
 }
 
 pub fn loadMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices: ?[]u32, draw_fn: ?Mesh.draw) !*Mesh {
@@ -504,6 +502,19 @@ pub fn unloadMesh(self: *Self, name: []const u8) void {
                 self.allocator.destroy(kv.value.mesh);
             }
         }
+    }
+}
+
+/// Update an existing mesh with new vertices, or create it if it doesn't exist
+pub fn updateMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices: ?[]u32, draw_fn: ?Mesh.draw) !void {
+    // Check if mesh already exists
+    if (self.meshes.getPtr(name)) |resource| {
+        try resource.mesh.updateVertices(vertices);
+        // self.allocator.free(vertices);
+    } else {
+        _ = self.loadMesh(name, vertices, indices, draw_fn) catch |err| {
+            std.debug.print("Failed to Update Mesh: {s} => {any}", .{ name, err });
+        };
     }
 }
 
@@ -732,7 +743,7 @@ fn cacheReadZString(reader: anytype, alloc: std.mem.Allocator) !?[:0]const u8 {
     const buf = try alloc.alloc(u8, len);
     _ = try reader.readAll(buf);
     defer alloc.free(buf);
-    
+
     // dupeZ creates a null-terminated copy
     return try alloc.dupeZ(u8, buf);
 }
@@ -852,10 +863,11 @@ pub fn readCache(alloc: std.mem.Allocator, path: []const u8) !*GLTFParser.ModelR
 }
 
 pub fn loadGLTFModel(self: *Self, allocator: std.mem.Allocator, filepath: []const u8) !*GLTFParser.ModelResource {
+    std.debug.print("model filepath: {s}\n", .{filepath});
     var gltf = try GLTF.init(allocator, filepath);
     defer gltf.deinit();
 
-    const model_id = try std.fmt.allocPrint(allocator, "model_{s}", .{filepath});
+    const model_id = try std.fmt.allocPrintZ(allocator, "model_{s}", .{filepath});
     try self.processGLTFResources(gltf, model_id);
     return GLTFParser.createModelResource(allocator, model_id, gltf);
 }
@@ -866,7 +878,7 @@ pub fn loadGLTFModelCached(
     gltf_path: []const u8,
 ) !*GLTFParser.ModelResource {
     ensureCacheDir();
-    
+
     const bin_path = cachePath(allocator, gltf_path);
     defer allocator.free(bin_path);
 
@@ -874,23 +886,22 @@ pub fn loadGLTFModelCached(
     if (isFresh(gltf_path, bin_path)) {
         if (readCache(allocator, bin_path)) |mr| {
             // Fix the model_id to match what's expected
-            const model_id = try std.fmt.allocPrint(allocator, "model_{s}", .{gltf_path});
+            const model_id = try std.fmt.allocPrintZ(allocator, "model_{s}", .{gltf_path});
             allocator.free(mr.model_id);
             mr.model_id = model_id;
-            
+
             const gltf = try GLTF.init(allocator, gltf_path);
             defer gltf.deinit();
+
             // Process all GLTF resources - textures, materials, AND meshes
-            try self.processGLTFTextures(gltf, mr.model_id);
-            try self.processGLTFMaterials(gltf, mr.model_id);
-            try self.processGLTFMeshes(gltf, mr.model_id);
-            
+            // TODO: Find a way to cache these as well
+            try self.processGLTFResources(gltf, model_id);
             return mr;
-        } else |_| {
-        }
+        } else |_| {}
     }
 
     // ---------- cold path -------------------------------------------------
+    std.debug.print("GLTF_PATH: {s}\n", .{gltf_path});
     const mr = try self.loadGLTFModel(allocator, gltf_path);
 
     writeCache(mr, bin_path) catch |err| {
@@ -907,54 +918,52 @@ fn processGLTFResources(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
 }
 
 fn processGLTFTextures(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
-    if (gltf.document.images == null or gltf.document.textures == null) return;
+    const images = gltf.document.value.images orelse return;
 
     const allocator = self.allocator;
-    // Process all images/textures
-    for (gltf.document.images.?, 0..) |image, img_idx| {
-        // Generate unique texture name
+    for (images, 0..) |image, img_idx| {
         const texture_name = if (image.name) |name|
             try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
         else
             try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, img_idx });
         defer allocator.free(texture_name);
 
-        // Load the texture data
         var texture_id: Mesh.TextureID = Mesh.TextureID{};
-        var img: ?*ImageLoader.Image = null;
+        var img: *ImageLoader.Image = undefined;
 
+        // Load from file
         if (image.uri) |uri| {
-            // Load from file
             const full_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ gltf.base_path, uri });
             defer allocator.free(full_path);
 
             img = try ImageLoader.Image.loadFromFile(allocator, full_path);
-            defer img.?.deinit();
+            defer img.deinit();
 
-            texture_id = try img.?.createGLTexture();
-        } else if (image.bufferView != null) {
-            // Load from buffer
+            texture_id = try img.createGLTexture();
+        }
+        // Load from buffer
+        else if (image.bufferView != null) {
             img = try gltf.loadBufferViewImage(allocator, image.bufferView.?);
-            defer img.?.deinit();
+            defer img.deinit();
 
-            texture_id = try img.?.createGLTexture();
+            texture_id = try img.createGLTexture();
         }
 
         // Register in resource manager
         if (texture_id.y != 0) {
-            const width = if (img) |_img| _img.width else 0;
-            const height = if (img) |_img| _img.height else 0;
-            const channels = if (img) |_img| _img.getChannels() else 0;
+            const width = img.width;
+            const height = img.height;
+            const channels = img.getChannels();
             try self.loadTexture(texture_name, texture_id.y, width, height, channels);
         }
     }
 }
 
 fn processGLTFMaterials(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
-    if (gltf.document.materials == null) return;
+    if (gltf.document.value.materials == null) return;
 
     const allocator = self.allocator;
-    for (gltf.document.materials.?, 0..) |material_def, mat_idx| {
+    for (gltf.document.value.materials.?, 0..) |material_def, mat_idx| {
         // Generate unique material name
         const material_name = if (material_def.name) |name|
             try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
@@ -1022,11 +1031,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
         // Associate base color texture if present
         if (pbr_mr.baseColorTexture) |tex_info| {
-            if (gltf.document.textures) |textures| {
+            if (gltf.document.value.textures) |textures| {
                 if (tex_info.index < textures.len) {
                     const texture = textures[tex_info.index];
                     if (texture.source) |source_idx| {
-                        if (gltf.document.images) |images| {
+                        if (gltf.document.value.images) |images| {
                             if (source_idx < images.len) {
                                 const img = images[source_idx];
                                 const tex_name = if (img.name) |name|
@@ -1047,11 +1056,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
         // Associate metallic-roughness texture if present
         if (pbr_mr.metallicRoughnessTexture) |tex_info| {
-            if (gltf.document.textures) |textures| {
+            if (gltf.document.value.textures) |textures| {
                 if (tex_info.index < textures.len) {
                     const texture = textures[tex_info.index];
                     if (texture.source) |source_idx| {
-                        if (gltf.document.images) |images| {
+                        if (gltf.document.value.images) |images| {
                             if (source_idx < images.len) {
                                 const img = images[source_idx];
                                 const tex_name = if (img.name) |name|
@@ -1073,11 +1082,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
     // Process normal map texture
     if (material_def.normalTexture) |tex_info| {
-        if (gltf.document.textures) |textures| {
+        if (gltf.document.value.textures) |textures| {
             if (tex_info.index < textures.len) {
                 const texture = textures[tex_info.index];
                 if (texture.source) |source_idx| {
-                    if (gltf.document.images) |images| {
+                    if (gltf.document.value.images) |images| {
                         if (source_idx < images.len) {
                             const img = images[source_idx];
                             const tex_name = if (img.name) |name|
@@ -1098,11 +1107,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
     // Process occlusion texture
     if (material_def.occlusionTexture) |tex_info| {
-        if (gltf.document.textures) |textures| {
+        if (gltf.document.value.textures) |textures| {
             if (tex_info.index < textures.len) {
                 const texture = textures[tex_info.index];
                 if (texture.source) |source_idx| {
-                    if (gltf.document.images) |images| {
+                    if (gltf.document.value.images) |images| {
                         if (source_idx < images.len) {
                             const img = images[source_idx];
                             const tex_name = if (img.name) |name|
@@ -1123,11 +1132,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
     // Process emissive texture
     if (material_def.emissiveTexture) |tex_info| {
-        if (gltf.document.textures) |textures| {
+        if (gltf.document.value.textures) |textures| {
             if (tex_info.index < textures.len) {
                 const texture = textures[tex_info.index];
                 if (texture.source) |source_idx| {
-                    if (gltf.document.images) |images| {
+                    if (gltf.document.value.images) |images| {
                         if (source_idx < images.len) {
                             const img = images[source_idx];
                             const tex_name = if (img.name) |name|
@@ -1164,11 +1173,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
             // Process diffuse texture
             if (sg.diffuseTexture) |tex_info| {
-                if (gltf.document.textures) |textures| {
+                if (gltf.document.value.textures) |textures| {
                     if (tex_info.index < textures.len) {
                         const texture = textures[tex_info.index];
                         if (texture.source) |source_idx| {
-                            if (gltf.document.images) |images| {
+                            if (gltf.document.value.images) |images| {
                                 if (source_idx < images.len) {
                                     const img = images[source_idx];
                                     const tex_name = if (img.name) |name|
@@ -1190,11 +1199,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
             // Process specular-glossiness texture
             if (sg.specularGlossinessTexture) |tex_info| {
-                if (gltf.document.textures) |textures| {
+                if (gltf.document.value.textures) |textures| {
                     if (tex_info.index < textures.len) {
                         const texture = textures[tex_info.index];
                         if (texture.source) |source_idx| {
-                            if (gltf.document.images) |images| {
+                            if (gltf.document.value.images) |images| {
                                 if (source_idx < images.len) {
                                     const img = images[source_idx];
                                     const tex_name = if (img.name) |name|
@@ -1234,11 +1243,11 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
             // Process specular texture
             if (spec.specularTexture) |tex_info| {
-                if (gltf.document.textures) |textures| {
+                if (gltf.document.value.textures) |textures| {
                     if (tex_info.index < textures.len) {
                         const texture = textures[tex_info.index];
                         if (texture.source) |source_idx| {
-                            if (gltf.document.images) |images| {
+                            if (gltf.document.value.images) |images| {
                                 if (source_idx < images.len) {
                                     const img = images[source_idx];
                                     const tex_name = if (img.name) |name|
@@ -1271,21 +1280,17 @@ fn createPhongMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GL
 }
 
 fn processGLTFMeshes(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
-    if (gltf.document.meshes == null) {
+    if (gltf.document.value.meshes == null) {
         std.debug.print("No meshes in GLTF document\n", .{});
         return;
     }
 
     const allocator = self.allocator;
-    std.debug.print("Processing {d} meshes for model {s}\n", .{ gltf.document.meshes.?.len, model_id });
-    
-    for (gltf.document.meshes.?, 0..) |mesh_def, mesh_idx| {
-        std.debug.print("  Mesh {d}: {s}, primitives: {d}\n", .{ 
-            mesh_idx, 
-            mesh_def.name orelse "unnamed",
-            mesh_def.primitives.len 
-        });
-        
+    std.debug.print("Processing {d} meshes for model {s}\n", .{ gltf.document.value.meshes.?.len, model_id });
+
+    for (gltf.document.value.meshes.?, 0..) |mesh_def, mesh_idx| {
+        std.debug.print("  Mesh {d}: {s}, primitives: {d}\n", .{ mesh_idx, mesh_def.name orelse "unnamed", mesh_def.primitives.len });
+
         for (mesh_def.primitives, 0..) |primitive, prim_idx| {
             // Generate unique mesh name
             const mesh_name = if (mesh_def.name) |name|
@@ -1296,13 +1301,10 @@ fn processGLTFMeshes(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
 
             std.debug.print("    Loading primitive {d} as {s}\n", .{ prim_idx, mesh_name });
             std.debug.print("      Material: {?d}\n", .{primitive.material});
-            
+
             const loaded_mesh = try gltf.loadMesh(allocator, mesh_idx);
             if (loaded_mesh) |mesh| {
-                std.debug.print("      Loaded mesh: {d} vertices, {?d} indices\n", .{ 
-                    mesh.vertices.len, 
-                    if (mesh.indices) |idx| idx.len else null 
-                });
+                std.debug.print("      Loaded mesh: {d} vertices, {?d} indices\n", .{ mesh.vertices.len, if (mesh.indices) |idx| idx.len else null });
                 _ = try self.loadMesh(mesh_name, mesh.vertices, mesh.indices, mesh._draw);
             } else {
                 std.debug.print("      Failed to load mesh!\n", .{});
@@ -1389,14 +1391,14 @@ pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptio
 // Collision mesh caching functions
 fn createMeshCacheKey(self: *Self, mesh: *@import("../Mesh.zig")) ![]u8 {
     var hasher = std.hash.Wyhash.init(0);
-    
+
     // Hash vertex positions
     if (mesh.vertices.len > 0) {
         for (mesh.vertices) |vertex| {
             hasher.update(std.mem.asBytes(&vertex.position));
         }
     }
-    
+
     // Hash indices if present - safely handle empty slices
     if (mesh.indices) |indices| {
         if (indices.len > 0) {
@@ -1406,36 +1408,36 @@ fn createMeshCacheKey(self: *Self, mesh: *@import("../Mesh.zig")) ![]u8 {
             }
         }
     }
-    
+
     const hash_value = hasher.final();
     return try std.fmt.allocPrint(self.allocator, "collision_mesh_{x}", .{hash_value});
 }
 
 pub fn getOrGenerateCollisionMesh(self: *Self, mesh: *@import("../Mesh.zig")) ![]@import("components/Collisions.zig").ConvexHullShape {
     const ConvexHullShape = @import("components/Collisions.zig").ConvexHullShape;
-    
+
     // Create cache key
     const mesh_key = try self.createMeshCacheKey(mesh);
     defer self.allocator.free(mesh_key);
-    
+
     // Check disk cache first
     const cache_path = try self.getCollisionCachePath(mesh_key);
     defer self.allocator.free(cache_path);
-    
+
     if (self.readCollisionCache(cache_path)) |cached_hulls| {
         return cached_hulls;
     } else |_| {
         // Cache miss or read error
     }
-    
+
     // Generate fresh convex hulls
     const generated_hulls = try ConvexHullShape.generateFromMesh(self.allocator, mesh);
-    
+
     // Write to disk cache
     self.writeCollisionCache(cache_path, generated_hulls) catch |err| {
         @panic(@errorName(err));
     };
-    
+
     return generated_hulls;
 }
 
@@ -1451,16 +1453,16 @@ fn writeCollisionCache(_: *Self, cache_path: []const u8, hulls: []const @import(
     var file = try std.fs.cwd().createFile(cache_path, .{});
     defer file.close();
     var w = file.writer();
-    
+
     // Write magic number and hull count
     try w.writeInt(u32, COLLISION_CACHE_MAGIC, .little);
     try w.writeInt(u32, @intCast(hulls.len), .little);
-    
+
     // Write each hull
     for (hulls) |hull| {
         try w.writeInt(u32, hull.n_points, .little);
         try w.writeInt(u32, hull.n_triangles, .little);
-        
+
         // Write points
         try w.writeInt(u32, @intCast(hull.points.len), .little);
         if (hull.points.len > 0) {
@@ -1468,7 +1470,7 @@ fn writeCollisionCache(_: *Self, cache_path: []const u8, hulls: []const @import(
                 try w.writeInt(u64, @bitCast(point), .little);
             }
         }
-        
+
         // Write triangles
         try w.writeInt(u32, @intCast(hull.triangles.len), .little);
         if (hull.triangles.len > 0) {
@@ -1479,35 +1481,36 @@ fn writeCollisionCache(_: *Self, cache_path: []const u8, hulls: []const @import(
     }
 }
 
+// TODO: Make a generic Cache Manager. Read / Write based on struct type passed in. Iterate over struct fields. Automatically serialize / deserialize based on sizeof...
 fn readCollisionCache(self: *Self, cache_path: []const u8) ![]@import("components/Collisions.zig").ConvexHullShape {
     const ConvexHullShape = @import("components/Collisions.zig").ConvexHullShape;
-    
+
     var file = std.fs.cwd().openFile(cache_path, .{}) catch |err| switch (err) {
         error.FileNotFound => return error.CacheNotFound,
         else => return err,
     };
     defer file.close();
     var r = file.reader();
-    
+
     // Check magic number
     if (try r.readInt(u32, .little) != COLLISION_CACHE_MAGIC) {
         return error.InvalidCache;
     }
-    
+
     const hull_count = try r.readInt(u32, .little);
     const hulls = try self.allocator.alloc(ConvexHullShape, hull_count);
-    
+
     for (hulls) |*hull| {
         hull.n_points = try r.readInt(u32, .little);
         hull.n_triangles = try r.readInt(u32, .little);
-        
+
         // Read points
         const points_len = try r.readInt(u32, .little);
         hull.points = try self.allocator.alloc(f64, points_len);
         for (hull.points) |*point| {
             point.* = @bitCast(try r.readInt(u64, .little));
         }
-        
+
         // Read triangles
         const triangles_len = try r.readInt(u32, .little);
         hull.triangles = try self.allocator.alloc(u32, triangles_len);
@@ -1515,11 +1518,10 @@ fn readCollisionCache(self: *Self, cache_path: []const u8) ![]@import("component
             triangle.* = try r.readInt(u32, .little);
         }
     }
-    
+
     return hulls;
 }
 
 pub fn debug(self: *Self) void {
     std.debug.print("{any}", .{self});
 }
-

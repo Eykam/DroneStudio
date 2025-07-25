@@ -124,7 +124,7 @@ fn generatePlaneMesh(allocator: std.mem.Allocator, config: GroundConfig) !*Mesh 
     indices[5] = 3; // Second triangle
 
     // Create mesh using the proper init function with triangle draw mode
-    const mesh = try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(glad.GL_TRIANGLES));
+    const mesh = try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(.triangles));
 
     return mesh;
 }

@@ -22,15 +22,14 @@ fn create_frustum_visualization(self: Self, allocator: std.mem.Allocator) !struc
     // Create a mesh for the frustum visualization
     const vertices = try self.generate_frustum_vertices(allocator);
 
-    var frustum_mesh = try Mesh.init(allocator, vertices, null, Mesh.gen_draw(glad.GL_LINES));
-    frustum_mesh.drawType = glad.GL_LINES;
+    const frustum_mesh = try Mesh.init(allocator, vertices, null, Mesh.gen_draw(.lines));
 
     // Set frustum color
     for (frustum_mesh.vertices) |*vertex| {
         vertex.color = .{ 0.0, 1.0, 1.0 }; // Cyan color for camera frustum
     }
 
-    return .{ .vertices = vertices, .draw_fn = Mesh.gen_draw(glad.GL_LINES) };
+    return .{ .vertices = vertices, .draw_fn = Mesh.gen_draw(.lines) };
 }
 
 fn generate_frustum_vertices(self: Self, allocator: std.mem.Allocator) ![]Mesh.Vertex {

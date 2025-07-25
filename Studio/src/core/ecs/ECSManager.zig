@@ -129,6 +129,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             &manager.transform_components,
             &manager.rigid_body_components,
             &manager.collider_components,
+            &manager.renderer_components,
         ),
         .shared_mem_system = try SharedMemSystem.init(
             allocator,
@@ -141,6 +142,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
     global_system.control_system = &manager.control_system;
     global_system.viewport_system = &manager.viewport_system;
     global_system.transform_system = &manager.transform_system;
+    global_system.collision_system = &manager.collision_system;
 
     // Link collision system to control system for physics-based movement
     manager.control_system.collision_system = &manager.collision_system;
@@ -221,7 +223,7 @@ pub fn update(self: *Self, time: f64) !void {
     self.transform_system.update();
     if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
-    try self.collision_system.update(@floatCast(dt));
+    try self.collision_system.update();
     if (should_time) std.debug.print("  Collision system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
     try self.viewport_system.update();
@@ -235,6 +237,7 @@ pub fn update(self: *Self, time: f64) !void {
 
     self.shared_mem_system.update();
     if (should_time) std.debug.print("  SharedMem system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
 }
 
 pub fn resetToInitialState(self: *Self) !void {
@@ -293,12 +296,10 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
     var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
     // Don't defer deinit - we're returning this
 
-
     // Create ECS entity for every ModelResource.EntityInfo
     for (model_resource.entities, 0..) |node, idx| {
         const e_id = try self.createEntity();
         try entity_map.put(idx, e_id);
-
 
         const transform = try self.addTransform(e_id);
 
@@ -323,7 +324,7 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
         // If there is a mesh_name, add a renderer
         if (node.mesh_name) |mesh_str| {
             const renderer = try self.addRenderer(e_id, mesh_str);
-            
+
             // If material_name, bind material
             if (node.material_name) |mat_str| {
                 try renderer.setMaterial(self.allocator, mat_str);

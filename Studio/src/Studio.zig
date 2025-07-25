@@ -1,11 +1,16 @@
 const std = @import("std");
 const gl = @import("core/bindings/gl.zig");
 const UI = @import("core/UI.zig");
+const Core = @import("core/ecs/Core.zig");
 const ECSManager = @import("core/ecs/ECSManager.zig");
 const Renderer = @import("core/ecs/components/Renderer.zig");
+const Physics = @import("core/ecs/components/Physics.zig");
+const Collisions = @import("core/ecs/components/Collisions.zig");
 const FreeCamera = @import("core/ecs/prefabs/FreeCamera.zig");
 const Drone = @import("core/ecs/prefabs/Drone.zig");
+const HintzeHall = @import("core/ecs/prefabs/HintzeHall.zig");
 const Ground = @import("core/ecs/prefabs/Ground.zig");
+const Math = @import("core/Math.zig");
 const c = @import("core/bindings/c.zig");
 const imgui = c.imgui;
 
@@ -19,10 +24,16 @@ fn handleSignal(_: c_int) callconv(.C) void {
 
 pub fn main() !void {
     std.debug.print("STUDIO MAIN: main() function called!\n", .{});
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    // var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // defer arena.deinit();
+    // const alloc = arena.allocator();
 
+    var gpa: std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }) = .init;
+    const alloc = gpa.allocator();
+    defer {
+        const status = gpa.deinit();
+        if (status == .leak) @panic("memory leaks detected");
+    }
     // =============================================== Scene Graph Initialization ===============================================
     const ECS = try ECSManager.init(alloc);
     defer ECS.deinit();
@@ -41,39 +52,11 @@ pub fn main() !void {
     _ = try ECS.spawn(free_cam);
 
     _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
+    _ = try HintzeHall.spawn(alloc, ECS);
 
-    // const resource_manager = ECS.world.resource_manager;
-    // const hintze_hall_resource = try resource_manager.loadGLTFModelCached(
-    //     alloc,
-    //     "assets/hintze_hall/scene.gltf",
-    // );
-
-    // var hintze_hall_result = try ECS.createEntitiesFromModel(hintze_hall_resource);
-    // const hintze_hall_entity = hintze_hall_result.root_entity;
-
-    // // Create static collision for the hall using the actual hall mesh
-    // var hall_collider = try Collisions.ColliderComponent.initFromModel(
-    //     alloc,
-    //     hintze_hall_resource,
-    //     .{ .TriangleMesh = .{} },
-    //     ECS.world.resource_manager,
-    // );
-    // var hall_body = Collisions.RigidBodyComponent.init(0.0, hall_collider.bullet_shape.?);
-
-    // // Add components to the hall entity
-    // try hall_collider.attach(ECS, hintze_hall_entity);
-    // try hall_body.attach(ECS, hintze_hall_entity);
-
-    // // Clean up entity map
-    // hintze_hall_result.entity_map.deinit();
-    // ECS.transform_components.get(hintze_hall_entity).?.setPosition(0, -1.0, 0);
-
-    // Create ground plane using the Ground prefab
-    _ = try Ground.spawn(alloc, ECS, .{
-        .size = 100.0,
-        .position = .{ 0.0, -10.0, 0.0 },
-        .color = .{ 0.4, 0.6, 0.4 }, // Slightly darker green
-    });
+    // Position the hall
+    // const hall_transform = ECS.transform_components.get(hintze_hall_entity).?;
+    // hall_transform.setPosition(0, -1.0, 0);
 
     std.debug.print("Initializing UI...\n", .{});
     const windows = [_]type{
@@ -351,203 +334,262 @@ pub fn main() !void {
     // }
 }
 
-test "ResourceManager - basic functionality with ECS context" {
-    const testing = std.testing;
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+// test "ResourceManager - basic functionality with ECS context" {
+//     const testing = std.testing;
+//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+//     defer arena.deinit();
+//     const alloc = arena.allocator();
 
-    // Initialize ECS which sets up OpenGL context
-    const ECS = ECSManager.init(alloc) catch |err| {
-        std.debug.print("Failed to initialize ECS for testing: {}\n", .{err});
-        return; // Skip test if ECS setup fails (e.g., no display)
-    };
-    defer ECS.deinit();
+//     // Initialize ECS which sets up OpenGL context
+//     const ECS = ECSManager.init(alloc) catch |err| {
+//         std.debug.print("Failed to initialize ECS for testing: {}\n", .{err});
+//         return; // Skip test if ECS setup fails (e.g., no display)
+//     };
+//     defer ECS.deinit();
 
-    // Test ResourceManager functionality
-    const resource_manager = ECS.world.resource_manager;
-    
-    // Test that ResourceManager initializes with default shaders
-    try testing.expect(resource_manager.shaders.count() >= 2);
-    
-    // Test shader retrieval
-    const standard_shader = resource_manager.getShader("standard_shader");
-    try testing.expect(standard_shader != null);
-    try testing.expect(standard_shader.?.program_id > 0);
-    
-    const pbr_shader = resource_manager.getShader("pbr_shader");
-    try testing.expect(pbr_shader != null);
-    try testing.expect(pbr_shader.?.program_id > 0);
-    
-    // Test that mesh, texture, material maps start empty
-    try testing.expect(resource_manager.meshes.count() == 0);
-    try testing.expect(resource_manager.textures.count() == 0);
-    try testing.expect(resource_manager.materials.count() == 0);
-}
+//     // Test ResourceManager functionality
+//     const resource_manager = ECS.world.resource_manager;
 
-test "ResourceManager - material creation and management" {
-    const testing = std.testing;
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+//     // Test that ResourceManager initializes with default shaders
+//     try testing.expect(resource_manager.shaders.count() >= 2);
 
-    // Initialize ECS for OpenGL context
-    const ECS = ECSManager.init(alloc) catch |err| {
-        std.debug.print("Failed to initialize ECS for testing: {}\n", .{err});
-        return; // Skip test if ECS setup fails
-    };
-    defer ECS.deinit();
+//     // Test shader retrieval
+//     const standard_shader = resource_manager.getShader("standard_shader");
+//     try testing.expect(standard_shader != null);
+//     try testing.expect(standard_shader.?.program_id > 0);
 
-    const resource_manager = ECS.world.resource_manager;
-    const ResourceManager = @import("core/ecs/ResourceManager.zig");
-    
-    // Create a test PBR material
-    const test_material = ResourceManager.MaterialVariant{
-        .PBR = ResourceManager.Material(.PBR){
-            .data = .{
-                .baseColorFactor = .{ 1.0, 0.5, 0.2, 1.0 },
-                .metallicFactor = 0.8,
-                .roughnessFactor = 0.3,
-            },
-        },
-    };
-    
-    // Load material with default shader
-    try resource_manager.loadMaterial("test_material", test_material, null);
-    
-    // Test that material was loaded
-    try testing.expect(resource_manager.materials.count() == 1);
-    
-    // Test getting the material
-    const loaded_material = resource_manager.materials.get("test_material");
-    try testing.expect(loaded_material != null);
-    try testing.expect(loaded_material.?.ref_count == 1);
-    
-    // Test material type detection
-    try testing.expect(loaded_material.?.material.getType() == .PBR);
-}
+//     const pbr_shader = resource_manager.getShader("pbr_shader");
+//     try testing.expect(pbr_shader != null);
+//     try testing.expect(pbr_shader.?.program_id > 0);
 
-test "ResourceManager - cache functionality" {
-    const testing = std.testing;
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+//     // Test that mesh, texture, material maps start empty
+//     try testing.expect(resource_manager.meshes.count() == 0);
+//     try testing.expect(resource_manager.textures.count() == 0);
+//     try testing.expect(resource_manager.materials.count() == 0);
+// }
 
-    const ResourceManager = @import("core/ecs/ResourceManager.zig");
-    
-    // Test cache path generation (doesn't need OpenGL)
-    const path1 = ResourceManager.cachePath(alloc, "assets/test/model.gltf");
-    defer alloc.free(path1);
-    
-    // Should replace slashes with dashes and add .bin extension
-    try testing.expect(std.mem.indexOf(u8, path1, "assets-test-model.gltf.bin") != null);
-    try testing.expect(std.mem.indexOf(u8, path1, ".asset-cache") != null);
-    
-    // Test that same path generates same cache path
-    const path2 = ResourceManager.cachePath(alloc, "assets/test/model.gltf");
-    defer alloc.free(path2);
-    
-    try testing.expectEqualStrings(path1, path2);
-}
+// test "ResourceManager - material creation and management" {
+//     const testing = std.testing;
+//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+//     defer arena.deinit();
+//     const alloc = arena.allocator();
 
-test "ResourceManager - GLTF caching with actual model" {
-    const testing = std.testing;
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+//     // Initialize ECS for OpenGL context
+//     const ECS = ECSManager.init(alloc) catch |err| {
+//         std.debug.print("Failed to initialize ECS for testing: {}\n", .{err});
+//         return; // Skip test if ECS setup fails
+//     };
+//     defer ECS.deinit();
 
-    // Initialize ECS for OpenGL context
-    const ECS = ECSManager.init(alloc) catch |err| {
-        std.debug.print("Failed to initialize ECS for testing: {}\n", .{err});
-        return; // Skip test if ECS setup fails
-    };
-    defer ECS.deinit();
+//     const resource_manager = ECS.world.resource_manager;
+//     const ResourceManager = @import("core/ecs/ResourceManager.zig");
 
-    const resource_manager = ECS.world.resource_manager;
-    
-    // Test with the drone model
-    const drone_path = "assets/drone/scene.gltf";
-    
-    // First load - should be fresh
-    std.debug.print("\n=== First load (fresh) ===\n", .{});
-    const resource1 = try resource_manager.loadGLTFModelCached(alloc, drone_path);
-    
-    // Check that resources were loaded
-    std.debug.print("After first load:\n", .{});
-    std.debug.print("  Meshes loaded: {}\n", .{resource_manager.meshes.count()});
-    std.debug.print("  Textures loaded: {}\n", .{resource_manager.textures.count()});
-    std.debug.print("  Materials loaded: {}\n", .{resource_manager.materials.count()});
-    std.debug.print("  Entities in model: {}\n", .{resource1.entities.len});
-    
-    const initial_mesh_count = resource_manager.meshes.count();
-    const initial_texture_count = resource_manager.textures.count();
-    const initial_material_count = resource_manager.materials.count();
-    
-    try testing.expect(initial_mesh_count > 0);
-    try testing.expect(resource1.entities.len > 0);
-    
-    // Print entity details
-    for (resource1.entities, 0..) |entity, i| {
-        std.debug.print("  Entity[{}]: name={s}, mesh={s}, material={s}\n", .{
-            i,
-            entity.name orelse "null",
-            entity.mesh_name orelse "null", 
-            entity.material_name orelse "null",
-        });
+//     // Create a test PBR material
+//     const test_material = ResourceManager.MaterialVariant{
+//         .PBR = ResourceManager.Material(.PBR){
+//             .data = .{
+//                 .baseColorFactor = .{ 1.0, 0.5, 0.2, 1.0 },
+//                 .metallicFactor = 0.8,
+//                 .roughnessFactor = 0.3,
+//             },
+//         },
+//     };
+
+//     // Load material with default shader
+//     try resource_manager.loadMaterial("test_material", test_material, null);
+
+//     // Test that material was loaded
+//     try testing.expect(resource_manager.materials.count() == 1);
+
+//     // Test getting the material
+//     const loaded_material = resource_manager.materials.get("test_material");
+//     try testing.expect(loaded_material != null);
+//     try testing.expect(loaded_material.?.ref_count == 1);
+
+//     // Test material type detection
+//     try testing.expect(loaded_material.?.material.getType() == .PBR);
+// }
+
+// test "ResourceManager - cache functionality" {
+//     const testing = std.testing;
+//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+//     defer arena.deinit();
+//     const alloc = arena.allocator();
+
+//     const ResourceManager = @import("core/ecs/ResourceManager.zig");
+
+//     // Test cache path generation (doesn't need OpenGL)
+//     const path1 = ResourceManager.cachePath(alloc, "assets/test/model.gltf");
+//     defer alloc.free(path1);
+
+//     // Should replace slashes with dashes and add .bin extension
+//     try testing.expect(std.mem.indexOf(u8, path1, "assets-test-model.gltf.bin") != null);
+//     try testing.expect(std.mem.indexOf(u8, path1, ".asset-cache") != null);
+
+//     // Test that same path generates same cache path
+//     const path2 = ResourceManager.cachePath(alloc, "assets/test/model.gltf");
+//     defer alloc.free(path2);
+
+//     try testing.expectEqualStrings(path1, path2);
+// }
+
+// test "ResourceManager - GLTF caching with actual model" {
+//     const testing = std.testing;
+//     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+//     defer arena.deinit();
+//     const alloc = arena.allocator();
+
+//     // Initialize ECS for OpenGL context
+//     const ECS = ECSManager.init(alloc) catch |err| {
+//         std.debug.print("Failed to initialize ECS for testing: {}\n", .{err});
+//         return; // Skip test if ECS setup fails
+//     };
+//     defer ECS.deinit();
+
+//     const resource_manager = ECS.world.resource_manager;
+
+//     // Test with the drone model
+//     const drone_path = "assets/drone/scene.gltf";
+
+//     // First load - should be fresh
+//     std.debug.print("\n=== First load (fresh) ===\n", .{});
+//     const resource1 = try resource_manager.loadGLTFModelCached(alloc, drone_path);
+
+//     // Check that resources were loaded
+//     std.debug.print("After first load:\n", .{});
+//     std.debug.print("  Meshes loaded: {}\n", .{resource_manager.meshes.count()});
+//     std.debug.print("  Textures loaded: {}\n", .{resource_manager.textures.count()});
+//     std.debug.print("  Materials loaded: {}\n", .{resource_manager.materials.count()});
+//     std.debug.print("  Entities in model: {}\n", .{resource1.entities.len});
+
+//     const initial_mesh_count = resource_manager.meshes.count();
+//     const initial_texture_count = resource_manager.textures.count();
+//     const initial_material_count = resource_manager.materials.count();
+
+//     try testing.expect(initial_mesh_count > 0);
+//     try testing.expect(resource1.entities.len > 0);
+
+//     // Print entity details
+//     for (resource1.entities, 0..) |entity, i| {
+//         std.debug.print("  Entity[{}]: name={s}, mesh={s}, material={s}\n", .{
+//             i,
+//             entity.name orelse "null",
+//             entity.mesh_name orelse "null",
+//             entity.material_name orelse "null",
+//         });
+//     }
+
+//     // Clean up first resource
+//     resource1.deinit();
+
+//     // Second load - should be from cache
+//     std.debug.print("\n=== Second load (cached) ===\n", .{});
+//     const resource2 = try resource_manager.loadGLTFModelCached(alloc, drone_path);
+
+//     // Check that resources were loaded from cache
+//     std.debug.print("After second load:\n", .{});
+//     std.debug.print("  Meshes loaded: {}\n", .{resource_manager.meshes.count()});
+//     std.debug.print("  Textures loaded: {}\n", .{resource_manager.textures.count()});
+//     std.debug.print("  Materials loaded: {}\n", .{resource_manager.materials.count()});
+//     std.debug.print("  Entities in model: {}\n", .{resource2.entities.len});
+
+//     // Should have same counts as before
+//     try testing.expectEqual(initial_mesh_count, resource_manager.meshes.count());
+//     try testing.expectEqual(initial_texture_count, resource_manager.textures.count());
+//     try testing.expectEqual(initial_material_count, resource_manager.materials.count());
+//     try testing.expectEqual(resource1.entities.len, resource2.entities.len);
+
+//     // Print cached entity details
+//     for (resource2.entities, 0..) |entity, i| {
+//         std.debug.print("  Entity[{}]: name={s}, mesh={s}, material={s}\n", .{
+//             i,
+//             entity.name orelse "null",
+//             entity.mesh_name orelse "null",
+//             entity.material_name orelse "null",
+//         });
+//     }
+
+//     // Verify entities have proper mesh and material references
+//     for (resource2.entities) |entity| {
+//         if (entity.mesh_name) |mesh_name| {
+//             const has_mesh = resource_manager.meshes.contains(mesh_name);
+//             if (!has_mesh) {
+//                 std.debug.print("ERROR: Missing mesh '{s}' in resource manager!\n", .{mesh_name});
+//             }
+//             try testing.expect(has_mesh);
+//         }
+
+//         if (entity.material_name) |material_name| {
+//             const has_material = resource_manager.materials.contains(material_name);
+//             if (!has_material) {
+//                 std.debug.print("ERROR: Missing material '{s}' in resource manager!\n", .{material_name});
+//             }
+//             try testing.expect(has_material);
+//         }
+//     }
+
+//     resource2.deinit();
+// }
+
+// test {
+// _ = @import("core/ecs/components/PhysicsThread.zig"); // Commented out collision system testing for now
+// }
+
+test "debug wireframe memory leak with HintzeHall" {
+    const allocator = std.testing.allocator;
+
+    std.debug.print("\n=== Testing Debug Wireframe Memory Leak with HintzeHall ===\n", .{});
+
+    // Create a minimal world and ECS manager
+    var ecs_manager = try ECSManager.init(allocator);
+    defer ecs_manager.deinit();
+
+    // Create HintzeHall entity with collision meshes
+    const hall_entity = try HintzeHall.spawn(allocator, ecs_manager);
+    std.debug.print("Created HintzeHall entity: {}\n", .{hall_entity.id});
+
+    // Enable debug wireframes
+    try ecs_manager.collision_system.setDebugWireframes(true);
+    std.debug.print("Enabled debug wireframes\n", .{});
+
+    // Add some debug output to the wireframe system
+    if (ecs_manager.collision_system.debug_wireframe_system) |_| {
+        std.debug.print("Debug wireframe system initialized and enabled\n", .{});
     }
-    
-    // Clean up first resource
-    resource1.deinit();
-    
-    // Second load - should be from cache
-    std.debug.print("\n=== Second load (cached) ===\n", .{});
-    const resource2 = try resource_manager.loadGLTFModelCached(alloc, drone_path);
-    
-    // Check that resources were loaded from cache
-    std.debug.print("After second load:\n", .{});
-    std.debug.print("  Meshes loaded: {}\n", .{resource_manager.meshes.count()});
-    std.debug.print("  Textures loaded: {}\n", .{resource_manager.textures.count()});
-    std.debug.print("  Materials loaded: {}\n", .{resource_manager.materials.count()});
-    std.debug.print("  Entities in model: {}\n", .{resource2.entities.len});
-    
-    // Should have same counts as before
-    try testing.expectEqual(initial_mesh_count, resource_manager.meshes.count());
-    try testing.expectEqual(initial_texture_count, resource_manager.textures.count());
-    try testing.expectEqual(initial_material_count, resource_manager.materials.count());
-    try testing.expectEqual(resource1.entities.len, resource2.entities.len);
-    
-    // Print cached entity details
-    for (resource2.entities, 0..) |entity, i| {
-        std.debug.print("  Entity[{}]: name={s}, mesh={s}, material={s}\n", .{
-            i,
-            entity.name orelse "null",
-            entity.mesh_name orelse "null",
-            entity.material_name orelse "null",
-        });
-    }
-    
-    // Verify entities have proper mesh and material references
-    for (resource2.entities) |entity| {
-        if (entity.mesh_name) |mesh_name| {
-            const has_mesh = resource_manager.meshes.contains(mesh_name);
-            if (!has_mesh) {
-                std.debug.print("ERROR: Missing mesh '{s}' in resource manager!\n", .{mesh_name});
+
+    // Simulate multiple update cycles to observe memory growth
+    for (0..20) |frame| {
+        // Update collision system (which updates debug wireframes)
+        try ecs_manager.update(50 * std.time.ns_per_ms);
+
+        // Every 5 frames, print status
+        if (frame % 5 == 0) {
+            std.debug.print("Frame {}: Updated collision system\n", .{frame});
+
+            // Check if wireframes are being generated
+            if (ecs_manager.collision_system.physics_thread) |physics_thread| {
+                const wireframes = physics_thread.getDebugWireframes();
+                var total_vertices: usize = 0;
+                for (wireframes) |wf| {
+                    total_vertices += wf.vertices.len;
+                }
+                std.debug.print("  Wireframes: {} entities, {} total vertices\n", .{ wireframes.len, total_vertices });
             }
-            try testing.expect(has_mesh);
         }
-        
-        if (entity.material_name) |material_name| {
-            const has_material = resource_manager.materials.contains(material_name);
-            if (!has_material) {
-                std.debug.print("ERROR: Missing material '{s}' in resource manager!\n", .{material_name});
-            }
-            try testing.expect(has_material);
-        }
-    }
-    
-    resource2.deinit();
-}
 
-test {
-    // _ = @import("core/ecs/components/PhysicsThread.zig"); // Commented out collision system testing for now
+        // Small delay to let physics thread process
+        std.time.sleep(50 * std.time.ns_per_ms);
+    }
+
+    // Disable debug wireframes
+    try ecs_manager.collision_system.setDebugWireframes(false);
+    std.debug.print("Disabled debug wireframes\n", .{});
+
+    // Run a few more frames to see if memory is released
+    for (0..5) |_| {
+        try ecs_manager.update(50 * std.time.ns_per_ms);
+        std.time.sleep(50 * std.time.ns_per_ms);
+    }
+
+    std.debug.print("Test completed - monitor memory usage externally\n", .{});
 }

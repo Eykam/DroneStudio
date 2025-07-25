@@ -11,6 +11,7 @@ const Mesh = @import("../../Mesh.zig");
 const ResourceManager = @import("../ResourceManager.zig");
 const Math = @import("../../Math.zig");
 const PhysicsThread = @import("PhysicsThread.zig");
+const Renderer = @import("Renderer.zig");
 
 const TransformComponent = Transform.TransformComponent;
 const PhysicsComponent = Physics.PhysicsComponent;
@@ -70,7 +71,7 @@ pub const ConvexHullShape = struct {
     n_points: u32,
     n_triangles: u32,
 
-    // Generate convex hulls from mesh using V-HACD (pure generation, no caching)
+    // Generate convex hulls from mesh using V-HACD
     pub fn generateFromMesh(allocator: std.mem.Allocator, mesh: *Mesh) ![]ConvexHullShape {
         // Create V-HACD instance
         const vhacd_handle = vhacd.vhacd_create();
@@ -428,7 +429,7 @@ pub const RigidBodyComponent = struct {
     const Self = @This();
 
     entity_id: Core.EntityID = undefined,
-    bullet_body: ?bullet.CbtBodyHandle = null,
+    bullet_body: ?bullet.CbtBodyHandle = null, //TODO: Remove this field since the physics thread handles this
     bullet_shape: bullet.CbtShapeHandle,
     mass: f32 = 1.0,
     initial_position: [3]f32 = .{ 0.0, 0.0, 0.0 },
@@ -438,8 +439,15 @@ pub const RigidBodyComponent = struct {
         return .{ .mass = mass, .bullet_shape = shape };
     }
 
-    pub fn setInitialTransform(self: *Self, position: [3]f32, rotation: [4]f32) void {
-        self.initial_position = position;
+    pub fn translate(self: *Self, offset: [3]f32) void {
+        self.initial_position = [3]f32{
+            self.initial_position[0] + offset[0],
+            self.initial_position[1] + offset[1],
+            self.initial_position[2] + offset[2],
+        };
+    }
+
+    pub fn rotate(self: *Self, rotation: [4]f32) void {
         self.initial_rotation = rotation;
     }
 
@@ -448,15 +456,8 @@ pub const RigidBodyComponent = struct {
 
         // Send command to physics thread to create body instead of creating in main thread
         if (ecs.collision_system.physics_thread) |physics| {
-            // Get initial transform from ECS
-            var initial_pos = self.initial_position;
-            var initial_rot = self.initial_rotation;
-
-            if (ecs.transform_components.get(eid)) |transform| {
-                initial_pos = transform.position;
-                // Convert rotation to quaternion array
-                initial_rot = .{ transform.rotation.x(), transform.rotation.y(), transform.rotation.z(), transform.rotation.w() };
-            }
+            const initial_pos = self.initial_position;
+            const initial_rot = self.initial_rotation;
 
             // Get collision properties from collider component (if it exists)
             var restitution: f32 = 0.5;
@@ -521,9 +522,6 @@ pub const ColliderComponent = struct {
     collision_group: u16 = 1,
     collision_mask: u16 = 0xFFFF, // Collide with everything by default
 
-    // Debug visualization
-    debug_entity_id: ?Core.EntityID = null,
-
     // For simple shapes (box, sphere, triangle mesh, etc.)
     pub fn init(allocator: std.mem.Allocator, shape: ColliderShape, mesh: ?*Mesh) !Self {
         var collider = Self{
@@ -539,116 +537,92 @@ pub const ColliderComponent = struct {
     }
 
     // Depth-first traversal helper for processing GLTF nodes with accumulated transforms
-    fn processNodeDFS(allocator: std.mem.Allocator, resource_manager: *ResourceManager, model_resource: *GLTF.ModelResource, compound_shape: bullet.CbtShapeHandle, base_shape: ColliderShape, node_index: usize, accumulated_transform: Mat4) !void {
+    fn processNodeDFS(
+        allocator: std.mem.Allocator,
+        resource_manager: *ResourceManager,
+        model_resource: *GLTF.ModelResource,
+        compound_shape: bullet.CbtShapeHandle,
+        base_shape: ColliderShape,
+        node_index: usize,
+        accumulated_transform: Mat4,
+    ) !void {
         if (node_index >= model_resource.entities.len) return;
 
         const node = model_resource.entities[node_index];
 
-        // Calculate this node's world transform by combining accumulated + local
-        var world_transform = accumulated_transform;
+        // Calculate this node's transform by combining accumulated + local
+        var current_transform = accumulated_transform;
+
+        std.debug.print("Node {d}: Processing (accumulated transform pos=[{d:.3}, {d:.3}, {d:.3}])\n", .{ node_index, accumulated_transform.get_position().x(), accumulated_transform.get_position().y(), accumulated_transform.get_position().z() });
 
         if (node.local_transformation) |local_transform| {
             std.debug.print("Node {d}: has local_transformation\n", .{node_index});
-            // Extract scale from matrix BEFORE normalization
-            world_transform = local_transform.multiply(world_transform);
+            current_transform = local_transform.multiply(current_transform);
         } else {
-            // std.debug.print("building from TRS components\n", .{});
-            // Build local transform from individual TRS components
             var local_matrix = Mat4.identity();
 
             // Apply translation
             if (node.translation) |t| {
-                // std.debug.print("  Translation: [{d:.3}, {d:.3}, {d:.3}]\n", .{ t[0], t[1], t[2] });
                 local_matrix = local_matrix.translate(t[0], t[1], t[2]);
             }
 
             // Apply rotation
             if (node.rotation) |r| {
-                // std.debug.print("  Rotation: [{d:.3}, {d:.3}, {d:.3}, {d:.3}]\n", .{ r[0], r[1], r[2], r[3] });
                 const quat = Quaternion.init(r[0], r[1], r[2], r[3]);
                 local_matrix = local_matrix.multiply(Mat4.from_quaternion(quat));
             }
 
             // Apply scale
             if (node.scale) |s| {
-                std.debug.print("Node {d}: Scale: [{d:.3}, {d:.3}, {d:.3}]\n", .{ node_index, s[0], s[1], s[2] });
                 local_matrix = local_matrix.scale(s[0], s[1], s[2]);
-            } else {
-                // std.debug.print("  No scale component\n", .{});
             }
 
-            world_transform = local_matrix.multiply(world_transform);
+            current_transform = local_matrix.multiply(current_transform);
         }
 
-        // If this node has a mesh, create collision shape with accumulated scale
+        // If this node has a mesh, create collision shape with accumulated transform
+        var transform_for_children = current_transform;
         if (node.mesh_name) |mesh_name| {
             if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
-                // TODO: There is probably a more efficient way to calculate the scale without
-                // doing an entire TRS decomposition, but this works for now.
-                // Extract scale from the accumulated world transform
-                const trs = world_transform.decomposeTRS();
-                const scale = trs.scale;
+                // Extract the 3x3 rotation matrix and translation directly from current_transform
+                const m = current_transform.base.data;
 
                 // Create child shape
-                const child_shape = bullet.cbtShapeAllocate(switch (base_shape) {
-                    .Box => bullet.CBT_SHAPE_TYPE_BOX,
-                    .Sphere => bullet.CBT_SHAPE_TYPE_SPHERE,
-                    .Capsule => bullet.CBT_SHAPE_TYPE_CAPSULE,
-                    .Cylinder => bullet.CBT_SHAPE_TYPE_CYLINDER,
-                    .Cone => bullet.CBT_SHAPE_TYPE_CONE,
-                    .TriangleMesh => bullet.CBT_SHAPE_TYPE_TRIANGLE_MESH,
-                    .ConvexHull => bullet.CBT_SHAPE_TYPE_COMPOUND,
-                    .CompoundShape => bullet.CBT_SHAPE_TYPE_COMPOUND,
-                });
+                const shape_type = base_shape.getBulletShapeType();
+                const mesh_shape = bullet.cbtShapeAllocate(shape_type);
 
-                if (child_shape != null) {
-                    // Apply scale to mesh vertices
-                    const scaled_vertices = try allocator.dupe(Mesh.Vertex, mesh_res.mesh.vertices);
-                    defer allocator.free(scaled_vertices);
-
-                    std.debug.print("  Mesh: {s}, World Scale: [{d:.3}, {d:.3}, {d:.3}]\n", .{ mesh_name, scale[0], scale[1], scale[2] });
-
-                    for (scaled_vertices) |*vertex| {
-                        vertex.position[0] *= scale[0];
-                        vertex.position[1] *= scale[1];
-                        vertex.position[2] *= scale[2];
-                    }
-
-                    var scaled_indices: ?[]u32 = null;
-                    defer if (scaled_indices) |indices| allocator.free(indices);
+                if (mesh_shape != null) {
+                    var indices_opt: ?[]u32 = null;
+                    defer if (indices_opt) |indices| allocator.free(indices);
 
                     if (mesh_res.mesh.indices) |indices| {
-                        scaled_indices = try allocator.dupe(u32, indices);
+                        indices_opt = try allocator.dupe(u32, indices);
                     }
 
-                    // Create temporary scaled mesh
-                    var temp_mesh = try Mesh.init(allocator, scaled_vertices, scaled_indices, mesh_res.mesh._draw);
+                    var temp_mesh = try Mesh.init(allocator, mesh_res.mesh.vertices, indices_opt, mesh_res.mesh._draw);
                     defer temp_mesh.deinit();
 
-                    // Create collision shape from scaled mesh
                     var mesh_collider = try createColliderFromMesh(allocator, resource_manager, temp_mesh, base_shape);
-
-                    // Use the collision shape to create the bullet shape
-                    try mesh_collider.shape.createBulletShape(allocator, child_shape.?, temp_mesh);
-
-                    // Don't deinit mesh_collider since child_shape is now owned by the compound shape
-
-                    // Create transform matrix without scale (since scale is baked into mesh)
-                    const right = world_transform.get_right().normalize();
-                    const up = world_transform.get_up().normalize();
-                    const forward = world_transform.get_forward().normalize();
-
-                    const position = world_transform.get_position();
+                    try mesh_collider.shape.createBulletShape(allocator, mesh_shape.?, temp_mesh);
 
                     var child_transform = [4][3]f32{
-                        [3]f32{ right.x(), right.y(), right.z() },
-                        [3]f32{ up.x(), up.y(), up.z() },
-                        [3]f32{ forward.x(), forward.y(), forward.z() },
-                        [3]f32{ position.x(), position.y(), position.z() },
+                        [3]f32{ m[0], m[1], m[2] }, // First column of rotation
+                        [3]f32{ m[4], m[5], m[6] }, // Second column of rotation
+                        [3]f32{ m[8], m[9], m[10] }, // Third column of rotation
+                        [3]f32{ m[12], m[13], m[14] }, // Translation
                     };
 
-                    // Add child shape to compound
-                    bullet.cbtShapeCompoundAddChild(compound_shape, &child_transform, child_shape.?);
+                    std.debug.print("  Adding mesh '{s}' to compound with transform:\n", .{mesh_name});
+                    std.debug.print("    Row 0: [{d:.3}, {d:.3}, {d:.3}] (X axis)\n", .{ child_transform[0][0], child_transform[0][1], child_transform[0][2] });
+                    std.debug.print("    Row 1: [{d:.3}, {d:.3}, {d:.3}] (Y axis)\n", .{ child_transform[1][0], child_transform[1][1], child_transform[1][2] });
+                    std.debug.print("    Row 2: [{d:.3}, {d:.3}, {d:.3}] (Z axis)\n", .{ child_transform[2][0], child_transform[2][1], child_transform[2][2] });
+                    std.debug.print("    Row 3: [{d:.3}, {d:.3}, {d:.3}] (Position)\n", .{ child_transform[3][0], child_transform[3][1], child_transform[3][2] });
+
+                    bullet.cbtShapeCompoundAddChild(compound_shape, &child_transform, mesh_shape.?);
+
+                    // Reset transform accumulation for children since this node has a mesh
+                    transform_for_children = Mat4.identity();
+                    std.debug.print("Node {d}: Found mesh, resetting transform accumulation for children\n", .{node_index});
                 }
             }
         }
@@ -661,7 +635,7 @@ pub const ColliderComponent = struct {
             if (child_node.parent_idx) |parent| {
                 if (parent == node_index) {
                     std.debug.print("  Node {d} has child {d}\n", .{ node_index, child_idx });
-                    try processNodeDFS(allocator, resource_manager, model_resource, compound_shape, base_shape, child_idx, world_transform);
+                    try processNodeDFS(allocator, resource_manager, model_resource, compound_shape, base_shape, child_idx, transform_for_children);
                 }
             }
         }
@@ -674,15 +648,12 @@ pub const ColliderComponent = struct {
         base_shape: ColliderShape,
         resource_manager: *ResourceManager,
     ) !Self {
-        // Count meshes to allocate compound shape properly
         var mesh_count: u32 = 0;
         for (model_resource.entities) |node| {
             if (node.mesh_name != null) mesh_count += 1;
         }
 
         if (mesh_count == 0) return error.NoMeshesToCreateColliderFrom;
-
-        // Create a compound shape collider
         var compound_collider = Self{
             .shape = .{ .CompoundShape = CompoundShape{} },
         };
@@ -743,9 +714,11 @@ pub const CollisionSystem = struct {
     transform_components: *SparseSet(TransformComponent),
     rigid_body_components: *SparseSet(RigidBodyComponent),
     collider_components: *SparseSet(ColliderComponent),
+    renderer_components: *SparseSet(Renderer.Renderable),
 
     // Threaded physics system
     physics_thread: ?*PhysicsThread.ThreadedPhysicsSystem = null,
+    debug_wireframe_system: ?DebugWireframeSystem = null,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -753,14 +726,15 @@ pub const CollisionSystem = struct {
         transform_components: *SparseSet(TransformComponent),
         rigid_body_components: *SparseSet(RigidBodyComponent),
         collider_components: *SparseSet(ColliderComponent),
+        renderer_components: *SparseSet(Renderer.Renderable),
     ) !Self {
-        std.debug.print("COLLISION SYSTEM: CollisionSystem.init() called\n", .{});
         var system = Self{
             .world = world,
             .allocator = allocator,
             .transform_components = transform_components,
             .rigid_body_components = rigid_body_components,
             .collider_components = collider_components,
+            .renderer_components = renderer_components,
         };
 
         try system.initThreadedPhysics();
@@ -769,6 +743,12 @@ pub const CollisionSystem = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        // Clean up debug wireframe system
+        if (self.debug_wireframe_system) |*debug_system| {
+            debug_system.deinit();
+            self.debug_wireframe_system = null;
+        }
+
         // Clean up threaded physics system
         if (self.physics_thread) |physics| {
             physics.deinit();
@@ -777,30 +757,48 @@ pub const CollisionSystem = struct {
     }
 
     fn initThreadedPhysics(self: *Self) !void {
-        // Initialize the threaded physics system
+        // Initialize the threaded physics system with thread-safe allocator
         self.physics_thread = try PhysicsThread.ThreadedPhysicsSystem.init(self.allocator);
+
+        // Initialize debug wireframe system
+        if (self.physics_thread) |physics_thread| {
+            self.debug_wireframe_system = try DebugWireframeSystem.init(self.allocator, physics_thread);
+            std.debug.print("Debug wireframe system initialized\n", .{});
+        }
     }
 
-    pub fn update(self: *Self, dt: f32) !void {
-        _ = dt; // Physics now runs on fixed timestep in separate thread
-
-        // Get latest physics states from the physics thread
+    pub fn update(self: *Self) !void {
         if (self.physics_thread) |physics| {
             const physics_states = physics.getPhysicsStates();
 
             // Update transform components with latest physics data
             for (physics_states) |state| {
                 if (self.transform_components.get(state.entity_id)) |transform| {
+                    // Debug output for physics state updates
+                    if (state.entity_id.id < 5) { // Only show first few entities to avoid spam
+                        std.debug.print("CollisionSystem: Updating entity {d} transform from physics: pos=[{d:.3}, {d:.3}, {d:.3}]\n", .{
+                            state.entity_id.id,
+                            state.position[0],
+                            state.position[1],
+                            state.position[2],
+                        });
+                    }
+
                     // Update position and rotation from physics thread
                     transform.position = state.position;
 
-                    // Convert quaternion to our rotation representation
-                    // TODO: Implement proper quaternion handling
                     const quat = Math.Quaternion{ .data = state.rotation };
                     transform.rotation = quat.normalize();
                     transform.updateLocalTransform();
                 }
             }
+        }
+
+        // Update debug wireframe system if enabled
+        if (self.debug_wireframe_system) |*debug_system| {
+            debug_system.update(self.world, self.world.resource_manager, self.renderer_components, self.transform_components) catch |err| {
+                std.debug.print("Error updating debug wireframe system: {any}\n", .{err});
+            };
         }
     }
 
@@ -843,16 +841,33 @@ pub const CollisionSystem = struct {
                             }
 
                             reset_count += 1;
-                            std.debug.print("Reset entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n", .{ entity_id.id, rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2] });
+                            std.debug.print(
+                                "Reset entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n",
+                                .{
+                                    entity_id.id,
+                                    rigid_body.initial_position[0],
+                                    rigid_body.initial_position[1],
+                                    rigid_body.initial_position[2],
+                                },
+                            );
                         } else {
-                            std.debug.print("Failed to send SetTransform command for entity {d} - queue full\n", .{entity_id.id});
+                            std.debug.print(
+                                "Failed to send SetTransform command for entity {d} - queue full\n",
+                                .{entity_id.id},
+                            );
                         }
                     }
                 }
 
-                std.debug.print("Reset complete! {d} dynamic bodies reset via physics thread commands.\n", .{reset_count});
+                std.debug.print(
+                    "Reset complete! {d} dynamic bodies reset via physics thread commands.\n",
+                    .{reset_count},
+                );
             } else {
-                std.debug.print("Failed to send ResetDynamicBodies command - physics command queue full\n", .{});
+                std.debug.print(
+                    "Failed to send ResetDynamicBodies command - physics command queue full\n",
+                    .{},
+                );
             }
         } else {
             std.debug.print("No physics thread available for reset operation\n", .{});
@@ -866,9 +881,20 @@ pub const CollisionSystem = struct {
             const success = physics.sendCommand(command);
 
             if (success) {
-                std.debug.print("Sent force command [{d:.2}, {d:.2}, {d:.2}] for eid {d}\n", .{ force[0], force[1], force[2], entity_id.id });
+                std.debug.print(
+                    "Sent force command [{d:.2}, {d:.2}, {d:.2}] for eid {d}\n",
+                    .{
+                        force[0],
+                        force[1],
+                        force[2],
+                        entity_id.id,
+                    },
+                );
             } else {
-                std.debug.print("Failed to send force command for eid {d} - command queue full\n", .{entity_id.id});
+                std.debug.print(
+                    "Failed to send force command for eid {d} - command queue full\n",
+                    .{entity_id.id},
+                );
             }
         } else {
             std.debug.print("No physics thread available for eid {d}\n", .{entity_id.id});
@@ -902,9 +928,6 @@ pub const CollisionSystem = struct {
             std.debug.print("No physics thread available for torque on eid {d}\n", .{entity_id.id});
         }
     }
-
-    // Note: linkColliderToRigidBody function removed - collision properties are now
-    // automatically set during physics body creation in the threaded physics system
 
     // Perform a ray test in the world
     pub fn rayTest(self: *Self, ray_from: [3]f32, ray_to: [3]f32, collision_filter_group: i32, collision_filter_mask: i32) ?struct {
@@ -950,87 +973,210 @@ pub const CollisionSystem = struct {
         return null;
     }
 
-    // Create debug visualization for a collider
-    pub fn createDebugVisualization(self: *Self, ecs_manager: *ECSManager, collider_eid: Core.EntityID, is_dynamic: bool) !void {
-        if (self.collider_components.get(collider_eid)) |collider| {
-            // Import ColliderDebug here to avoid circular dependency
-            const ColliderDebug = @import("../prefabs/ColliderDebug.zig");
-
-            // Generate deterministic name for debug mesh (will be cached by ResourceManager)
-            var name_buf: [64]u8 = undefined;
-            const mesh_name = try std.fmt.bufPrint(&name_buf, "collider_debug_{s}_{d}", .{
-                @tagName(collider.shape),
-                collider_eid.id,
-            });
-
-            // Get mesh data for triangle mesh debug visualization
-            var mesh_data: ?*Mesh = null;
-            if (std.meta.activeTag(collider.shape) == .TriangleMesh) {
-                // For triangle meshes, get the original mesh data from the renderable component
-                if (ecs_manager.renderer_components.get(collider_eid)) |renderable| {
-                    if (self.world.resource_manager.meshes.get(renderable.mesh_name)) |mesh_resource| {
-                        mesh_data = mesh_resource.mesh;
-                    }
-                }
-            }
-
-            // Create debug visualization using the new unified API
-            const debug_components = try ColliderDebug.generateDebugVisualization(
-                self.allocator,
-                ecs_manager,
-                mesh_name,
-                collider.shape,
-                collider,
-                is_dynamic,
-                mesh_data,
-            );
-
-            // Spawn debug entity
-            const debug_eid = try ecs_manager.spawn(.{
-                debug_components.tf,
-                debug_components.renderable,
-            });
-
-            // Link to parent entity
-            if (self.transform_components.get(collider_eid)) |_| {
-                try ecs_manager.transform_system.addChild(collider_eid, debug_eid);
-            }
-
-            // Store reference
-            collider.debug_entity_id = debug_eid;
+    /// Enable or disable debug wireframes
+    pub fn setDebugWireframes(self: *Self, enabled: bool) !void {
+        if (self.debug_wireframe_system) |*debug_system| {
+            try debug_system.setEnabled(enabled);
+        } else {
+            return error.DebugWireframeSystemNotInitialized;
         }
     }
 
-    // Remove debug visualization for a collider
-    pub fn removeDebugVisualization(self: *Self, ecs_manager: *ECSManager, collider_eid: Core.EntityID) !void {
-        if (self.collider_components.get(collider_eid)) |collider| {
-            if (collider.debug_entity_id) |debug_eid| {
-                // Remove entity from ECS
-                ecs_manager.destroyEntity(debug_eid);
-
-                // Clear the reference
-                collider.debug_entity_id = null;
+    /// Pause or resume physics simulation
+    pub fn setPhysicsPaused(self: *Self, paused: bool) void {
+        if (self.physics_thread) |physics| {
+            const success = physics.setPhysicsPaused(paused);
+            if (!success) {
+                std.debug.print("Failed to send pause command to physics thread - queue full\n", .{});
             }
+        } else {
+            std.debug.print("No physics thread available for pause operation\n", .{});
         }
     }
 
-    // Toggle debug visualization for all colliders
-    pub fn toggleDebugVisualization(self: *Self, ecs_manager: *ECSManager, show_debug: bool) !void {
-        var it = self.collider_components.iterator();
+    /// Check if physics simulation is currently paused
+    pub fn isPhysicsPaused(self: *Self) bool {
+        if (self.physics_thread) |physics| {
+            return physics.isPhysicsPaused();
+        }
+        return false;
+    }
+};
+
+pub const DebugWireframeSystem = struct {
+    const DebugSelf = @This();
+
+    const DebugInfo = struct {
+        mesh_name: []u8,
+        debug_entity: Core.EntityID,
+    };
+
+    allocator: std.mem.Allocator,
+    physics_thread: *PhysicsThread.ThreadedPhysicsSystem,
+    debug_entities: std.AutoHashMap(Core.EntityID, DebugInfo), // physics_entity => debug info
+    enabled: bool = false,
+    last_wireframe_version: u32 = 0, // Track last processed wireframe version
+
+    pub fn init(allocator: std.mem.Allocator, physics_thread: *PhysicsThread.ThreadedPhysicsSystem) !DebugSelf {
+        return DebugSelf{
+            .allocator = allocator,
+            .physics_thread = physics_thread,
+            .debug_entities = std.AutoHashMap(Core.EntityID, DebugInfo).init(allocator),
+            .enabled = false,
+        };
+    }
+
+    pub fn deinit(self: *DebugSelf) void {
+        // Free all cached mesh names
+        var it = self.debug_entities.iterator();
         while (it.next()) |entry| {
-            const collider_eid = entry.entity_id;
-            const collider = entry.component;
+            self.allocator.free(entry.value_ptr.mesh_name);
+        }
+        self.debug_entities.deinit();
+    }
 
-            if (show_debug and collider.debug_entity_id == null) {
-                // Determine if it's dynamic based on rigid body component
-                var is_dynamic = false;
-                if (self.rigid_body_components.get(collider_eid)) |rigid_body| {
-                    is_dynamic = rigid_body.mass > 0.0; // Dynamic bodies have mass > 0
+    /// Enable or disable debug wireframes
+    pub fn setEnabled(self: *DebugSelf, enabled: bool) !void {
+        if (self.enabled == enabled) return; // No change
+
+        self.enabled = enabled;
+
+        if (enabled) {
+            // Enable debug wireframes in physics thread
+            const dynamic_color = [3]f32{ 0.0, 1.0, 0.0 }; // Green for dynamic
+            const static_color = [3]f32{ 0.0, 0.0, 1.0 }; // Blue for static
+
+            const success = self.physics_thread.setDebugWireframes(true, dynamic_color, static_color);
+            if (!success) {
+                return error.FailedToEnableDebugWireframes;
+            }
+
+            std.debug.print("DebugWireframeSystem: Enabled debug wireframes (renderables will be created when wireframes are ready)\n", .{});
+        } else {
+            // Disable debug wireframes in physics thread
+            const success = self.physics_thread.setDebugWireframes(false, .{ 0, 0, 0 }, .{ 0, 0, 0 });
+            if (!success) {
+                return error.FailedToDisableDebugWireframes;
+            }
+
+            std.debug.print("DebugWireframeSystem: Disabled debug wireframes (cleanup will happen in update)\n", .{});
+        }
+    }
+
+    pub fn update(
+        self: *DebugSelf, 
+        world: *Core.World,
+        resource_manager: *ResourceManager,
+        renderer_components: *SparseSet(Renderer.Renderable),
+        transform_components: *SparseSet(Transform.TransformComponent)
+    ) !void {
+        if (!self.enabled) {
+            // Clean up when disabled
+            if (self.debug_entities.count() > 0) {
+                self.cleanupDebugEntities(renderer_components, transform_components);
+            }
+            return;
+        }
+
+        // Check if wireframes have been updated
+        const current_version = self.physics_thread.getWireframeVersion();
+        if (current_version > self.last_wireframe_version) {
+            std.debug.print("DebugWireframeSystem: New wireframes available (version {} -> {})\n", .{self.last_wireframe_version, current_version});
+            
+            // Clean up old debug entities first
+            self.cleanupDebugEntities(renderer_components, transform_components);
+
+            // Create new debug entities with fresh wireframes
+            try self.createDebugEntities(world, resource_manager, renderer_components, transform_components);
+
+            self.last_wireframe_version = current_version;
+            std.debug.print("DebugWireframeSystem: Created {} debug entities for version {}\n", .{self.debug_entities.count(), current_version});
+        }
+
+        // Update transforms for existing debug entities
+        const physics_states = self.physics_thread.getPhysicsStates();
+        for (physics_states) |state| {
+            if (self.debug_entities.get(state.entity_id)) |debug_info| {
+                if (transform_components.get(debug_info.debug_entity)) |transform| {
+                    transform.setPosition(state.position[0], state.position[1], state.position[2]);
+                    const quat = Math.Quaternion{ .data = state.rotation };
+                    transform.setRotation(quat);
                 }
-                try self.createDebugVisualization(ecs_manager, collider_eid, is_dynamic);
-            } else if (!show_debug and collider.debug_entity_id != null) {
-                try self.removeDebugVisualization(ecs_manager, collider_eid);
             }
         }
+    }
+
+    /// Clean up all debug entities and their components
+    fn cleanupDebugEntities(
+        self: *DebugSelf,
+        renderer_components: *SparseSet(Renderer.Renderable),
+        transform_components: *SparseSet(Transform.TransformComponent)
+    ) void {
+        var it = self.debug_entities.iterator();
+        while (it.next()) |entry| {
+            const debug_info = entry.value_ptr.*;
+            
+            // Remove components from debug entity
+            _ = renderer_components.remove(debug_info.debug_entity) catch false;
+            _ = transform_components.remove(debug_info.debug_entity) catch false;
+            
+            // Free mesh name
+            self.allocator.free(debug_info.mesh_name);
+        }
+        self.debug_entities.clearAndFree();
+        std.debug.print("DebugWireframeSystem: Cleaned up debug entities\n", .{});
+    }
+
+    /// Create debug entities from current wireframe data
+    fn createDebugEntities(
+        self: *DebugSelf,
+        world: *Core.World,
+        resource_manager: *ResourceManager,
+        renderer_components: *SparseSet(Renderer.Renderable),
+        transform_components: *SparseSet(Transform.TransformComponent)
+    ) !void {
+        const wireframes = self.physics_thread.getDebugWireframes();
+        for (wireframes) |wireframe_data| {
+            const mesh_name = try self.getMeshName(wireframe_data.entity_id);
+            
+            // Create a debug entity for this physics entity
+            const debug_entity = try world.createEntity();
+            
+            // Add transform component to debug entity (will be updated each frame)
+            const initial_transform = Transform.TransformComponent.init(self.allocator);
+            try transform_components.add(debug_entity, initial_transform);
+            
+            // Create mesh from wireframe vertices
+            const mesh_vertices = try self.allocator.alloc(Mesh.Vertex, wireframe_data.vertices.len);
+            for (wireframe_data.vertices, 0..) |vertex, i| {
+                mesh_vertices[i] = Mesh.Vertex{
+                    .position = vertex.position,
+                    .color = vertex.color,
+                    .normal = .{ 0.0, 0.0, 1.0 },
+                    .texture = .{ 0.0, 0.0 },
+                };
+            }
+            
+            // Create mesh in resource manager
+            try resource_manager.updateMesh(mesh_name, mesh_vertices, null, Mesh.gen_draw(.lines));
+            
+            // Create renderable for debug entity
+            const renderable = try Renderer.Renderable.init(self.allocator, mesh_name);
+            try renderer_components.add(debug_entity, renderable);
+            
+            // Store mapping from physics entity to debug entity
+            const debug_info = DebugInfo{
+                .mesh_name = mesh_name,
+                .debug_entity = debug_entity,
+            };
+            try self.debug_entities.put(wireframe_data.entity_id, debug_info);
+            
+            std.debug.print("Created debug entity {d} for physics entity {d}\n", .{debug_entity.id, wireframe_data.entity_id.id});
+        }
+    }
+
+    /// Generate a unique mesh name for a physics entity
+    fn getMeshName(self: *DebugSelf, physics_eid: Core.EntityID) ![]u8 {
+        return std.fmt.allocPrint(self.allocator, "debug_wireframe_{d}", .{physics_eid.id});
     }
 };

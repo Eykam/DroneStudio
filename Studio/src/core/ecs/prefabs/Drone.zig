@@ -19,10 +19,10 @@ const Vec3 = Math.Vec3;
 /// ---------------------------------------------------------------------------
 /// Tunable constants
 const Defaults = struct {
-    const thrust: f32 = 4.0; // m/s
-    const yawRate: f32 = 120; // °/s
-    const rollRate: f32 = 70;
-    const pitchRate: f32 = 70; // ° per pixel
+    const thrust: f32 = 20.0; // m/s
+    const yawRate: f32 = 2; // °/s
+    const rollRate: f32 = 60;
+    const pitchRate: f32 = 60; // ° per pixel
 };
 
 /// Helpers ---------------------------------------------------------------
@@ -32,7 +32,7 @@ const CollisionSystem = Collisions.CollisionSystem;
 inline fn move(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dir: Vec3, speed: f32, dt: f32) void {
     if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
         // Use physics force for dynamic bodies
-        const force = dir.scale(speed * rigid_body.?.mass * 5.0); // Scale by mass for consistent feel
+        const force = dir.scale(speed * rigid_body.?.mass); // Scale by mass for consistent feel
         std.debug.print("Applying force to eid {d}: [{d:.2}, {d:.2}, {d:.2}]\n", .{ eid.id, force.data[0], force.data[1], force.data[2] });
         collision_system.?.applyCentralForce(eid, force.data);
     } else {
@@ -46,7 +46,7 @@ inline fn move(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body
 inline fn rotate(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, axis: Vec3, deg: f32, dt: f32) void {
     if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
         // Use physics torque for dynamic bodies - increased multiplier to match mouse sensitivity
-        const torque = axis.scale(Math.radians(deg) * rigid_body.?.mass * 500.0); // Scale by mass and convert to radians
+        const torque = axis.scale(Math.radians(deg) * rigid_body.?.mass); // Scale by mass and convert to radians
         std.debug.print("Applying torque to eid {d}: [{d:.2}, {d:.2}, {d:.2}]\n", .{ eid.id, torque.data[0], torque.data[1], torque.data[2] });
         collision_system.?.applyTorque(eid, torque.data);
     } else {
@@ -59,16 +59,16 @@ inline fn rotate(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_bo
 
 /// Key‑binding callbacks --------------------------------------------------
 fn up(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    move(eid, tf, rigid_body, collision_system, tf.world_transform.get_up(), Defaults.thrust, dt);
+    move(eid, tf, rigid_body, collision_system, tf.local_transform.get_up(), Defaults.thrust, dt);
 }
 fn down(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    move(eid, tf, rigid_body, collision_system, tf.world_transform.get_up().scale(-1), Defaults.thrust, dt);
+    move(eid, tf, rigid_body, collision_system, tf.local_transform.get_up().scale(-1), Defaults.thrust, dt);
 }
 fn yawLeft(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    rotate(eid, tf, rigid_body, collision_system, tf.world_transform.get_up(), -Defaults.yawRate, dt);
+    rotate(eid, tf, rigid_body, collision_system, tf.local_transform.get_up(), -Defaults.yawRate, dt);
 }
 fn yawRight(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    rotate(eid, tf, rigid_body, collision_system, tf.world_transform.get_up(), Defaults.yawRate, dt);
+    rotate(eid, tf, rigid_body, collision_system, tf.local_transform.get_up(), Defaults.yawRate, dt);
 }
 
 /// Mouse‑look (pitch / roll) ----------------------------------------------
@@ -81,12 +81,12 @@ fn mouseLook(
     dy: f32,
     _: f64,
 ) void {
-    const local_forward = tf.world_transform.get_forward();
-    const local_right = tf.world_transform.get_right();
+    const local_forward = tf.local_transform.get_forward();
+    const local_right = tf.local_transform.get_right();
 
     // Remove dt scaling for mouse input - mouse movement is already frame-rate independent
-    const roll_angle = -@as(f32, @floatCast(dx)) * 0.1; // Reduced sensitivity
-    const pitch_angle = @as(f32, @floatCast(-dy)) * 0.1; // Reduced sensitivity
+    const roll_angle = @as(f32, @floatCast(dx)) * 0.1; // Reduced sensitivity
+    const pitch_angle = -@as(f32, @floatCast(-dy)) * 0.1; // Reduced sensitivity
 
     if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
         // DEBUG: Let's see what axes we're working with
@@ -94,8 +94,8 @@ fn mouseLook(
         std.debug.print("Local axes - forward: [{d:.2}, {d:.2}, {d:.2}], right: [{d:.2}, {d:.2}, {d:.2}]\n", .{ local_forward.x(), local_forward.y(), local_forward.z(), local_right.x(), local_right.y(), local_right.z() });
 
         // Use physics torque for dynamic bodies - try much larger values
-        const roll_torque_vec = local_forward.scale(-Math.radians(roll_angle) * rigid_body.?.mass * 50000.0);
-        const pitch_torque_vec = local_right.scale(-Math.radians(pitch_angle) * rigid_body.?.mass * 50000.0);
+        const roll_torque_vec = local_forward.scale(-Math.radians(roll_angle) * rigid_body.?.mass);
+        const pitch_torque_vec = local_right.scale(-Math.radians(pitch_angle) * rigid_body.?.mass);
 
         // Combine the torques
         const combined_torque = Vec3.init(roll_torque_vec.x() + pitch_torque_vec.x(), roll_torque_vec.y() + pitch_torque_vec.y(), roll_torque_vec.z() + pitch_torque_vec.z());
@@ -139,7 +139,7 @@ pub fn spawn(
     scene_height: u32,
 ) !Core.EntityID {
     var root_tf = Transform.TransformComponent.init(alloc);
-    root_tf.setPosition(0, 10, 0);
+    root_tf.setPosition(0, 30, 0);
 
     const root_ctrl = try makeDroneController(alloc);
 
@@ -152,7 +152,7 @@ pub fn spawn(
     var entities = try ecs.createEntitiesFromModel(drone_body_resource);
     const drone_body_entity = entities.root_entity;
 
-    // Create convex hull collider from model (proper for dynamic bodies)
+    // Create convex hull collider from model
     const collider = try Collisions.ColliderComponent.initFromModel(
         alloc,
         drone_body_resource,
@@ -163,8 +163,9 @@ pub fn spawn(
     // Create physics body with the collider's shape
     var rigid_body = Collisions.RigidBodyComponent.init(1.0, collider.bullet_shape.?);
 
-    // Set initial transform for reset functionality
-    rigid_body.setInitialTransform(.{ 0, 10, 0 }, .{ 0, 0, 0, 1 });
+    // Set initial position offset from collision shape center of mass
+    rigid_body.translate(.{ 0, 30, 0 });
+    rigid_body.rotate(.{ 0, 0, 0, 1 });
 
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
 

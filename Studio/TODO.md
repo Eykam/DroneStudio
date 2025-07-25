@@ -8,6 +8,7 @@ TODO:
         [] - Store dt in PackedTransform
         [x] - Use seek to playback?
         [x] - Current Seek (00:00 / 10:00)
+        [] - Work with new physics system
         [] - 1|2|4|8x speed
     [x] - Save to path / etc
     [x] - UI to select saved configs
@@ -30,8 +31,10 @@ TODO:
     [] - Find way to access them typesafe???
     [] - Create demo depthmap using opencv
     [] - give VP back to engine to render??
-[] - Generate colliders / convex hulls of meshes
-[] - Add basic physics (gravity, collisions)
+[X] - Generate colliders / convex hulls of meshes
+    [] - Use CoACD algo 
+        [] - Possibly implement CoACD w/ hardware acceleration
+[X] - Add basic physics (gravity, collisions)
 [] - Implement Drone flying physics
     [] - Controller Input => DSHOT => Thrust
     [] - Model Battery
@@ -55,7 +58,7 @@ TODO:
     [] - 4 Motor Thrusts => Accel, Velocity & Position
 [] - Implement animations from GLTF
     [] - speed of animation depending on RPM of motors
-[] - Make Skeleton / Show skeleton option of meshes
+[X] - Make Skeleton / Show skeleton option of meshes
 [] - Scene / Asset import. Ability to set positions & save.
 [] - Framework for testing accuracy of VIO
     [] - Define cameras / lidar
@@ -73,16 +76,22 @@ TODO:
 
 FIX:
 [x] - Flag to stop FBO from resizing with window
-[] - Maintain aspect ratio when resizing viewport
+[X] - Maintain aspect ratio when resizing viewport
 [] - Fix transformsystem to do a basic dfs w/ dirty flag
-[] - Figure out why asset caching isnt working properly
+[X] - Figure out why asset caching isnt working properly
 [] - Make new branch to store old studio code
 [] - Write docs / landing page on Engine
-[] - Figure out why viewports initialize to black until toggleViewport 
-[] - Make main viewport larger (no max width)
+[X] - Figure out why viewports initialize to black until toggleViewport 
+[X] - Make main viewport larger (no max width)
 [] - Frustum only visible in Free / Debug mode
 [] - Move Active Flags from Camera => Viewport
     [] - Update Viewport Selector in UI
 [] - Remove global component to global system
 [] - Remove PBRTexture & material structs from Mesh
 [] - Remove legacy Pipeline & code
+[] - Remove old physics components / systems
+    [] - Rename collisions.zig => PhysicsAdapter.zig
+    [] - Rename PhysicsThread => PhysicsSimulator.zig
+[] - Make ECS completely generic (no usage of specific components / systems)
+[] - Make ResourceManager component / system agnostic (no imports or usages of components / systems)
+[] - More modular testing

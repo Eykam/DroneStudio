@@ -35,6 +35,36 @@ pub const SharedHeader = extern struct {
     entries: [MAX_VIEWPORTS]ViewportEntry,
 };
 
+fn getShmName(allocator: std.mem.Allocator) ![:0]const u8 {
+    return allocator.dupeZ(u8, SHM_ENV); // Allocates & appends '\x00'.
+}
+
+fn initSharedMem(allocator: std.mem.Allocator) ![]align(std.mem.page_size) u8 {
+    const shm_name = try getShmName(allocator);
+    defer allocator.free(shm_name);
+
+    const expected_size = @sizeOf(SharedHeader);
+    std.debug.print("Shared memory size: {} bytes\n", .{expected_size});
+
+    const fd = std.c.shm_open(
+        shm_name.ptr,
+        @bitCast(std.os.linux.O{ .ACCMODE = .RDWR, .CREAT = true }),
+        0o660,
+    );
+    try std.posix.ftruncate(fd, @sizeOf(SharedHeader));
+    const ptr = try std.posix.mmap(
+        null,
+        @sizeOf(SharedHeader),
+        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .TYPE = .SHARED },
+        fd,
+        0,
+    );
+    _ = std.posix.close(fd);
+
+    return ptr;
+}
+
 pub const SharedMemSystem = struct {
     const Self = @This();
 
@@ -95,33 +125,3 @@ pub const SharedMemSystem = struct {
         self.seq += 1;
     }
 };
-
-fn getShmName(allocator: std.mem.Allocator) ![:0]const u8 {
-    return allocator.dupeZ(u8, SHM_ENV); // Allocates & appends '\x00'.
-}
-
-fn initSharedMem(allocator: std.mem.Allocator) ![]align(std.mem.page_size) u8 {
-    const shm_name = try getShmName(allocator);
-    defer allocator.free(shm_name);
-
-    const expected_size = @sizeOf(SharedHeader);
-    std.debug.print("Shared memory size: {} bytes\n", .{expected_size});
-
-    const fd = std.c.shm_open(
-        shm_name.ptr,
-        @bitCast(std.os.linux.O{ .ACCMODE = .RDWR, .CREAT = true }),
-        0o660,
-    );
-    try std.posix.ftruncate(fd, @sizeOf(SharedHeader));
-    const ptr = try std.posix.mmap(
-        null,
-        @sizeOf(SharedHeader),
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
-        .{ .TYPE = .SHARED },
-        fd,
-        0,
-    );
-    _ = std.posix.close(fd);
-
-    return ptr;
-}

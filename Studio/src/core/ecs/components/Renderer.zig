@@ -243,6 +243,7 @@ pub const RenderSystem = struct {
                 const view_matrix = cam.view(tf);
                 const projection_matrix = cam.projection();
                 const camera_position = tf.position;
+                
 
                 // std.debug.print("View Mat {any}\nProj Mat: {any}\nCamera Position: {any}\n", .{ view_matrix, projection_matrix, camera_position });
 
@@ -309,6 +310,7 @@ pub const RenderSystem = struct {
                         glad.glDisable(glad.GL_BLEND);
                         glad.glEnable(glad.GL_CULL_FACE);
                         glad.glCullFace(glad.GL_BACK);
+                    } else {
                     }
                 }
             }

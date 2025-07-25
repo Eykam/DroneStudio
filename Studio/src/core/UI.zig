@@ -306,7 +306,7 @@ pub const RootWindow = struct {
                 const old_state = self.show_collision_debug;
                 if (imgui.igCheckbox("Show Collision Debug", &self.show_collision_debug)) {
                     // State changed, toggle collision debug visualization
-                    ctx.ecs.collision_system.toggleDebugVisualization(ctx.ecs, self.show_collision_debug) catch |err| {
+                    ctx.ecs.collision_system.setDebugWireframes(self.show_collision_debug) catch |err| {
                         std.debug.print("Failed to toggle collision debug: {}\n", .{err});
                         self.show_collision_debug = old_state; // Revert on error
                     };
@@ -680,11 +680,16 @@ pub const EntitiesWindow = struct {
         }
 
         // split into two columns: hierarchy (left) | details (right)
-        imgui.igColumns(2, "EntitiesColumns", true);
-        imgui.igSetColumnWidth(0, 250); // hierarchy column width
+        if (imgui.igBeginTable("EntitiesTable", 2, imgui.ImGuiTableFlags_Resizable | imgui.ImGuiTableFlags_BordersInnerV, .{ .x = 0, .y = 0 }, 0)) {
+            imgui.igTableSetupColumn("Hierarchy", imgui.ImGuiTableColumnFlags_WidthFixed, 250.0, 0);
+            imgui.igTableSetupColumn("Details", imgui.ImGuiTableColumnFlags_WidthStretch, 0.0, 0);
+            
+            imgui.igTableNextRow(imgui.ImGuiTableRowFlags_None, 0.0);
+            _ = imgui.igTableSetColumnIndex(0);
 
         // ───────── LEFT SIDE : hierarchy tree ─────────
         const ecs = ctx.ecs;
+        if (imgui.igBeginChild_Str("HierarchyScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
 
         // Find roots (transform.parent == null).  Entities without a
         // TransformComponent are also shown at root level.
@@ -707,15 +712,24 @@ pub const EntitiesWindow = struct {
             }
         }
 
-        imgui.igNextColumn();
+        }
+        imgui.igEndChild();
+        
+        _ = imgui.igTableSetColumnIndex(1);
 
         // ───────── RIGHT SIDE : component details ─────────
+        if (imgui.igBeginChild_Str("DetailsScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
         if (self.selected_id) |eid| {
             showAllComponents(ecs, eid);
         } else {
             imgui.igTextDisabled("Select an entity to view its components");
         }
+        }
+        imgui.igEndChild();
 
+            imgui.igEndTable();
+        }
+        
         imgui.igEnd(); // Entities window
     }
 
@@ -726,12 +740,16 @@ pub const EntitiesWindow = struct {
         imgui.igSeparator();
 
         // Two-column layout: hierarchy | details
-        imgui.igColumns(2, "EntitiesColumns##Sidebar", true);
-        imgui.igSetColumnWidth(0, 180); // sidebar is narrow → smaller tree
-
-        const ecs = ctx.ecs;
+        if (imgui.igBeginTable("SidebarEntitiesTable", 2, imgui.ImGuiTableFlags_Resizable | imgui.ImGuiTableFlags_BordersInnerV, .{ .x = 0, .y = 0 }, 0)) {
+            imgui.igTableSetupColumn("Hierarchy", imgui.ImGuiTableColumnFlags_WidthFixed, 180.0, 0);
+            imgui.igTableSetupColumn("Details", imgui.ImGuiTableColumnFlags_WidthStretch, 0.0, 0);
+            
+            imgui.igTableNextRow(imgui.ImGuiTableRowFlags_None, 0.0);
+            _ = imgui.igTableSetColumnIndex(0);
 
         // ---------- hierarchy ----------
+        const ecs = ctx.ecs;
+        if (imgui.igBeginChild_Str("SidebarHierarchyScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
         var seen = std.AutoHashMap(usize, void).init(self.allocator);
         defer seen.deinit();
 
@@ -751,16 +769,23 @@ pub const EntitiesWindow = struct {
             }
         }
 
-        imgui.igNextColumn();
+        }
+        imgui.igEndChild();
+        
+        _ = imgui.igTableSetColumnIndex(1);
 
         // ---------- component details ----------
+        if (imgui.igBeginChild_Str("SidebarDetailsScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
         if (self.selected_id) |eid| {
             showAllComponents(ecs, eid);
         } else {
             imgui.igTextDisabled("Select an entity to view its components");
         }
+        }
+        imgui.igEndChild();
 
-        imgui.igColumns(1, null, false); // reset
+            imgui.igEndTable();
+        }
     }
 
     // ───── helpers ───────────────────────────────────────────────────────

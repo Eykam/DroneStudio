@@ -5,6 +5,24 @@ const glad = gl.glad;
 
 const Self = @This();
 
+pub const DrawType = enum {
+    lines,
+    triangles,
+    points,
+    line_strip,
+    triangle_strip,
+
+    pub fn toGL(self: DrawType) glad.GLenum {
+        return switch (self) {
+            .lines => glad.GL_LINES,
+            .triangles => glad.GL_TRIANGLES,
+            .points => glad.GL_POINTS,
+            .line_strip => glad.GL_LINE_STRIP,
+            .triangle_strip => glad.GL_TRIANGLE_STRIP,
+        };
+    }
+};
+
 pub const Vertex = struct {
     position: [3]f32,
     color: [3]f32,
@@ -376,15 +394,50 @@ pub fn deinit(self: *Self) void {
     if (self.meta.IBO != 0) glad.glDeleteBuffers(1, &self.meta.IBO);
 }
 
-pub fn gen_draw(comptime drawType: glad.GLuint) draw {
+/// Update the mesh vertices with new data, updating the OpenGL buffer
+pub fn updateVertices(self: *Self, new_vertices: []Vertex) !void {
+    // If the new vertex count is different, we need to reallocate the buffer
+    if (new_vertices.len != self.vertices.len) {
+        // Free old vertices
+        self.allocator.free(self.vertices);
+        
+        // Allocate and copy new vertices
+        self.vertices = try self.allocator.dupe(Vertex, new_vertices);
+        
+        // Recreate the buffer with new size
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(self.vertices.len * @sizeOf(Vertex)),
+            self.vertices.ptr,
+            glad.GL_DYNAMIC_DRAW, // Use DYNAMIC_DRAW since we're updating frequently
+        );
+    } else {
+        // Same size - just update the data
+        // Copy new vertices into our buffer
+        @memcpy(self.vertices, new_vertices);
+        
+        // Update OpenGL vertex buffer using SubData
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
+        glad.glBufferSubData(
+            glad.GL_ARRAY_BUFFER,
+            0,
+            @intCast(self.vertices.len * @sizeOf(Vertex)),
+            self.vertices.ptr,
+        );
+    }
+}
+
+pub fn gen_draw(comptime draw_type: DrawType) draw {
     return struct {
         pub fn default_draw(mesh: *Self) void {
             glad.glBindVertexArray(mesh.meta.VAO);
 
+            const gl_draw_type = draw_type.toGL();
             if (mesh.indices) |indices| {
-                glad.glDrawElements(drawType, @intCast(indices.len), glad.GL_UNSIGNED_INT, null);
+                glad.glDrawElements(gl_draw_type, @intCast(indices.len), glad.GL_UNSIGNED_INT, null);
             } else {
-                glad.glDrawArrays(drawType, 0, @intCast(mesh.vertices.len));
+                glad.glDrawArrays(gl_draw_type, 0, @intCast(mesh.vertices.len));
             }
         }
     }.default_draw;
