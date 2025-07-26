@@ -191,6 +191,7 @@ void cbtWorldDebugSetDrawer(CbtWorldHandle world_handle, const CbtDebugDraw* dra
 void cbtWorldDebugSetMode(CbtWorldHandle world_handle, int mode);
 int cbtWorldDebugGetMode(CbtWorldHandle world_handle);
 void cbtWorldDebugDrawAll(CbtWorldHandle world_handle);
+void cbtWorldDebugDrawBody(CbtWorldHandle world_handle, CbtBodyHandle body_handle, const CbtVector3 color);
 void cbtWorldDebugDrawLine1(
     CbtWorldHandle world_handle,
     const CbtVector3 p0,

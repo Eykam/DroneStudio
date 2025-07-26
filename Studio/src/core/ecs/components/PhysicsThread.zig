@@ -775,25 +775,18 @@ pub const ThreadedPhysicsSystem = struct {
         self.state_buffer.endWrite();
     }
 
-    /// Extract debug wireframes for all bodies in the physics world
+    /// Extract debug wireframes for all bodies in the physics world, creating separate wireframe data for each body
     fn extractDebugWireframes(self: *Self) void {
         const wireframe_buffer = self.wireframe_buffer.beginWrite(self.allocator);
-
-        var collector = LineCollector.init(self.allocator, .{ 1.0, 1.0, 1.0 }); // Default white, will be overridden per body
-        defer collector.deinit();
 
         var debug_draw = bullet.CbtDebugDraw{
             .drawLine1 = physicsDebugDrawLineCallback,
             .drawLine2 = null,
             .drawContactPoint = null,
-            .context = &collector,
+            .context = undefined, // Will be set per body
         };
 
-        // Configure Bullet to draw wireframes
-        bullet.cbtWorldDebugSetDrawer(self.bullet_world, &debug_draw);
-        bullet.cbtWorldDebugSetMode(self.bullet_world, bullet.CBT_DBGMODE_DRAW_WIREFRAME);
-
-        // Extract wireframes for each entity
+        // Extract wireframes for each entity individually
         var it = self.entity_bodies.iterator();
         while (it.next()) |entry| {
             const entity_id = entry.key_ptr.*;
@@ -803,21 +796,30 @@ pub const ThreadedPhysicsSystem = struct {
             const mass = bullet.cbtBodyGetMass(body);
             const color = if (mass > 0.0) self.debug_dynamic_color else self.debug_static_color;
 
-            // Clear collector and set color for this body
-            collector.vertices.clearRetainingCapacity();
-            collector.color = color;
+            // Create a new collector for this specific body
+            var collector = LineCollector.init(self.allocator, color);
+            defer collector.deinit();
+            
+            // Set the collector as the context for the debug draw callback
+            debug_draw.context = &collector;
+            
+            // Configure Bullet to draw wireframes with this specific collector
+            bullet.cbtWorldDebugSetDrawer(self.bullet_world, &debug_draw);
+            bullet.cbtWorldDebugSetMode(self.bullet_world, bullet.CBT_DBGMODE_DRAW_WIREFRAME);
 
-            // TODO: Currently draws all bodies at once - in the future we could draw individual bodies
-            // For now, we'll draw all and associate with the first entity
-            if (entity_id.id == entry.key_ptr.*.id) {
-                bullet.cbtWorldDebugDrawAll(self.bullet_world);
+            // Draw wireframes for this specific body only using our new cbullet function
+            std.debug.print("Drawing wireframes for entity {d} with color [{d:.2}, {d:.2}, {d:.2}]\n", .{ entity_id.id, color[0], color[1], color[2] });
+            bullet.cbtWorldDebugDrawBody(self.bullet_world, body, &color);
+            std.debug.print("Collector now has {d} vertices after drawing entity {d} (mass: {d:.2})\n", .{ collector.vertices.items.len, entity_id.id, mass });
 
-                // Create wireframe data for this entity
-                const vertices = collector.toOwnedSlice() catch |err| {
-                    std.debug.print("Failed to extract wireframe vertices for entity {d}: {any}\n", .{ entity_id.id, err });
-                    continue;
-                };
+            // Create wireframe data for this specific entity
+            const vertices = collector.toOwnedSlice() catch |err| {
+                std.debug.print("Failed to extract wireframe vertices for entity {d}: {any}\n", .{ entity_id.id, err });
+                continue;
+            };
 
+            // Only create wireframe data if we actually have vertices for this body
+            if (vertices.len > 0) {
                 const wireframe_data = DebugWireframeData{
                     .entity_id = entity_id,
                     .vertices = vertices,
@@ -828,18 +830,21 @@ pub const ThreadedPhysicsSystem = struct {
                     std.debug.print("Failed to append wireframe data for entity {d}\n", .{entity_id.id});
                     self.allocator.free(vertices);
                 };
-
-                // For now, only extract wireframes once per frame for all bodies
-                break;
+                
+                std.debug.print("Created debug wireframe for entity {d} with {d} vertices (mass: {d:.2})\n", .{ entity_id.id, vertices.len, mass });
+            } else {
+                // Free the empty vertices array
+                self.allocator.free(vertices);
             }
         }
 
         self.wireframe_buffer.endWrite();
         
-        // Increment version to signal completion
-        const old_version = self.debug_wireframes_version.load(.acquire);
-        self.debug_wireframes_version.store(old_version + 1, .release);
-        std.debug.print("Debug wireframes extracted, version: {d}\n", .{old_version + 1});
+        // Increment debug wireframes version to signal update
+        const current_version = self.debug_wireframes_version.load(.acquire);
+        self.debug_wireframes_version.store(current_version + 1, .release);
+        
+        std.debug.print("Extracted per-body debug wireframes for physics world (version: {d})\n", .{current_version + 1});
     }
 };
 

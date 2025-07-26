@@ -357,6 +357,26 @@ void cbtWorldDebugDrawAll(CbtWorldHandle world_handle) {
     auto world = ((WorldData*)world_handle)->world;
     world->debugDrawWorld();
 }
+void cbtWorldDebugDrawBody(CbtWorldHandle world_handle, CbtBodyHandle body_handle, const CbtVector3 color) {
+    assert(world_handle);
+    assert(body_handle && cbtBodyIsCreated(body_handle));
+    
+    auto world_data = (WorldData*)world_handle;
+    auto world = world_data->world;
+    auto body = (btRigidBody*)body_handle;
+    
+    // Ensure debug drawer is set
+    if (!world_data->debug) {
+        return;
+    }
+    
+    // Get the collision object from the rigid body
+    btCollisionObject* colObj = body;
+    
+    // Draw the individual body using Bullet's debugDrawObject
+    btVector3 bt_color(color[0], color[1], color[2]);
+    world->debugDrawObject(colObj->getWorldTransform(), colObj->getCollisionShape(), bt_color);
+}
 
 void cbtWorldDebugDrawLine1(
     CbtWorldHandle world_handle,
