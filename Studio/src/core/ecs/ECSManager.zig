@@ -165,16 +165,20 @@ pub fn deinit(self: *Self) void {
     // Deinit component storage
     self.transform_components.deinit();
     self.renderer_components.deinit();
+    self.collider_components.deinit();
     self.physics_components.deinit();
     self.controller_components.deinit();
 
-    // Deinit systems
+    // Deinit collision system first to stop physics thread before cleaning up resources
     self.collision_system.deinit();
-    self.shared_mem_system.deinit();
 
-    // Deinit world and resource manager
+    // Deinit resource manager (while OpenGL context is still alive)
     self.world.resource_manager.deinit();
     self.allocator.destroy(self.world.resource_manager);
+
+    // Deinit other systems
+    self.shared_mem_system.deinit();
+    self.globals_system.deinit(); // This frees itself and destroys OpenGL context
     self.world.deinit();
     self.allocator.destroy(self.world);
 
@@ -237,7 +241,6 @@ pub fn update(self: *Self, time: f64) !void {
 
     self.shared_mem_system.update();
     if (should_time) std.debug.print("  SharedMem system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
-
 }
 
 pub fn resetToInitialState(self: *Self) !void {

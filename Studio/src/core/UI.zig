@@ -207,7 +207,6 @@ pub const RootWindow = struct {
     visible: bool,
     sidebar_width: f32 = 0, // Default width, will be adjusted by user
     is_resizing: bool = false, // Track if currently resizing
-    show_collision_debug: bool = false, // Toggle for collision debug visualization
 
     entities_window: *EntitiesWindow,
     timeline_recorder: TimelineRecorder,
@@ -297,24 +296,6 @@ pub const RootWindow = struct {
                 _ = imgui.igBeginChild_Str("EntitiesSidebarChild", .{ .x = 0, .y = ent_h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_HorizontalScrollbar);
                 self.entities_window.drawSidebar(ctx);
                 imgui.igEndChild();
-            }
-
-            imgui.igSeparator();
-
-            if (imgui.igCollapsingHeader_TreeNodeFlags("Debug###Debug", hdr_flags)) {
-                // Collision debug toggle
-                const old_state = self.show_collision_debug;
-                if (imgui.igCheckbox("Show Collision Debug", &self.show_collision_debug)) {
-                    // State changed, toggle collision debug visualization
-                    ctx.ecs.collision_system.setDebugWireframes(self.show_collision_debug) catch |err| {
-                        std.debug.print("Failed to toggle collision debug: {}\n", .{err});
-                        self.show_collision_debug = old_state; // Revert on error
-                    };
-                }
-
-                if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
-                    imgui.igSetTooltip("Show wireframe boxes around colliders.\nGreen = Dynamic, Blue = Static");
-                }
             }
 
             imgui.igEndChild();
@@ -661,6 +642,8 @@ pub const EntitiesWindow = struct {
     allocator: std.mem.Allocator,
     visible: bool = true,
     selected_id: ?Core.EntityID = null,
+    show_collision_debug: bool = false,
+    global_renderable_visibility: bool = true,
 
     pub fn init(alloc: std.mem.Allocator) !*Self {
         const self = try alloc.create(Self);
@@ -679,57 +662,87 @@ pub const EntitiesWindow = struct {
             return;
         }
 
+        // Global controls at the top
+        if (imgui.igTreeNode_Str("Global Controls")) {
+            // Collision debug toggle
+            const old_collision_state = self.show_collision_debug;
+            if (imgui.igCheckbox("Show Collision Debug", &self.show_collision_debug)) {
+                // State changed, toggle collision debug visualization
+                ctx.ecs.collision_system.setDebugWireframes(self.show_collision_debug) catch |err| {
+                    std.debug.print("Failed to toggle collision debug: {}\n", .{err});
+                    self.show_collision_debug = old_collision_state; // Revert on error
+                };
+            }
+            if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                imgui.igSetTooltip("Show wireframe boxes around colliders.\nGreen = Dynamic, Blue = Static");
+            }
+
+            // Global renderable visibility toggle
+            if (imgui.igCheckbox("Global Renderable Visibility", &self.global_renderable_visibility)) {
+                // Toggle visibility for all renderables
+                var it = ctx.ecs.renderer_components.iterator();
+                while (it.next()) |entry| {
+                    entry.component.is_visible = self.global_renderable_visibility;
+                }
+            }
+            if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                imgui.igSetTooltip("Toggle visibility of all renderable objects in the scene");
+            }
+
+            imgui.igTreePop();
+        }
+        imgui.igSeparator();
+
         // split into two columns: hierarchy (left) | details (right)
         if (imgui.igBeginTable("EntitiesTable", 2, imgui.ImGuiTableFlags_Resizable | imgui.ImGuiTableFlags_BordersInnerV, .{ .x = 0, .y = 0 }, 0)) {
             imgui.igTableSetupColumn("Hierarchy", imgui.ImGuiTableColumnFlags_WidthFixed, 250.0, 0);
             imgui.igTableSetupColumn("Details", imgui.ImGuiTableColumnFlags_WidthStretch, 0.0, 0);
-            
+
             imgui.igTableNextRow(imgui.ImGuiTableRowFlags_None, 0.0);
             _ = imgui.igTableSetColumnIndex(0);
 
-        // ───────── LEFT SIDE : hierarchy tree ─────────
-        const ecs = ctx.ecs;
-        if (imgui.igBeginChild_Str("HierarchyScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
+            // ───────── LEFT SIDE : hierarchy tree ─────────
+            const ecs = ctx.ecs;
+            if (imgui.igBeginChild_Str("HierarchyScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
 
-        // Find roots (transform.parent == null).  Entities without a
-        // TransformComponent are also shown at root level.
-        var seen = std.AutoHashMap(usize, void).init(self.allocator);
-        defer seen.deinit();
+                // Find roots (transform.parent == null).  Entities without a
+                // TransformComponent are also shown at root level.
+                var seen = std.AutoHashMap(usize, void).init(self.allocator);
+                defer seen.deinit();
 
-        // First: all entities that _have_ a transform and no parent.
-        var transform_it = ecs.transform_components.iterator();
-        while (transform_it.next()) |entry| {
-            if (entry.component.parent == null) {
-                drawHierarchyRecursive(ecs, entry.entity_id, &seen, self);
+                // First: all entities that _have_ a transform and no parent.
+                var transform_it = ecs.transform_components.iterator();
+                while (transform_it.next()) |entry| {
+                    if (entry.component.parent == null) {
+                        drawHierarchyRecursive(ecs, entry.entity_id, &seen, self);
+                    }
+                }
+                // Second: entities that lack a transform altogether (e.g. globals).
+                var entity_it = ecs.world.entities.iterator();
+                while (entity_it.next()) |eid_entry| {
+                    const eid = eid_entry.value_ptr.*;
+                    if (!ecs.transform_components.has(eid) and !seen.contains(eid.id)) {
+                        _ = drawHierarchyItem(eid, self, .{});
+                    }
+                }
             }
-        }
-        // Second: entities that lack a transform altogether (e.g. globals).
-        var entity_it = ecs.world.entities.iterator();
-        while (entity_it.next()) |eid_entry| {
-            const eid = eid_entry.value_ptr.*;
-            if (!ecs.transform_components.has(eid) and !seen.contains(eid.id)) {
-                _ = drawHierarchyItem(eid, self, .{});
+            imgui.igEndChild();
+
+            _ = imgui.igTableSetColumnIndex(1);
+
+            // ───────── RIGHT SIDE : component details ─────────
+            if (imgui.igBeginChild_Str("DetailsScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
+                if (self.selected_id) |eid| {
+                    showAllComponents(ecs, eid);
+                } else {
+                    imgui.igTextDisabled("Select an entity to view its components");
+                }
             }
-        }
-
-        }
-        imgui.igEndChild();
-        
-        _ = imgui.igTableSetColumnIndex(1);
-
-        // ───────── RIGHT SIDE : component details ─────────
-        if (imgui.igBeginChild_Str("DetailsScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
-        if (self.selected_id) |eid| {
-            showAllComponents(ecs, eid);
-        } else {
-            imgui.igTextDisabled("Select an entity to view its components");
-        }
-        }
-        imgui.igEndChild();
+            imgui.igEndChild();
 
             imgui.igEndTable();
         }
-        
+
         imgui.igEnd(); // Entities window
     }
 
@@ -739,50 +752,80 @@ pub const EntitiesWindow = struct {
         imgui.igText("Entities"); // header
         imgui.igSeparator();
 
+        // Global controls
+        if (imgui.igTreeNode_Str("Global Controls")) {
+            // Collision debug toggle
+            const old_collision_state = self.show_collision_debug;
+            if (imgui.igCheckbox("Show Collision Debug", &self.show_collision_debug)) {
+                // State changed, toggle collision debug visualization
+                ctx.ecs.collision_system.setDebugWireframes(self.show_collision_debug) catch |err| {
+                    std.debug.print("Failed to toggle collision debug: {}\n", .{err});
+                    self.show_collision_debug = old_collision_state; // Revert on error
+                };
+            }
+            if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                imgui.igSetTooltip("Show wireframe boxes around colliders.\nGreen = Dynamic, Blue = Static");
+            }
+
+            // Global renderable visibility toggle
+            if (imgui.igCheckbox("Global Renderable Visibility", &self.global_renderable_visibility)) {
+                // Toggle visibility for all renderables
+                var it = ctx.ecs.renderer_components.iterator();
+                while (it.next()) |entry| {
+                    entry.component.is_visible = self.global_renderable_visibility;
+                }
+            }
+            if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                imgui.igSetTooltip("Toggle visibility of all renderable objects in the scene");
+            }
+
+            imgui.igTreePop();
+        }
+        imgui.igSeparator();
+
         // Two-column layout: hierarchy | details
         if (imgui.igBeginTable("SidebarEntitiesTable", 2, imgui.ImGuiTableFlags_Resizable | imgui.ImGuiTableFlags_BordersInnerV, .{ .x = 0, .y = 0 }, 0)) {
             imgui.igTableSetupColumn("Hierarchy", imgui.ImGuiTableColumnFlags_WidthFixed, 180.0, 0);
             imgui.igTableSetupColumn("Details", imgui.ImGuiTableColumnFlags_WidthStretch, 0.0, 0);
-            
+
             imgui.igTableNextRow(imgui.ImGuiTableRowFlags_None, 0.0);
             _ = imgui.igTableSetColumnIndex(0);
 
-        // ---------- hierarchy ----------
-        const ecs = ctx.ecs;
-        if (imgui.igBeginChild_Str("SidebarHierarchyScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
-        var seen = std.AutoHashMap(usize, void).init(self.allocator);
-        defer seen.deinit();
+            // ---------- hierarchy ----------
+            const ecs = ctx.ecs;
+            if (imgui.igBeginChild_Str("SidebarHierarchyScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
+                var seen = std.AutoHashMap(usize, void).init(self.allocator);
+                defer seen.deinit();
 
-        // roots first
-        var tf_it = ecs.transform_components.iterator();
-        while (tf_it.next()) |e| {
-            if (e.component.parent == null) {
-                drawHierarchyRecursive(ecs, e.entity_id, &seen, self);
+                // roots first
+                var tf_it = ecs.transform_components.iterator();
+                while (tf_it.next()) |e| {
+                    if (e.component.parent == null) {
+                        drawHierarchyRecursive(ecs, e.entity_id, &seen, self);
+                    }
+                }
+                // loose entities
+                var ent_it = ecs.world.entities.iterator();
+                while (ent_it.next()) |eid_entry| {
+                    const eid = eid_entry.value_ptr.*;
+                    if (!ecs.transform_components.has(eid) and !seen.contains(eid.id)) {
+                        _ = drawHierarchyItem(eid, self, .{});
+                    }
+                }
             }
-        }
-        // loose entities
-        var ent_it = ecs.world.entities.iterator();
-        while (ent_it.next()) |eid_entry| {
-            const eid = eid_entry.value_ptr.*;
-            if (!ecs.transform_components.has(eid) and !seen.contains(eid.id)) {
-                _ = drawHierarchyItem(eid, self, .{});
+            imgui.igEndChild();
+
+            _ = imgui.igTableSetColumnIndex(1);
+
+            // ---------- component details ----------
+            if (imgui.igBeginChild_Str("SidebarDetailsScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
+                if (self.selected_id) |eid| {
+                    showAllComponents(ecs, eid);
+                } else {
+                    imgui.igTextDisabled("Select an entity to view its components");
+                }
             }
-        }
-
-        }
-        imgui.igEndChild();
-        
-        _ = imgui.igTableSetColumnIndex(1);
-
-        // ---------- component details ----------
-        if (imgui.igBeginChild_Str("SidebarDetailsScroll", .{ .x = 0, .y = 0 }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None)) {
-        if (self.selected_id) |eid| {
-            showAllComponents(ecs, eid);
-        } else {
-            imgui.igTextDisabled("Select an entity to view its components");
-        }
-        }
-        imgui.igEndChild();
+            imgui.igEndChild();
 
             imgui.igEndTable();
         }
@@ -836,12 +879,79 @@ pub const EntitiesWindow = struct {
 
     // ───── component-detail section ──────────────────────────────────────
     fn showAllComponents(ecs: *ECSManager, eid: Core.EntityID) void {
+        // Show entity controls directly (not in a tree node)
+        showEntityControls(ecs, eid);
+        imgui.igSeparator();
+
         showTransform(ecs, eid);
         showRenderable(ecs, eid);
         showPhysics(ecs, eid);
         showCamera(ecs, eid);
         showController(ecs, eid);
         showViewport(ecs, eid);
+    }
+
+    fn showEntityControls(ecs: *ECSManager, eid: Core.EntityID) void {
+        // Debug wireframe toggle (only for entities with physics components)
+        if (ecs.physics_components.has(eid)) {
+            var debug_enabled = false; // TODO: Get actual debug state for this entity
+            if (imgui.igCheckbox("Debug Wireframe", &debug_enabled)) {
+                // TODO: Toggle debug wireframe for this specific entity
+                std.debug.print("TODO: Toggle debug wireframe for entity {d}\n", .{eid.id});
+            }
+            if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                imgui.igSetTooltip("Toggle debug wireframe for this entity and its children");
+            }
+        }
+
+        // Visibility toggle - always show for all entities
+        var is_visible = true;
+        if (ecs.renderer_components.get(eid)) |renderable| {
+            // Entity has renderable - use its visibility state
+            is_visible = renderable.is_visible;
+        } else {
+            // No renderable - check if ALL children with renderables are visible
+            // If any child is hidden, we show unchecked
+            is_visible = areAllChildrenVisible(ecs, eid);
+        }
+        
+        if (imgui.igCheckbox("Visible", &is_visible)) {
+            // Toggle visibility for this entity and recursively for children
+            toggleRenderableRecursive(ecs, eid, is_visible);
+        }
+        if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+            imgui.igSetTooltip("Toggle visibility for this entity and all its children");
+        }
+    }
+
+    fn toggleRenderableRecursive(ecs: *ECSManager, eid: Core.EntityID, visible: bool) void {
+        // Toggle this entity's renderable if it has one
+        if (ecs.renderer_components.get(eid)) |renderable| {
+            renderable.is_visible = visible;
+        }
+
+        // Recursively toggle children
+        if (ecs.transform_components.get(eid)) |transform| {
+            for (transform.children.items) |child_eid| {
+                toggleRenderableRecursive(ecs, child_eid, visible);
+            }
+        }
+    }
+    
+    fn areAllChildrenVisible(ecs: *ECSManager, eid: Core.EntityID) bool {
+        // Check if ALL children with renderables are visible
+        // Returns true if no renderables found or all are visible
+        if (ecs.transform_components.get(eid)) |transform| {
+            for (transform.children.items) |child_eid| {
+                // Check this child
+                if (ecs.renderer_components.get(child_eid)) |renderable| {
+                    if (!renderable.is_visible) return false;
+                }
+                // Recursively check grandchildren
+                if (!areAllChildrenVisible(ecs, child_eid)) return false;
+            }
+        }
+        return true; // All renderables are visible (or no renderables found)
     }
 
     inline fn bulletMat4(label: [:0]const u8, m: Math.Mat4) void {

@@ -15,7 +15,24 @@ uniform vec3 viewPos;
 
 // Material uniforms - PBR Metallic-Roughness
 uniform bool useTexture;
+uniform vec4 baseColorFactor;
+uniform float metallicFactor;
+uniform float roughnessFactor;
+uniform vec3 emissiveFactor;
+uniform float emissiveStrength;
+uniform float alphaCutoff;
+uniform int alphaModeEnum;
+uniform bool doubleSided;
+uniform vec3 specularColor;
+uniform float specularStrength;
 
+// Texture presence flags
+uniform bool hasBaseColorTexture;
+uniform bool hasNormalTexture;
+uniform bool hasMetallicRoughnessTexture;
+uniform bool hasOcclusionTexture;
+uniform bool hasEmissiveTexture;
+uniform bool hasSpecularTexture;
 
 // Textures
 uniform sampler2D baseColorTexture; 
@@ -35,12 +52,12 @@ void main() {
     // Get albedo color
     vec4 albedo;
     
-    if (useTexture) {
-        // Fall back to your original YUV texture approach
-        albedo = texture(baseColorTexture, TexCoord);
+    if (useTexture && hasBaseColorTexture) {
+        // Use texture if available
+        albedo = texture(baseColorTexture, TexCoord) * baseColorFactor;
     } else {
-        // Use the base color factor or vertex color
-        albedo = vec4(0.7, 0.1, 0.1, 0.3);
+        // Use the base color factor from material
+        albedo = baseColorFactor;
     }
     
     FragColor = albedo;

@@ -86,7 +86,16 @@ pub const GlobalsSystem = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.cleanupImGui();
+        cleanupImGui();
+        
+        // Destroy window and terminate GLFW
+        if (self.window) |window| {
+            glfw.glfwDestroyWindow(window);
+        }
+        glfw.glfwTerminate();
+        
+        // Free self
+        self.allocator.destroy(self);
     }
 
 

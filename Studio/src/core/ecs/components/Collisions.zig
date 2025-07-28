@@ -344,7 +344,7 @@ pub const ColliderShape = union(enum) {
 };
 
 // Helper function to calculate mesh bounds
-fn calculateMeshBounds(mesh: *Mesh) struct { min_bounds: [3]f32, max_bounds: [3]f32, half_extents: [3]f32, dimensions: [3]f32 } {
+pub fn calculateMeshBounds(mesh: *Mesh) struct { min_bounds: [3]f32, max_bounds: [3]f32, half_extents: [3]f32, dimensions: [3]f32 } {
     var min_bounds = [3]f32{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
     var max_bounds = [3]f32{ std.math.floatMin(f32), std.math.floatMin(f32), std.math.floatMin(f32) };
 
@@ -553,7 +553,12 @@ pub const ColliderComponent = struct {
         // Calculate this node's transform by combining accumulated + local
         var current_transform = accumulated_transform;
 
-        std.debug.print("Node {d}: Processing (accumulated transform pos=[{d:.3}, {d:.3}, {d:.3}])\n", .{ node_index, accumulated_transform.get_position().x(), accumulated_transform.get_position().y(), accumulated_transform.get_position().z() });
+        std.debug.print("Node {d}: Processing (accumulated transform pos=[{d:.3}, {d:.3}, {d:.3}])\n", .{
+            node_index,
+            accumulated_transform.get_position().x(),
+            accumulated_transform.get_position().y(),
+            accumulated_transform.get_position().z(),
+        });
 
         if (node.local_transformation) |local_transform| {
             std.debug.print("Node {d}: has local_transformation\n", .{node_index});
@@ -584,7 +589,6 @@ pub const ColliderComponent = struct {
         var transform_for_children = current_transform;
         if (node.mesh_name) |mesh_name| {
             if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
-                // Extract the 3x3 rotation matrix and translation directly from current_transform
                 const m = current_transform.base.data;
 
                 // Create child shape
@@ -674,7 +678,15 @@ pub const ColliderComponent = struct {
         for (model_resource.entities, 0..) |node, i| {
             if (node.parent_idx == null) {
                 std.debug.print("Processing root node {d} with no parent\n", .{i});
-                try processNodeDFS(allocator, resource_manager, model_resource, compound_collider.bullet_shape.?, base_shape, i, Mat4.identity());
+                try processNodeDFS(
+                    allocator,
+                    resource_manager,
+                    model_resource,
+                    compound_collider.bullet_shape.?,
+                    base_shape,
+                    i,
+                    Mat4.identity(),
+                );
             }
         }
 
@@ -683,7 +695,7 @@ pub const ColliderComponent = struct {
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         if (self.bullet_shape) |shape| {
-            bullet.cbtShapeDeallocate(shape);
+            bullet.cbtShapeDestroy(shape);
             self.bullet_shape = null;
         }
 
@@ -775,14 +787,14 @@ pub const CollisionSystem = struct {
             for (physics_states) |state| {
                 if (self.transform_components.get(state.entity_id)) |transform| {
                     // Debug output for physics state updates
-                    if (state.entity_id.id < 5) { // Only show first few entities to avoid spam
-                        std.debug.print("CollisionSystem: Updating entity {d} transform from physics: pos=[{d:.3}, {d:.3}, {d:.3}]\n", .{
-                            state.entity_id.id,
-                            state.position[0],
-                            state.position[1],
-                            state.position[2],
-                        });
-                    }
+                    // if (state.entity_id.id < 5) { // Only show first few entities to avoid spam
+                    std.debug.print("CollisionSystem: Updating entity {d} transform from physics: pos=[{d:.3}, {d:.3}, {d:.3}]\n", .{
+                        state.entity_id.id,
+                        state.position[0],
+                        state.position[1],
+                        state.position[2],
+                    });
+                    // }
 
                     // Update position and rotation from physics thread
                     transform.position = state.position;
@@ -807,71 +819,62 @@ pub const CollisionSystem = struct {
         std.debug.print("Starting resetAllDynamicBodies...\n", .{});
 
         // In threaded physics, send reset command to physics thread
-        if (self.physics_thread) |physics| {
-            const command = PhysicsThread.PhysicsCommand{ .ResetDynamicBodies = .{} };
-            const success = physics.sendCommand(command);
+        const physics = self.physics_thread orelse {
+            std.debug.print("No physics thread available for reset operation\n", .{});
+            return;
+        };
 
-            if (success) {
-                std.debug.print("Sent ResetDynamicBodies command to physics thread\n", .{});
+        const command = PhysicsThread.PhysicsCommand{ .ResetDynamicBodies = .{} };
+        const success = physics.sendCommand(command);
 
-                // Also send SetTransform commands for each dynamic body to reset positions
-                var it = self.rigid_body_components.iterator();
-                var reset_count: u32 = 0;
+        if (!success) {
+            std.debug.print("Failed to send ResetDynamicBodies command - physics command queue full\n", .{});
+            return;
+        }
 
-                while (it.next()) |entry| {
-                    const entity_id = entry.entity_id;
-                    const rigid_body = entry.component;
+        std.debug.print("Sent ResetDynamicBodies command to physics thread\n", .{});
 
-                    // Only reset dynamic bodies (mass > 0)
-                    if (rigid_body.mass > 0.0) {
-                        // Send SetTransform command to physics thread
-                        const transform_command = PhysicsThread.PhysicsCommand{ .SetTransform = .{
-                            .entity_id = entity_id,
-                            .position = rigid_body.initial_position,
-                            .rotation = rigid_body.initial_rotation,
-                        } };
+        // Also send SetTransform commands for each dynamic body to reset positions
+        var it = self.rigid_body_components.iterator();
+        var reset_count: u32 = 0;
 
-                        if (physics.sendCommand(transform_command)) {
-                            // Update the transform component in main thread to match
-                            if (self.transform_components.get(entity_id)) |transform| {
-                                transform.setPosition(rigid_body.initial_position[0], rigid_body.initial_position[1], rigid_body.initial_position[2]);
-                                // Reset rotation to identity quaternion (should match initial_rotation but using identity for simplicity)
-                                const identity_quat = Math.Quaternion.identity();
-                                transform.setRotation(identity_quat);
-                            }
+        while (it.next()) |entry| {
+            const entity_id = entry.entity_id;
+            const rigid_body = entry.component;
 
-                            reset_count += 1;
-                            std.debug.print(
-                                "Reset entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n",
-                                .{
-                                    entity_id.id,
-                                    rigid_body.initial_position[0],
-                                    rigid_body.initial_position[1],
-                                    rigid_body.initial_position[2],
-                                },
-                            );
-                        } else {
-                            std.debug.print(
-                                "Failed to send SetTransform command for entity {d} - queue full\n",
-                                .{entity_id.id},
-                            );
-                        }
-                    }
-                }
+            // Only reset dynamic bodies (mass > 0)
+            if (rigid_body.mass <= 0.0) continue;
 
+            // Send SetTransform command to physics thread
+            const transform_command = PhysicsThread.PhysicsCommand{ .SetTransform = .{
+                .entity_id = entity_id,
+                .position = rigid_body.initial_position,
+                .rotation = rigid_body.initial_rotation,
+            } };
+
+            if (!physics.sendCommand(transform_command)) {
                 std.debug.print(
-                    "Reset complete! {d} dynamic bodies reset via physics thread commands.\n",
-                    .{reset_count},
-                );
-            } else {
-                std.debug.print(
-                    "Failed to send ResetDynamicBodies command - physics command queue full\n",
-                    .{},
+                    "Failed to send SetTransform command for entity {d} - queue full\n",
+                    .{entity_id.id},
                 );
             }
-        } else {
-            std.debug.print("No physics thread available for reset operation\n", .{});
+
+            reset_count += 1;
+            std.debug.print(
+                "Reset entity {d} to initial position: [{d:.2}, {d:.2}, {d:.2}]\n",
+                .{
+                    entity_id.id,
+                    rigid_body.initial_position[0],
+                    rigid_body.initial_position[1],
+                    rigid_body.initial_position[2],
+                },
+            );
         }
+
+        std.debug.print(
+            "Reset complete! {d} dynamic bodies reset via physics thread commands.\n",
+            .{reset_count},
+        );
     }
 
     // Apply a central force to an entity via physics thread
@@ -1003,6 +1006,11 @@ pub const CollisionSystem = struct {
     }
 };
 
+// Import tests
+test {
+    _ = @import("CollisionTests.zig");
+}
+
 pub const DebugWireframeSystem = struct {
     const DebugSelf = @This();
 
@@ -1063,13 +1071,7 @@ pub const DebugWireframeSystem = struct {
         }
     }
 
-    pub fn update(
-        self: *DebugSelf, 
-        world: *Core.World,
-        resource_manager: *ResourceManager,
-        renderer_components: *SparseSet(Renderer.Renderable),
-        transform_components: *SparseSet(Transform.TransformComponent)
-    ) !void {
+    pub fn update(self: *DebugSelf, world: *Core.World, resource_manager: *ResourceManager, renderer_components: *SparseSet(Renderer.Renderable), transform_components: *SparseSet(Transform.TransformComponent)) !void {
         if (!self.enabled) {
             // Clean up when disabled
             if (self.debug_entities.count() > 0) {
@@ -1081,8 +1083,8 @@ pub const DebugWireframeSystem = struct {
         // Check if wireframes have been updated
         const current_version = self.physics_thread.getWireframeVersion();
         if (current_version > self.last_wireframe_version) {
-            std.debug.print("DebugWireframeSystem: New wireframes available (version {} -> {})\n", .{self.last_wireframe_version, current_version});
-            
+            std.debug.print("DebugWireframeSystem: New wireframes available (version {} -> {})\n", .{ self.last_wireframe_version, current_version });
+
             // Clean up old debug entities first
             self.cleanupDebugEntities(renderer_components, transform_components);
 
@@ -1090,7 +1092,7 @@ pub const DebugWireframeSystem = struct {
             try self.createDebugEntities(world, resource_manager, renderer_components, transform_components);
 
             self.last_wireframe_version = current_version;
-            std.debug.print("DebugWireframeSystem: Created {} debug entities for version {}\n", .{self.debug_entities.count(), current_version});
+            std.debug.print("DebugWireframeSystem: Created {} debug entities for version {}\n", .{ self.debug_entities.count(), current_version });
         }
 
         // Update transforms for existing debug entities
@@ -1098,28 +1100,29 @@ pub const DebugWireframeSystem = struct {
         for (physics_states) |state| {
             if (self.debug_entities.get(state.entity_id)) |debug_info| {
                 if (transform_components.get(debug_info.debug_entity)) |transform| {
-                    transform.setPosition(state.position[0], state.position[1], state.position[2]);
+                    transform.setPosition(
+                        state.position[0],
+                        state.position[1],
+                        state.position[2],
+                    );
                     const quat = Math.Quaternion{ .data = state.rotation };
                     transform.setRotation(quat);
+                    transform.updateLocalTransform();
                 }
             }
         }
     }
 
     /// Clean up all debug entities and their components
-    fn cleanupDebugEntities(
-        self: *DebugSelf,
-        renderer_components: *SparseSet(Renderer.Renderable),
-        transform_components: *SparseSet(Transform.TransformComponent)
-    ) void {
+    fn cleanupDebugEntities(self: *DebugSelf, renderer_components: *SparseSet(Renderer.Renderable), transform_components: *SparseSet(Transform.TransformComponent)) void {
         var it = self.debug_entities.iterator();
         while (it.next()) |entry| {
             const debug_info = entry.value_ptr.*;
-            
+
             // Remove components from debug entity
             _ = renderer_components.remove(debug_info.debug_entity) catch false;
             _ = transform_components.remove(debug_info.debug_entity) catch false;
-            
+
             // Free mesh name
             self.allocator.free(debug_info.mesh_name);
         }
@@ -1128,24 +1131,18 @@ pub const DebugWireframeSystem = struct {
     }
 
     /// Create debug entities from current wireframe data
-    fn createDebugEntities(
-        self: *DebugSelf,
-        world: *Core.World,
-        resource_manager: *ResourceManager,
-        renderer_components: *SparseSet(Renderer.Renderable),
-        transform_components: *SparseSet(Transform.TransformComponent)
-    ) !void {
+    fn createDebugEntities(self: *DebugSelf, world: *Core.World, resource_manager: *ResourceManager, renderer_components: *SparseSet(Renderer.Renderable), transform_components: *SparseSet(Transform.TransformComponent)) !void {
         const wireframes = self.physics_thread.getDebugWireframes();
         for (wireframes) |wireframe_data| {
             const mesh_name = try self.getMeshName(wireframe_data.entity_id);
-            
+
             // Create a debug entity for this physics entity
             const debug_entity = try world.createEntity();
-            
+
             // Add transform component to debug entity (will be updated each frame)
             const initial_transform = Transform.TransformComponent.init(self.allocator);
             try transform_components.add(debug_entity, initial_transform);
-            
+
             // Create mesh from wireframe vertices
             const mesh_vertices = try self.allocator.alloc(Mesh.Vertex, wireframe_data.vertices.len);
             for (wireframe_data.vertices, 0..) |vertex, i| {
@@ -1156,22 +1153,22 @@ pub const DebugWireframeSystem = struct {
                     .texture = .{ 0.0, 0.0 },
                 };
             }
-            
+
             // Create mesh in resource manager
             try resource_manager.updateMesh(mesh_name, mesh_vertices, null, Mesh.gen_draw(.lines));
-            
+
             // Create renderable for debug entity
             const renderable = try Renderer.Renderable.init(self.allocator, mesh_name);
             try renderer_components.add(debug_entity, renderable);
-            
+
             // Store mapping from physics entity to debug entity
             const debug_info = DebugInfo{
                 .mesh_name = mesh_name,
                 .debug_entity = debug_entity,
             };
             try self.debug_entities.put(wireframe_data.entity_id, debug_info);
-            
-            std.debug.print("Created debug entity {d} for physics entity {d}\n", .{debug_entity.id, wireframe_data.entity_id.id});
+
+            std.debug.print("Created debug entity {d} for physics entity {d}\n", .{ debug_entity.id, wireframe_data.entity_id.id });
         }
     }
 

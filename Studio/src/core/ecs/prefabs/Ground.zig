@@ -15,7 +15,7 @@ const Vec3 = Math.Vec3;
 pub const GroundConfig = struct {
     size: f32 = 100.0, // Size of the ground plane (100x100 units)
     position: [3]f32 = .{ 0.0, 0.0, 0.0 },
-    color: [3]f32 = .{ 0.3, 0.7, 0.3 }, // Green ground
+    color: [3]f32 = .{ 0.0, 0.5, 0.5 },
 };
 
 pub fn spawn(
@@ -35,7 +35,10 @@ pub fn spawn(
     defer allocator.free(mesh_name);
 
     const mesh_name_owned = try allocator.dupe(u8, mesh_name);
-    try ecs.world.resource_manager.meshes.put(mesh_name_owned, .{ .mesh = plane_mesh, .instance_count = 0 });
+    try ecs.world.resource_manager.meshes.put(mesh_name_owned, .{
+        .mesh = plane_mesh,
+        .instance_count = 0,
+    });
 
     // Create renderer component
     var renderer = try Renderer.Renderable.init(allocator, mesh_name_owned);
@@ -52,24 +55,28 @@ pub fn spawn(
     };
 
     // Create unique material name based on config
-    const material_name = try std.fmt.allocPrint(allocator, "ground_material_{d}_{d}_{d}", .{ @as(u32, @intFromFloat(config.color[0] * 1000)), @as(u32, @intFromFloat(config.color[1] * 1000)), @as(u32, @intFromFloat(config.color[2] * 1000)) });
+    const material_name = try std.fmt.allocPrint(allocator, "ground_material_{d}_{d}_{d}", .{
+        @as(u32, @intFromFloat(config.color[0] * 1000)),
+        @as(u32, @intFromFloat(config.color[1] * 1000)),
+        @as(u32, @intFromFloat(config.color[2] * 1000)),
+    });
     defer allocator.free(material_name);
 
     const material_name_owned = try allocator.dupeZ(u8, material_name);
 
     // Load the material into the resource manager
     try ecs.world.resource_manager.loadMaterial(material_name_owned, ground_material, null);
-
     try renderer.setMaterial(allocator, material_name_owned);
 
-    // Create physics collider (box shape for ground plane) - made thicker to prevent tunneling
     const collider = try Collisions.ColliderComponent.init(allocator, .{ .TriangleMesh = .{} }, plane_mesh);
-
-    // Create static rigid body (mass = 0)
     const rigid_body = Collisions.RigidBodyComponent.init(0.0, collider.bullet_shape.?);
 
-    // Spawn entity with all components
-    const ground_entity = try ecs.spawn(.{ transform, renderer, collider, rigid_body });
+    const ground_entity = try ecs.spawn(.{
+        transform,
+        renderer,
+        collider,
+        rigid_body,
+    });
 
     // Physics body creation now handles collision properties automatically in threaded physics
 

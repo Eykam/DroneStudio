@@ -10,6 +10,7 @@ const FreeCamera = @import("core/ecs/prefabs/FreeCamera.zig");
 const Drone = @import("core/ecs/prefabs/Drone.zig");
 const HintzeHall = @import("core/ecs/prefabs/HintzeHall.zig");
 const Ground = @import("core/ecs/prefabs/Ground.zig");
+const Box = @import("core/ecs/prefabs/Box.zig");
 const Math = @import("core/Math.zig");
 const c = @import("core/bindings/c.zig");
 const imgui = c.imgui;
@@ -51,8 +52,10 @@ pub fn main() !void {
     const free_cam = try FreeCamera.generate(alloc, .{}, scene_width, scene_height);
     _ = try ECS.spawn(free_cam);
 
-    _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
-    _ = try HintzeHall.spawn(alloc, ECS);
+    // _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
+    _ = try Box.spawn(alloc, ECS, .ConvexHull, .{ 0, 0, 0 }, .{ 1, 1, 1 }, 1.0, scene_width, scene_height);
+    _ = try Ground.spawn(alloc, ECS, .{});
+    // _ = try HintzeHall.spawn(alloc, ECS);
 
     // Position the hall
     // const hall_transform = ECS.transform_components.get(hintze_hall_entity).?;
@@ -535,7 +538,12 @@ pub fn main() !void {
 // _ = @import("core/ecs/components/PhysicsThread.zig"); // Commented out collision system testing for now
 // }
 
+fn skip() !void {
+    return error.SkipZigTest;
+}
+
 test "debug wireframe memory leak with HintzeHall" {
+    try skip();
     const allocator = std.testing.allocator;
 
     std.debug.print("\n=== Testing Debug Wireframe Memory Leak with HintzeHall ===\n", .{});

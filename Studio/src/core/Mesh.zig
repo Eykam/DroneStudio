@@ -215,7 +215,7 @@ textureID: TextureID = TextureID{},
 vertices: []Vertex,
 indices: ?[]u32 = null,
 meta: Metadata,
-_draw: draw,
+_draw: draw = default_draw,
 drawType: glad.GLenum = glad.GL_TRIANGLES,
 flags: ?MeshFlags = MeshFlags{},
 material: Material = Material{},
@@ -392,18 +392,16 @@ pub fn deinit(self: *Self) void {
     if (self.meta.VAO != 0) glad.glDeleteVertexArrays(1, &self.meta.VAO);
     if (self.meta.VBO != 0) glad.glDeleteBuffers(1, &self.meta.VBO);
     if (self.meta.IBO != 0) glad.glDeleteBuffers(1, &self.meta.IBO);
+    self.allocator.free(self.vertices);
 }
 
 /// Update the mesh vertices with new data, updating the OpenGL buffer
 pub fn updateVertices(self: *Self, new_vertices: []Vertex) !void {
     // If the new vertex count is different, we need to reallocate the buffer
     if (new_vertices.len != self.vertices.len) {
-        // Free old vertices
         self.allocator.free(self.vertices);
-        
-        // Allocate and copy new vertices
         self.vertices = try self.allocator.dupe(Vertex, new_vertices);
-        
+
         // Recreate the buffer with new size
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
         glad.glBufferData(
@@ -416,7 +414,7 @@ pub fn updateVertices(self: *Self, new_vertices: []Vertex) !void {
         // Same size - just update the data
         // Copy new vertices into our buffer
         @memcpy(self.vertices, new_vertices);
-        
+
         // Update OpenGL vertex buffer using SubData
         glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.meta.VBO);
         glad.glBufferSubData(
@@ -543,8 +541,8 @@ pub fn calculateTangents(vertices: []Vertex, indices: ?[]u32) void {
     }
 }
 
-pub fn debug(self: Self) void {
-    Debug.printVertexShader(self.meta.VBO, self.vertices.len) catch |err| {
-        std.debug.print("Failed to debug vertex shader {any}\n", .{err});
-    };
-}
+// pub fn debug(self: Self) void {
+//     Debug.printVertexShader(self.meta.VBO, self.vertices.len) catch |err| {
+//         std.debug.print("Failed to debug vertex shader {any}\n", .{err});
+//     };
+// }

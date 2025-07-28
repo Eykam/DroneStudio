@@ -138,8 +138,8 @@ pub fn spawn(
     scene_width: u32,
     scene_height: u32,
 ) !Core.EntityID {
-    var root_tf = Transform.TransformComponent.init(alloc);
-    root_tf.setPosition(0, 30, 0);
+    const root_tf = Transform.TransformComponent.init(alloc);
+    // root_tf.setPosition(0, 30, 0);
 
     const root_ctrl = try makeDroneController(alloc);
 
@@ -147,6 +147,7 @@ pub fn spawn(
         alloc,
         "assets/drone/scene.gltf",
     );
+    defer drone_body_resource.deinit();
 
     // Create visual model (no physics)
     var entities = try ecs.createEntitiesFromModel(drone_body_resource);
