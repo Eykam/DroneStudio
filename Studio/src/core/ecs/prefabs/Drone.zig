@@ -139,8 +139,6 @@ pub fn spawn(
     scene_height: u32,
 ) !Core.EntityID {
     const root_tf = Transform.TransformComponent.init(alloc);
-    // root_tf.setPosition(0, 30, 0);
-
     const root_ctrl = try makeDroneController(alloc);
 
     const drone_body_resource = try ecs.world.resource_manager.loadGLTFModelCached(

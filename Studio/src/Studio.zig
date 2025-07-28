@@ -52,8 +52,8 @@ pub fn main() !void {
     const free_cam = try FreeCamera.generate(alloc, .{}, scene_width, scene_height);
     _ = try ECS.spawn(free_cam);
 
-    // _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
-    _ = try Box.spawn(alloc, ECS, .ConvexHull, .{ 0, 0, 0 }, .{ 1, 1, 1 }, 1.0, scene_width, scene_height);
+    _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
+    // _ = try Box.spawn(alloc, ECS, .ConvexHull, .{ 0, 10, 0 }, .{ 1, 1, 1 }, 1.0, scene_width, scene_height);
     _ = try Ground.spawn(alloc, ECS, .{});
     // _ = try HintzeHall.spawn(alloc, ECS);
 

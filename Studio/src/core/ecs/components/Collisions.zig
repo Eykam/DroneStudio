@@ -1071,7 +1071,13 @@ pub const DebugWireframeSystem = struct {
         }
     }
 
-    pub fn update(self: *DebugSelf, world: *Core.World, resource_manager: *ResourceManager, renderer_components: *SparseSet(Renderer.Renderable), transform_components: *SparseSet(Transform.TransformComponent)) !void {
+    pub fn update(
+        self: *DebugSelf,
+        world: *Core.World,
+        resource_manager: *ResourceManager,
+        renderer_components: *SparseSet(Renderer.Renderable),
+        transform_components: *SparseSet(Transform.TransformComponent),
+    ) !void {
         if (!self.enabled) {
             // Clean up when disabled
             if (self.debug_entities.count() > 0) {

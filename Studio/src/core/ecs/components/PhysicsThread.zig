@@ -497,7 +497,7 @@ pub const ThreadedPhysicsSystem = struct {
     should_shutdown: std.atomic.Value(bool),
 
     // Timing
-    target_hz: f64 = 240.0,
+    target_hz: f64 = 60.0,
     fixed_timestep: f64,
 
     // Entity tracking
@@ -802,6 +802,27 @@ pub const ThreadedPhysicsSystem = struct {
 
             // Only create wireframe data if we actually have vertices for this body
             if (vertices.len > 0) {
+                // Get the current world transform of the rigid body to convert vertices back to local space
+                var current_transform: [4][3]f32 = undefined;
+                bullet.cbtBodyGetCenterOfMassTransform(body, &current_transform);
+                
+                // Convert Bullet transform [4][3] to Mat4 for inversion
+                const world_matrix = bulletTransformToMat4(current_transform);
+                
+                // Calculate the inverse transformation matrix
+                const inverse_matrix = world_matrix.inverse() orelse {
+                    std.debug.print("Failed to invert transform matrix for entity {d}, skipping\n", .{entity_id.id});
+                    self.allocator.free(vertices);
+                    continue;
+                };
+                
+                // Transform all vertices from world space back to local space
+                std.debug.print("Converting {d} vertices from world space to local space for entity {d}\n", .{ vertices.len, entity_id.id });
+                for (vertices) |*vertex| {
+                    const local_pos = transformPoint(inverse_matrix, vertex.position);
+                    vertex.position = local_pos;
+                }
+                
                 const wireframe_data = DebugWireframeData{
                     .entity_id = entity_id,
                     .vertices = vertices,
@@ -829,6 +850,42 @@ pub const ThreadedPhysicsSystem = struct {
         std.debug.print("Extracted per-body debug wireframes for physics world (version: {d})\n", .{current_version + 1});
     }
 };
+
+/// Convert Bullet's [4][3] transform format to Mat4 for matrix operations
+fn bulletTransformToMat4(bullet_transform: [4][3]f32) Math.Mat4 {
+    // Bullet format: [4][3] where each [3] is a column vector
+    // [0] = X axis (right vector)
+    // [1] = Y axis (up vector)  
+    // [2] = Z axis (forward vector)
+    // [3] = Translation
+    
+    const data = [16]f32{
+        // Column 0 (X axis)
+        bullet_transform[0][0], bullet_transform[0][1], bullet_transform[0][2], 0.0,
+        // Column 1 (Y axis)
+        bullet_transform[1][0], bullet_transform[1][1], bullet_transform[1][2], 0.0,
+        // Column 2 (Z axis)
+        bullet_transform[2][0], bullet_transform[2][1], bullet_transform[2][2], 0.0,
+        // Column 3 (Translation)
+        bullet_transform[3][0], bullet_transform[3][1], bullet_transform[3][2], 1.0,
+    };
+    
+    return Math.Mat4.from_array(data);
+}
+
+/// Transform a 3D point using a 4x4 transformation matrix
+fn transformPoint(matrix: Math.Mat4, point: [3]f32) [3]f32 {
+    const m = matrix.to_array();
+    
+    // Multiply matrix * [x, y, z, 1] (homogeneous coordinates)
+    const x = m[0] * point[0] + m[4] * point[1] + m[8] * point[2] + m[12];
+    const y = m[1] * point[0] + m[5] * point[1] + m[9] * point[2] + m[13];
+    const z = m[2] * point[0] + m[6] * point[1] + m[10] * point[2] + m[14];
+    const w = m[3] * point[0] + m[7] * point[1] + m[11] * point[2] + m[15];
+    
+    // Divide by w for perspective correction (should be 1.0 for affine transforms)
+    return [3]f32{ x / w, y / w, z / w };
+}
 
 // Test-specific imports (only needed for testing)
 const testing = std.testing;

@@ -157,9 +157,7 @@ pub fn spawn(
     scene_width: u32,
     scene_height: u32,
 ) !Core.EntityID {
-    var root_tf = Transform.TransformComponent.init(alloc);
-    root_tf.setPosition(position[0], position[1], position[2]);
-
+    const root_tf = Transform.TransformComponent.init(alloc);
     const root_ctrl = try makeBoxController(alloc);
 
     const box_mesh = try createBoxMesh(alloc, size);
@@ -172,10 +170,10 @@ pub fn spawn(
 
     // Add mesh to resource manager
     try ecs.world.resource_manager.meshes.put(try alloc.dupe(u8, mesh_name), .{ .mesh = box_mesh, .instance_count = 1 });
-    
+
     // Create renderer component
     var box_renderer = try Renderer.Renderable.init(alloc, try alloc.dupe(u8, mesh_name));
-    
+
     // Create a simple material for the box
     const ResourceManager = @import("../ResourceManager.zig");
     const box_material = ResourceManager.MaterialVariant{
@@ -185,7 +183,7 @@ pub fn spawn(
             },
         },
     };
-    
+
     // Create unique material name
     const material_name = try std.fmt.allocPrint(alloc, "box_material_{d}_{d}_{d}", .{
         @as(u32, @intFromFloat(size[0] * 100)),
@@ -193,9 +191,9 @@ pub fn spawn(
         @as(u32, @intFromFloat(size[2] * 100)),
     });
     defer alloc.free(material_name);
-    
+
     const material_name_owned = try alloc.dupeZ(u8, material_name);
-    
+
     // Load the material into the resource manager
     try ecs.world.resource_manager.loadMaterial(material_name_owned, box_material, null);
     try box_renderer.setMaterial(alloc, material_name_owned);
@@ -223,7 +221,7 @@ pub fn spawn(
 
     // Create physics body
     var rigid_body = Collisions.RigidBodyComponent.init(mass, collider.bullet_shape.?);
-    rigid_body.translate(.{ 0, 10, 0 });
+    rigid_body.translate(position);
     std.debug.print("Created box with collision type: {s}, position: [{d:.2}, {d:.2}, {d:.2}], mass: {d:.2}\n", .{
         @tagName(collision_type),
         position[0],

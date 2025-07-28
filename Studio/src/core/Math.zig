@@ -289,6 +289,72 @@ pub fn Matrix(comptime N: usize) type {
         pub fn from_array(arr: [N * N]f32) Self {
             return Self{ .data = arr };
         }
+
+        pub fn determinant(self: Self) f32 {
+            if (N == 2) {
+                return self.data[0] * self.data[3] - self.data[1] * self.data[2];
+            } else if (N == 3) {
+                return self.data[0] * (self.data[4] * self.data[8] - self.data[5] * self.data[7]) -
+                       self.data[1] * (self.data[3] * self.data[8] - self.data[5] * self.data[6]) +
+                       self.data[2] * (self.data[3] * self.data[7] - self.data[4] * self.data[6]);
+            } else if (N == 4) {
+                // 4x4 determinant using cofactor expansion along first row
+                const m = self.data;
+                const a00 = m[0]; const a01 = m[4]; const a02 = m[8];  const a03 = m[12];
+                const a10 = m[1]; const a11 = m[5]; const a12 = m[9];  const a13 = m[13];
+                const a20 = m[2]; const a21 = m[6]; const a22 = m[10]; const a23 = m[14];
+                const a30 = m[3]; const a31 = m[7]; const a32 = m[11]; const a33 = m[15];
+
+                return a00 * (a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31) + a13 * (a21 * a32 - a22 * a31)) -
+                       a01 * (a10 * (a22 * a33 - a23 * a32) - a12 * (a20 * a33 - a23 * a30) + a13 * (a20 * a32 - a22 * a30)) +
+                       a02 * (a10 * (a21 * a33 - a23 * a31) - a11 * (a20 * a33 - a23 * a30) + a13 * (a20 * a31 - a21 * a30)) -
+                       a03 * (a10 * (a21 * a32 - a22 * a31) - a11 * (a20 * a32 - a22 * a30) + a12 * (a20 * a31 - a21 * a30));
+            } else {
+                @compileError("Determinant not implemented for matrices larger than 4x4");
+            }
+        }
+
+        pub fn inverse(self: Self) ?Self {
+            if (N == 4) {
+                const m = self.data;
+                const a00 = m[0]; const a01 = m[4]; const a02 = m[8];  const a03 = m[12];
+                const a10 = m[1]; const a11 = m[5]; const a12 = m[9];  const a13 = m[13];
+                const a20 = m[2]; const a21 = m[6]; const a22 = m[10]; const a23 = m[14];
+                const a30 = m[3]; const a31 = m[7]; const a32 = m[11]; const a33 = m[15];
+
+                const det = self.determinant();
+                if (@abs(det) < 1e-8) return null; // Matrix is singular
+
+                const inv_det = 1.0 / det;
+
+                var result = Self{ .data = undefined };
+                
+                // Calculate adjugate matrix and divide by determinant
+                result.data[0] = inv_det * (a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31) + a13 * (a21 * a32 - a22 * a31));
+                result.data[4] = inv_det * -(a01 * (a22 * a33 - a23 * a32) - a02 * (a21 * a33 - a23 * a31) + a03 * (a21 * a32 - a22 * a31));
+                result.data[8] = inv_det * (a01 * (a12 * a33 - a13 * a32) - a02 * (a11 * a33 - a13 * a31) + a03 * (a11 * a32 - a12 * a31));
+                result.data[12] = inv_det * -(a01 * (a12 * a23 - a13 * a22) - a02 * (a11 * a23 - a13 * a21) + a03 * (a11 * a22 - a12 * a21));
+
+                result.data[1] = inv_det * -(a10 * (a22 * a33 - a23 * a32) - a12 * (a20 * a33 - a23 * a30) + a13 * (a20 * a32 - a22 * a30));
+                result.data[5] = inv_det * (a00 * (a22 * a33 - a23 * a32) - a02 * (a20 * a33 - a23 * a30) + a03 * (a20 * a32 - a22 * a30));
+                result.data[9] = inv_det * -(a00 * (a12 * a33 - a13 * a32) - a02 * (a10 * a33 - a13 * a30) + a03 * (a10 * a32 - a12 * a30));
+                result.data[13] = inv_det * (a00 * (a12 * a23 - a13 * a22) - a02 * (a10 * a23 - a13 * a20) + a03 * (a10 * a22 - a12 * a20));
+
+                result.data[2] = inv_det * (a10 * (a21 * a33 - a23 * a31) - a11 * (a20 * a33 - a23 * a30) + a13 * (a20 * a31 - a21 * a30));
+                result.data[6] = inv_det * -(a00 * (a21 * a33 - a23 * a31) - a01 * (a20 * a33 - a23 * a30) + a03 * (a20 * a31 - a21 * a30));
+                result.data[10] = inv_det * (a00 * (a11 * a33 - a13 * a31) - a01 * (a10 * a33 - a13 * a30) + a03 * (a10 * a31 - a11 * a30));
+                result.data[14] = inv_det * -(a00 * (a11 * a23 - a13 * a21) - a01 * (a10 * a23 - a13 * a20) + a03 * (a10 * a21 - a11 * a20));
+
+                result.data[3] = inv_det * -(a10 * (a21 * a32 - a22 * a31) - a11 * (a20 * a32 - a22 * a30) + a12 * (a20 * a31 - a21 * a30));
+                result.data[7] = inv_det * (a00 * (a21 * a32 - a22 * a31) - a01 * (a20 * a32 - a22 * a30) + a02 * (a20 * a31 - a21 * a30));
+                result.data[11] = inv_det * -(a00 * (a11 * a32 - a12 * a31) - a01 * (a10 * a32 - a12 * a30) + a02 * (a10 * a31 - a11 * a30));
+                result.data[15] = inv_det * (a00 * (a11 * a22 - a12 * a21) - a01 * (a10 * a22 - a12 * a20) + a02 * (a10 * a21 - a11 * a20));
+
+                return result;
+            } else {
+                @compileError("Matrix inversion not implemented for matrices other than 4x4");
+            }
+        }
     };
 }
 
