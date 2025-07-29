@@ -512,6 +512,12 @@ float cbtShapeGetMargin(CbtShapeHandle shape_handle) {
     return shape->getMargin();
 }
 
+void cbtShapeSetLocalScaling(CbtShapeHandle shape_handle, const CbtVector3 scaling) {
+    assert(shape_handle && cbtShapeIsCreated(shape_handle));
+    auto shape = (btCollisionShape*)shape_handle;
+    shape->setLocalScaling(btVector3(scaling[0], scaling[1], scaling[2]));
+}
+
 void cbtShapeBoxCreate(CbtShapeHandle shape_handle, const CbtVector3 half_extents) {
     assert(shape_handle && !cbtShapeIsCreated(shape_handle));
     assert(cbtShapeGetType(shape_handle) == CBT_SHAPE_TYPE_BOX);

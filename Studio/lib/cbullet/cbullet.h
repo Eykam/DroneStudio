@@ -223,6 +223,7 @@ bool cbtShapeIsCreated(CbtShapeHandle shape_handle);
 int cbtShapeGetType(CbtShapeHandle shape_handle);
 void cbtShapeSetMargin(CbtShapeHandle shape_handle, float margin);
 float cbtShapeGetMargin(CbtShapeHandle shape_handle);
+void cbtShapeSetLocalScaling(CbtShapeHandle shape_handle, const CbtVector3 scaling);
 
 bool cbtShapeIsPolyhedral(CbtShapeHandle shape_handle);
 bool cbtShapeIsConvex2d(CbtShapeHandle shape_handle);

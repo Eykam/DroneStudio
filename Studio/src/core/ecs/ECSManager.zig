@@ -224,11 +224,11 @@ pub fn update(self: *Self, time: f64) !void {
     self.control_system.update(dt);
     if (should_time) std.debug.print("  Control system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
-    self.transform_system.update();
-    if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
-
     try self.collision_system.update();
     if (should_time) std.debug.print("  Collision system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.transform_system.update();
+    if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
     try self.viewport_system.update();
     if (should_time) std.debug.print("  Viewport system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});

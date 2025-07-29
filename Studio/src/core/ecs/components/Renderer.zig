@@ -243,26 +243,13 @@ pub const RenderSystem = struct {
                 const view_matrix = cam.view(tf);
                 const projection_matrix = cam.projection();
                 const camera_position = tf.position;
-                
-
-                // std.debug.print("View Mat {any}\nProj Mat: {any}\nCamera Position: {any}\n", .{ view_matrix, projection_matrix, camera_position });
 
                 // Process render queue
                 const current_shader_id: c_uint = 0;
                 var prev_material: ?[]const u8 = null;
 
-                // std.debug.print("Render Queue Size: {d}\n", .{self.render_queue.items.len});
-
                 for (self.render_queue.items, 0..) |*cmd, idx| {
                     _ = idx;
-                    // std.debug.print("Render Command {d}:\n\tShaderID: {d}\n\tShaderName: {s}\n\tTransform: {any}\n\tEntityID: {d}\n\tRenderable: {any}\n", .{
-                    //     idx,
-                    //     cmd.shader_id,
-                    //     cmd.shader_name orelse "null",
-                    //     cmd.transform.world_transform,
-                    //     cmd.entity_id.id,
-                    //     cmd.renderer,
-                    // });
 
                     // Get mesh from resource manager
                     if (self.world.resource_manager.meshes.get(cmd.renderer.mesh_name)) |mesh_resource| {
@@ -276,6 +263,20 @@ pub const RenderSystem = struct {
                                 }
 
                                 prev_material = material_name;
+                            } else {
+                                // Same material as previous, but still need to update model matrix for this entity
+                                if (self.world.resource_manager.materials.getPtr(material_name)) |material_resource| {
+                                    const shader_name = material_resource.shader_ref orelse switch (material_resource.material) {
+                                        .PBR => "pbr_shader",
+                                        .Phong => "standard_shader",
+                                    };
+                                    if (self.world.resource_manager.getShader(shader_name)) |shader| {
+                                        const uModelLoc = shader.uniforms.get("uModel") orelse -1;
+                                        if (uModelLoc != -1) {
+                                            glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &cmd.transform.world_transform.to_array());
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             // No material - use a default shader if needed
@@ -310,12 +311,9 @@ pub const RenderSystem = struct {
                         glad.glDisable(glad.GL_BLEND);
                         glad.glEnable(glad.GL_CULL_FACE);
                         glad.glCullFace(glad.GL_BACK);
-                    } else {
-                    }
+                    } else {}
                 }
             }
-
-            // std.debug.print("{s}\n{s}\n", .{ "=" ** 80, "=" ** 80 });
         }
 
         // Now bind back to default framebuffer, just so we have a blank background for ImGui
@@ -325,7 +323,14 @@ pub const RenderSystem = struct {
         glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
     }
 
-    pub fn applyMaterial(self: *Self, material_resource: *ResourceManager.MaterialResource, transform: TransformComponent, view_matrix: *const Mat4, projection_matrix: *const Mat4, view_position: *const [3]f32) void {
+    pub fn applyMaterial(
+        self: *Self,
+        material_resource: *ResourceManager.MaterialResource,
+        transform: TransformComponent,
+        view_matrix: *const Mat4,
+        projection_matrix: *const Mat4,
+        view_position: *const [3]f32,
+    ) void {
         const shader_name = material_resource.shader_ref orelse switch (material_resource.material) {
             .PBR => "pbr_shader",
             .Phong => "standard_shader",

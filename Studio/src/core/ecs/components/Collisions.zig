@@ -189,10 +189,10 @@ pub const ConvexHullShape = struct {
                 hulls[i].triangles = try allocator.alloc(u32, 0);
             }
 
-            std.debug.print("Hull: {d}\n", .{i});
-            std.debug.print("Points: {d} Triangles: {d}\n", .{ n_points, n_triangles });
-            std.debug.print("Points: {d:.2}\n", .{hulls[i].points});
-            std.debug.print("Triangles {d:.2}\n\n", .{hulls[i].triangles});
+            // std.debug.print("Hull: {d}\n", .{i});
+            // std.debug.print("Points: {d} Triangles: {d}\n", .{ n_points, n_triangles });
+            // std.debug.print("Points: {d:.2}\n", .{hulls[i].points});
+            // std.debug.print("Triangles {d:.2}\n\n", .{hulls[i].triangles});
         }
 
         return hulls;
@@ -552,16 +552,9 @@ pub const ColliderComponent = struct {
 
         // Calculate this node's transform by combining accumulated + local
         var current_transform = accumulated_transform;
-
-        std.debug.print("Node {d}: Processing (accumulated transform pos=[{d:.3}, {d:.3}, {d:.3}])\n", .{
-            node_index,
-            accumulated_transform.get_position().x(),
-            accumulated_transform.get_position().y(),
-            accumulated_transform.get_position().z(),
-        });
+        // var current_transform = Mat4.identity();
 
         if (node.local_transformation) |local_transform| {
-            std.debug.print("Node {d}: has local_transformation\n", .{node_index});
             current_transform = local_transform.multiply(current_transform);
         } else {
             var local_matrix = Mat4.identity();
@@ -589,7 +582,13 @@ pub const ColliderComponent = struct {
         var transform_for_children = current_transform;
         if (node.mesh_name) |mesh_name| {
             if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
-                const m = current_transform.base.data;
+                std.debug.print("Node {d}: Processing accumulated transform = {d:.3})\n", .{
+                    node_index,
+                    accumulated_transform,
+                });
+
+                std.debug.print("Node {d}: has local_transformation\n", .{node_index});
+                std.debug.print("Local Transform = {any}\n", .{node.local_transformation.?});
 
                 // Create child shape
                 const shape_type = base_shape.getBulletShapeType();
@@ -603,17 +602,20 @@ pub const ColliderComponent = struct {
                         indices_opt = try allocator.dupe(u32, indices);
                     }
 
-                    var temp_mesh = try Mesh.init(allocator, mesh_res.mesh.vertices, indices_opt, mesh_res.mesh._draw);
-                    defer temp_mesh.deinit();
+                    const temp_mesh = try Mesh.init(allocator, mesh_res.mesh.vertices, indices_opt, mesh_res.mesh._draw);
+                    // Don't deinit temp_mesh as it would free shared vertices from resource manager
 
                     var mesh_collider = try createColliderFromMesh(allocator, resource_manager, temp_mesh, base_shape);
                     try mesh_collider.shape.createBulletShape(allocator, mesh_shape.?, temp_mesh);
 
+                    const trs = current_transform.decomposeTRS();
+                    const position = trs.translation;
+                    const rotation = Math.Mat3.from_quaternion(trs.rotation).base.data;
                     var child_transform = [4][3]f32{
-                        [3]f32{ m[0], m[1], m[2] }, // First column of rotation
-                        [3]f32{ m[4], m[5], m[6] }, // Second column of rotation
-                        [3]f32{ m[8], m[9], m[10] }, // Third column of rotation
-                        [3]f32{ m[12], m[13], m[14] }, // Translation
+                        [3]f32{ rotation[0], rotation[3], rotation[6] }, // First column of rotation
+                        [3]f32{ rotation[1], rotation[4], rotation[7] }, // Second column of rotation
+                        [3]f32{ rotation[2], rotation[5], rotation[8] }, // Third column of rotation
+                        [3]f32{ position[0], position[1], position[2] }, // Translation
                     };
 
                     std.debug.print("  Adding mesh '{s}' to compound with transform:\n", .{mesh_name});
@@ -622,6 +624,7 @@ pub const ColliderComponent = struct {
                     std.debug.print("    Row 2: [{d:.3}, {d:.3}, {d:.3}] (Z axis)\n", .{ child_transform[2][0], child_transform[2][1], child_transform[2][2] });
                     std.debug.print("    Row 3: [{d:.3}, {d:.3}, {d:.3}] (Position)\n", .{ child_transform[3][0], child_transform[3][1], child_transform[3][2] });
 
+                    bullet.cbtShapeSetLocalScaling(mesh_shape.?, &trs.scale);
                     bullet.cbtShapeCompoundAddChild(compound_shape, &child_transform, mesh_shape.?);
 
                     // Reset transform accumulation for children since this node has a mesh
@@ -786,21 +789,9 @@ pub const CollisionSystem = struct {
             // Update transform components with latest physics data
             for (physics_states) |state| {
                 if (self.transform_components.get(state.entity_id)) |transform| {
-                    // Debug output for physics state updates
-                    // if (state.entity_id.id < 5) { // Only show first few entities to avoid spam
-                    std.debug.print("CollisionSystem: Updating entity {d} transform from physics: pos=[{d:.3}, {d:.3}, {d:.3}]\n", .{
-                        state.entity_id.id,
-                        state.position[0],
-                        state.position[1],
-                        state.position[2],
-                    });
-                    // }
-
                     // Update position and rotation from physics thread
                     transform.position = state.position;
-
-                    const quat = Math.Quaternion{ .data = state.rotation };
-                    transform.rotation = quat.normalize();
+                    transform.rotation = state.rotation.normalize();
                     transform.updateLocalTransform();
                 }
             }
@@ -1111,8 +1102,7 @@ pub const DebugWireframeSystem = struct {
                         state.position[1],
                         state.position[2],
                     );
-                    const quat = Math.Quaternion{ .data = state.rotation };
-                    transform.setRotation(quat);
+                    transform.setRotation(state.rotation);
                     transform.updateLocalTransform();
                 }
             }
@@ -1120,7 +1110,11 @@ pub const DebugWireframeSystem = struct {
     }
 
     /// Clean up all debug entities and their components
-    fn cleanupDebugEntities(self: *DebugSelf, renderer_components: *SparseSet(Renderer.Renderable), transform_components: *SparseSet(Transform.TransformComponent)) void {
+    fn cleanupDebugEntities(
+        self: *DebugSelf,
+        renderer_components: *SparseSet(Renderer.Renderable),
+        transform_components: *SparseSet(Transform.TransformComponent),
+    ) void {
         var it = self.debug_entities.iterator();
         while (it.next()) |entry| {
             const debug_info = entry.value_ptr.*;
@@ -1137,7 +1131,13 @@ pub const DebugWireframeSystem = struct {
     }
 
     /// Create debug entities from current wireframe data
-    fn createDebugEntities(self: *DebugSelf, world: *Core.World, resource_manager: *ResourceManager, renderer_components: *SparseSet(Renderer.Renderable), transform_components: *SparseSet(Transform.TransformComponent)) !void {
+    fn createDebugEntities(
+        self: *DebugSelf,
+        world: *Core.World,
+        resource_manager: *ResourceManager,
+        renderer_components: *SparseSet(Renderer.Renderable),
+        transform_components: *SparseSet(Transform.TransformComponent),
+    ) !void {
         const wireframes = self.physics_thread.getDebugWireframes();
         for (wireframes) |wireframe_data| {
             const mesh_name = try self.getMeshName(wireframe_data.entity_id);

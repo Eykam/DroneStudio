@@ -312,7 +312,7 @@ pub const PhysicsCommand = union(enum) {
 pub const PhysicsState = struct {
     entity_id: Core.EntityID,
     position: [3]f32,
-    rotation: [4]f32, // quaternion (x, y, z, w)
+    rotation: Math.Quaternion,
     linear_velocity: [3]f32,
     angular_velocity: [3]f32,
     is_active: bool,
@@ -532,7 +532,7 @@ pub const ThreadedPhysicsSystem = struct {
             .debug_wireframes_version = std.atomic.Value(u32).init(0),
             .debug_dynamic_color = .{ 0.0, 1.0, 0.0 }, // Green for dynamic
             .debug_static_color = .{ 0.0, 0.0, 1.0 }, // Blue for static
-            .physics_paused = std.atomic.Value(bool).init(false),
+            .physics_paused = std.atomic.Value(bool).init(true),
         };
         self.fixed_timestep = 1.0 / self.target_hz;
 
@@ -655,18 +655,16 @@ pub const ThreadedPhysicsSystem = struct {
 
             // Step physics simulation (only if not paused)
             var num_steps: i32 = 0;
-            if (self.physics_paused.load(.acquire)) {
+            if (!self.physics_paused.load(.acquire)) {
                 const max_substeps: i32 = 10;
                 const fixed_timestep_f32: f32 = @floatCast(self.fixed_timestep);
                 num_steps = bullet.cbtWorldStepSimulation(self.bullet_world, fixed_timestep_f32, max_substeps, fixed_timestep_f32);
 
                 if (num_steps > 0) {
                     self.physics_time += @as(f64, @floatFromInt(num_steps)) * self.fixed_timestep;
-                }
 
-                // Debug: Log actual steps taken
-                if (self.frame_count % 60 == 0 and num_steps > 0) {
-                    std.debug.print("Physics stepping: took {d} substeps, timestep={d:.4}s, physics_time={d:.2}s\n", .{ num_steps, fixed_timestep_f32, self.physics_time });
+                    // Check for drone-ground collision after physics step
+                    self.checkDroneGroundCollision();
                 }
             } else {
                 // Debug: Log pause status occasionally
@@ -721,19 +719,12 @@ pub const ThreadedPhysicsSystem = struct {
 
             // TODO: There should be a more efficient way to extract quaternion from 3x3 rotation matrix
             // without converting to Mat4 and using decomposeTRS, but this works for now
-
-            // Convert Bullet's 4x3 transform matrix to Mat4
-            const mat4 = Math.Mat4{ .base = .{ .data = [16]f32{
-                transform_matrix[0][0], transform_matrix[0][1], transform_matrix[0][2], 0.0,
-                transform_matrix[1][0], transform_matrix[1][1], transform_matrix[1][2], 0.0,
-                transform_matrix[2][0], transform_matrix[2][1], transform_matrix[2][2], 0.0,
-                transform_matrix[3][0], transform_matrix[3][1], transform_matrix[3][2], 1.0,
-            } } };
+            const mat4 = bulletTransformToMat4(transform_matrix);
 
             // Extract position and rotation using decomposeTRS
             const trs = mat4.decomposeTRS();
             const position = trs.translation;
-            const rotation = trs.rotation.data;
+            const rotation = trs.rotation;
 
             // Check if body is active
             const activation_state = bullet.cbtBodyGetActivationState(body);
@@ -755,6 +746,67 @@ pub const ThreadedPhysicsSystem = struct {
         }
 
         self.state_buffer.endWrite();
+    }
+
+    /// Check for collision between drone and ground
+    fn checkDroneGroundCollision(self: *Self) void {
+        // First time: print all entity IDs to identify drone and ground
+        const print_once = struct {
+            var printed: bool = false;
+        };
+        if (!print_once.printed) {
+            print_once.printed = true;
+            std.debug.print("\n=== Physics bodies in world ===\n", .{});
+            var it = self.entity_bodies.iterator();
+            while (it.next()) |entry| {
+                const entity_id = entry.key_ptr.*;
+                const body = entry.value_ptr.*;
+                const mass = bullet.cbtBodyGetMass(body);
+                std.debug.print("Entity {d}: mass = {d:.2} (type: {s})\n", .{
+                    entity_id.id,
+                    mass,
+                    if (mass > 0.0) "DYNAMIC" else "STATIC",
+                });
+            }
+            std.debug.print("===========================\n\n", .{});
+        }
+
+        // Simple proximity-based collision detection
+        // Find dynamic bodies (drones) and static bodies (ground)
+        var dynamic_bodies = std.ArrayList(struct { entity: Core.EntityID, body: bullet.CbtBodyHandle, pos: [3]f32 }).init(self.allocator);
+        defer dynamic_bodies.deinit();
+        var static_bodies = std.ArrayList(struct { entity: Core.EntityID, body: bullet.CbtBodyHandle, pos: [3]f32 }).init(self.allocator);
+        defer static_bodies.deinit();
+
+        var it = self.entity_bodies.iterator();
+        while (it.next()) |entry| {
+            const entity_id = entry.key_ptr.*;
+            const body = entry.value_ptr.*;
+            const mass = bullet.cbtBodyGetMass(body);
+
+            // Get body position
+            var transform: [4][3]f32 = undefined;
+            bullet.cbtBodyGetCenterOfMassTransform(body, &transform);
+            const pos = [3]f32{ transform[3][0], transform[3][1], transform[3][2] };
+
+            if (mass > 0) {
+                dynamic_bodies.append(.{ .entity = entity_id, .body = body, .pos = pos }) catch {};
+            } else {
+                static_bodies.append(.{ .entity = entity_id, .body = body, .pos = pos }) catch {};
+            }
+        }
+
+        // Check if any dynamic body is very close to ground (Y position near 0)
+        for (dynamic_bodies.items) |dynamic| {
+            // Check if drone is near ground level (assuming ground is at Y=0)
+            if (dynamic.pos[1] < 0.6) { // Drone radius is about 0.5, so check if center is below 0.6
+                std.debug.print("\nCOLLISION DETECTED: Dynamic entity {d} at Y={d:.3} hit ground!\n", .{
+                    dynamic.entity.id,
+                    dynamic.pos[1],
+                });
+                // @panic("COLLISION DETECTED: Drone collided with ground plane!");
+            }
+        }
     }
 
     /// Extract debug wireframes for all bodies in the physics world, creating separate wireframe data for each body
@@ -805,24 +857,24 @@ pub const ThreadedPhysicsSystem = struct {
                 // Get the current world transform of the rigid body to convert vertices back to local space
                 var current_transform: [4][3]f32 = undefined;
                 bullet.cbtBodyGetCenterOfMassTransform(body, &current_transform);
-                
+
                 // Convert Bullet transform [4][3] to Mat4 for inversion
                 const world_matrix = bulletTransformToMat4(current_transform);
-                
+
                 // Calculate the inverse transformation matrix
                 const inverse_matrix = world_matrix.inverse() orelse {
                     std.debug.print("Failed to invert transform matrix for entity {d}, skipping\n", .{entity_id.id});
                     self.allocator.free(vertices);
                     continue;
                 };
-                
+
                 // Transform all vertices from world space back to local space
                 std.debug.print("Converting {d} vertices from world space to local space for entity {d}\n", .{ vertices.len, entity_id.id });
                 for (vertices) |*vertex| {
                     const local_pos = transformPoint(inverse_matrix, vertex.position);
                     vertex.position = local_pos;
                 }
-                
+
                 const wireframe_data = DebugWireframeData{
                     .entity_id = entity_id,
                     .vertices = vertices,
@@ -855,10 +907,10 @@ pub const ThreadedPhysicsSystem = struct {
 fn bulletTransformToMat4(bullet_transform: [4][3]f32) Math.Mat4 {
     // Bullet format: [4][3] where each [3] is a column vector
     // [0] = X axis (right vector)
-    // [1] = Y axis (up vector)  
+    // [1] = Y axis (up vector)
     // [2] = Z axis (forward vector)
     // [3] = Translation
-    
+
     const data = [16]f32{
         // Column 0 (X axis)
         bullet_transform[0][0], bullet_transform[0][1], bullet_transform[0][2], 0.0,
@@ -869,20 +921,20 @@ fn bulletTransformToMat4(bullet_transform: [4][3]f32) Math.Mat4 {
         // Column 3 (Translation)
         bullet_transform[3][0], bullet_transform[3][1], bullet_transform[3][2], 1.0,
     };
-    
+
     return Math.Mat4.from_array(data);
 }
 
 /// Transform a 3D point using a 4x4 transformation matrix
 fn transformPoint(matrix: Math.Mat4, point: [3]f32) [3]f32 {
     const m = matrix.to_array();
-    
+
     // Multiply matrix * [x, y, z, 1] (homogeneous coordinates)
     const x = m[0] * point[0] + m[4] * point[1] + m[8] * point[2] + m[12];
     const y = m[1] * point[0] + m[5] * point[1] + m[9] * point[2] + m[13];
     const z = m[2] * point[0] + m[6] * point[1] + m[10] * point[2] + m[14];
     const w = m[3] * point[0] + m[7] * point[1] + m[11] * point[2] + m[15];
-    
+
     // Divide by w for perspective correction (should be 1.0 for affine transforms)
     return [3]f32{ x / w, y / w, z / w };
 }
@@ -1333,7 +1385,7 @@ test "Double Buffer - Basic functionality" {
         try write_buf.append(PhysicsState{
             .entity_id = Core.EntityID.init(1),
             .position = .{ 1.0, 2.0, 3.0 },
-            .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+            .rotation = Math.Quaternion.identity(),
             .linear_velocity = .{ 0.0, 0.0, 0.0 },
             .angular_velocity = .{ 0.0, 0.0, 0.0 },
             .is_active = true,
@@ -1355,7 +1407,7 @@ test "Double Buffer - Basic functionality" {
         try write_buf2.append(PhysicsState{
             .entity_id = Core.EntityID.init(1),
             .position = .{ 1.0, 3.0, 3.0 },
-            .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+            .rotation = Math.Quaternion.identity(),
             .linear_velocity = .{ 0.0, 0.0, 0.0 },
             .angular_velocity = .{ 0.0, 0.0, 0.0 },
             .is_active = true,
@@ -1376,7 +1428,7 @@ test "Double Buffer - Basic functionality" {
         try write_buf3.append(PhysicsState{
             .entity_id = Core.EntityID.init(1),
             .position = .{ 1.0, 4.0, 3.0 },
-            .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+            .rotation = Math.Quaternion.identity(),
             .linear_velocity = .{ 0.0, 0.0, 0.0 },
             .angular_velocity = .{ 0.0, 0.0, 0.0 },
             .is_active = true,
@@ -1414,7 +1466,7 @@ test "Double Buffer - Concurrent access simulation" {
         try write_buf.append(PhysicsState{
             .entity_id = Core.EntityID.init(1),
             .position = .{ 1.0, @as(f32, @floatFromInt(frame)), 3.0 },
-            .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+            .rotation = Math.Quaternion.identity(),
             .linear_velocity = .{ 0.0, 0.0, 0.0 },
             .angular_velocity = .{ 0.0, 0.0, 0.0 },
             .is_active = true,
@@ -1475,7 +1527,7 @@ test "Double Buffer - Threading stress test" {
                 write_buf.append(PhysicsState{
                     .entity_id = Core.EntityID.init(1),
                     .position = .{ 1.0, @as(f32, @floatFromInt(local_frame)), 3.0 },
-                    .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+                    .rotation = Math.Quaternion.identity(),
                     .linear_velocity = .{ 0.0, 0.0, 0.0 },
                     .angular_velocity = .{ 0.0, 0.0, 0.0 },
                     .is_active = true,

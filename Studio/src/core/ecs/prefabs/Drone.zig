@@ -163,7 +163,7 @@ pub fn spawn(
     var rigid_body = Collisions.RigidBodyComponent.init(1.0, collider.bullet_shape.?);
 
     // Set initial position offset from collision shape center of mass
-    rigid_body.translate(.{ 0, 30, 0 });
+    rigid_body.translate(.{ 0, 15, 0 });
     rigid_body.rotate(.{ 0, 0, 0, 1 });
 
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
