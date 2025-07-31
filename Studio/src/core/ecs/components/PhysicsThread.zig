@@ -4,6 +4,8 @@ const Core = @import("../Core.zig");
 const Mesh = @import("../../Mesh.zig");
 const bullet = @import("../../bindings/c.zig").bullet;
 
+const Vec3 = Math.Vec3;
+
 pub const ApplyForce = struct {
     entity_id: Core.EntityID,
     force: [3]f32,
@@ -19,11 +21,11 @@ pub const ApplyForce = struct {
 
 pub const ApplyTorque = struct {
     entity_id: Core.EntityID,
-    torque: [3]f32,
+    torque: Vec3,
 
     pub fn execute(self: ApplyTorque, physics_thread: *ThreadedPhysicsSystem) void {
         if (physics_thread.entity_bodies.get(self.entity_id)) |body| {
-            bullet.cbtBodyApplyTorque(body, &self.torque);
+            bullet.cbtBodyApplyTorque(body, @ptrCast(&self.torque.data));
         } else {
             std.debug.print("No physics body found for torque on entity {d}\n", .{self.entity_id.id});
         }
@@ -77,6 +79,8 @@ pub const CreateRigidBody = struct {
     shape_handle: bullet.CbtShapeHandle,
     initial_pos: [3]f32,
     initial_rot: [4]f32,
+    inertia: [3]f32 = .{ 0.0, 0.0, 0.0 },
+    use_custom_inertia: bool = false,
     restitution: f32 = 0.5,
     friction: f32 = 0.5,
     rolling_friction: f32 = 0.1,
@@ -110,6 +114,12 @@ pub const CreateRigidBody = struct {
             };
 
             bullet.cbtBodySetCenterOfMassTransform(body_handle, &final_transform);
+
+            // Set custom inertia if specified
+            if (self.use_custom_inertia) {
+                bullet.cbtBodySetMassProps(body_handle, self.mass, &self.inertia);
+                std.debug.print("Using custom inertia for entity {d}: [{d:.6}, {d:.6}, {d:.6}] kg⋅m²\n", .{ self.entity_id.id, self.inertia[0], self.inertia[1], self.inertia[2] });
+            }
 
             std.debug.print("  Set rigid body transform for entity {d}:\n", .{self.entity_id.id});
             std.debug.print("    Position: [{d:.3}, {d:.3}, {d:.3}]\n", .{ final_transform[3][0], final_transform[3][1], final_transform[3][2] });
@@ -317,6 +327,11 @@ pub const PhysicsState = struct {
     angular_velocity: [3]f32,
     is_active: bool,
     frame_number: u64, // Debug: track which physics frame this state is from
+
+    // Extended data for IMU simulation
+    omega_body: Vec3, // Angular velocity in body frame (rad/s)
+    alpha_world: Vec3, // Total linear acceleration in world frame (includes gravity) (m/s²)
+    rotation_wb: Math.Quaternion, // World to body rotation matrix
 };
 
 /// Debug wireframe data for an entity
@@ -730,6 +745,23 @@ pub const ThreadedPhysicsSystem = struct {
             const activation_state = bullet.cbtBodyGetActivationState(body);
             const is_active = activation_state == bullet.CBT_ACTIVE_TAG;
 
+            // Calculate IMU-specific data
+            // Transform angular velocity from world frame to body frame
+            const omega_world_vec = Math.Vec3.init(angular_vel[0], angular_vel[1], angular_vel[2]);
+            const omega_body = omega_world_vec.rotate_by_quaternion(rotation.conjugate());
+
+            var force_world: [3]f32 = undefined;
+            bullet.cbtBodyGetTotalForce(body, &force_world);
+
+            const body_mass = bullet.cbtBodyGetMass(body);
+            const alpha_world = if (body_mass < std.math.floatEps(f32))
+                Vec3.zero()
+            else
+                Vec3.from_array(force_world).scale(1.0 / body_mass);
+
+            // World to body rotation quaternion
+            const rotation_wb = rotation.conjugate();
+
             const state = PhysicsState{
                 .entity_id = entity_id,
                 .position = position,
@@ -738,6 +770,10 @@ pub const ThreadedPhysicsSystem = struct {
                 .angular_velocity = angular_vel,
                 .is_active = is_active,
                 .frame_number = self.frame_count,
+                // IMU data
+                .omega_body = omega_body,
+                .alpha_world = alpha_world,
+                .rotation_wb = rotation_wb,
             };
 
             write_buffer.append(state) catch {

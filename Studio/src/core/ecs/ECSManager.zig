@@ -19,6 +19,9 @@ const Viewports = @import("components/Viewports.zig");
 const Recorder = @import("components/Recorder.zig");
 const Collisions = @import("components/Collisions.zig");
 const SharedMem = @import("components/SharedMem.zig");
+const IMUSensor = @import("components/IMUSensor.zig");
+const FlightController = @import("components/FlightController.zig");
+const FlightInput = @import("components/FlightInput.zig");
 
 // Components
 const ControllerComponent = Controller.ControllerComponent;
@@ -30,6 +33,9 @@ const GlobalsComponent = Globals.GlobalsComponent;
 const ViewportComponent = Viewports.ViewportComponent;
 const ColliderComponent = Collisions.ColliderComponent;
 const RigidBodyComponent = Collisions.RigidBodyComponent;
+const IMUSensorComponent = IMUSensor.IMUSensorComponent;
+const FlightControllerComponent = FlightController.FlightControllerComponent;
+const FlightInputComponent = FlightInput.FlightInputComponent;
 
 // Systems
 const ControllerSytem = Controller.ControlSystem;
@@ -41,6 +47,9 @@ const ViewportSystem = Viewports.ViewportSystem;
 const RecorderSystem = Recorder.RecorderSystem;
 const CollisionSystem = Collisions.CollisionSystem;
 const SharedMemSystem = SharedMem.SharedMemSystem;
+const IMUSystem = IMUSensor.IMUSystem;
+const FlightControllerSystem = FlightController.FlightControllerSystem;
+const FlightInputSystem = FlightInput.FlightInputSystem;
 
 const Self = @This();
 
@@ -57,6 +66,9 @@ controller_components: SparseSet(ControllerComponent),
 viewport_components: SparseSet(ViewportComponent),
 collider_components: SparseSet(ColliderComponent),
 rigid_body_components: SparseSet(RigidBodyComponent),
+imu_sensor_components: SparseSet(IMUSensorComponent),
+flight_controller_components: SparseSet(FlightControllerComponent),
+flight_input_components: SparseSet(FlightInputComponent),
 
 // Systems
 globals_system: *GlobalsSystem,
@@ -68,6 +80,9 @@ viewport_system: ViewportSystem,
 recorder_system: *RecorderSystem,
 collision_system: CollisionSystem,
 shared_mem_system: SharedMemSystem,
+imu_system: IMUSystem,
+flight_controller_system: FlightControllerSystem,
+flight_input_system: FlightInputSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const global_system = try GlobalsSystem.init(allocator, .{});
@@ -89,6 +104,9 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         .controller_components = SparseSet(ControllerComponent).init(allocator),
         .collider_components = SparseSet(ColliderComponent).init(allocator),
         .rigid_body_components = SparseSet(RigidBodyComponent).init(allocator),
+        .imu_sensor_components = SparseSet(IMUSensorComponent).init(allocator),
+        .flight_controller_components = SparseSet(FlightControllerComponent).init(allocator),
+        .flight_input_components = SparseSet(FlightInputComponent).init(allocator),
 
         // Initialize systems
         .globals_system = global_system,
@@ -136,6 +154,18 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             manager.globals,
             &manager.viewport_components,
         ),
+        .imu_system = IMUSystem.init(
+            allocator,
+            &manager.imu_sensor_components,
+        ),
+        .flight_controller_system = FlightControllerSystem.init(
+            allocator,
+            &manager.flight_controller_components,
+        ),
+        .flight_input_system = FlightInputSystem.init(
+            allocator,
+            &manager.flight_input_components,
+        ),
     };
 
     global_system.camera_system = &manager.camera_system;
@@ -146,6 +176,20 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
 
     // Link collision system to control system for physics-based movement
     manager.control_system.collision_system = &manager.collision_system;
+
+    // Link IMU system to physics thread for sensor data
+    if (manager.collision_system.physics_thread) |physics_thread| {
+        manager.imu_system.setPhysicsThread(physics_thread);
+        try manager.imu_system.startIMUThread();
+
+        // Link flight controller system to other systems
+        manager.flight_controller_system.setIMUSystem(&manager.imu_system);
+        manager.flight_controller_system.setPhysicsThread(physics_thread);
+        try manager.flight_controller_system.startControlThread();
+
+        // Link flight input system to flight controller system
+        manager.flight_input_system.setFlightControllerSystem(&manager.flight_controller_system);
+    }
 
     return manager;
 }
@@ -168,6 +212,13 @@ pub fn deinit(self: *Self) void {
     self.collider_components.deinit();
     self.physics_components.deinit();
     self.controller_components.deinit();
+    self.imu_sensor_components.deinit();
+    self.flight_controller_components.deinit();
+    self.flight_input_components.deinit();
+
+    // Deinit flight controller and IMU systems to stop their threads
+    self.flight_controller_system.deinit();
+    self.imu_system.deinit();
 
     // Deinit collision system first to stop physics thread before cleaning up resources
     self.collision_system.deinit();
@@ -227,6 +278,14 @@ pub fn update(self: *Self, time: f64) !void {
     try self.collision_system.update();
     if (should_time) std.debug.print("  Collision system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
+    self.flight_input_system.update(
+        &self.globals.keys,
+        @floatCast(self.globals.mouse_dx),
+        @floatCast(self.globals.mouse_dy),
+        @floatCast(dt),
+    );
+    if (should_time) std.debug.print("  Flight input system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
     self.transform_system.update();
     if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
@@ -245,8 +304,29 @@ pub fn update(self: *Self, time: f64) !void {
 
 pub fn resetToInitialState(self: *Self) !void {
     std.debug.print("Resetting ECS to initial state...\n", .{});
+
+    // Reset collision system (existing functionality)
     self.collision_system.resetAllDynamicBodies();
-    std.debug.print("Reset complete!\n", .{});
+
+    // Reset all flight controller components
+    var fc_iter = self.flight_controller_components.iterator();
+    while (fc_iter.next()) |entry| {
+        entry.component.reset();
+    }
+
+    // Reset all flight input components
+    var fi_iter = self.flight_input_components.iterator();
+    while (fi_iter.next()) |entry| {
+        entry.component.reset();
+    }
+
+    // Reset all IMU sensor components
+    var imu_iter = self.imu_sensor_components.iterator();
+    while (imu_iter.next()) |entry| {
+        entry.component.reset();
+    }
+
+    std.debug.print("Reset complete! (including flight control systems)\n", .{});
 }
 
 // Entity management methods

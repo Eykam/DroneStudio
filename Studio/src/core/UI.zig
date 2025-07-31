@@ -9,6 +9,9 @@ const Controller = @import("ecs/components/Controller.zig").ControllerComponent;
 const Camera = @import("ecs/components/Camera.zig").CameraComponent;
 const Viewport = @import("ecs/components/Viewports.zig").ViewportComponent;
 const Recorder = @import("ecs/components/Recorder.zig");
+const IMUSensor = @import("ecs/components/IMUSensor.zig");
+const FlightController = @import("ecs/components/FlightController.zig");
+const FlightInput = @import("ecs/components/FlightInput.zig");
 
 // const Vision = @import("Vision.zig");
 // const Drone = @import("Drone.zig");
@@ -91,6 +94,177 @@ const CameraMetadataOverlay = struct {
                 imgui.igPopStyleVar(2);
                 imgui.igPopStyleColor(1);
             }
+        }
+    }
+};
+
+const FlightControlOverlay = struct {
+    const Self = @This();
+
+    visible: bool = true,
+    last_update_time: f64 = 0,
+    update_interval: f64 = 0.5, // Update every 500ms
+    
+    // Cached display values to avoid flickering
+    cached_gyro: [3]f32 = [3]f32{0, 0, 0},
+    cached_accel: [3]f32 = [3]f32{0, 0, 0},
+    cached_setpoint_thrust: f32 = 0,
+    cached_setpoint_rates: [3]f32 = [3]f32{0, 0, 0},
+    cached_attitude: [4]f32 = [4]f32{0, 0, 0, 1},
+    cached_rate_estimate: [3]f32 = [3]f32{0, 0, 0},
+    cached_input_thrust: f32 = 0,
+    cached_input_rates: [3]f32 = [3]f32{0, 0, 0},
+    cached_keys: [4]bool = [4]bool{false, false, false, false}, // W, S, A, D
+    cached_mouse: [2]f32 = [2]f32{0, 0},
+    has_imu_data: bool = false,
+
+    pub fn init() Self {
+        return .{};
+    }
+
+    pub fn drawOverlay(self: *Self, ctx: *const UIContext, image_pos: imgui.ImVec2, _: f32) void {
+        if (!self.visible) return;
+
+        // Get current time and check if we should update cached values
+        const current_time = ctx.ecs.globals.last_frame_time;
+        const should_update = (current_time - self.last_update_time) >= self.update_interval;
+
+        // Find the drone entity (first entity with flight controller)
+        var drone_eid: ?Core.EntityID = null;
+        var fc_iter = ctx.ecs.flight_controller_components.iterator();
+        if (fc_iter.next()) |entry| {
+            drone_eid = entry.entity_id;
+        }
+
+        if (drone_eid) |eid| {
+            // Update cached values if enough time has passed
+            if (should_update) {
+                self.updateCachedValues(ctx, eid);
+                self.last_update_time = current_time;
+            }
+            const overlay_flags = imgui.ImGuiWindowFlags_NoTitleBar |
+                imgui.ImGuiWindowFlags_NoResize |
+                imgui.ImGuiWindowFlags_NoMove |
+                imgui.ImGuiWindowFlags_NoCollapse |
+                imgui.ImGuiWindowFlags_NoScrollbar |
+                imgui.ImGuiWindowFlags_NoSavedSettings |
+                imgui.ImGuiWindowFlags_NoInputs;
+
+            // Position in top-left corner of the rendered image (with padding)
+            const overlay_pos = imgui.ImVec2{
+                .x = image_pos.x + 10, // 10px from left edge of image
+                .y = image_pos.y + 10, // 10px from top of image
+            };
+
+            imgui.igSetNextWindowPos(overlay_pos, imgui.ImGuiCond_Always, .{ .x = 0, .y = 0 });
+            imgui.igSetNextWindowSize(.{ .x = 320, .y = 360 }, imgui.ImGuiCond_Always);
+
+            imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_WindowBg, .{ .x = 0.1, .y = 0.1, .z = 0.1, .w = 0.8 });
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 12, .y = 10 });
+            imgui.igPushStyleVar_Float(imgui.ImGuiStyleVar_WindowRounding, 8.0);
+
+            if (imgui.igBegin("##FlightControlOverlay", &self.visible, overlay_flags)) {
+                // Header
+                imgui.igTextColored(.{ .x = 0.3, .y = 0.8, .z = 1.0, .w = 1.0 }, "Flight Control Debug");
+                imgui.igSeparator();
+
+                // IMU Data
+                imgui.igTextColored(.{ .x = 0.9, .y = 0.7, .z = 0.3, .w = 1.0 }, "IMU Sensor:");
+                
+                if (self.has_imu_data) {
+                    imgui.igText("Gyro (rad/s): %.3f, %.3f, %.3f", self.cached_gyro[0], self.cached_gyro[1], self.cached_gyro[2]);
+                    imgui.igText("Accel (m/s²): %.3f, %.3f, %.3f", self.cached_accel[0], self.cached_accel[1], self.cached_accel[2]);
+                } else {
+                    imgui.igTextColored(.{ .x = 0.8, .y = 0.4, .z = 0.4, .w = 1.0 }, "No IMU data available");
+                }
+                
+                imgui.igText("Sample Rate: 1000 Hz");
+                imgui.igSeparator();
+
+                // Flight Controller Data
+                imgui.igTextColored(.{ .x = 0.3, .y = 0.9, .z = 0.4, .w = 1.0 }, "Flight Controller:");
+                
+                // Control setpoints
+                imgui.igText("Setpoints:");
+                imgui.igText("  Thrust: %.2f N", self.cached_setpoint_thrust);
+                imgui.igText("  Rates (rad/s): %.2f, %.2f, %.2f", 
+                    self.cached_setpoint_rates[0], self.cached_setpoint_rates[1], self.cached_setpoint_rates[2]);
+                
+                // Current estimates
+                imgui.igText("Estimates:");
+                imgui.igText("  Attitude: %.2f, %.2f, %.2f, %.2f", 
+                    self.cached_attitude[0], self.cached_attitude[1], 
+                    self.cached_attitude[2], self.cached_attitude[3]);
+                imgui.igText("  Rates: %.2f, %.2f, %.2f", 
+                    self.cached_rate_estimate[0], self.cached_rate_estimate[1], self.cached_rate_estimate[2]);
+                
+                imgui.igSeparator();
+
+                // Flight Input Data
+                imgui.igTextColored(.{ .x = 0.9, .y = 0.5, .z = 0.9, .w = 1.0 }, "Input Commands:");
+                
+                imgui.igText("Thrust: %.2f N", self.cached_input_thrust);
+                imgui.igText("Rates: %.2f, %.2f, %.2f", 
+                    self.cached_input_rates[0], self.cached_input_rates[1], self.cached_input_rates[2]);
+                
+                // Input state
+                imgui.igText("Keys: W:%s S:%s A:%s D:%s", 
+                    if (self.cached_keys[0]) cstr("ON") else cstr("OFF"),
+                    if (self.cached_keys[1]) cstr("ON") else cstr("OFF"),
+                    if (self.cached_keys[2]) cstr("ON") else cstr("OFF"),
+                    if (self.cached_keys[3]) cstr("ON") else cstr("OFF"));
+                imgui.igText("Mouse: %.1f, %.1f", self.cached_mouse[0], self.cached_mouse[1]);
+            }
+            imgui.igEnd();
+
+            imgui.igPopStyleVar(2);
+            imgui.igPopStyleColor(1);
+        }
+    }
+
+    fn updateCachedValues(self: *Self, ctx: *const UIContext, eid: Core.EntityID) void {
+        // Update IMU data
+        if (ctx.ecs.imu_sensor_components.get(eid)) |imu_component| {
+            if (imu_component.getLatestSample()) |sample| {
+                self.cached_gyro = sample.gyro;
+                self.cached_accel = sample.accel;
+                self.has_imu_data = true;
+            } else {
+                self.has_imu_data = false;
+            }
+        }
+
+        // Update Flight Controller data
+        if (ctx.ecs.flight_controller_components.get(eid)) |fc_component| {
+            self.cached_setpoint_thrust = fc_component.setpoints.desired_thrust;
+            self.cached_setpoint_rates = fc_component.setpoints.desired_rates;
+            self.cached_attitude = [4]f32{
+                fc_component.attitude_estimate.x(),
+                fc_component.attitude_estimate.y(),
+                fc_component.attitude_estimate.z(),
+                fc_component.attitude_estimate.w(),
+            };
+            self.cached_rate_estimate = [3]f32{
+                fc_component.rate_estimate.x(),
+                fc_component.rate_estimate.y(),
+                fc_component.rate_estimate.z(),
+            };
+        }
+
+        // Update Flight Input data
+        if (ctx.ecs.flight_input_components.get(eid)) |input_component| {
+            self.cached_input_thrust = input_component.control_commands.desired_thrust;
+            self.cached_input_rates = input_component.control_commands.desired_rates;
+            self.cached_keys = [4]bool{
+                input_component.input_state.throttle_up,
+                input_component.input_state.throttle_down,
+                input_component.input_state.yaw_left,
+                input_component.input_state.yaw_right,
+            };
+            self.cached_mouse = [2]f32{
+                input_component.input_state.mouse_dx,
+                input_component.input_state.mouse_dy,
+            };
         }
     }
 };
@@ -211,6 +385,7 @@ pub const RootWindow = struct {
     entities_window: *EntitiesWindow,
     timeline_recorder: TimelineRecorder,
     camera_overlay: CameraMetadataOverlay,
+    flight_control_overlay: FlightControlOverlay,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
         const self = try allocator.create(Self);
@@ -219,6 +394,7 @@ pub const RootWindow = struct {
             .entities_window = try EntitiesWindow.init(allocator),
             .timeline_recorder = TimelineRecorder.init(allocator),
             .camera_overlay = CameraMetadataOverlay.init(),
+            .flight_control_overlay = FlightControlOverlay.init(),
         };
         return self;
     }
@@ -350,6 +526,9 @@ pub const RootWindow = struct {
 
                         // Draw camera metadata overlay on top of the image
                         self.camera_overlay.drawOverlay(ctx, image_pos, img_w);
+                        
+                        // Draw flight control overlay
+                        self.flight_control_overlay.drawOverlay(ctx, image_pos, img_w);
                     }
                 }
             } else {

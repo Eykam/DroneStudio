@@ -92,6 +92,7 @@ pub const Vec3 = struct {
 
     pub fn dot(a: Self, b: Self) f32 {
         const product = a.data * b.data;
+        _ = std.builtin;
         return @reduce(.Add, product);
     }
 
@@ -148,8 +149,8 @@ pub const Vec3 = struct {
         return .{ .data = result };
     }
 
-    pub fn from_slice(slice: [3]f32) Self {
-        return Self{ .data = slice };
+    pub fn from_array(arr: [3]f32) Self {
+        return Self{ .data = arr };
     }
 
     /// Create vector from angles
@@ -295,20 +296,32 @@ pub fn Matrix(comptime N: usize) type {
                 return self.data[0] * self.data[3] - self.data[1] * self.data[2];
             } else if (N == 3) {
                 return self.data[0] * (self.data[4] * self.data[8] - self.data[5] * self.data[7]) -
-                       self.data[1] * (self.data[3] * self.data[8] - self.data[5] * self.data[6]) +
-                       self.data[2] * (self.data[3] * self.data[7] - self.data[4] * self.data[6]);
+                    self.data[1] * (self.data[3] * self.data[8] - self.data[5] * self.data[6]) +
+                    self.data[2] * (self.data[3] * self.data[7] - self.data[4] * self.data[6]);
             } else if (N == 4) {
                 // 4x4 determinant using cofactor expansion along first row
                 const m = self.data;
-                const a00 = m[0]; const a01 = m[4]; const a02 = m[8];  const a03 = m[12];
-                const a10 = m[1]; const a11 = m[5]; const a12 = m[9];  const a13 = m[13];
-                const a20 = m[2]; const a21 = m[6]; const a22 = m[10]; const a23 = m[14];
-                const a30 = m[3]; const a31 = m[7]; const a32 = m[11]; const a33 = m[15];
+                const a00 = m[0];
+                const a01 = m[4];
+                const a02 = m[8];
+                const a03 = m[12];
+                const a10 = m[1];
+                const a11 = m[5];
+                const a12 = m[9];
+                const a13 = m[13];
+                const a20 = m[2];
+                const a21 = m[6];
+                const a22 = m[10];
+                const a23 = m[14];
+                const a30 = m[3];
+                const a31 = m[7];
+                const a32 = m[11];
+                const a33 = m[15];
 
                 return a00 * (a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31) + a13 * (a21 * a32 - a22 * a31)) -
-                       a01 * (a10 * (a22 * a33 - a23 * a32) - a12 * (a20 * a33 - a23 * a30) + a13 * (a20 * a32 - a22 * a30)) +
-                       a02 * (a10 * (a21 * a33 - a23 * a31) - a11 * (a20 * a33 - a23 * a30) + a13 * (a20 * a31 - a21 * a30)) -
-                       a03 * (a10 * (a21 * a32 - a22 * a31) - a11 * (a20 * a32 - a22 * a30) + a12 * (a20 * a31 - a21 * a30));
+                    a01 * (a10 * (a22 * a33 - a23 * a32) - a12 * (a20 * a33 - a23 * a30) + a13 * (a20 * a32 - a22 * a30)) +
+                    a02 * (a10 * (a21 * a33 - a23 * a31) - a11 * (a20 * a33 - a23 * a30) + a13 * (a20 * a31 - a21 * a30)) -
+                    a03 * (a10 * (a21 * a32 - a22 * a31) - a11 * (a20 * a32 - a22 * a30) + a12 * (a20 * a31 - a21 * a30));
             } else {
                 @compileError("Determinant not implemented for matrices larger than 4x4");
             }
@@ -317,10 +330,22 @@ pub fn Matrix(comptime N: usize) type {
         pub fn inverse(self: Self) ?Self {
             if (N == 4) {
                 const m = self.data;
-                const a00 = m[0]; const a01 = m[4]; const a02 = m[8];  const a03 = m[12];
-                const a10 = m[1]; const a11 = m[5]; const a12 = m[9];  const a13 = m[13];
-                const a20 = m[2]; const a21 = m[6]; const a22 = m[10]; const a23 = m[14];
-                const a30 = m[3]; const a31 = m[7]; const a32 = m[11]; const a33 = m[15];
+                const a00 = m[0];
+                const a01 = m[4];
+                const a02 = m[8];
+                const a03 = m[12];
+                const a10 = m[1];
+                const a11 = m[5];
+                const a12 = m[9];
+                const a13 = m[13];
+                const a20 = m[2];
+                const a21 = m[6];
+                const a22 = m[10];
+                const a23 = m[14];
+                const a30 = m[3];
+                const a31 = m[7];
+                const a32 = m[11];
+                const a33 = m[15];
 
                 const det = self.determinant();
                 if (@abs(det) < 1e-8) return null; // Matrix is singular
@@ -328,7 +353,7 @@ pub fn Matrix(comptime N: usize) type {
                 const inv_det = 1.0 / det;
 
                 var result = Self{ .data = undefined };
-                
+
                 // Calculate adjugate matrix and divide by determinant
                 result.data[0] = inv_det * (a11 * (a22 * a33 - a23 * a32) - a12 * (a21 * a33 - a23 * a31) + a13 * (a21 * a32 - a22 * a31));
                 result.data[4] = inv_det * -(a01 * (a22 * a33 - a23 * a32) - a02 * (a21 * a33 - a23 * a31) + a03 * (a21 * a32 - a22 * a31));
@@ -424,6 +449,7 @@ pub const Mat2 = struct {
     }
 };
 
+//TODO: add a to_quaternion function
 /// Specialized 3x3 matrix type with additional methods
 pub const Mat3 = struct {
     base: Matrix(3),
@@ -447,6 +473,10 @@ pub const Mat3 = struct {
     /// Create zero matrix
     pub fn zero() Self {
         return Self{ .base = Matrix(3).zero() };
+    }
+
+    pub fn transpose(self: Self) Self {
+        return Self{ .base = self.base.transpose() };
     }
 
     /// Create rotation matrix around X axis
@@ -556,6 +586,26 @@ pub const Mat3 = struct {
 
     pub fn scale(self: Self, scalar: f32) Self {
         return Self{ .base = self.base.scale(scalar) };
+    }
+
+    /// Transform a Vec3 by this matrix
+    pub fn transformVec3(self: Self, v: Vec3) Vec3 {
+        const m = self.base.data;
+        return Vec3.init(
+            m[0] * v.x() + m[1] * v.y() + m[2] * v.z(), // row 0
+            m[3] * v.x() + m[4] * v.y() + m[5] * v.z(), // row 1
+            m[6] * v.x() + m[7] * v.y() + m[8] * v.z(), // row 2
+        );
+    }
+
+    /// Transform a 3-element array by this matrix
+    pub fn transformArray(self: Self, arr: [3]f32) [3]f32 {
+        const m = self.base.data;
+        return [3]f32{
+            m[0] * arr[0] + m[1] * arr[1] + m[2] * arr[2], // row 0
+            m[3] * arr[0] + m[4] * arr[1] + m[5] * arr[2], // row 1
+            m[6] * arr[0] + m[7] * arr[1] + m[8] * arr[2], // row 2
+        };
     }
 };
 
@@ -859,7 +909,7 @@ pub const Mat4 = struct {
 
     /// Create a Mat4 from Mat3 with 0 padding
     pub fn from_mat3(m: Mat3) Mat4 {
-        const data: [4 * 4]f32 = undefined;
+        const data: [4 * 4]f32 = .{0} ** 16;
 
         data[0] = m.data[0];
         data[1] = m.data[1];
@@ -973,7 +1023,6 @@ pub const Mat4 = struct {
     }
 };
 
-// Todo: Use @Vector instead for SIMD
 pub const Quaternion = struct {
     const Self = @This();
 
@@ -981,6 +1030,10 @@ pub const Quaternion = struct {
 
     pub fn init(_x: f32, _y: f32, _z: f32, _w: f32) Self {
         return Self{ .data = .{ _x, _y, _z, _w } };
+    }
+
+    pub fn init_from_arr(arr: [4]f32) Self {
+        return Self{ .data = arr };
     }
 
     pub inline fn x(self: Quaternion) f32 {
@@ -1155,44 +1208,49 @@ pub const Quaternion = struct {
         return qz.multiply(qy).multiply(qx).normalize();
     }
 
-    pub fn from_mat3(_mat: Mat3) Self {
-        const mat = _mat.base.data;
+    pub fn from_mat3(m: Mat3) Self {
+        const mat = m.base.data;
         const trace = mat[0] + mat[4] + mat[8];
-        var result = Self{
-            .w = 0,
-            .x = 0,
-            .y = 0,
-            .z = 0,
-        };
+        var result = Self{ .data = .{ 0, 0, 0, 0 } };
 
         if (trace > 0) {
             const S = @sqrt(trace + 1.0) * 2;
-            result.w = 0.25 * S;
-            result.x = (mat[7] - mat[5]) / S;
-            result.y = (mat[2] - mat[6]) / S;
-            result.z = (mat[3] - mat[1]) / S;
+            result.data[0] = (mat[7] - mat[5]) / S;
+            result.data[1] = (mat[2] - mat[6]) / S;
+            result.data[2] = (mat[3] - mat[1]) / S;
+            result.data[3] = 0.25 * S;
         } else if ((mat[0] > mat[4]) and (mat[0] > mat[8])) {
             const S = @sqrt(1.0 + mat[0] - mat[4] - mat[8]) * 2;
-            result.w = (mat[7] - mat[5]) / S;
-            result.x = 0.25 * S;
-            result.y = (mat[1] + mat[3]) / S;
-            result.z = (mat[2] + mat[6]) / S;
+            result.data[0] = 0.25 * S;
+            result.data[1] = (mat[1] + mat[3]) / S;
+            result.data[2] = (mat[2] + mat[6]) / S;
+            result.data[3] = (mat[7] - mat[5]) / S;
         } else if (mat[4] > mat[8]) {
             const S = @sqrt(1.0 + mat[4] - mat[0] - mat[8]) * 2;
-            result.w = (mat[2] - mat[6]) / S;
-            result.x = (mat[1] + mat[3]) / S;
-            result.y = 0.25 * S;
-            result.z = (mat[5] + mat[7]) / S;
+            result.data[0] = (mat[1] + mat[3]) / S;
+            result.data[1] = 0.25 * S;
+            result.data[2] = (mat[5] + mat[7]) / S;
+            result.data[3] = (mat[2] - mat[6]) / S;
         } else {
             const S = @sqrt(1.0 + mat[8] - mat[0] - mat[4]) * 2;
-            result.w = (mat[3] - mat[1]) / S;
-            result.x = (mat[2] + mat[6]) / S;
-            result.y = (mat[5] + mat[7]) / S;
-            result.z = 0.25 * S;
+            result.data[0] = (mat[2] + mat[6]) / S;
+            result.data[1] = (mat[5] + mat[7]) / S;
+            result.data[2] = 0.25 * S;
+            result.data[3] = (mat[3] - mat[1]) / S;
         }
 
         // Normalize the quaternion
         return result.normalize();
+    }
+
+    pub fn to_mat3(self: Self) Mat3 {
+        _ = self;
+        @panic("Not Implemented");
+    }
+
+    pub fn from_mat4(m: Mat4) Self {
+        _ = m;
+        @panic("Not Implemented");
     }
 
     pub fn to_mat4(_q: Self) Mat4 {

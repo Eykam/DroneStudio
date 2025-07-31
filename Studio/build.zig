@@ -241,28 +241,53 @@ fn configureKernels(
     optimize: std.builtin.OptimizeMode,
     use_cuda: bool,
 ) void {
+    _ = target;
+    _ = optimize;
+
     if (use_cuda) {
-        const cuda_detector_obj = b.addSystemCommand(&.{
-            "nvcc",
-            "-O3",
-            "--compiler-options",
-            "'-fPIC'",
-            "-c",
-            "lib/kernels/kernels.cu",
-            "-o",
-            "lib/kernels/kernels.o",
-        });
+        const kernel_cu_path = "lib/kernels/kernels.cu";
+        const kernel_o_path = "lib/kernels/kernels.o";
 
-        const cuda_detector_artifact = b.addObject(.{
-            .name = "cuda_kernels",
-            .root_source_file = null,
-            .target = target,
-            .optimize = optimize,
-        });
-        cuda_detector_artifact.addObjectFile(b.path("lib/kernels/kernels.o"));
-        cuda_detector_artifact.step.dependOn(&cuda_detector_obj.step);
+        // Check if we need to recompile the CUDA kernels
+        var need_cuda_compile = false;
 
-        exe.addObjectFile(cuda_detector_artifact.getEmittedBin());
+        // Check if .o file exists
+        const obj_stat = std.fs.cwd().statFile(kernel_o_path) catch |err| blk: {
+            if (err == error.FileNotFound) {
+                std.debug.print("CUDA kernels.o not found, will compile...\n", .{});
+                need_cuda_compile = true;
+            }
+            break :blk null;
+        };
+
+        // If .o exists, check if .cu is newer
+        if (!need_cuda_compile and obj_stat != null) {
+            const cu_stat = std.fs.cwd().statFile(kernel_cu_path) catch unreachable;
+            if (cu_stat.mtime > obj_stat.?.mtime) {
+                std.debug.print("CUDA kernels.cu is newer than kernels.o, will recompile...\n", .{});
+                need_cuda_compile = true;
+            }
+        }
+
+        // Only run nvcc if needed
+        if (need_cuda_compile) {
+            const cuda_compile_cmd = b.addSystemCommand(&.{
+                "nvcc",
+                "-O3",
+                "--compiler-options",
+                "'-fPIC'",
+                "-c",
+                kernel_cu_path,
+                "-o",
+                kernel_o_path,
+            });
+            cuda_compile_cmd.step.name = "Compile CUDA kernels";
+            // Make sure nvcc runs before we try to link the object file
+            b.getInstallStep().dependOn(&cuda_compile_cmd.step);
+        }
+
+        // Always link the object file (either newly compiled or existing)
+        exe.addObjectFile(b.path(kernel_o_path));
     }
 
     exe.addIncludePath(b.path("lib/kernels"));
@@ -426,8 +451,7 @@ pub fn build(b: *std.Build) void {
 
         // Add test GUI configuration
         desktop_tests.root_module.addAnonymousImport("test_config", .{
-            .root_source_file = b.addWriteFiles().add("test_config.zig", 
-                b.fmt("pub const GUI_ENABLED = {any};\n", .{test_gui})),
+            .root_source_file = b.addWriteFiles().add("test_config.zig", b.fmt("pub const GUI_ENABLED = {any};\n", .{test_gui})),
         });
 
         // Run command for the desktop test executable

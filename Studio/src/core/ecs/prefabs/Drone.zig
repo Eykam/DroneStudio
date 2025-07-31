@@ -9,128 +9,15 @@ const Controller = @import("../components/Controller.zig");
 const Transform = @import("../components/Transform.zig");
 const Viewport = @import("../components/Viewports.zig");
 const Collisions = @import("../components/Collisions.zig");
+const IMUSensor = @import("../components/IMUSensor.zig");
+const FlightController = @import("../components/FlightController.zig");
+const FlightInput = @import("../components/FlightInput.zig");
 const DroneCamera = @import("DroneCamera.zig");
 const SensorCamera = @import("SensorCamera.zig");
 const Frustum = @import("Frustum.zig");
 
 const glfw = gl.glfw;
 const Vec3 = Math.Vec3;
-
-/// ---------------------------------------------------------------------------
-/// Tunable constants
-const Defaults = struct {
-    const thrust: f32 = 20.0; // m/s
-    const yawRate: f32 = 2; // °/s
-    const rollRate: f32 = 60;
-    const pitchRate: f32 = 60; // ° per pixel
-};
-
-/// Helpers ---------------------------------------------------------------
-const CollisionSystem = Collisions.CollisionSystem;
-
-// Physics-aware movement: use forces if physics is available, otherwise direct transform
-inline fn move(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dir: Vec3, speed: f32, dt: f32) void {
-    if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
-        // Use physics force for dynamic bodies
-        const force = dir.scale(speed * rigid_body.?.mass); // Scale by mass for consistent feel
-        std.debug.print("Applying force to eid {d}: [{d:.2}, {d:.2}, {d:.2}]\n", .{ eid.id, force.data[0], force.data[1], force.data[2] });
-        collision_system.?.applyCentralForce(eid, force.data);
-    } else {
-        // Fallback to direct transform manipulation for static/kinematic or non-physics entities
-        std.debug.print("Using direct transform for eid {d} (rigid_body: {any})\n", .{ eid.id, rigid_body });
-        tf.translate(dir.scale(speed * dt).data);
-    }
-}
-
-// Physics-aware rotation: use torque if physics is available, otherwise direct transform
-inline fn rotate(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, axis: Vec3, deg: f32, dt: f32) void {
-    if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
-        // Use physics torque for dynamic bodies - increased multiplier to match mouse sensitivity
-        const torque = axis.scale(Math.radians(deg) * rigid_body.?.mass); // Scale by mass and convert to radians
-        std.debug.print("Applying torque to eid {d}: [{d:.2}, {d:.2}, {d:.2}]\n", .{ eid.id, torque.data[0], torque.data[1], torque.data[2] });
-        collision_system.?.applyTorque(eid, torque.data);
-    } else {
-        // Fallback to direct transform manipulation
-        std.debug.print("Using direct rotation for eid {d}\n", .{eid.id});
-        const q = Math.Quaternion.from_axis_angle(axis, deg * dt);
-        tf.rotate(q);
-    }
-}
-
-/// Key‑binding callbacks --------------------------------------------------
-fn up(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    move(eid, tf, rigid_body, collision_system, tf.local_transform.get_up(), Defaults.thrust, dt);
-}
-fn down(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    move(eid, tf, rigid_body, collision_system, tf.local_transform.get_up().scale(-1), Defaults.thrust, dt);
-}
-fn yawLeft(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    rotate(eid, tf, rigid_body, collision_system, tf.local_transform.get_up(), -Defaults.yawRate, dt);
-}
-fn yawRight(eid: Core.EntityID, tf: *Transform.TransformComponent, rigid_body: ?*Collisions.RigidBodyComponent, collision_system: ?*CollisionSystem, dt: f32) void {
-    rotate(eid, tf, rigid_body, collision_system, tf.local_transform.get_up(), Defaults.yawRate, dt);
-}
-
-/// Mouse‑look (pitch / roll) ----------------------------------------------
-fn mouseLook(
-    eid: Core.EntityID,
-    tf: *Transform.TransformComponent,
-    rigid_body: ?*Collisions.RigidBodyComponent,
-    collision_system: ?*CollisionSystem,
-    dx: f32, // pixels
-    dy: f32,
-    _: f64,
-) void {
-    const local_forward = tf.local_transform.get_forward();
-    const local_right = tf.local_transform.get_right();
-
-    // Remove dt scaling for mouse input - mouse movement is already frame-rate independent
-    const roll_angle = @as(f32, @floatCast(dx)) * 0.1; // Reduced sensitivity
-    const pitch_angle = -@as(f32, @floatCast(-dy)) * 0.1; // Reduced sensitivity
-
-    if (rigid_body != null and collision_system != null and rigid_body.?.mass > 0.0) {
-        // DEBUG: Let's see what axes we're working with
-        std.debug.print("Mouse input: dx={d:.2}, dy={d:.2} -> roll={d:.2}, pitch={d:.2}\n", .{ dx, dy, roll_angle, pitch_angle });
-        std.debug.print("Local axes - forward: [{d:.2}, {d:.2}, {d:.2}], right: [{d:.2}, {d:.2}, {d:.2}]\n", .{ local_forward.x(), local_forward.y(), local_forward.z(), local_right.x(), local_right.y(), local_right.z() });
-
-        // Use physics torque for dynamic bodies - try much larger values
-        const roll_torque_vec = local_forward.scale(-Math.radians(roll_angle) * rigid_body.?.mass);
-        const pitch_torque_vec = local_right.scale(-Math.radians(pitch_angle) * rigid_body.?.mass);
-
-        // Combine the torques
-        const combined_torque = Vec3.init(roll_torque_vec.x() + pitch_torque_vec.x(), roll_torque_vec.y() + pitch_torque_vec.y(), roll_torque_vec.z() + pitch_torque_vec.z());
-
-        std.debug.print("Applied torque: [{d:.2}, {d:.2}, {d:.2}] (mass: {d:.2})\n", .{ combined_torque.x(), combined_torque.y(), combined_torque.z(), rigid_body.?.mass });
-        collision_system.?.applyTorque(eid, combined_torque.data);
-    } else {
-        // Fallback to direct transform manipulation
-        const roll_quat = Math.Quaternion.from_axis_angle(local_forward, roll_angle);
-        const pitch_quat = Math.Quaternion.from_axis_angle(local_right, pitch_angle);
-
-        var relative_rotation = Math.Quaternion.identity();
-        relative_rotation = relative_rotation.multiply(pitch_quat);
-        relative_rotation = relative_rotation.multiply(roll_quat);
-        relative_rotation = relative_rotation.normalize();
-
-        tf.rotate(relative_rotation);
-    }
-}
-
-/// Factory that returns a ready‑to‑attach ControllerComponent -------------
-pub fn makeDroneController(a: std.mem.Allocator) !Controller.ControllerComponent {
-    var c = Controller.ControllerComponent.init(a);
-
-    // mouse
-    c.mouse_move = mouseLook;
-
-    // keyboard
-    try c.key_bindings.append(.{ .key = glfw.GLFW_KEY_W, .onPressed = up });
-    try c.key_bindings.append(.{ .key = glfw.GLFW_KEY_S, .onPressed = down });
-    try c.key_bindings.append(.{ .key = glfw.GLFW_KEY_A, .onPressed = yawLeft });
-    try c.key_bindings.append(.{ .key = glfw.GLFW_KEY_D, .onPressed = yawRight });
-
-    return c;
-}
 
 pub fn spawn(
     alloc: std.mem.Allocator,
@@ -139,7 +26,6 @@ pub fn spawn(
     scene_height: u32,
 ) !Core.EntityID {
     const root_tf = Transform.TransformComponent.init(alloc);
-    const root_ctrl = try makeDroneController(alloc);
 
     const drone_body_resource = try ecs.world.resource_manager.loadGLTFModelCached(
         alloc,
@@ -162,9 +48,39 @@ pub fn spawn(
     // Create physics body with the collider's shape
     var rigid_body = Collisions.RigidBodyComponent.init(1.0, collider.bullet_shape.?);
 
+    // Set realistic moment of inertia for a quadrotor drone
+    // Based on typical quadrotor with 0.3m arm length and 1kg mass
+    // Ixx ≈ Iyy (roll/pitch inertia), Izz (yaw inertia) is smaller
+    const arm_length: f32 = 0.3; // meters
+    const motor_mass: f32 = 0.1; // kg per motor
+    const body_mass: f32 = rigid_body.mass - 4 * motor_mass;
+
+    // Simplified calculation: 4 point masses at motor positions + central body
+    const Ixx = 2 * motor_mass * arm_length * arm_length + body_mass * 0.02; // kg⋅m²
+    const Iyy = Ixx; // Symmetric for quad-X
+    const Izz = 4 * motor_mass * arm_length * arm_length + body_mass * 0.01; // Higher yaw inertia
+
+    rigid_body.setInertia(Ixx, Iyy, Izz);
+    std.debug.print("Drone inertia: Ixx={d:.6}, Iyy={d:.6}, Izz={d:.6} kg⋅m²\n", .{ Ixx, Iyy, Izz });
+
     // Set initial position offset from collision shape center of mass
-    rigid_body.translate(.{ 0, 15, 0 });
+    rigid_body.translate(.{ 0, 2, 0 });
     rigid_body.rotate(.{ 0, 0, 0, 1 });
+
+    // Create IMU sensor component with realistic parameters
+    var imu_sensor = IMUSensor.IMUSensorComponent.init();
+    imu_sensor.pos_body = Vec3.init(0.0, 0.0, 0.0);
+    imu_sensor.rot_body = Math.Quaternion.identity();
+
+    // Create flight controller with OpenGL to NED coordinate adapter
+    const coord_adapter = FlightController.OpenGLAdapter.create();
+    const flight_controller = FlightController.FlightControllerComponent.init(
+        .{},
+        rigid_body.mass,
+        .Attitude,
+        coord_adapter,
+    );
+    const flight_input = FlightInput.FlightInputComponent.init();
 
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
 
@@ -201,8 +117,15 @@ pub fn spawn(
         0.1,
     );
 
-    // No need for physics target in new architecture - physics is on the same entity as controller
-    const root_eid = try ecs.spawn(.{ root_tf, root_ctrl, collider, rigid_body });
+    // Spawn drone with all flight control components
+    const root_eid = try ecs.spawn(.{
+        root_tf,
+        collider,
+        rigid_body,
+        imu_sensor,
+        flight_controller,
+        flight_input,
+    });
 
     // Clean up the entity map since we no longer need it
     entities.entity_map.deinit();

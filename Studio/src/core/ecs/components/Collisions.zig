@@ -432,11 +432,19 @@ pub const RigidBodyComponent = struct {
     bullet_body: ?bullet.CbtBodyHandle = null, //TODO: Remove this field since the physics thread handles this
     bullet_shape: bullet.CbtShapeHandle,
     mass: f32 = 1.0,
+    inertia: [3]f32 = .{ 0.0, 0.0, 0.0 }, // Moment of inertia tensor diagonal [Ixx, Iyy, Izz]
+    use_custom_inertia: bool = false, // If false, let Bullet calculate from shape
     initial_position: [3]f32 = .{ 0.0, 0.0, 0.0 },
     initial_rotation: [4]f32 = .{ 0.0, 0.0, 0.0, 1.0 }, // quaternion (x, y, z, w)
 
     pub fn init(mass: f32, shape: bullet.CbtShapeHandle) Self {
         return .{ .mass = mass, .bullet_shape = shape };
+    }
+
+    /// Set custom moment of inertia (diagonal elements only)
+    pub fn setInertia(self: *Self, ixx: f32, iyy: f32, izz: f32) void {
+        self.inertia = [3]f32{ ixx, iyy, izz };
+        self.use_custom_inertia = true;
     }
 
     pub fn translate(self: *Self, offset: [3]f32) void {
@@ -476,6 +484,8 @@ pub const RigidBodyComponent = struct {
                 .shape_handle = self.bullet_shape,
                 .initial_pos = initial_pos,
                 .initial_rot = initial_rot,
+                .inertia = self.inertia,
+                .use_custom_inertia = self.use_custom_inertia,
                 .restitution = restitution,
                 .friction = friction,
                 .rolling_friction = rolling_friction,
@@ -910,9 +920,14 @@ pub const CollisionSystem = struct {
     }
 
     // Apply a torque to an entity via physics thread
-    pub fn applyTorque(self: *Self, entity_id: Core.EntityID, torque: [3]f32) void {
+    pub fn applyTorque(self: *Self, entity_id: Core.EntityID, torque: Vec3) void {
         if (self.physics_thread) |physics| {
-            const command = PhysicsThread.PhysicsCommand{ .ApplyTorque = .{ .entity_id = entity_id, .torque = torque } };
+            const command = PhysicsThread.PhysicsCommand{
+                .ApplyTorque = .{
+                    .entity_id = entity_id,
+                    .torque = torque,
+                },
+            };
             const success = physics.sendCommand(command);
 
             if (!success) {
