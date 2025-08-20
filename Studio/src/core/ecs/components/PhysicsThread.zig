@@ -325,13 +325,9 @@ pub const PhysicsState = struct {
     rotation: Math.Quaternion,
     linear_velocity: [3]f32,
     angular_velocity: [3]f32,
+    accel_world: Vec3,
     is_active: bool,
     frame_number: u64, // Debug: track which physics frame this state is from
-
-    // Extended data for IMU simulation
-    omega_body: Vec3, // Angular velocity in body frame (rad/s)
-    alpha_world: Vec3, // Total linear acceleration in world frame (includes gravity) (m/s²)
-    rotation_wb: Math.Quaternion, // World to body rotation matrix
 };
 
 /// Debug wireframe data for an entity
@@ -722,6 +718,10 @@ pub const ThreadedPhysicsSystem = struct {
             const entity_id = entry.key_ptr.*;
             const body = entry.value_ptr.*;
 
+            // Check if body is active
+            const activation_state = bullet.cbtBodyGetActivationState(body);
+            const is_active = activation_state == bullet.CBT_ACTIVE_TAG;
+
             // Get transform from Bullet
             var transform_matrix: [4][3]f32 = undefined;
             bullet.cbtBodyGetCenterOfMassTransform(body, &transform_matrix);
@@ -741,26 +741,14 @@ pub const ThreadedPhysicsSystem = struct {
             const position = trs.translation;
             const rotation = trs.rotation;
 
-            // Check if body is active
-            const activation_state = bullet.cbtBodyGetActivationState(body);
-            const is_active = activation_state == bullet.CBT_ACTIVE_TAG;
-
-            // Calculate IMU-specific data
-            // Transform angular velocity from world frame to body frame
-            const omega_world_vec = Math.Vec3.init(angular_vel[0], angular_vel[1], angular_vel[2]);
-            const omega_body = omega_world_vec.rotate_by_quaternion(rotation.conjugate());
-
             var force_world: [3]f32 = undefined;
             bullet.cbtBodyGetTotalForce(body, &force_world);
 
             const body_mass = bullet.cbtBodyGetMass(body);
-            const alpha_world = if (body_mass < std.math.floatEps(f32))
+            const accel_world = if (body_mass < std.math.floatEps(f32))
                 Vec3.zero()
             else
                 Vec3.from_array(force_world).scale(1.0 / body_mass);
-
-            // World to body rotation quaternion
-            const rotation_wb = rotation.conjugate();
 
             const state = PhysicsState{
                 .entity_id = entity_id,
@@ -768,12 +756,9 @@ pub const ThreadedPhysicsSystem = struct {
                 .rotation = rotation,
                 .linear_velocity = linear_vel,
                 .angular_velocity = angular_vel,
+                .accel_world = accel_world,
                 .is_active = is_active,
                 .frame_number = self.frame_count,
-                // IMU data
-                .omega_body = omega_body,
-                .alpha_world = alpha_world,
-                .rotation_wb = rotation_wb,
             };
 
             write_buffer.append(state) catch {
@@ -1782,7 +1767,13 @@ test "updateStateBuffer - Entity tracking" {
     var entity2_found = false;
 
     for (states) |state| {
-        std.debug.print("    Entity {d}: pos=[{d:.3}, {d:.3}, {d:.3}] frame={d}\n", .{ state.entity_id.id, state.position[0], state.position[1], state.position[2], state.frame_number });
+        std.debug.print("    Entity {d}: pos=[{d:.3}, {d:.3}, {d:.3}] frame={d}\n", .{
+            state.entity_id.id,
+            state.position[0],
+            state.position[1],
+            state.position[2],
+            state.frame_number,
+        });
 
         if (state.entity_id.id == 1) {
             entity1_found = true;

@@ -977,9 +977,15 @@ fn processGLTFMaterials(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
         else
             MaterialType.Phong;
 
+        if (material_type == .Phong) {
+            std.debug.print("Phong detected: {s} => {}\n", .{ material_name, material_def });
+            // @panic("Detected phong material!\n");
+        }
+
         const material = switch (material_type) {
             .PBR => try self.createPBRMaterial(material_def, gltf, model_id),
-            .Phong => try self.createPhongMaterial(material_def, gltf, model_id),
+            else => continue,
+            // .Phong => try self.createPhongMaterial(material_def, gltf, model_id),
         };
 
         // Register material in resource manager

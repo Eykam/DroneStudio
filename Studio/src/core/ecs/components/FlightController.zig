@@ -89,20 +89,55 @@ pub const OpenGLAdapter = struct {
     }
 };
 
+/// Input state for processing raw inputs
+pub const InputState = struct {
+    // Key states
+    throttle_up: bool = false,
+    throttle_down: bool = false,
+    yaw_left: bool = false,
+    yaw_right: bool = false,
+
+    // Mouse movement (pixels per frame)
+    mouse_dx: f32 = 0.0,
+    mouse_dy: f32 = 0.0,
+};
+
+/// Input processing parameters
+pub const InputParams = struct {
+    // Input sensitivity
+    throttle_sensitivity: f32 = 30.0, // N/s (thrust change rate)
+    yaw_sensitivity: f32 = 3.14, // rad/s per key press
+    roll_pitch_sensitivity: f32 = 0.1, // rad/s per pixel of mouse movement
+
+    // Input limits (safety bounds)
+    max_roll_rate: f32 = 10.47, // rad/s (600 deg/s)
+    max_pitch_rate: f32 = 10.47, // rad/s (600 deg/s)
+    max_yaw_rate: f32 = 5.24, // rad/s (300 deg/s)
+    max_thrust: f32 = 40.0, // Newtons (3g for 1kg drone)
+
+    // Low-pass filter parameters
+    throttle_filter_tau: f32 = 0.05, // seconds
+    rate_filter_tau: f32 = 0.05, // seconds
+};
+
 /// Rate controller - direct angular velocity control
 pub const RateController = struct {
     const Self = @This();
 
     // Configuration - REDUCED gains for stability
-    roll_gains: [3]f32 = [3]f32{ 0.04, 0.0, 0.001 },
-    pitch_gains: [3]f32 = [3]f32{ 0.04, 0.0, 0.001 },
-    yaw_gains: [3]f32 = [3]f32{ 0.04, 0.0, 0.001 },
+    roll_gains: [3]f32 = [3]f32{ 2.0, 0.5, 0.02 },
+    pitch_gains: [3]f32 = [3]f32{ 2.0, 0.5, 0.02 },
+    yaw_gains: [3]f32 = [3]f32{ 1.0, 0.2, 0.01 },
     max_roll: f32 = 10.47, // rad/s
     max_pitch: f32 = 10.47, // rad/s
     max_yaw: f32 = 5.24, // rad/s
 
     // PID controllers for each axis
     pid: PIDController.PosePIDController,
+
+    // Input processing state
+    filtered_thrust: f32 = 0.0,
+    filtered_rates: [3]f32 = [3]f32{ 0, 0, 0 },
 
     pub fn init(
         integrator_limit: f32,
@@ -121,6 +156,62 @@ pub const RateController = struct {
         );
 
         return self;
+    }
+
+    /// Process input and generate control setpoints
+    pub fn processInput(
+        self: *Self,
+        input_state: InputState,
+        params: InputParams,
+        dt: f32,
+    ) ControlSetpoints {
+        // Process throttle input
+        var throttle_command: f32 = 0.0;
+        if (input_state.throttle_up) {
+            throttle_command += params.throttle_sensitivity * dt;
+        }
+        if (input_state.throttle_down) {
+            throttle_command -= params.throttle_sensitivity * dt;
+        }
+
+        // Apply low-pass filter to throttle
+        const throttle_alpha = dt / (params.throttle_filter_tau + dt);
+        const target_thrust = std.math.clamp(self.filtered_thrust + throttle_command, 0.0, params.max_thrust);
+        self.filtered_thrust = self.filtered_thrust + throttle_alpha * (target_thrust - self.filtered_thrust);
+
+        // Process yaw (rate control)
+        var yaw_rate: f32 = 0.0;
+        if (input_state.yaw_left) {
+            yaw_rate += params.yaw_sensitivity;
+        }
+        if (input_state.yaw_right) {
+            yaw_rate -= params.yaw_sensitivity;
+        }
+        yaw_rate = std.math.clamp(yaw_rate, -params.max_yaw_rate, params.max_yaw_rate);
+
+        // Apply filter to rates
+        const rate_alpha = dt / (params.rate_filter_tau + dt);
+        self.filtered_rates[2] = self.filtered_rates[2] + rate_alpha * (yaw_rate - self.filtered_rates[2]);
+
+        // Mouse directly controls angular rates
+        var raw_rates = [3]f32{ 0, 0, 0 };
+        raw_rates[0] = input_state.mouse_dx * params.roll_pitch_sensitivity;
+        raw_rates[1] = -input_state.mouse_dy * params.roll_pitch_sensitivity;
+
+        // Apply limits
+        raw_rates[0] = std.math.clamp(raw_rates[0], -params.max_roll_rate, params.max_roll_rate);
+        raw_rates[1] = std.math.clamp(raw_rates[1], -params.max_pitch_rate, params.max_pitch_rate);
+
+        // Apply low-pass filter to roll/pitch rates
+        self.filtered_rates[0] = self.filtered_rates[0] + rate_alpha * (raw_rates[0] - self.filtered_rates[0]);
+        self.filtered_rates[1] = self.filtered_rates[1] + rate_alpha * (raw_rates[1] - self.filtered_rates[1]);
+
+        return .{
+            .Rate = .{
+                .rates = self.filtered_rates,
+                .thrust = self.filtered_thrust,
+            },
+        };
     }
 
     /// Process rate control loop
@@ -143,6 +234,8 @@ pub const RateController = struct {
 
     pub fn reset(self: *Self) void {
         self.pid.reset();
+        self.filtered_thrust = 0.0;
+        self.filtered_rates = [3]f32{ 0, 0, 0 };
     }
 };
 
@@ -151,9 +244,9 @@ pub const AttitudeController = struct {
     const Self = @This();
 
     // Proportional gains (rad/s per rad)
-    Kp_roll: f32 = 0.13,
-    Kp_pitch: f32 = 0.13,
-    Kp_yaw: f32 = 0.04,
+    Kp_roll: f32 = 2.0,
+    Kp_pitch: f32 = 2.0,
+    Kp_yaw: f32 = 0.5,
 
     max_roll: f32 = 0.52, // rad (30 degrees)
     max_pitch: f32 = 0.52, // rad (30 degrees)
@@ -161,6 +254,12 @@ pub const AttitudeController = struct {
 
     // Inner rate controller
     rate_controller: RateController,
+
+    // Input processing state
+    filtered_thrust: f32 = 0.0,
+    filtered_yaw_rate: f32 = 0.0,
+    roll_angle: f32 = 0.0,
+    pitch_angle: f32 = 0.0,
 
     pub fn init(
         integrator_limit: f32,
@@ -178,6 +277,62 @@ pub const AttitudeController = struct {
         return self;
     }
 
+    /// Process input and generate control setpoints
+    pub fn processInput(
+        self: *Self,
+        input_state: InputState,
+        params: InputParams,
+        dt: f32,
+    ) ControlSetpoints {
+        // Process throttle input
+        var throttle_command: f32 = 0.0;
+        if (input_state.throttle_up) {
+            throttle_command += params.throttle_sensitivity * dt;
+        }
+        if (input_state.throttle_down) {
+            throttle_command -= params.throttle_sensitivity * dt;
+        }
+
+        // Apply low-pass filter to throttle
+        const throttle_alpha = dt / (params.throttle_filter_tau + dt);
+        const target_thrust = std.math.clamp(self.filtered_thrust + throttle_command, 0.0, params.max_thrust);
+        self.filtered_thrust = self.filtered_thrust + throttle_alpha * (target_thrust - self.filtered_thrust);
+
+        // Process yaw (rate control even in attitude mode)
+        var yaw_rate: f32 = 0.0;
+        if (input_state.yaw_left) {
+            yaw_rate += params.yaw_sensitivity;
+        }
+        if (input_state.yaw_right) {
+            yaw_rate -= params.yaw_sensitivity;
+        }
+        yaw_rate = std.math.clamp(yaw_rate, -params.max_yaw_rate, params.max_yaw_rate);
+
+        // Apply filter to yaw rate
+        const rate_alpha = dt / (params.rate_filter_tau + dt);
+        self.filtered_yaw_rate = self.filtered_yaw_rate + rate_alpha * (yaw_rate - self.filtered_yaw_rate);
+
+        // Mouse controls desired angles
+        const angle_sensitivity = 0.02; // rad per pixel
+
+        // Integrate mouse movement to get angles
+        self.roll_angle += input_state.mouse_dx * angle_sensitivity;
+        self.pitch_angle += -input_state.mouse_dy * angle_sensitivity;
+
+        // Clamp angles to reasonable limits (±30 degrees)
+        const max_angle: f32 = 0.52; // ~30 degrees in radians
+        self.roll_angle = std.math.clamp(self.roll_angle, -max_angle, max_angle);
+        self.pitch_angle = std.math.clamp(self.pitch_angle, -max_angle, max_angle);
+
+        return .{
+            .Attitude = .{
+                .angles = [2]f32{ self.roll_angle, self.pitch_angle },
+                .yaw_rate = self.filtered_yaw_rate,
+                .thrust = self.filtered_thrust,
+            },
+        };
+    }
+
     /// Process attitude control loop (cascade with rate control)
     pub fn update(
         self: *Self,
@@ -191,11 +346,10 @@ pub const AttitudeController = struct {
         const q_err = q_des.multiply(q_act.conjugate()).normalize();
 
         // For small angles (|θ| < ~60°): 2·vector_part ~= rotation error (rad)
-        const e = Quaternion.init(
+        const e = Vec3.init(
             q_err.x() * 2.0,
             q_err.y() * 2.0,
             q_err.z() * 2.0,
-            q_err.w(),
         );
 
         // Desired body rates from proportional attitude error
@@ -204,6 +358,16 @@ pub const AttitudeController = struct {
             self.Kp_pitch * e.y(),
             yaw_sp + self.Kp_yaw * e.z(), // yaw rate + yaw hold
         );
+
+        std.debug.print("Q_ERR: {}E: {d}\nW_SP: {}\n\n", .{
+            q_err,
+            [_]f32{
+                Math.degrees(e.x()),
+                Math.degrees(e.y()),
+                Math.degrees(e.z()),
+            },
+            w_sp,
+        });
 
         // Clamp rate set-points
         // ω_sp = ω_sp.clamp(-max_rate, max_rate);
@@ -214,6 +378,43 @@ pub const AttitudeController = struct {
 
     pub fn reset(self: *Self) void {
         self.rate_controller.reset();
+        self.filtered_thrust = 0.0;
+        self.filtered_yaw_rate = 0.0;
+        self.roll_angle = 0.0;
+        self.pitch_angle = 0.0;
+    }
+};
+
+pub const RateSetpoints = struct {
+    rates: [3]f32 = [3]f32{ 0, 0, 0 }, // [roll, pitch, yaw] rad/s
+    thrust: f32 = 0.0, // Newtons total
+};
+
+/// Attitude controller setpoints
+pub const AttitudeSetpoints = struct {
+    angles: [2]f32 = [2]f32{ 0, 0 }, // [roll, pitch] rad
+    yaw_rate: f32 = 0.0, // rad/s (yaw stays in rate mode)
+    thrust: f32 = 10.0, // Newtons total
+};
+
+/// Tagged union matching the controller type
+pub const ControlSetpoints = union(ControllerType) {
+    Rate: RateSetpoints,
+    Attitude: AttitudeSetpoints,
+
+    pub fn init(controller_type: ControllerType) ControlSetpoints {
+        return switch (controller_type) {
+            .Rate => .{ .Rate = RateSetpoints{} },
+            .Attitude => .{ .Attitude = AttitudeSetpoints{} },
+        };
+    }
+
+    /// Get thrust regardless of mode
+    pub fn getThrust(self: ControlSetpoints) f32 {
+        return switch (self) {
+            .Rate => |r| r.thrust,
+            .Attitude => |a| a.thrust,
+        };
     }
 };
 
@@ -221,6 +422,19 @@ pub const ControllerType = enum { Rate, Attitude };
 pub const Controller = union(ControllerType) {
     Rate: RateController,
     Attitude: AttitudeController,
+
+    /// Process input and generate control setpoints
+    pub fn processInput(
+        self: *Controller,
+        input_state: InputState,
+        params: InputParams,
+        dt: f32,
+    ) ControlSetpoints {
+        return switch (self.*) {
+            .Rate => |*rate| rate.processInput(input_state, params, dt),
+            .Attitude => |*attitude| attitude.processInput(input_state, params, dt),
+        };
+    }
 
     /// Update the controller based on its type
     pub fn update(
@@ -233,11 +447,12 @@ pub const Controller = union(ControllerType) {
     ) [3]f32 {
         switch (self.*) {
             .Rate => |*rc| {
-                return rc.update(setpoints.desired_rates, w_act, dt);
+                const rate_setpoints = setpoints.Rate;
+                return rc.update(rate_setpoints.rates, w_act, dt);
             },
             .Attitude => |*ac| {
-                const yaw_rate_cmd = setpoints.desired_rates[2];
-                return ac.update(q_des, q_act, w_act, yaw_rate_cmd, dt);
+                const att_setpoints = setpoints.Attitude;
+                return ac.update(q_des, q_act, w_act, att_setpoints.yaw_rate, dt);
             },
         }
     }
@@ -261,16 +476,10 @@ pub const FlightControllerParams = struct {
 
     // Motor dynamics
     motor_time_constant: f32 = 0.04, // seconds (40ms lag)
-    motor_max_thrust: f32 = 20.0, // Newtons per motor
+    motor_max_thrust: f32 = 10.0, // Newtons per motor
 
     // Control rate
     control_rate_hz: u32 = 400, // 400 Hz control loop
-};
-
-/// Current control setpoints from input system
-pub const ControlSetpoints = struct {
-    desired_rates: [3]f32 = [3]f32{ 0, 0, 0 }, // [roll, pitch, yaw] rad/s
-    desired_thrust: f32 = 0.0, // Newtons total
 };
 
 /// Motor commands (after mixing and lag filtering)
@@ -293,7 +502,8 @@ pub const FlightControllerComponent = struct {
     coord_adapter: ?CoordinateAdapter,
 
     controller: Controller,
-    setpoints: ControlSetpoints = ControlSetpoints{},
+    controller_type: ControllerType,
+    setpoints: ControlSetpoints,
     motor_commands: MotorCommands = MotorCommands{},
 
     // State estimation (in engine coordinates)
@@ -322,6 +532,8 @@ pub const FlightControllerComponent = struct {
             .params = params,
             .mass = mass,
             .controller = controller,
+            .controller_type = controller_type,
+            .setpoints = ControlSetpoints.init(controller_type),
             .coord_adapter = coord_adapter,
         };
     }
@@ -333,105 +545,127 @@ pub const FlightControllerComponent = struct {
 
     /// Update control setpoints from input system
     pub fn setControlSetpoints(self: *Self, setpoints: ControlSetpoints) void {
+        // Ensure setpoints match controller type
+        std.debug.assert(@as(ControllerType, self.controller) == @as(ControllerType, setpoints));
         self.setpoints = setpoints;
     }
 
     /// Process IMU sample and update state estimate (complementary filter)
     pub fn updateStateEstimate(self: *Self, imu_sample: IMUSample, dt: f32) void {
         // Extract gyro rates and apply low-pass filter for rate estimate
-        const raw_rates = Vec3.init(imu_sample.gyro[0], imu_sample.gyro[1], imu_sample.gyro[2]);
-        const rate_filter_alpha: f32 = 0.3; // 30% new data, 70% old - reduces noise
-        self.rate_estimate = self.rate_estimate.scale(1.0 - rate_filter_alpha).add(raw_rates.scale(rate_filter_alpha));
+        const raw_rates, const raw_accel = if (self.coord_adapter) |adapter| blk: {
+            const rates_opengl = Vec3.from_array(imu_sample.gyro);
+            const accel_opengl = Vec3.from_array(imu_sample.accel);
+
+            break :blk .{
+                rates_opengl.rotate_by_quaternion(adapter.q_FN),
+                accel_opengl.rotate_by_quaternion(adapter.q_FN),
+            };
+        } else .{
+            // No adapter - keep in OpenGL
+            Vec3.from_array(imu_sample.gyro),
+            Vec3.from_array(imu_sample.accel),
+        };
 
         // === COMPLEMENTARY FILTER FOR ATTITUDE ===
         // Integrate gyroscope for short-term attitude (high frequency)
-        const omega = raw_rates; // Use raw rates for integration (less lag)
-        const theta = omega.scale(dt); // Small angle approximation
-        const dq = Quaternion.init(theta.x() * 0.5, theta.y() * 0.5, theta.z() * 0.5, 1.0).normalize();
+        const theta = raw_rates.scale(dt); // Small angle approximation
+        const dq = Quaternion.init(
+            theta.x() * 0.5,
+            theta.y() * 0.5,
+            theta.z() * 0.5,
+            1.0,
+        ).normalize();
 
-        var attitude_from_gyro = self.attitude_estimate.multiply(dq).normalize();
-
-        // Get attitude from accelerometer (low frequency)
-        const accel_body = Vec3.init(imu_sample.accel[0], imu_sample.accel[1], imu_sample.accel[2]);
-        const accel_mag = accel_body.length();
+        var q_gyro = self.attitude_estimate.multiply(dq).normalize();
+        const accel_mag = raw_accel.length();
 
         // Only use accelerometer if it's measuring mostly gravity (not accelerating)
-        if (@abs(accel_mag - 9.81) < 1.0) { // Within 1 m/s² of gravity
-            // Normalize accelerometer reading
-            const accel_norm = accel_body.normalize();
+        // if (accel_mag > 8.81 and accel_mag < 10.81) { // Normalize accelerometer reading
+        // Expected gravity in body frame based on current attitude estimate
 
-            // Expected gravity in body frame based on current attitude estimate
-            const gravity_world = Vec3.init(0, -9.81, 0); // World frame gravity
-            const expected_gravity_body = gravity_world.rotate_by_quaternion(attitude_from_gyro.conjugate()).normalize();
+        const expected_accel_NED = Vec3.init(0, 0, -9.81); // World frame gravity
+        const expected_accel_body = expected_accel_NED.rotate_by_quaternion(q_gyro.conjugate()).normalize();
 
-            // Calculate error between measured and expected gravity
-            const gravity_error = accel_norm.cross(expected_gravity_body);
+        //     // Calculate error between measured and expected gravity
+        const accel_err = raw_accel.cross(expected_accel_body);
 
-            // Complementary filter gain (how much to trust accelerometer)
-            const kp: f32 = 0.1; // Proportional gain for accelerometer correction
+        //     // Complementary filter gain (how much to trust accelerometer)
+        const kp: f32 = 1.5; // Proportional gain for accelerometer correction
 
-            // Apply correction
-            const correction = gravity_error.scale(kp * dt);
-            const correction_quat = Quaternion.init(correction.x() * 0.5, correction.y() * 0.5, correction.z() * 0.5, 1.0).normalize();
+        //     // Apply correction
+        const correction = accel_err.scale(kp * dt);
+        const q_correction = Quaternion.init(
+            correction.x() * 0.5,
+            correction.y() * 0.5,
+            correction.z() * 0.5,
+            1.0,
+        ).normalize();
 
-            // Apply accelerometer correction to gyro attitude
-            attitude_from_gyro = correction_quat.multiply(attitude_from_gyro).normalize();
-        }
+        //     // Apply accelerometer correction to gyro attitude
+        q_gyro = q_correction.multiply(q_gyro).normalize();
+        // }
+        self.attitude_estimate = q_gyro;
 
-        // Step 3: Update final attitude estimate
-        self.attitude_estimate = attitude_from_gyro;
+        std.debug.print("DT: {}\nRAW_RATES: {}\nRAW_ACCEL: {}\nACCEL_MAG: {}\nQ_GYRO: {}\n", .{
+            dt,
+            raw_rates,
+            raw_accel,
+            accel_mag,
+            q_gyro,
+        });
+
+        const rate_filter_alpha: f32 = 0.3; // 30% new data, 70% old - reduces noise
+        self.rate_estimate = self.rate_estimate.scale(1.0 - rate_filter_alpha).add(raw_rates.scale(rate_filter_alpha));
     }
 
     /// Run the control loop using the selected controller
     pub fn updateControl(self: *Self, dt: f32) [3]f32 {
+        switch (self.controller) {
+            .Rate => |*rate_ctrl| {
+                const rate_setpoints = self.setpoints.Rate;
 
-        // No coordinate transformation - assume engine and flight coordinates are the same
-        if (self.coord_adapter == null) {
-            return self.controller.update(
-                self.setpoints,
-                Quaternion.identity(), // still [desired_rates, thrust]
-                Quaternion.identity(), // attitude not needed in rate mode
-                self.rate_estimate,
-                dt,
-            );
+                // Direct rate control
+                return rate_ctrl.update(
+                    rate_setpoints.rates,
+                    self.rate_estimate,
+                    dt,
+                );
+            },
+
+            .Attitude => |*att_ctrl| {
+                const att_setpoints = self.setpoints.Attitude;
+
+                // Extract current angles from quaternion
+                const current_euler = self.attitude_estimate.to_euler();
+
+                // Build desired quaternion from angle setpoints
+                const q_des = Quaternion.from_euler(
+                    att_setpoints.angles[1], // Desired pitch
+                    current_euler[1], // Keep current yaw
+                    att_setpoints.angles[0], // Desired roll
+                );
+
+                // Run attitude controller
+                return att_ctrl.update(
+                    q_des,
+                    self.attitude_estimate,
+                    self.rate_estimate,
+                    att_setpoints.yaw_rate, // Pass through yaw rate
+                    dt,
+                );
+            },
         }
-
-        const adapter = self.coord_adapter.?;
-        const pose_f = adapter.engineToFlight(self.attitude_estimate, self.rate_estimate);
-
-        // Desired roll / pitch come from input as angles (rad).
-        // Build a quaternion set-point with current yaw + commanded roll/pitch.
-        const roll_sp = self.setpoints.desired_rates[0];
-        const pitch_sp = self.setpoints.desired_rates[1];
-
-        // Current yaw (about Down axis) from quaternion
-        const yaw_now = std.math.atan2(
-            2.0 * (pose_f.q_NB.w() * pose_f.q_NB.y() + pose_f.q_NB.x() * pose_f.q_NB.z()),
-            1.0 - 2.0 * (pose_f.q_NB.y() * pose_f.q_NB.y() + pose_f.q_NB.z() * pose_f.q_NB.z()),
-        );
-
-        const q_des = Quaternion.from_euler( // X=pitch, Y=yaw, Z=roll
-            pitch_sp, yaw_now, // hold current yaw
-            roll_sp);
-
-        // Run quaternion attitude loop
-        const torque_f = switch (self.controller) {
-            .Rate => unreachable,
-            .Attitude => self.controller.update(
-                self.setpoints,
-                q_des, // desired attitude (Flight)
-                pose_f.q_NB, // actual   attitude (Flight)
-                pose_f.rates_flight, // current  ω_B      (Flight)
-                dt,
-            ),
-        };
-
-        return torque_f;
     }
 
     /// Mix thrust and torque commands to individual motor thrusts (quad-X configuration)
     pub fn updateMotorMixer(self: *Self, torque_body: [3]f32) void {
-        const thrust = self.setpoints.desired_thrust;
+        std.debug.print("MIXER: rates=[{d:.2}, {d:.2}, {d:.2}] → torque=[{d:.2}, {d:.2}, {d:.2}]\n\n", .{
+            self.rate_estimate.x(), self.rate_estimate.y(), self.rate_estimate.z(),
+            torque_body[0],         torque_body[1],         torque_body[2],
+        });
+
+        const thrust = self.setpoints.getThrust();
         const tau_x = torque_body[0]; // Roll torque (around X-axis)
         const tau_y = torque_body[1]; // Pitch torque (around Y-axis)
         const tau_z = torque_body[2]; // Yaw torque (around Z-axis)
@@ -439,20 +673,27 @@ pub const FlightControllerComponent = struct {
         const L = self.params.motor_arm_length;
         const k_tau = self.params.motor_drag_ratio;
 
-        // Quad-X motor mixer matrix for NED coordinate system
-        // Motors: M1(front-right), M2(front-left), M3(rear-left), M4(rear-right)
-        // Motor positions: M1(+L,+L), M2(+L,-L), M3(-L,-L), M4(-L,+L)
+        // Quad-X motor mixer matrix
+        // Motors are at 45° angles: M1(front-right), M2(front-left), M3(rear-left), M4(rear-right)
         // Motor rotation: M1(CW), M2(CCW), M3(CW), M4(CCW)
         const thrust_per_motor = thrust / 4.0;
 
-        // Mixing equations for NED frame:
+        // For quad-X configuration:
+        // - Roll torque is generated by differential thrust on diagonal motors
+        // - Pitch torque is generated by differential thrust front vs rear
+        // - Each motor contributes to torque based on its arm distance
+        const L_eff = L * @sqrt(2.0); // Effective moment arm for roll/pitch in quad-X
+
+        // Mixing equations:
         // Roll right (+τx) increases M1,M4 and decreases M2,M3
-        // Pitch forward (+τy) increases M1,M2 and decreases M3,M4
+        // Pitch forward (+τy) increases M3,M4 and decreases M1,M2
         // Yaw right (+τz) increases CCW motors (M2,M4) and decreases CW motors (M1,M3)
-        self.motor_commands.motor_thrusts[0] = thrust_per_motor + tau_x / (2.0 * L) + tau_y / (2.0 * L) - tau_z / (4.0 * k_tau); // M1 (front-right, CW)
-        self.motor_commands.motor_thrusts[1] = thrust_per_motor - tau_x / (2.0 * L) + tau_y / (2.0 * L) + tau_z / (4.0 * k_tau); // M2 (front-left, CCW)
-        self.motor_commands.motor_thrusts[2] = thrust_per_motor - tau_x / (2.0 * L) - tau_y / (2.0 * L) - tau_z / (4.0 * k_tau); // M3 (rear-left, CW)
-        self.motor_commands.motor_thrusts[3] = thrust_per_motor + tau_x / (2.0 * L) - tau_y / (2.0 * L) + tau_z / (4.0 * k_tau); // M4 (rear-right, CCW)
+        const yaw_term = tau_z / (4.0 * L * k_tau);
+
+        self.motor_commands.motor_thrusts[0] = thrust_per_motor + tau_x / L_eff - tau_y / L_eff - yaw_term;
+        self.motor_commands.motor_thrusts[1] = thrust_per_motor - tau_x / L_eff - tau_y / L_eff + yaw_term;
+        self.motor_commands.motor_thrusts[2] = thrust_per_motor - tau_x / L_eff + tau_y / L_eff - yaw_term;
+        self.motor_commands.motor_thrusts[3] = thrust_per_motor + tau_x / L_eff + tau_y / L_eff + yaw_term;
 
         self.applySaturation();
     }
@@ -460,7 +701,7 @@ pub const FlightControllerComponent = struct {
     /// Apply motor saturation limits and redistribute if needed
     fn applySaturation(self: *Self) void {
         const max_motor_thrust = self.params.motor_max_thrust;
-        const min_motor_thrust: f32 = 0.1; // Minimum thrust to maintain controllability
+        const min_motor_thrust: f32 = 0.0; // Minimum thrust to maintain controllability
 
         // Clamp all motors to [min_thrust, max_thrust]
         for (&self.motor_commands.motor_thrusts) |*thrust| {
@@ -481,45 +722,61 @@ pub const FlightControllerComponent = struct {
     }
 
     /// Convert motor thrusts to world forces and body torques for physics engine
-    pub fn calculatePhysicsForces(self: *Self, attitude: Quaternion) void {
-        // Motor positions in body frame (quad-X configuration)
+    pub fn calculatePhysicsForces(self: *Self, attitude_ned: Quaternion) void {
+        // Motor positions in NED body frame
         const L = self.params.motor_arm_length;
+        const L_diag = L / @sqrt(2.0);
         const motor_positions = [4]Vec3{
-            Vec3.init(L, L, 0), // M1: front-right (+X,+Y)
-            Vec3.init(L, -L, 0), // M2: front-left (+X,-Y)
-            Vec3.init(-L, -L, 0), // M3: rear-left (-X,-Y)
-            Vec3.init(-L, L, 0), // M4: rear-right (-X,+Y)
+            Vec3.init(L_diag, L_diag, 0), // M1: front-right
+            Vec3.init(L_diag, -L_diag, 0), // M2: front-left
+            Vec3.init(-L_diag, -L_diag, 0), // M3: rear-left
+            Vec3.init(-L_diag, L_diag, 0), // M4: rear-right
         };
 
-        // Each motor produces thrust in +Z body direction
-        const thrust_direction_body = Vec3.init(0, 0, -1);
-        const thrust_direction_world = thrust_direction_body.rotate_by_quaternion(attitude);
-
-        // Calculate total thrust in world frame
+        // Calculate total thrust
         var total_thrust: f32 = 0;
         for (self.motor_filtered) |motor_thrust| {
             total_thrust += motor_thrust;
         }
-        self.motor_commands.total_thrust_world = thrust_direction_world.scale(total_thrust);
 
-        // Calculate total torque in body frame (from motor arm moments)
-        var total_torque_body = Vec3.init(0, 0, 0);
+        // Calculate torques in NED body frame
+        const thrust_dir_ned_body = Vec3.init(0, 0, -1); // Upward in NED body
+        var total_torque_ned = Vec3.init(0, 0, 0);
 
         for (0..4) |i| {
-            const motor_pos = motor_positions[i];
-            const motor_force_body = thrust_direction_body.scale(self.motor_filtered[i]);
-            const torque_from_arm = motor_pos.cross(motor_force_body);
-            total_torque_body = total_torque_body.add(torque_from_arm);
+            const motor_force = thrust_dir_ned_body.scale(self.motor_filtered[i]);
+            const torque_from_arm = motor_positions[i].cross(motor_force);
+            total_torque_ned = total_torque_ned.add(torque_from_arm);
         }
 
-        // Add propeller drag torques (simplified) - FIXED to match motor rotation
-        const prop_drag_signs = [4]f32{ -1, 1, -1, 1 }; // M1(CW), M2(CCW), M3(CW), M4(CCW)
+        // Add prop drag torques
+        const prop_drag_signs = [4]f32{ -1, 1, -1, 1 };
         for (0..4) |i| {
             const drag_torque = self.motor_filtered[i] * self.params.motor_drag_ratio * prop_drag_signs[i];
-            total_torque_body = total_torque_body.add(Vec3.init(0, 0, drag_torque));
+            total_torque_ned = total_torque_ned.add(Vec3.init(0, 0, drag_torque));
         }
 
-        self.motor_commands.total_torque_body = total_torque_body;
+        // Transform to OpenGL for physics
+        if (self.coord_adapter) |adapter| {
+            // Convert attitude from NED to OpenGL
+            const attitude_opengl = adapter.q_NF.multiply(attitude_ned);
+
+            // // Thrust directicuxxn: NED body [0,0,-1] → OpenGL body [0,1,0]
+            // const thrust_dir_opengl_body = Vec3.init(0, 1, 0); // Up in OpenGL
+
+            // Rotate to world frame using OpenGL attitude
+            const thrust_dir_world = thrust_dir_ned_body.rotate_by_quaternion(attitude_ned).normalize();
+            const thrust_world_opengl = thrust_dir_world.rotate_by_quaternion(attitude_opengl);
+
+            self.motor_commands.total_thrust_world = thrust_world_opengl.scale(total_thrust);
+            self.motor_commands.total_torque_body = total_torque_ned.rotate_by_quaternion(adapter.q_NF);
+            // self.motor_commands.total_torque_body = Vec3.init(0, 0, 0);
+        } else {
+            // No adapter - already in correct frame
+            const thrust_world = thrust_dir_ned_body.rotate_by_quaternion(attitude_ned);
+            self.motor_commands.total_thrust_world = thrust_world.scale(total_thrust);
+            self.motor_commands.total_torque_body = total_torque_ned;
+        }
     }
 
     /// Reset flight controller state to initial values
@@ -528,7 +785,7 @@ pub const FlightControllerComponent = struct {
         self.controller.reset();
 
         // Reset setpoints
-        self.setpoints = ControlSetpoints{};
+        self.setpoints = ControlSetpoints.init(self.controller_type);
 
         // Reset motor commands
         self.motor_commands = MotorCommands{};
@@ -619,6 +876,9 @@ pub const FlightControllerSystem = struct {
             const frame_start = timer.read();
             const timestamp_us = @as(u64, @intCast(std.time.microTimestamp()));
 
+            const physics = self.physics_thread orelse continue;
+            if (physics.isPhysicsPaused()) continue;
+
             // Process all flight controllers
             self.updateAllControllers(timestamp_us);
 
@@ -657,26 +917,21 @@ pub const FlightControllerSystem = struct {
 
                 const torque_body = controller.updateControl(dt);
 
-                if (@mod(timestamp_us / 10000, 100) == 0) { // Every ~100ms
-                    std.debug.print("CTRL[{d}]: setpoint=[{d:.3}, {d:.3}, {d:.3}] actual=[{d:.3}, {d:.3}, {d:.3}] torque=[{d:.3}, {d:.3}, {d:.3}]\n", .{
-                        entity_id.id,
-                        controller.setpoints.desired_rates[0],
-                        controller.setpoints.desired_rates[1],
-                        controller.setpoints.desired_rates[2],
-                        controller.rate_estimate.x(),
-                        controller.rate_estimate.y(),
-                        controller.rate_estimate.z(),
-                        torque_body[0],
-                        torque_body[1],
-                        torque_body[2],
-                    });
-                }
-
                 controller.updateMotorMixer(torque_body);
                 controller.updateMotorLag(dt);
                 controller.calculatePhysicsForces(controller.attitude_estimate);
 
                 if (@mod(timestamp_us / 10000, 100) == 0) { // Every ~100ms
+                    const euler = controller.attitude_estimate.to_euler();
+                    std.debug.print("ATTITUDE: pitch={d:.1}°, yaw={d:.1}°, roll={d:.1}° | rates=[{d:.2}, {d:.2}, {d:.2}]\n", .{
+                        euler[0] * 180.0 / std.math.pi, // Your to_euler returns [pitch, yaw, roll]
+                        euler[1] * 180.0 / std.math.pi,
+                        euler[2] * 180.0 / std.math.pi,
+                        controller.rate_estimate.x(),
+                        controller.rate_estimate.y(),
+                        controller.rate_estimate.z(),
+                    });
+                    std.debug.print("SETPOINTS: {}\n", .{controller.setpoints});
                     std.debug.print("MOTORS[{d}]: thrust=[{d:.2}, {d:.2}, {d:.2}, {d:.2}]N total_force=[{d:.2}, {d:.2}, {d:.2}]N\n", .{
                         entity_id.id,
                         controller.motor_filtered[0],
@@ -688,7 +943,7 @@ pub const FlightControllerSystem = struct {
                         controller.motor_commands.total_thrust_world.z(),
                     });
                 }
-
+                std.debug.print("\n\n{s}\n\n", .{"=" ** 80});
                 self.sendPhysicsCommands(entity_id, controller);
             }
         }
@@ -710,40 +965,40 @@ pub const FlightControllerSystem = struct {
 
     /// Send motor commands to physics thread as forces and torques
     fn sendPhysicsCommands(self: *Self, entity_id: Core.EntityID, flight_controller: *FlightControllerComponent) void {
-        if (self.physics_thread) |physics| {
-            const motor_commands = flight_controller.motor_commands;
-            const coord_adapter = flight_controller.coord_adapter;
+        const physics = self.physics_thread orelse return;
 
-            const engine_results = if (coord_adapter) |adapter|
-                adapter.flightToEngine(motor_commands.total_torque_body, motor_commands.total_thrust_world)
-            else
-                CoordinateAdapter.FlightToEngineResult{
-                    .torque_engine = motor_commands.total_torque_body,
-                    .force_engine = motor_commands.total_thrust_world,
-                };
+        const motor_commands = flight_controller.motor_commands;
 
-            const force_command = PhysicsThread.PhysicsCommand{
-                .ApplyForce = .{
-                    .entity_id = entity_id,
-                    .force = engine_results.force_engine.data,
-                },
-            };
+        const force_command = PhysicsThread.PhysicsCommand{
+            .ApplyForce = .{
+                .entity_id = entity_id,
+                .force = motor_commands.total_thrust_world.data,
+            },
+        };
 
-            if (!physics.sendCommand(force_command)) {
-                std.debug.print("Failed to send thrust command for entity {d}\n", .{entity_id.id});
-            }
+        // Get attitude in engine for torque transformation
+        const attitude_engine = if (flight_controller.coord_adapter) |adapter|
+            adapter.q_NF.multiply(flight_controller.attitude_estimate) // NED → Engine
+        else
+            flight_controller.attitude_estimate;
 
-            const world_torque = engine_results.torque_engine.rotate_by_quaternion(flight_controller.attitude_estimate);
-            const torque_command = PhysicsThread.PhysicsCommand{
-                .ApplyTorque = .{
-                    .entity_id = entity_id,
-                    .torque = world_torque,
-                },
-            };
+        // Transform body torque to world
+        const world_torque = flight_controller.motor_commands.total_torque_body
+            .rotate_by_quaternion(attitude_engine);
 
-            if (!physics.sendCommand(torque_command)) {
-                std.debug.print("Failed to send torque command for entity {d}\n", .{entity_id.id});
-            }
+        const torque_command = PhysicsThread.PhysicsCommand{
+            .ApplyTorque = .{
+                .entity_id = entity_id,
+                .torque = world_torque,
+            },
+        };
+
+        if (!physics.sendCommand(force_command)) {
+            std.debug.print("Failed to send thrust command for entity {d}\n", .{entity_id.id});
+        }
+
+        if (!physics.sendCommand(torque_command)) {
+            std.debug.print("Failed to send torque command for entity {d}\n", .{entity_id.id});
         }
     }
 };

@@ -3,9 +3,11 @@ const Math = @import("../../Math.zig");
 const Core = @import("../Core.zig");
 const SparseSet = @import("../SparseSet.zig").SparseSet;
 const PhysicsThread = @import("PhysicsThread.zig");
+const bullet = @import("../../bindings/c.zig").bullet;
 
 const Vec3 = Math.Vec3;
 const Quaternion = Math.Quaternion;
+const PhysicsState = PhysicsThread.PhysicsState;
 
 /// IMU sample data structure following the coordinate conventions
 pub const IMUSample = struct {
@@ -98,12 +100,11 @@ pub const IMUSensorComponent = struct {
     /// Generate a sensor sample from physics state with realistic noise
     pub fn generateSample(
         self: *Self,
-        omega_body: Vec3, // rad/s body frame
-        alpha_world: Vec3, // m/s² world frame including gravity
-        rotation_bw: Quaternion, // world to body rotation
+        physics_state: PhysicsState,
         timestamp_us: u64,
         rng: *std.Random.DefaultPrng,
     ) IMUSample {
+        //TODO: Keep this here or move to after update?
         const dt = if (self.last_update_us > 0)
             @as(f32, @floatFromInt(timestamp_us - self.last_update_us)) / 1_000_000.0
         else
@@ -111,16 +112,29 @@ pub const IMUSensorComponent = struct {
 
         self.last_update_us = timestamp_us;
 
+        const rotation = physics_state.rotation;
+        const rotation_bw = rotation.conjugate(); // World to body
+
+        const angular_vel = physics_state.angular_velocity;
+        const angular_vel_world = Vec3.from_array(angular_vel);
+        const angular_vel_body = angular_vel_world.rotate_by_quaternion(rotation_bw);
+
         // Transform linear acceleration to body frame
-        // Note: alpha_world from physics is total acceleration including gravity
-        // IMU measures specific force (acceleration minus gravity), so we remove gravity
-        const gravity_world = Vec3.init(0, -9.81, 0);
-        const specific_force_world = alpha_world.sub(gravity_world);
-        const accel_body = specific_force_world.rotate_by_quaternion(rotation_bw);
+        // Note: alpha_world from physics is total acceleration excludign gravity
+        const accel_world = physics_state.accel_world;
+        if (accel_world.length() > 5.0) {
+            return IMUSample{
+                .timestamp_us = timestamp_us,
+                .gyro = .{ 0, 0, 0 },
+                .accel = .{ 0, 0, 0 },
+            };
+        }
+
+        const accel_body = accel_world.rotate_by_quaternion(rotation_bw);
 
         // Transform to sensor frame
         const accel_sensor = accel_body.rotate_by_quaternion(self.rot_body);
-        const omega_sensor = omega_body.rotate_by_quaternion(self.rot_body);
+        const angular_vel_sensor = angular_vel_body.rotate_by_quaternion(self.rot_body);
 
         // Evolve bias random walk
         const sqrt_dt = @sqrt(dt);
@@ -145,9 +159,9 @@ pub const IMUSensorComponent = struct {
         const noise_scale_accel = self.noise_accel_std * sqrt_dt;
 
         const gyro_noisy = [3]f32{
-            omega_sensor.x() + self.bias_gyro.x() + random.floatNorm(f32) * noise_scale_gyro,
-            omega_sensor.y() + self.bias_gyro.y() + random.floatNorm(f32) * noise_scale_gyro,
-            omega_sensor.z() + self.bias_gyro.z() + random.floatNorm(f32) * noise_scale_gyro,
+            angular_vel_sensor.x() + self.bias_gyro.x() + random.floatNorm(f32) * noise_scale_gyro,
+            angular_vel_sensor.y() + self.bias_gyro.y() + random.floatNorm(f32) * noise_scale_gyro,
+            angular_vel_sensor.z() + self.bias_gyro.z() + random.floatNorm(f32) * noise_scale_gyro,
         };
 
         const accel_noisy = [3]f32{
@@ -263,6 +277,8 @@ pub const IMUSystem = struct {
             const frame_start = timer.read();
             const timestamp_us = @as(u64, @intCast(std.time.microTimestamp()));
 
+            const physics = self.physics_thread orelse continue;
+            if (physics.isPhysicsPaused()) continue;
             // Process all IMU sensors
             self.updateAllSensors(timestamp_us);
 
@@ -290,10 +306,9 @@ pub const IMUSystem = struct {
     /// Update all IMU sensors with latest physics data
     fn updateAllSensors(self: *Self, timestamp_us: u64) void {
         // Get latest physics states from physics thread
-        const physics_states = if (self.physics_thread) |physics|
-            physics.getPhysicsStates()
-        else
-            return;
+        //
+        const physics_system = self.physics_thread orelse return;
+        const physics_states = physics_system.getPhysicsStates();
 
         // Process each IMU sensor
         var imu_iter = self.imu_components.iterator();
@@ -301,17 +316,11 @@ pub const IMUSystem = struct {
             const imu_component = entry.component;
             const entity_id = entry.entity_id;
 
-            // Find corresponding physics state
+            // Find corresponding physics states
             for (physics_states) |physics_state| {
                 if (physics_state.entity_id.id == entity_id.id) {
-                    const rotation_bw = physics_state.rotation.conjugate(); // World to body
-                    const alpha_world = physics_state.alpha_world;
-                    const omega_body = physics_state.omega_body;
-
                     const sample = imu_component.generateSample(
-                        omega_body,
-                        alpha_world,
-                        rotation_bw,
+                        physics_state,
                         timestamp_us,
                         &self.rng,
                     );

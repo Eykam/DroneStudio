@@ -231,7 +231,6 @@ pub const RecorderSystem = struct {
 
     pub fn saveToDisk(self: *Self, path: []const u8) !void {
         if (self.is_recording) try self.toggle();
-        _ = self.file.?;
         try std.fs.cwd().rename("capture.tmp", path);
     }
 

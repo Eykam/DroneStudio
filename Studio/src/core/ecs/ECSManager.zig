@@ -375,7 +375,10 @@ pub fn setParent(self: *Self, child_id: Core.EntityID, parent_id: Core.EntityID)
     try self.transform_system.addChild(parent_id, child_id);
 }
 
-pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource) !struct { root_entity: Core.EntityID, entity_map: std.AutoHashMap(usize, Core.EntityID) } {
+pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource) !struct {
+    root_entity: Core.EntityID,
+    entity_map: std.AutoHashMap(usize, Core.EntityID),
+} {
     var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
     // Don't defer deinit - we're returning this
 

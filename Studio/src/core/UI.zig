@@ -112,8 +112,6 @@ const FlightControlOverlay = struct {
     cached_setpoint_rates: [3]f32 = [3]f32{0, 0, 0},
     cached_attitude: [4]f32 = [4]f32{0, 0, 0, 1},
     cached_rate_estimate: [3]f32 = [3]f32{0, 0, 0},
-    cached_input_thrust: f32 = 0,
-    cached_input_rates: [3]f32 = [3]f32{0, 0, 0},
     cached_keys: [4]bool = [4]bool{false, false, false, false}, // W, S, A, D
     cached_mouse: [2]f32 = [2]f32{0, 0},
     has_imu_data: bool = false,
@@ -203,9 +201,7 @@ const FlightControlOverlay = struct {
                 // Flight Input Data
                 imgui.igTextColored(.{ .x = 0.9, .y = 0.5, .z = 0.9, .w = 1.0 }, "Input Commands:");
                 
-                imgui.igText("Thrust: %.2f N", self.cached_input_thrust);
-                imgui.igText("Rates: %.2f, %.2f, %.2f", 
-                    self.cached_input_rates[0], self.cached_input_rates[1], self.cached_input_rates[2]);
+                imgui.igText("Raw input captured (processing moved to controller)");
                 
                 // Input state
                 imgui.igText("Keys: W:%s S:%s A:%s D:%s", 
@@ -236,8 +232,11 @@ const FlightControlOverlay = struct {
 
         // Update Flight Controller data
         if (ctx.ecs.flight_controller_components.get(eid)) |fc_component| {
-            self.cached_setpoint_thrust = fc_component.setpoints.desired_thrust;
-            self.cached_setpoint_rates = fc_component.setpoints.desired_rates;
+            self.cached_setpoint_thrust = fc_component.setpoints.getThrust();
+            self.cached_setpoint_rates = switch (fc_component.setpoints) {
+                .Rate => |rate| rate.rates,
+                .Attitude => |att| [3]f32{ att.angles[0], att.angles[1], att.yaw_rate },
+            };
             self.cached_attitude = [4]f32{
                 fc_component.attitude_estimate.x(),
                 fc_component.attitude_estimate.y(),
@@ -253,8 +252,7 @@ const FlightControlOverlay = struct {
 
         // Update Flight Input data
         if (ctx.ecs.flight_input_components.get(eid)) |input_component| {
-            self.cached_input_thrust = input_component.control_commands.desired_thrust;
-            self.cached_input_rates = input_component.control_commands.desired_rates;
+            // FlightInput now only captures raw input - processing moved to controller
             self.cached_keys = [4]bool{
                 input_component.input_state.throttle_up,
                 input_component.input_state.throttle_down,
