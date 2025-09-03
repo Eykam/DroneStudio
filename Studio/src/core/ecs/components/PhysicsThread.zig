@@ -6,15 +6,65 @@ const bullet = @import("../../bindings/c.zig").bullet;
 
 const Vec3 = Math.Vec3;
 
+/// Force accumulator to handle frequency mismatch between control and physics
+pub const ForceAccumulator = struct {
+    forces: Vec3 = Vec3.init(0, 0, 0),
+    torques: Vec3 = Vec3.init(0, 0, 0),
+    accumulated_dt: f32 = 0,
+
+    pub fn addForce(self: *ForceAccumulator, force: Vec3, dt: f32) void {
+        // Accumulate force weighted by time
+        self.forces = self.forces.add(force.scale(dt));
+        self.accumulated_dt += dt;
+    }
+
+    pub fn addTorque(self: *ForceAccumulator, torque: Vec3, dt: f32) void {
+        // Accumulate torque weighted by time
+        self.torques = self.torques.add(torque.scale(dt));
+    }
+
+    pub fn getAverageForce(self: *ForceAccumulator) Vec3 {
+        if (self.accumulated_dt > 0) {
+            // Return time-averaged force
+            return self.forces.scale(1.0 / self.accumulated_dt);
+        }
+        return Vec3.init(0, 0, 0);
+    }
+
+    pub fn getAverageTorque(self: *ForceAccumulator) Vec3 {
+        if (self.accumulated_dt > 0) {
+            // Return time-averaged torque
+            return self.torques.scale(1.0 / self.accumulated_dt);
+        }
+        return Vec3.init(0, 0, 0);
+    }
+
+    pub fn reset(self: *ForceAccumulator) void {
+        self.forces = Vec3.init(0, 0, 0);
+        self.torques = Vec3.init(0, 0, 0);
+        self.accumulated_dt = 0;
+    }
+};
+
 pub const ApplyForce = struct {
     entity_id: Core.EntityID,
     force: [3]f32,
+    dt: f32, // Time delta this force represents
 
     pub fn execute(self: ApplyForce, physics_thread: *ThreadedPhysicsSystem) void {
-        if (physics_thread.entity_bodies.get(self.entity_id)) |body| {
-            bullet.cbtBodyApplyCentralForce(body, &self.force);
+        // Get or create accumulator for this entity
+        const result = physics_thread.entity_force_accumulators.getOrPut(self.entity_id) catch {
+            std.debug.print("Failed to create force accumulator for entity {d}\n", .{self.entity_id.id});
+            return;
+        };
+
+        if (result.found_existing) {
+            // Add to existing accumulator
+            result.value_ptr.addForce(Vec3.from_array(self.force), self.dt);
         } else {
-            std.debug.print("No physics body found for force on entity {d}\n", .{self.entity_id.id});
+            // Initialize new accumulator
+            result.value_ptr.* = ForceAccumulator{};
+            result.value_ptr.addForce(Vec3.from_array(self.force), self.dt);
         }
     }
 };
@@ -22,12 +72,22 @@ pub const ApplyForce = struct {
 pub const ApplyTorque = struct {
     entity_id: Core.EntityID,
     torque: Vec3,
+    dt: f32, // Time delta this torque represents
 
     pub fn execute(self: ApplyTorque, physics_thread: *ThreadedPhysicsSystem) void {
-        if (physics_thread.entity_bodies.get(self.entity_id)) |body| {
-            bullet.cbtBodyApplyTorque(body, @ptrCast(&self.torque.data));
+        // Get or create accumulator for this entity
+        const result = physics_thread.entity_force_accumulators.getOrPut(self.entity_id) catch {
+            std.debug.print("Failed to create force accumulator for entity {d}\n", .{self.entity_id.id});
+            return;
+        };
+
+        if (result.found_existing) {
+            // Add to existing accumulator
+            result.value_ptr.addTorque(self.torque, self.dt);
         } else {
-            std.debug.print("No physics body found for torque on entity {d}\n", .{self.entity_id.id});
+            // Initialize new accumulator
+            result.value_ptr.* = ForceAccumulator{};
+            result.value_ptr.addTorque(self.torque, self.dt);
         }
     }
 };
@@ -513,6 +573,7 @@ pub const ThreadedPhysicsSystem = struct {
 
     // Entity tracking
     entity_bodies: std.AutoHashMap(Core.EntityID, bullet.CbtBodyHandle),
+    entity_force_accumulators: std.AutoHashMap(Core.EntityID, ForceAccumulator),
 
     // Debug wireframes
     debug_wireframes_enabled: std.atomic.Value(bool),
@@ -539,6 +600,7 @@ pub const ThreadedPhysicsSystem = struct {
             .should_shutdown = std.atomic.Value(bool).init(false),
             .fixed_timestep = undefined, // 60 Hz
             .entity_bodies = std.AutoHashMap(Core.EntityID, bullet.CbtBodyHandle).init(allocator),
+            .entity_force_accumulators = std.AutoHashMap(Core.EntityID, ForceAccumulator).init(allocator),
             .debug_wireframes_enabled = std.atomic.Value(bool).init(false),
             .debug_wireframes_version = std.atomic.Value(u32).init(0),
             .debug_dynamic_color = .{ 0.0, 1.0, 0.0 }, // Green for dynamic
@@ -586,6 +648,7 @@ pub const ThreadedPhysicsSystem = struct {
         }
 
         self.entity_bodies.deinit();
+        self.entity_force_accumulators.deinit();
         self.state_buffer.deinit();
         self.wireframe_buffer.deinit(self.allocator);
 
@@ -667,6 +730,22 @@ pub const ThreadedPhysicsSystem = struct {
             // Step physics simulation (only if not paused)
             var num_steps: i32 = 0;
             if (!self.physics_paused.load(.acquire)) {
+                // Apply accumulated forces before physics step
+                var force_iter = self.entity_force_accumulators.iterator();
+                while (force_iter.next()) |entry| {
+                    if (self.entity_bodies.get(entry.key_ptr.*)) |body| {
+                        const avg_force = entry.value_ptr.getAverageForce();
+                        const avg_torque = entry.value_ptr.getAverageTorque();
+
+                        // Apply averaged forces to physics body
+                        bullet.cbtBodyApplyCentralForce(body, @ptrCast(&avg_force.data));
+                        bullet.cbtBodyApplyTorque(body, @ptrCast(&avg_torque.data));
+
+                        // Reset accumulator after applying
+                        entry.value_ptr.reset();
+                    }
+                }
+
                 const max_substeps: i32 = 10;
                 const fixed_timestep_f32: f32 = @floatCast(self.fixed_timestep);
                 num_steps = bullet.cbtWorldStepSimulation(self.bullet_world, fixed_timestep_f32, max_substeps, fixed_timestep_f32);

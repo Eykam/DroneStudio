@@ -431,7 +431,7 @@ pub const RigidBodyComponent = struct {
     entity_id: Core.EntityID = undefined,
     bullet_body: ?bullet.CbtBodyHandle = null, //TODO: Remove this field since the physics thread handles this
     bullet_shape: bullet.CbtShapeHandle,
-    mass: f32 = 1.0,
+    mass: f32 = 0.0,
     inertia: [3]f32 = .{ 0.0, 0.0, 0.0 }, // Moment of inertia tensor diagonal [Ixx, Iyy, Izz]
     use_custom_inertia: bool = false, // If false, let Bullet calculate from shape
     initial_position: [3]f32 = .{ 0.0, 0.0, 0.0 },

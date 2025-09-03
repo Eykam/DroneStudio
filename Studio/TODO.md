@@ -71,7 +71,12 @@ TODO:
     [] - Similar to above, but using gymnasium
     [] - Expose scene data to user to use as input to agent
 [] - Dynamic Scenes
-
+[] - Move current studio specific code over to example folder (or its own rep)
+[] - Add renderer for terminal (true color or ascii)
+[] - Decouple asset loader (make async / separate thread)
+[] - Refactor build.zon.zig to point to dependency releases instead of dowloading repos locally
+[] - Add tracy support for profiling
+    [] - Benchmark stack allocations vs heap allocs
 
 
 FIX:

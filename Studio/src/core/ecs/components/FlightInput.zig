@@ -41,6 +41,9 @@ pub const FlightInputComponent = struct {
         mouse_dy: f32,
     ) void {
         // Update key states
+        if (keys[glfw.GLFW_KEY_6]) {
+            self.input_state.arm = !self.input_state.arm;
+        }
         self.input_state.throttle_up = keys[glfw.GLFW_KEY_W];
         self.input_state.throttle_down = keys[glfw.GLFW_KEY_S];
         self.input_state.yaw_left = keys[glfw.GLFW_KEY_A];
@@ -105,6 +108,7 @@ pub const FlightInputSystem = struct {
             // Get the flight controller for this entity
             if (fc_system.flight_controller_components.get(entity_id)) |flight_controller| {
                 // Use the controller to process input and generate setpoints
+                flight_controller.armed = input_component.input_state.arm;
                 const setpoints = flight_controller.controller.processInput(
                     input_component.input_state,
                     input_component.params,

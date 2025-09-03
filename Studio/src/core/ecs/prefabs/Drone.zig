@@ -46,7 +46,7 @@ pub fn spawn(
     );
 
     // Create physics body with the collider's shape
-    var rigid_body = Collisions.RigidBodyComponent.init(1.0, collider.bullet_shape.?);
+    var rigid_body = Collisions.RigidBodyComponent.init(1.5, collider.bullet_shape.?);
 
     // Set realistic moment of inertia for a quadrotor drone
     // Based on typical quadrotor with 0.3m arm length and 1kg mass

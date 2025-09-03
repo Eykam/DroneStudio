@@ -92,6 +92,8 @@ pub const OpenGLAdapter = struct {
 /// Input state for processing raw inputs
 pub const InputState = struct {
     // Key states
+    arm: bool = false,
+    disarm: bool = false,
     throttle_up: bool = false,
     throttle_down: bool = false,
     yaw_left: bool = false,
@@ -105,7 +107,7 @@ pub const InputState = struct {
 /// Input processing parameters
 pub const InputParams = struct {
     // Input sensitivity
-    throttle_sensitivity: f32 = 30.0, // N/s (thrust change rate)
+    throttle_sensitivity: f32 = 50.0, // N/s (thrust change rate)
     yaw_sensitivity: f32 = 3.14, // rad/s per key press
     roll_pitch_sensitivity: f32 = 0.1, // rad/s per pixel of mouse movement
 
@@ -124,10 +126,9 @@ pub const InputParams = struct {
 pub const RateController = struct {
     const Self = @This();
 
-    // Configuration - REDUCED gains for stability
-    roll_gains: [3]f32 = [3]f32{ 2.0, 0.5, 0.02 },
-    pitch_gains: [3]f32 = [3]f32{ 2.0, 0.5, 0.02 },
-    yaw_gains: [3]f32 = [3]f32{ 1.0, 0.2, 0.01 },
+    roll_gains: [3]f32 = [3]f32{ 0.1, 0.005, 0.001 },
+    pitch_gains: [3]f32 = [3]f32{ 0.1, 0.005, 0.001 },
+    yaw_gains: [3]f32 = [3]f32{ 0.05, 0.003, 0.0005 },
     max_roll: f32 = 10.47, // rad/s
     max_pitch: f32 = 10.47, // rad/s
     max_yaw: f32 = 5.24, // rad/s
@@ -243,10 +244,9 @@ pub const RateController = struct {
 pub const AttitudeController = struct {
     const Self = @This();
 
-    // Proportional gains (rad/s per rad)
-    Kp_roll: f32 = 2.0,
-    Kp_pitch: f32 = 2.0,
-    Kp_yaw: f32 = 0.5,
+    Kp_roll: f32 = 0.05,
+    Kp_pitch: f32 = 0.05,
+    Kp_yaw: f32 = 0.02,
 
     max_roll: f32 = 0.52, // rad (30 degrees)
     max_pitch: f32 = 0.52, // rad (30 degrees)
@@ -394,7 +394,7 @@ pub const RateSetpoints = struct {
 pub const AttitudeSetpoints = struct {
     angles: [2]f32 = [2]f32{ 0, 0 }, // [roll, pitch] rad
     yaw_rate: f32 = 0.0, // rad/s (yaw stays in rate mode)
-    thrust: f32 = 10.0, // Newtons total
+    thrust: f32 = 0.0, // Newtons total
 };
 
 /// Tagged union matching the controller type
@@ -472,7 +472,7 @@ pub const FlightControllerParams = struct {
 
     // Motor configuration for quad-X
     motor_arm_length: f32 = 0.15, // meters
-    motor_drag_ratio: f32 = 0.05, // kτ = c_drag / c_thrust
+    motor_drag_ratio: f32 = 0.15, // kτ = c_drag / c_thrust
 
     // Motor dynamics
     motor_time_constant: f32 = 0.04, // seconds (40ms lag)
@@ -501,6 +501,7 @@ pub const FlightControllerComponent = struct {
     // Coordinate system adapter (optional - null means engine and flight coordinates are the same)
     coord_adapter: ?CoordinateAdapter,
 
+    armed: bool = false,
     controller: Controller,
     controller_type: ControllerType,
     setpoints: ControlSetpoints,
@@ -701,7 +702,16 @@ pub const FlightControllerComponent = struct {
     /// Apply motor saturation limits and redistribute if needed
     fn applySaturation(self: *Self) void {
         const max_motor_thrust = self.params.motor_max_thrust;
-        const min_motor_thrust: f32 = 0.0; // Minimum thrust to maintain controllability
+        
+        // Calculate total thrust and dynamic minimum
+        const total_thrust = self.motor_commands.motor_thrusts[0] + 
+                            self.motor_commands.motor_thrusts[1] + 
+                            self.motor_commands.motor_thrusts[2] + 
+                            self.motor_commands.motor_thrusts[3];
+        const avg_thrust = total_thrust / 4.0;
+        
+        // Dynamic minimum: 10% of average thrust, but never below 0.1N
+        const min_motor_thrust = @max(0.1, avg_thrust * 0.1);
 
         // Clamp all motors to [min_thrust, max_thrust]
         for (&self.motor_commands.motor_thrusts) |*thrust| {
@@ -710,6 +720,63 @@ pub const FlightControllerComponent = struct {
 
         // TODO: Add more sophisticated redistribution if any motor saturates
         // For now, simple clamping is sufficient
+
+        // Safety check: detect death spiral conditions
+        self.checkForDeathSpiral();
+    }
+
+    /// Safety monitor to detect unrecoverable control situations
+    fn checkForDeathSpiral(self: *Self) void {
+        var saturated_motors: u32 = 0;
+        var min_saturated: u32 = 0;
+        var max_saturated: u32 = 0;
+
+        // Calculate dynamic minimum (same logic as applySaturation)
+        const total_thrust = self.motor_commands.motor_thrusts[0] + 
+                            self.motor_commands.motor_thrusts[1] + 
+                            self.motor_commands.motor_thrusts[2] + 
+                            self.motor_commands.motor_thrusts[3];
+        const avg_thrust = total_thrust / 4.0;
+        const min_motor_thrust = @max(0.1, avg_thrust * 0.1);
+
+        // Count saturated motors
+        for (self.motor_commands.motor_thrusts) |thrust| {
+            if (thrust >= self.params.motor_max_thrust - 0.01) {
+                max_saturated += 1;
+            }
+            if (thrust <= min_motor_thrust + 0.01) { // Near dynamic minimum
+                min_saturated += 1;
+            }
+            if (thrust >= self.params.motor_max_thrust - 0.01 or thrust <= min_motor_thrust + 0.01) {
+                saturated_motors += 1;
+            }
+        }
+
+        // Check attitude errors (convert to degrees for easier reading)
+        const euler = self.attitude_estimate.to_euler();
+        const roll_deg = std.math.radiansToDegrees(euler[2]);
+        const pitch_deg = std.math.radiansToDegrees(euler[0]);
+        const yaw_deg = std.math.radiansToDegrees(euler[1]);
+
+        // Death spiral conditions
+        const extreme_attitude = @abs(roll_deg) > 30.0 or @abs(pitch_deg) > 30.0;
+        const severe_saturation = saturated_motors >= 3;
+        const opposite_saturation = min_saturated >= 1 and max_saturated >= 1;
+
+        if (extreme_attitude and (severe_saturation or opposite_saturation)) {
+            std.debug.print("🚨 DEATH SPIRAL DETECTED! 🚨\n", .{});
+            std.debug.print("Attitude: roll={d:.1}° pitch={d:.1}° yaw={d:.1}°\n", .{ roll_deg, pitch_deg, yaw_deg });
+            std.debug.print("Motors: [{d:.2}, {d:.2}, {d:.2}, {d:.2}]N\n", .{
+                self.motor_commands.motor_thrusts[0],
+                self.motor_commands.motor_thrusts[1],
+                self.motor_commands.motor_thrusts[2],
+                self.motor_commands.motor_thrusts[3],
+            });
+            std.debug.print("Saturated: {d}/4 motors (max: {d}, min: {d})\n", .{ saturated_motors, max_saturated, min_saturated });
+            std.debug.print("Control authority lost - system unrecoverable\n", .{});
+
+            @panic("Flight controller death spiral detected - check logs above");
+        }
     }
 
     /// Apply motor lag filter (1st order with time constant)
@@ -761,16 +828,12 @@ pub const FlightControllerComponent = struct {
             // Convert attitude from NED to OpenGL
             const attitude_opengl = adapter.q_NF.multiply(attitude_ned);
 
-            // // Thrust directicuxxn: NED body [0,0,-1] → OpenGL body [0,1,0]
-            // const thrust_dir_opengl_body = Vec3.init(0, 1, 0); // Up in OpenGL
-
             // Rotate to world frame using OpenGL attitude
             const thrust_dir_world = thrust_dir_ned_body.rotate_by_quaternion(attitude_ned).normalize();
             const thrust_world_opengl = thrust_dir_world.rotate_by_quaternion(attitude_opengl);
 
             self.motor_commands.total_thrust_world = thrust_world_opengl.scale(total_thrust);
             self.motor_commands.total_torque_body = total_torque_ned.rotate_by_quaternion(adapter.q_NF);
-            // self.motor_commands.total_torque_body = Vec3.init(0, 0, 0);
         } else {
             // No adapter - already in correct frame
             const thrust_world = thrust_dir_ned_body.rotate_by_quaternion(attitude_ned);
@@ -819,6 +882,7 @@ pub const FlightControllerSystem = struct {
 
     // Timing
     target_rate_hz: f64 = 400.0, // 400 Hz control loop
+    last_timestamp_us: u64 = 0, // For calculating actual dt
 
     pub fn init(allocator: std.mem.Allocator, flight_controller_components: *SparseSet(FlightControllerComponent)) Self {
         return Self{
@@ -905,12 +969,18 @@ pub const FlightControllerSystem = struct {
 
     /// Update all flight controllers with latest IMU data
     fn updateAllControllers(self: *Self, timestamp_us: u64) void {
-        const dt: f32 = 1.0 / @as(f32, @floatCast(self.target_rate_hz)); // Fixed timestep
-
+        // Calculate actual dt from previous frame (convert μs to seconds)
+        const dt: f32 = if (self.last_timestamp_us > 0)
+            @as(f32, @floatFromInt(timestamp_us - self.last_timestamp_us)) / 1_000_000.0 // μs to seconds
+        else
+            1.0 / @as(f32, @floatCast(self.target_rate_hz)); // Fallback to target dt on first frame
+        self.last_timestamp_us = timestamp_us;
         var controller_iter = self.flight_controller_components.iterator();
         while (controller_iter.next()) |entry| {
             const controller = entry.component;
             const entity_id = entry.entity_id;
+
+            if (!controller.armed) continue;
 
             if (self.getLatestIMUSample(entity_id)) |imu_sample| {
                 controller.updateStateEstimate(imu_sample, dt);
@@ -921,30 +991,30 @@ pub const FlightControllerSystem = struct {
                 controller.updateMotorLag(dt);
                 controller.calculatePhysicsForces(controller.attitude_estimate);
 
-                if (@mod(timestamp_us / 10000, 100) == 0) { // Every ~100ms
-                    const euler = controller.attitude_estimate.to_euler();
-                    std.debug.print("ATTITUDE: pitch={d:.1}°, yaw={d:.1}°, roll={d:.1}° | rates=[{d:.2}, {d:.2}, {d:.2}]\n", .{
-                        euler[0] * 180.0 / std.math.pi, // Your to_euler returns [pitch, yaw, roll]
-                        euler[1] * 180.0 / std.math.pi,
-                        euler[2] * 180.0 / std.math.pi,
-                        controller.rate_estimate.x(),
-                        controller.rate_estimate.y(),
-                        controller.rate_estimate.z(),
-                    });
-                    std.debug.print("SETPOINTS: {}\n", .{controller.setpoints});
-                    std.debug.print("MOTORS[{d}]: thrust=[{d:.2}, {d:.2}, {d:.2}, {d:.2}]N total_force=[{d:.2}, {d:.2}, {d:.2}]N\n", .{
-                        entity_id.id,
-                        controller.motor_filtered[0],
-                        controller.motor_filtered[1],
-                        controller.motor_filtered[2],
-                        controller.motor_filtered[3],
-                        controller.motor_commands.total_thrust_world.x(),
-                        controller.motor_commands.total_thrust_world.y(),
-                        controller.motor_commands.total_thrust_world.z(),
-                    });
-                }
+                // if (@mod(timestamp_us / 10000, 100) == 0) { // Every ~100ms
+                const euler = controller.attitude_estimate.to_euler();
+                std.debug.print("ATTITUDE: pitch={d:.1}°, yaw={d:.1}°, roll={d:.1}° | rates=[{d:.2}, {d:.2}, {d:.2}]\n", .{
+                    euler[0] * 180.0 / std.math.pi, // Your to_euler returns [pitch, yaw, roll]
+                    euler[1] * 180.0 / std.math.pi,
+                    euler[2] * 180.0 / std.math.pi,
+                    controller.rate_estimate.x(),
+                    controller.rate_estimate.y(),
+                    controller.rate_estimate.z(),
+                });
+                std.debug.print("SETPOINTS: {}\n", .{controller.setpoints});
+                std.debug.print("MOTORS[{d}]: thrust=[{d:.2}, {d:.2}, {d:.2}, {d:.2}]N total_force=[{d:.2}, {d:.2}, {d:.2}]N\n", .{
+                    entity_id.id,
+                    controller.motor_filtered[0],
+                    controller.motor_filtered[1],
+                    controller.motor_filtered[2],
+                    controller.motor_filtered[3],
+                    controller.motor_commands.total_thrust_world.x(),
+                    controller.motor_commands.total_thrust_world.y(),
+                    controller.motor_commands.total_thrust_world.z(),
+                });
+                // }
                 std.debug.print("\n\n{s}\n\n", .{"=" ** 80});
-                self.sendPhysicsCommands(entity_id, controller);
+                self.sendPhysicsCommands(entity_id, controller, dt);
             }
         }
     }
@@ -964,7 +1034,7 @@ pub const FlightControllerSystem = struct {
     }
 
     /// Send motor commands to physics thread as forces and torques
-    fn sendPhysicsCommands(self: *Self, entity_id: Core.EntityID, flight_controller: *FlightControllerComponent) void {
+    fn sendPhysicsCommands(self: *Self, entity_id: Core.EntityID, flight_controller: *FlightControllerComponent, dt: f32) void {
         const physics = self.physics_thread orelse return;
 
         const motor_commands = flight_controller.motor_commands;
@@ -973,6 +1043,7 @@ pub const FlightControllerSystem = struct {
             .ApplyForce = .{
                 .entity_id = entity_id,
                 .force = motor_commands.total_thrust_world.data,
+                .dt = dt, // Time delta for this force application
             },
         };
 
@@ -990,6 +1061,7 @@ pub const FlightControllerSystem = struct {
             .ApplyTorque = .{
                 .entity_id = entity_id,
                 .torque = world_torque,
+                .dt = dt, // Time delta for this torque application
             },
         };
 
