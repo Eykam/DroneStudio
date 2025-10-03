@@ -7,6 +7,7 @@ const Viewports = @import("Viewports.zig");
 const Controller = @import("Controller.zig");
 const Transform = @import("Transform.zig");
 const Collisions = @import("Collisions.zig");
+const ECSManager = @import("../ECSManager.zig");
 
 const glfw = gl.glfw;
 const glad = gl.glad;
@@ -87,17 +88,16 @@ pub const GlobalsSystem = struct {
 
     pub fn deinit(self: *Self) void {
         cleanupImGui();
-        
+
         // Destroy window and terminate GLFW
         if (self.window) |window| {
             glfw.glfwDestroyWindow(window);
         }
         glfw.glfwTerminate();
-        
+
         // Free self
         self.allocator.destroy(self);
     }
-
 
     pub fn setupCallbacks(self: *Self, window: ?*glfw.struct_GLFWwindow) void {
         if (window == null) return;
@@ -231,19 +231,31 @@ pub const GlobalsSystem = struct {
             return;
         }
 
-        scene.globals.mouse_dx = xpos - scene.globals.last_mouse_x;
-        scene.globals.mouse_dy = scene.globals.last_mouse_y - ypos; // Reversed Y
+        const dx = xpos - scene.globals.last_mouse_x;
+        const dy = scene.globals.last_mouse_y - ypos; // Reversed Y
 
+        scene.globals.mouse_dx = dx;
+        scene.globals.mouse_dy = dy;
         scene.globals.last_mouse_x = xpos;
         scene.globals.last_mouse_y = ypos;
 
         if (scene.globals.menu) {
             if (io.*.WantCaptureMouse) {
-                // Let ImGui handle the mouse if it wants it
-                scene.globals.last_mouse_x = xpos;
-                scene.globals.last_mouse_y = ypos;
                 return;
             }
+        }
+
+        // Forward mouse movement to control system
+        if (dx != 0 or dy != 0) {
+            var event = Controller.Event{ .mouse = Controller.MouseEvent{
+                .x = @floatCast(xpos),
+                .y = @floatCast(ypos),
+                .dx = @floatCast(dx),
+                .dy = @floatCast(dy),
+                .dt = @floatCast(scene.globals.dt),
+            } };
+
+            scene.control_system.handleEvent(&event);
         }
     }
 
@@ -261,6 +273,33 @@ pub const GlobalsSystem = struct {
                 return;
             }
         }
+
+        // Forward to control system
+        const mouse_button = switch (button) {
+            0 => Controller.MouseButton.left,
+            1 => Controller.MouseButton.right,
+            2 => Controller.MouseButton.middle,
+            else => return,
+        };
+
+        const mouse_action = switch (action) {
+            0 => Controller.MouseAction.release,
+            1 => Controller.MouseAction.press,
+            else => return,
+        };
+
+        var event = Controller.Event{ .mouse = Controller.MouseEvent{
+            .x = @floatCast(scene.globals.last_mouse_x),
+            .y = @floatCast(scene.globals.last_mouse_y),
+            .dx = 0,
+            .dy = 0,
+            .button = mouse_button,
+            .action = mouse_action,
+            .mods = mods,
+            .dt = @floatCast(scene.globals.dt),
+        } };
+
+        scene.control_system.handleEvent(&event);
     }
 
     fn charCallback(window: ?*glfw.struct_GLFWwindow, character: c_uint) callconv(.C) void {
@@ -277,118 +316,33 @@ pub const GlobalsSystem = struct {
         if (window == null) return;
 
         const scene = @as(*Self, @ptrCast(@alignCast(glfw.glfwGetWindowUserPointer(window))));
-        // const io = imgui.igGetIO();
+
         if (scene.globals.menu) {
             imgui.ImGui_ImplGlfw_KeyCallback(@ptrCast(window), key, scancode, action, mods);
+            const io = imgui.igGetIO();
+            if (io.*.WantCaptureKeyboard and key != glfw.GLFW_KEY_ESCAPE) {
+                return; // Let ESC through even when ImGui wants keyboard
+            }
         }
 
         if (key < 0 or key >= 1024) return;
 
+        // Update global key state for legacy code
         if (action == glfw.GLFW_PRESS)
-            scene.globals.keys[@intCast(key)] = true
+            scene.control_system.updateKeyState(key, true)
         else if (action == glfw.GLFW_RELEASE)
-            scene.globals.keys[@intCast(key)] = false;
+            scene.control_system.updateKeyState(key, false);
 
-        if (action == glfw.GLFW_PRESS or action == glfw.GLFW_REPEAT) {
-            switch (key) {
-                glfw.GLFW_KEY_ESCAPE => {
-                    scene.globals.menu = !scene.globals.menu;
-                    const current_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+        // Forward to control system
+        var event = Controller.Event{ .key = Controller.InputEvent{
+            .key = Controller.Key.fromGLFW(key),
+            .scancode = scancode,
+            .action = @enumFromInt(action),
+            .mods = mods,
+            .dt = @floatCast(scene.globals.dt),
+        } };
 
-                    const cursor_mode = switch (current_mode) {
-                        glfw.GLFW_CURSOR_NORMAL => glfw.GLFW_CURSOR_DISABLED,
-                        glfw.GLFW_CURSOR_HIDDEN => glfw.GLFW_CURSOR_NORMAL,
-                        glfw.GLFW_CURSOR_DISABLED => glfw.GLFW_CURSOR_NORMAL,
-                        else => unreachable,
-                    };
-
-                    glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, cursor_mode);
-                },
-                glfw.GLFW_KEY_M => {
-                    glfw.glfwIconifyWindow(window);
-                },
-                glfw.GLFW_KEY_RIGHT_BRACKET => {
-                    glfw.glfwDestroyWindow(window);
-                },
-                glfw.GLFW_KEY_P => {
-                    scene.globals.paused = !scene.globals.paused;
-                    // Also pause/unpause physics simulation
-                    if (scene.collision_system) |collision_system| {
-                        collision_system.setPhysicsPaused(scene.globals.paused);
-                    }
-                    std.debug.print("Toggled pause: {}\n", .{scene.globals.paused});
-                },
-                glfw.GLFW_KEY_F => {
-                    scene.globals.fly = !scene.globals.fly;
-                },
-
-                glfw.GLFW_KEY_V => {
-                    scene.toggleViewport();
-                },
-                glfw.GLFW_KEY_R => {
-                    scene.globals.reset_requested = true;
-                    std.debug.print("Reset requested!\n", .{});
-                },
-
-                else => {},
-            }
-        }
-    }
-
-    /// Cycle through enabled viewports and switch both the active camera
-    /// and the active controller.
-    pub fn toggleViewport(self: *Self) void {
-        const vps = self.viewport_system.viewports;
-        const cam_sys = self.camera_system;
-        const ctrl_sys = self.control_system;
-
-        var target_cam_eid: Core.EntityID = blk: {
-            // No camera yet → just pick the first viewport entity
-            if (cam_sys.active_camera_eid) |eid| break :blk eid;
-
-            // first() is safe because at least one viewport exists
-            var first = vps.iterator();
-            const first_cam = first.next().?.entity_id;
-            break :blk first_cam;
-        };
-
-        if (cam_sys.active_camera_eid) |_| {
-            var it = vps.iterator();
-            var first_seen: ?Core.EntityID = null;
-            var choose_next = false;
-
-            while (it.next()) |entry| {
-                if (first_seen == null) first_seen = entry.entity_id;
-
-                if (choose_next) {
-                    target_cam_eid = entry.entity_id;
-                    break;
-                }
-                if (entry.entity_id.id == cam_sys.active_camera_eid.?.id)
-                    choose_next = true;
-            }
-            if (choose_next and target_cam_eid.id == cam_sys.active_camera_eid.?.id)
-                target_cam_eid = first_seen.?; // wrapped around
-        }
-
-        cam_sys.set_active(target_cam_eid);
-
-        const ctrl_eid: ?Core.EntityID = blk: {
-            var current = target_cam_eid;
-            while (true) {
-                if (self.control_system.controller_components.has(current))
-                    break :blk current;
-
-                const tf_opt = self.transform_system.transform_components.get(current);
-                if (tf_opt == null or tf_opt.?.parent == null)
-                    break :blk null;
-
-                current = tf_opt.?.parent.?; // climb one level
-            }
-        };
-
-        std.debug.print("New active ctrl: {any}\n", .{if (ctrl_eid) |eid| eid.id else null});
-        ctrl_sys.active_controller_eid = ctrl_eid; // may be null → movement disabled
+        scene.control_system.handleEvent(&event);
     }
 
     fn scrollCallback(window: ?*glfw.struct_GLFWwindow, xoffset: f64, yoffset: f64) callconv(.C) void {
@@ -401,6 +355,20 @@ pub const GlobalsSystem = struct {
             return;
         }
 
+        // Forward to control system
+        var event = Controller.Event{ .mouse = Controller.MouseEvent{
+            .x = @floatCast(scene.globals.last_mouse_x),
+            .y = @floatCast(scene.globals.last_mouse_y),
+            .dx = 0,
+            .dy = 0,
+            .scroll_x = @floatCast(xoffset),
+            .scroll_y = @floatCast(yoffset),
+            .dt = @floatCast(scene.globals.dt),
+        } };
+
+        scene.control_system.handleEvent(&event);
+
+        // Legacy zoom handling - should be moved to a controller
         const zoomSensitivity: f32 = 0.1;
         const newZoom = scene.globals.zoom - @as(f32, @floatCast(yoffset)) * zoomSensitivity * scene.globals.zoom;
 
@@ -416,5 +384,77 @@ pub const GlobalsSystem = struct {
         // if (scene.globals.camera_manager) |camera_manager| {
         //     camera_manager.main_camera.?.process_scroll_wheel(newZoom);
         // }
+    }
+};
+
+// Global application controller
+pub const GlobalController = struct {
+    pub fn createComponent() Controller.ControllerComponent {
+        var controller = Controller.ControllerComponent.init(0, "Global", .Application);
+
+        // ESC - Toggle menu
+        controller.addBinding(.{
+            .key = .Escape,
+            .handler = handleMenuToggle,
+            .context = null, // Will be set to ECSManager when processing
+        }) catch unreachable;
+
+        // M - Minimize window
+        controller.addBinding(.{
+            .key = .M,
+            .handler = handleMinimize,
+            .context = null,
+        }) catch unreachable;
+
+        // ] - Quit application
+        controller.addBinding(.{
+            .key = .RightBracket,
+            .handler = handleQuit,
+            .context = null,
+        }) catch unreachable;
+
+        return controller;
+    }
+
+    fn handleMenuToggle(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        if (event.action != .Press and event.action != .Repeat) return; // Only on PRESS or REPEAT
+
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const globals_system = ecs.globals_system;
+
+        globals_system.globals.menu = !globals_system.globals.menu;
+
+        if (globals_system.window) |window| {
+            const current_mode = glfw.glfwGetInputMode(window, glfw.GLFW_CURSOR);
+            const cursor_mode = switch (current_mode) {
+                glfw.GLFW_CURSOR_NORMAL => glfw.GLFW_CURSOR_DISABLED,
+                glfw.GLFW_CURSOR_HIDDEN => glfw.GLFW_CURSOR_NORMAL,
+                glfw.GLFW_CURSOR_DISABLED => glfw.GLFW_CURSOR_NORMAL,
+                else => glfw.GLFW_CURSOR_NORMAL,
+            };
+
+            glfw.glfwSetInputMode(window, glfw.GLFW_CURSOR, cursor_mode);
+        }
+        event.consume();
+    }
+
+    fn handleMinimize(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        if (event.action != .Press) return; // Only on PRESS
+
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        if (ecs.globals_system.window) |window| {
+            glfw.glfwIconifyWindow(window);
+        }
+        event.consume();
+    }
+
+    fn handleQuit(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        if (event.action != .Press) return; // Only on PRESS
+
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        if (ecs.globals_system.window) |window| {
+            glfw.glfwSetWindowShouldClose(window, glfw.GLFW_TRUE);
+        }
+        event.consume();
     }
 };

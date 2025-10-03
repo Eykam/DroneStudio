@@ -11,7 +11,6 @@ const Viewport = @import("../components/Viewports.zig");
 const Collisions = @import("../components/Collisions.zig");
 const IMUSensor = @import("../components/IMUSensor.zig");
 const FlightController = @import("../components/FlightController.zig");
-const FlightInput = @import("../components/FlightInput.zig");
 const DroneCamera = @import("DroneCamera.zig");
 const SensorCamera = @import("SensorCamera.zig");
 const Frustum = @import("Frustum.zig");
@@ -80,15 +79,15 @@ pub fn spawn(
         .Attitude,
         coord_adapter,
     );
-    const flight_input = FlightInput.FlightInputComponent.init();
-
+    // Create drone controller for flight input
+    const drone_input_controller = FlightController.DroneInputController.createComponent();
     const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
 
     const disparity = 0.075; // 75mm
     const sensor_cam_left = try SensorCamera.generate(alloc, "sensor_cam_left", .{ .pos = .{ -disparity / 2.0, 0.0, 0.15 } });
     const sensor_cam_right = try SensorCamera.generate(alloc, "sensor_cam_right", .{ .pos = .{ disparity / 2.0, 0.0, 0.15 } });
 
-    const drone_cam_frustum = try Frustum.generate(
+    const drone_cam_frustum = Frustum.generate(
         alloc,
         ecs,
         "drone_cam_frustum",
@@ -97,7 +96,7 @@ pub fn spawn(
         1.0,
         0.1,
     );
-    const sensor_cam_frustum_left = try Frustum.generate(
+    const sensor_cam_frustum_left = Frustum.generate(
         alloc,
         ecs,
         "sensor_cam_frustum",
@@ -107,7 +106,7 @@ pub fn spawn(
         0.1,
     );
 
-    const sensor_cam_frustum_right = try Frustum.generate(
+    const sensor_cam_frustum_right = Frustum.generate(
         alloc,
         ecs,
         "sensor_cam_frustum",
@@ -124,8 +123,11 @@ pub fn spawn(
         rigid_body,
         imu_sensor,
         flight_controller,
-        flight_input,
+        drone_input_controller,
     });
+
+    // Set this drone as the selected entity for control
+    ecs.control_system.setSelectedEntity(root_eid);
 
     // Clean up the entity map since we no longer need it
     entities.entity_map.deinit();

@@ -1386,7 +1386,6 @@ test "Physics Thread - Box falling with gravity integration test" {
             // Update the full ECS for rendering
             try ecs.update(elapsed);
 
-            // Check for quit key (simplified - in real implementation would use proper input)
             if (gl.glfw.glfwGetKey(ecs.globals_system.window, gl.glfw.GLFW_KEY_Q) == gl.glfw.GLFW_PRESS) {
                 std.debug.print("Quit key pressed - ending test\n", .{});
                 break;

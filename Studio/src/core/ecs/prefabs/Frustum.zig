@@ -108,11 +108,20 @@ pub fn generate(
     near: f32,
 ) !struct { renderable: Renderable, tf: TransformComponent } {
     const self = Self{ .fov = fov, .aspect_ratio = aspect_ratio, .frustum_debug_far = far, .frustum_debug_near = near };
-    const resources = try self.create_frustum_visualization(alloc);
+    const resources = self.create_frustum_visualization(alloc) catch |err| {
+        std.debug.print("Failed to create frustum resourources => {}\n", .{err});
+        @panic("Failed to generate resources for frustum...");
+    };
     defer alloc.free(resources.vertices);
 
-    _ = try ecs.world.resource_manager.loadMesh(name, resources.vertices, null, resources.draw_fn);
-    const renderable = try Renderable.init(alloc, name);
+    _ = ecs.world.resource_manager.loadMesh(name, resources.vertices, null, resources.draw_fn) catch |err| {
+        std.debug.print("Failed to load frustum mesh from resource manager => {}\n", .{err});
+        @panic("Failed to load Frustum Mesh...");
+    };
+    const renderable = Renderable.init(alloc, name) catch |err| {
+        std.debug.print("Failed to initialize renderable for frustum=> {}\n", .{err});
+        @panic("Failed to initialize renderable for frustum...");
+    };
 
     var tf = Transform.TransformComponent.init(alloc);
     tf.rotateWithEuler(0, 180, 0);

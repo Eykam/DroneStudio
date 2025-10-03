@@ -179,4 +179,11 @@ pub const TransformSystem = struct {
             }
         }
     }
+
+    pub fn getParent(self: *Self, entity_id: Core.EntityID) ?Core.EntityID {
+        if (self.transform_components.get(entity_id)) |transform| {
+            return transform.parent;
+        }
+        return null;
+    }
 };

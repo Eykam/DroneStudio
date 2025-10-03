@@ -71,9 +71,12 @@ TODO:
     [] - Similar to above, but using gymnasium
     [] - Expose scene data to user to use as input to agent
 [] - Dynamic Scenes
+[x] - Refactor Control System to allow for overriding keybinds per tab / entity
+    [] - Refactor existing components to use new structure
 [] - Move current studio specific code over to example folder (or its own rep)
 [] - Add renderer for terminal (true color or ascii)
 [] - Decouple asset loader (make async / separate thread)
+[] - Use cgltf instead of manually parsing
 [] - Refactor build.zon.zig to point to dependency releases instead of dowloading repos locally
 [] - Add tracy support for profiling
     [] - Benchmark stack allocations vs heap allocs
@@ -98,5 +101,8 @@ FIX:
     [] - Rename collisions.zig => PhysicsAdapter.zig
     [] - Rename PhysicsThread => PhysicsSimulator.zig
 [] - Make ECS completely generic (no usage of specific components / systems)
+    [] - Make it so each system gets the other required systems from the parent ptr?
+    [] - Would ordering of intialization matter here?
+    [] - pre-update hook, post-update hook
 [] - Make ResourceManager component / system agnostic (no imports or usages of components / systems)
 [] - More modular testing

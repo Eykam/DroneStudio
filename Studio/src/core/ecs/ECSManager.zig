@@ -21,7 +21,6 @@ const Collisions = @import("components/Collisions.zig");
 const SharedMem = @import("components/SharedMem.zig");
 const IMUSensor = @import("components/IMUSensor.zig");
 const FlightController = @import("components/FlightController.zig");
-const FlightInput = @import("components/FlightInput.zig");
 
 // Components
 const ControllerComponent = Controller.ControllerComponent;
@@ -35,7 +34,6 @@ const ColliderComponent = Collisions.ColliderComponent;
 const RigidBodyComponent = Collisions.RigidBodyComponent;
 const IMUSensorComponent = IMUSensor.IMUSensorComponent;
 const FlightControllerComponent = FlightController.FlightControllerComponent;
-const FlightInputComponent = FlightInput.FlightInputComponent;
 
 // Systems
 const ControllerSytem = Controller.ControlSystem;
@@ -49,7 +47,6 @@ const CollisionSystem = Collisions.CollisionSystem;
 const SharedMemSystem = SharedMem.SharedMemSystem;
 const IMUSystem = IMUSensor.IMUSystem;
 const FlightControllerSystem = FlightController.FlightControllerSystem;
-const FlightInputSystem = FlightInput.FlightInputSystem;
 
 const Self = @This();
 
@@ -68,7 +65,6 @@ collider_components: SparseSet(ColliderComponent),
 rigid_body_components: SparseSet(RigidBodyComponent),
 imu_sensor_components: SparseSet(IMUSensorComponent),
 flight_controller_components: SparseSet(FlightControllerComponent),
-flight_input_components: SparseSet(FlightInputComponent),
 
 // Systems
 globals_system: *GlobalsSystem,
@@ -82,7 +78,6 @@ collision_system: CollisionSystem,
 shared_mem_system: SharedMemSystem,
 imu_system: IMUSystem,
 flight_controller_system: FlightControllerSystem,
-flight_input_system: FlightInputSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const global_system = try GlobalsSystem.init(allocator, .{});
@@ -106,7 +101,6 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         .rigid_body_components = SparseSet(RigidBodyComponent).init(allocator),
         .imu_sensor_components = SparseSet(IMUSensorComponent).init(allocator),
         .flight_controller_components = SparseSet(FlightControllerComponent).init(allocator),
-        .flight_input_components = SparseSet(FlightInputComponent).init(allocator),
 
         // Initialize systems
         .globals_system = global_system,
@@ -125,12 +119,11 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             &manager.camera_components,
             &manager.transform_components,
         ),
-        .control_system = ControllerSytem.init(
+        .control_system = try ControllerSytem.init(
             world,
             manager.globals,
-            &manager.transform_components,
-            &manager.rigid_body_components,
             &manager.controller_components,
+            manager,
         ),
         .render_system = try RenderSystem.init(
             allocator,
@@ -162,10 +155,6 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             allocator,
             &manager.flight_controller_components,
         ),
-        .flight_input_system = FlightInputSystem.init(
-            allocator,
-            &manager.flight_input_components,
-        ),
     };
 
     global_system.camera_system = &manager.camera_system;
@@ -173,9 +162,6 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
     global_system.viewport_system = &manager.viewport_system;
     global_system.transform_system = &manager.transform_system;
     global_system.collision_system = &manager.collision_system;
-
-    // Link collision system to control system for physics-based movement
-    manager.control_system.collision_system = &manager.collision_system;
 
     // Link IMU system to physics thread for sensor data
     if (manager.collision_system.physics_thread) |physics_thread| {
@@ -186,9 +172,6 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         manager.flight_controller_system.setIMUSystem(&manager.imu_system);
         manager.flight_controller_system.setPhysicsThread(physics_thread);
         try manager.flight_controller_system.startControlThread();
-
-        // Link flight input system to flight controller system
-        manager.flight_input_system.setFlightControllerSystem(&manager.flight_controller_system);
     }
 
     return manager;
@@ -201,10 +184,7 @@ pub fn deinit(self: *Self) void {
         tuple.component.deinit();
     }
 
-    var controller_iter = self.controller_components.iterator();
-    while (controller_iter.next()) |tuple| {
-        tuple.component.deinit();
-    }
+    // Controller components don't need deinit - they use fixed arrays
 
     // Deinit component storage
     self.transform_components.deinit();
@@ -214,7 +194,6 @@ pub fn deinit(self: *Self) void {
     self.controller_components.deinit();
     self.imu_sensor_components.deinit();
     self.flight_controller_components.deinit();
-    self.flight_input_components.deinit();
 
     // Deinit flight controller and IMU systems to stop their threads
     self.flight_controller_system.deinit();
@@ -271,19 +250,10 @@ pub fn update(self: *Self, time: f64) !void {
 
     if (should_time) std.debug.print("Frame {d} system timings:\n", .{self.globals.frame_count});
 
-    if (should_time) _ = timer.lap(); // Reset timer
-    self.control_system.update(dt);
-    if (should_time) std.debug.print("  Control system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
-
     try self.collision_system.update();
     if (should_time) std.debug.print("  Collision system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
-    self.flight_input_system.update(
-        &self.globals.keys,
-        @floatCast(self.globals.mouse_dx),
-        @floatCast(self.globals.mouse_dy),
-        @floatCast(dt),
-    );
+    self.control_system.updateContinuous();
     if (should_time) std.debug.print("  Flight input system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
     self.transform_system.update();
@@ -311,12 +281,6 @@ pub fn resetToInitialState(self: *Self) !void {
     // Reset all flight controller components
     var fc_iter = self.flight_controller_components.iterator();
     while (fc_iter.next()) |entry| {
-        entry.component.reset();
-    }
-
-    // Reset all flight input components
-    var fi_iter = self.flight_input_components.iterator();
-    while (fi_iter.next()) |entry| {
         entry.component.reset();
     }
 

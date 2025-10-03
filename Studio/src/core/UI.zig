@@ -104,16 +104,16 @@ const FlightControlOverlay = struct {
     visible: bool = true,
     last_update_time: f64 = 0,
     update_interval: f64 = 0.5, // Update every 500ms
-    
+
     // Cached display values to avoid flickering
-    cached_gyro: [3]f32 = [3]f32{0, 0, 0},
-    cached_accel: [3]f32 = [3]f32{0, 0, 0},
+    cached_gyro: [3]f32 = [3]f32{ 0, 0, 0 },
+    cached_accel: [3]f32 = [3]f32{ 0, 0, 0 },
     cached_setpoint_thrust: f32 = 0,
-    cached_setpoint_rates: [3]f32 = [3]f32{0, 0, 0},
-    cached_attitude: [4]f32 = [4]f32{0, 0, 0, 1},
-    cached_rate_estimate: [3]f32 = [3]f32{0, 0, 0},
-    cached_keys: [4]bool = [4]bool{false, false, false, false}, // W, S, A, D
-    cached_mouse: [2]f32 = [2]f32{0, 0},
+    cached_setpoint_rates: [3]f32 = [3]f32{ 0, 0, 0 },
+    cached_attitude: [4]f32 = [4]f32{ 0, 0, 0, 1 },
+    cached_rate_estimate: [3]f32 = [3]f32{ 0, 0, 0 },
+    cached_keys: [4]bool = [4]bool{ false, false, false, false }, // W, S, A, D
+    cached_mouse: [2]f32 = [2]f32{ 0, 0 },
     has_imu_data: bool = false,
 
     pub fn init() Self {
@@ -168,47 +168,39 @@ const FlightControlOverlay = struct {
 
                 // IMU Data
                 imgui.igTextColored(.{ .x = 0.9, .y = 0.7, .z = 0.3, .w = 1.0 }, "IMU Sensor:");
-                
+
                 if (self.has_imu_data) {
                     imgui.igText("Gyro (rad/s): %.3f, %.3f, %.3f", self.cached_gyro[0], self.cached_gyro[1], self.cached_gyro[2]);
                     imgui.igText("Accel (m/s²): %.3f, %.3f, %.3f", self.cached_accel[0], self.cached_accel[1], self.cached_accel[2]);
                 } else {
                     imgui.igTextColored(.{ .x = 0.8, .y = 0.4, .z = 0.4, .w = 1.0 }, "No IMU data available");
                 }
-                
+
                 imgui.igText("Sample Rate: 1000 Hz");
                 imgui.igSeparator();
 
                 // Flight Controller Data
                 imgui.igTextColored(.{ .x = 0.3, .y = 0.9, .z = 0.4, .w = 1.0 }, "Flight Controller:");
-                
+
                 // Control setpoints
                 imgui.igText("Setpoints:");
                 imgui.igText("  Thrust: %.2f N", self.cached_setpoint_thrust);
-                imgui.igText("  Rates (rad/s): %.2f, %.2f, %.2f", 
-                    self.cached_setpoint_rates[0], self.cached_setpoint_rates[1], self.cached_setpoint_rates[2]);
-                
+                imgui.igText("  Rates (rad/s): %.2f, %.2f, %.2f", self.cached_setpoint_rates[0], self.cached_setpoint_rates[1], self.cached_setpoint_rates[2]);
+
                 // Current estimates
                 imgui.igText("Estimates:");
-                imgui.igText("  Attitude: %.2f, %.2f, %.2f, %.2f", 
-                    self.cached_attitude[0], self.cached_attitude[1], 
-                    self.cached_attitude[2], self.cached_attitude[3]);
-                imgui.igText("  Rates: %.2f, %.2f, %.2f", 
-                    self.cached_rate_estimate[0], self.cached_rate_estimate[1], self.cached_rate_estimate[2]);
-                
+                imgui.igText("  Attitude: %.2f, %.2f, %.2f, %.2f", self.cached_attitude[0], self.cached_attitude[1], self.cached_attitude[2], self.cached_attitude[3]);
+                imgui.igText("  Rates: %.2f, %.2f, %.2f", self.cached_rate_estimate[0], self.cached_rate_estimate[1], self.cached_rate_estimate[2]);
+
                 imgui.igSeparator();
 
                 // Flight Input Data
                 imgui.igTextColored(.{ .x = 0.9, .y = 0.5, .z = 0.9, .w = 1.0 }, "Input Commands:");
-                
+
                 imgui.igText("Raw input captured (processing moved to controller)");
-                
+
                 // Input state
-                imgui.igText("Keys: W:%s S:%s A:%s D:%s", 
-                    if (self.cached_keys[0]) cstr("ON") else cstr("OFF"),
-                    if (self.cached_keys[1]) cstr("ON") else cstr("OFF"),
-                    if (self.cached_keys[2]) cstr("ON") else cstr("OFF"),
-                    if (self.cached_keys[3]) cstr("ON") else cstr("OFF"));
+                imgui.igText("Keys: W:%s S:%s A:%s D:%s", if (self.cached_keys[0]) cstr("ON") else cstr("OFF"), if (self.cached_keys[1]) cstr("ON") else cstr("OFF"), if (self.cached_keys[2]) cstr("ON") else cstr("OFF"), if (self.cached_keys[3]) cstr("ON") else cstr("OFF"));
                 imgui.igText("Mouse: %.1f, %.1f", self.cached_mouse[0], self.cached_mouse[1]);
             }
             imgui.igEnd();
@@ -250,20 +242,9 @@ const FlightControlOverlay = struct {
             };
         }
 
-        // Update Flight Input data
-        if (ctx.ecs.flight_input_components.get(eid)) |input_component| {
-            // FlightInput now only captures raw input - processing moved to controller
-            self.cached_keys = [4]bool{
-                input_component.input_state.throttle_up,
-                input_component.input_state.throttle_down,
-                input_component.input_state.yaw_left,
-                input_component.input_state.yaw_right,
-            };
-            self.cached_mouse = [2]f32{
-                input_component.input_state.mouse_dx,
-                input_component.input_state.mouse_dy,
-            };
-        }
+        // TODO: Add debug display for DroneInputController state
+        // Show current input states, armed status, flight mode, etc.
+        // This would help debug the drone control system
     }
 };
 
@@ -379,6 +360,10 @@ pub const RootWindow = struct {
     visible: bool,
     sidebar_width: f32 = 0, // Default width, will be adjusted by user
     is_resizing: bool = false, // Track if currently resizing
+    active_tab: enum { Scene, Paths } = .Scene, // Current active tab
+
+    // Paths tab specific state
+    paths_sidebar_width: f32 = 0,
 
     entities_window: *EntitiesWindow,
     timeline_recorder: TimelineRecorder,
@@ -427,9 +412,41 @@ pub const RootWindow = struct {
         var avail: imgui.ImVec2 = undefined;
         imgui.igGetContentRegionAvail(&avail);
 
-        const topbar_height: f32 = 0;
-        const main_area_h: f32 = avail.y - topbar_height;
+        // Draw tab bar at the top
 
+        imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_FramePadding, .{ .x = 12, .y = 8 });
+        imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_ItemSpacing, .{ .x = 1.0, .y = 1.0 });
+
+        if (imgui.igBeginTabBar("##MainTabs", imgui.ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)) {
+            if (imgui.igBeginTabItem("Scene", null, imgui.ImGuiTabItemFlags_None)) {
+                self.active_tab = .Scene;
+                imgui.igEndTabItem();
+            }
+
+            if (imgui.igBeginTabItem("Paths", null, imgui.ImGuiTabItemFlags_None)) {
+                self.active_tab = .Paths;
+                imgui.igEndTabItem();
+            }
+
+            imgui.igEndTabBar();
+        }
+
+        imgui.igPopStyleVar(2);
+
+        // Calculate remaining height after tab bar
+        imgui.igGetContentRegionAvail(&avail);
+        const main_area_h: f32 = avail.y;
+
+        // Draw the appropriate tab content
+        switch (self.active_tab) {
+            .Scene => self.drawSceneTab(ctx, avail, main_area_h),
+            .Paths => self.drawPathsTab(ctx, avail, main_area_h),
+        }
+
+        imgui.igEnd(); // end root window
+    }
+
+    fn drawSceneTab(self: *Self, ctx: *const UIContext, avail: imgui.ImVec2, main_area_h: f32) void {
         if (self.sidebar_width == 0)
             self.sidebar_width = avail.x * 0.15; // 15 % first frame
 
@@ -524,7 +541,7 @@ pub const RootWindow = struct {
 
                         // Draw camera metadata overlay on top of the image
                         self.camera_overlay.drawOverlay(ctx, image_pos, img_w);
-                        
+
                         // Draw flight control overlay
                         self.flight_control_overlay.drawOverlay(ctx, image_pos, img_w);
                     }
@@ -581,9 +598,9 @@ pub const RootWindow = struct {
                         camera_system.active_camera_eid = eid;
 
                         if (ctx.ecs.findControllerAncestor(eid)) |ctrl_eid| {
-                            ctx.ecs.control_system.active_controller_eid = ctrl_eid;
+                            ctx.ecs.control_system.setSelectedEntity(ctrl_eid);
                         } else {
-                            ctx.ecs.control_system.active_controller_eid = null; // no controller
+                            ctx.ecs.control_system.setSelectedEntity(null); // no controller
                         }
                     }
                     if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
@@ -606,7 +623,166 @@ pub const RootWindow = struct {
             imgui.igEndTable();
         } // end table
 
-        imgui.igEnd(); // end root window
+    }
+
+    fn drawPathsTab(self: *Self, ctx: *const UIContext, avail: imgui.ImVec2, main_area_h: f32) void {
+        if (self.paths_sidebar_width == 0)
+            self.paths_sidebar_width = avail.x * 0.20; // 20% for paths sidebar
+
+        self.paths_sidebar_width = std.math.clamp(
+            self.paths_sidebar_width,
+            250.0, // min 250 px
+            avail.x * 0.4, // maximum of 40% of window width
+        );
+
+        // Begin 2-column resizable table for Paths layout
+        if (imgui.igBeginTable("PathsLayoutTable", 2, imgui.ImGuiTableFlags_Resizable | imgui.ImGuiTableFlags_NoPadInnerX | imgui.ImGuiTableFlags_BordersInnerV | imgui.ImGuiTableFlags_SizingFixedFit, .{ .x = 0, .y = 0 }, 0)) {
+            // column 0 = sidebar (fixed), 1 = main viewport (stretch)
+            imgui.igTableSetupColumn("PathsSidebar", imgui.ImGuiTableColumnFlags_WidthFixed, self.paths_sidebar_width, 0);
+            imgui.igTableSetupColumn("PathsViewport", imgui.ImGuiTableColumnFlags_WidthStretch, 0, 1);
+
+            imgui.igTableNextRow(imgui.ImGuiLogFlags_None, 0);
+
+            // ========================================================== Paths Sidebar
+            _ = imgui.igTableSetColumnIndex(0);
+
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str("PathsSidebarChild", .{ .x = 0, .y = main_area_h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+            imgui.igText("Path Planning");
+            imgui.igSeparator();
+
+            // Path planning controls
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Waypoints", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                imgui.igText("No waypoints defined");
+                if (imgui.igButton("Add Waypoint", .{ .x = -1, .y = 0 })) {
+                    // TODO: Add waypoint functionality
+                }
+            }
+
+            imgui.igSeparator();
+
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Path Settings", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                const S = struct {
+                    var path_smooth: f32 = 0.5;
+                    var path_height: f32 = 10.0;
+                    var path_speed: f32 = 5.0;
+                };
+
+                _ = imgui.igSliderFloat("Smoothing", &S.path_smooth, 0.0, 1.0, "%.2f", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Default Height", &S.path_height, 1.0, 100.0, "%.1f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Default Speed", &S.path_speed, 0.5, 20.0, "%.1f m/s", imgui.ImGuiSliderFlags_None);
+            }
+
+            imgui.igSeparator();
+
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Path Visualization", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                const V = struct {
+                    var show_path: bool = true;
+                    var show_waypoints: bool = true;
+                    var show_direction: bool = false;
+                };
+
+                _ = imgui.igCheckbox("Show Path", &V.show_path);
+                _ = imgui.igCheckbox("Show Waypoints", &V.show_waypoints);
+                _ = imgui.igCheckbox("Show Direction Arrows", &V.show_direction);
+            }
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+
+            // ========================================================== Paths Main Viewport
+            _ = imgui.igTableSetColumnIndex(1);
+
+            var contentAvail: imgui.ImVec2 = undefined;
+            imgui.igGetContentRegionAvail(&contentAvail);
+
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str("PathsViewportArea", .{ .x = contentAvail.x, .y = main_area_h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+            // Display main camera view for path planning
+            const camera_system = &ctx.ecs.camera_system;
+            var vp_store = ctx.ecs.viewport_components;
+
+            if (camera_system.active_camera_eid) |main_cam| {
+                if (vp_store.get(main_cam)) |main_entry| {
+                    const mvp = main_entry.vp;
+                    if (mvp.enabled) {
+                        imgui.igTextColored(.{ .x = 0, .y = 0.8, .z = 1, .w = 1 }, "Path Planning View: %s", mvp.name.ptr);
+
+                        // Display toolbar for path operations
+                        if (imgui.igButton("Clear Path", .{ .x = 80, .y = 0 })) {
+                            // TODO: Clear current path
+                        }
+                        imgui.igSameLine(0, 10);
+                        if (imgui.igButton("Load Path", .{ .x = 80, .y = 0 })) {
+                            // TODO: Load path from file
+                        }
+                        imgui.igSameLine(0, 10);
+                        if (imgui.igButton("Save Path", .{ .x = 80, .y = 0 })) {
+                            // TODO: Save path to file
+                        }
+                        imgui.igSameLine(0, 10);
+                        if (imgui.igButton("Execute Path", .{ .x = 100, .y = 0 })) {
+                            // TODO: Execute the planned path
+                        }
+
+                        imgui.igSeparator();
+
+                        // Keep aspect ratio for viewport
+                        const tex_w: f32 = @floatFromInt(mvp.fbo.width);
+                        const tex_h: f32 = @floatFromInt(mvp.fbo.height);
+                        const aspect = tex_w / tex_h;
+
+                        var region: imgui.ImVec2 = undefined;
+                        imgui.igGetContentRegionAvail(&region);
+
+                        var img_w = region.x;
+                        var img_h = img_w / aspect;
+                        if (img_h > region.y - 100) { // Leave space for toolbar and text
+                            img_h = region.y - 100;
+                            img_w = img_h * aspect;
+                        }
+                        if (img_w < region.x)
+                            imgui.igSetCursorPosX(imgui.igGetCursorPosX() + (region.x - img_w) * 0.5);
+
+                        // Get the position of the image before drawing it
+                        var image_pos: imgui.ImVec2 = undefined;
+                        imgui.igGetCursorScreenPos(&image_pos);
+
+                        const tex_id: imgui.ImTextureID = @intCast(mvp.fbo.texture);
+                        imgui.igImage(tex_id, .{ .x = img_w, .y = img_h }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1, .z = 1, .w = 1 }, .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1 });
+
+                        // Check for mouse clicks on the viewport to add waypoints
+                        if (imgui.igIsItemClicked(imgui.ImGuiMouseButton_Left)) {
+                            // TODO: Add waypoint at clicked position
+                            var mouse_pos: imgui.ImVec2 = undefined;
+                            imgui.igGetMousePos(&mouse_pos);
+                            const rel_x = (mouse_pos.x - image_pos.x) / img_w;
+                            const rel_y = (mouse_pos.y - image_pos.y) / img_h;
+                            std.debug.print("Path waypoint click at: {d:.2}, {d:.2}\n", .{ rel_x, rel_y });
+                        }
+
+                        if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
+                            _ = imgui.igBeginTooltip();
+                            imgui.igText("Left-click to add waypoints");
+                            imgui.igText("Right-click on waypoint to edit/delete");
+                            imgui.igEndTooltip();
+                        }
+                    }
+                }
+            } else {
+                imgui.igTextColored(.{ .x = 1, .y = 0, .z = 0, .w = 1 }, "No camera set for path planning. Please select a camera");
+            }
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+
+            // Remember the user-chosen sidebar width for next frame
+            self.paths_sidebar_width = imgui.igGetColumnWidth(0);
+
+            imgui.igEndTable();
+        } // end table
     }
 
     // The ViewportManager function as a widget (not a window)
@@ -1091,7 +1267,7 @@ pub const EntitiesWindow = struct {
             // If any child is hidden, we show unchecked
             is_visible = areAllChildrenVisible(ecs, eid);
         }
-        
+
         if (imgui.igCheckbox("Visible", &is_visible)) {
             // Toggle visibility for this entity and recursively for children
             toggleRenderableRecursive(ecs, eid, is_visible);
@@ -1114,7 +1290,7 @@ pub const EntitiesWindow = struct {
             }
         }
     }
-    
+
     fn areAllChildrenVisible(ecs: *ECSManager, eid: Core.EntityID) bool {
         // Check if ALL children with renderables are visible
         // Returns true if no renderables found or all are visible
@@ -1190,8 +1366,8 @@ pub const EntitiesWindow = struct {
         if (!ecs.controller_components.has(eid)) return;
         if (imgui.igTreeNode_Str("Controller")) {
             const c = ecs.controller_components.get(eid).?;
-            imgui.igBulletText("move_speed: %.2f", c.move_speed);
-            imgui.igBulletText("# bindings: %d", c.key_bindings.items.len);
+            imgui.igBulletText("priority: %d", c.priority);
+            imgui.igBulletText("# bindings: %d", c.binding_count);
             imgui.igTreePop();
         }
     }

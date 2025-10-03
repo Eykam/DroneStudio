@@ -5,6 +5,7 @@ const SparseSet = @import("../SparseSet.zig").SparseSet;
 const PIDController = @import("../../flight/PIDController.zig");
 const IMUSensor = @import("IMUSensor.zig");
 const PhysicsThread = @import("PhysicsThread.zig");
+const Controller = @import("Controller.zig");
 
 const Vec3 = Math.Vec3;
 const Quaternion = Math.Quaternion;
@@ -107,7 +108,7 @@ pub const InputState = struct {
 /// Input processing parameters
 pub const InputParams = struct {
     // Input sensitivity
-    throttle_sensitivity: f32 = 50.0, // N/s (thrust change rate)
+    throttle_sensitivity: f32 = 200.0, // N/s (thrust change rate)
     yaw_sensitivity: f32 = 3.14, // rad/s per key press
     roll_pitch_sensitivity: f32 = 0.1, // rad/s per pixel of mouse movement
 
@@ -419,13 +420,13 @@ pub const ControlSetpoints = union(ControllerType) {
 };
 
 pub const ControllerType = enum { Rate, Attitude };
-pub const Controller = union(ControllerType) {
+pub const DroneController = union(ControllerType) {
     Rate: RateController,
     Attitude: AttitudeController,
 
     /// Process input and generate control setpoints
     pub fn processInput(
-        self: *Controller,
+        self: *@This(),
         input_state: InputState,
         params: InputParams,
         dt: f32,
@@ -438,7 +439,7 @@ pub const Controller = union(ControllerType) {
 
     /// Update the controller based on its type
     pub fn update(
-        self: *Controller,
+        self: *@This(),
         setpoints: ControlSetpoints,
         q_des: Quaternion, // desired body attitude (Flight)
         q_act: Quaternion, // current attitude               "
@@ -457,7 +458,7 @@ pub const Controller = union(ControllerType) {
         }
     }
 
-    pub fn reset(self: *Controller) void {
+    pub fn reset(self: *@This()) void {
         switch (self.*) {
             .Rate => |*rate_ctrl| rate_ctrl.reset(),
             .Attitude => |*att_ctrl| att_ctrl.reset(),
@@ -502,7 +503,7 @@ pub const FlightControllerComponent = struct {
     coord_adapter: ?CoordinateAdapter,
 
     armed: bool = false,
-    controller: Controller,
+    controller: DroneController,
     controller_type: ControllerType,
     setpoints: ControlSetpoints,
     motor_commands: MotorCommands = MotorCommands{},
@@ -525,8 +526,8 @@ pub const FlightControllerComponent = struct {
         const integrator_limit = torque_limit * 0.5; // 50% for integral windup
 
         const controller = switch (controller_type) {
-            .Rate => Controller{ .Rate = RateController.init(integrator_limit, torque_limit) },
-            .Attitude => Controller{ .Attitude = AttitudeController.init(integrator_limit, torque_limit) },
+            .Rate => DroneController{ .Rate = RateController.init(integrator_limit, torque_limit) },
+            .Attitude => DroneController{ .Attitude = AttitudeController.init(integrator_limit, torque_limit) },
         };
 
         return Self{
@@ -702,14 +703,14 @@ pub const FlightControllerComponent = struct {
     /// Apply motor saturation limits and redistribute if needed
     fn applySaturation(self: *Self) void {
         const max_motor_thrust = self.params.motor_max_thrust;
-        
+
         // Calculate total thrust and dynamic minimum
-        const total_thrust = self.motor_commands.motor_thrusts[0] + 
-                            self.motor_commands.motor_thrusts[1] + 
-                            self.motor_commands.motor_thrusts[2] + 
-                            self.motor_commands.motor_thrusts[3];
+        const total_thrust = self.motor_commands.motor_thrusts[0] +
+            self.motor_commands.motor_thrusts[1] +
+            self.motor_commands.motor_thrusts[2] +
+            self.motor_commands.motor_thrusts[3];
         const avg_thrust = total_thrust / 4.0;
-        
+
         // Dynamic minimum: 10% of average thrust, but never below 0.1N
         const min_motor_thrust = @max(0.1, avg_thrust * 0.1);
 
@@ -732,10 +733,10 @@ pub const FlightControllerComponent = struct {
         var max_saturated: u32 = 0;
 
         // Calculate dynamic minimum (same logic as applySaturation)
-        const total_thrust = self.motor_commands.motor_thrusts[0] + 
-                            self.motor_commands.motor_thrusts[1] + 
-                            self.motor_commands.motor_thrusts[2] + 
-                            self.motor_commands.motor_thrusts[3];
+        const total_thrust = self.motor_commands.motor_thrusts[0] +
+            self.motor_commands.motor_thrusts[1] +
+            self.motor_commands.motor_thrusts[2] +
+            self.motor_commands.motor_thrusts[3];
         const avg_thrust = total_thrust / 4.0;
         const min_motor_thrust = @max(0.1, avg_thrust * 0.1);
 
@@ -1071,6 +1072,156 @@ pub const FlightControllerSystem = struct {
 
         if (!physics.sendCommand(torque_command)) {
             std.debug.print("Failed to send torque command for entity {d}\n", .{entity_id.id});
+        }
+    }
+};
+
+// Drone input controller for handling user input to the drone
+pub const DroneInputController = struct {
+    const ECSManager = @import("../ECSManager.zig");
+    pub fn createComponent() Controller.ControllerComponent {
+        var controller = Controller.ControllerComponent.init(2, "Drone", .Entity);
+
+        // 6 - Toggle arm/disarm
+        controller.addBinding(.{
+            .key = .@"6",
+            .handler = handleArmToggle,
+            .context = null,
+        }) catch unreachable;
+
+        // WASD - Throttle and yaw control
+        controller.addBinding(.{
+            .key = .W,
+            .handler = handleThrottleUp,
+            .context = null,
+        }) catch unreachable;
+
+        controller.addBinding(.{
+            .key = .S,
+            .handler = handleThrottleDown,
+            .context = null,
+        }) catch unreachable;
+
+        controller.addBinding(.{
+            .key = .A,
+            .handler = handleYawLeft,
+            .context = null,
+        }) catch unreachable;
+
+        controller.addBinding(.{
+            .key = .D,
+            .handler = handleYawRight,
+            .context = null,
+        }) catch unreachable;
+
+        // Mouse handler for pitch/roll control
+        controller.setMouseHandler(handleMouseControl, null);
+
+        return controller;
+    }
+
+    fn handleArmToggle(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        if (event.action != .Press) return;
+
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const selected_entity = ecs.control_system.selected_entity orelse return;
+
+        // Get flight controller component for this entity
+        if (ecs.flight_controller_components.get(selected_entity)) |flight_controller| {
+            flight_controller.armed = !flight_controller.armed;
+            std.debug.print("Drone {}: {s}\n", .{ selected_entity.id, if (flight_controller.armed) "ARMED" else "DISARMED" });
+        }
+        event.consume();
+    }
+
+    fn handleThrottleUp(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const selected_entity = ecs.control_system.selected_entity orelse return;
+
+        sendFlightInput(ecs, selected_entity, .throttle_up, event.action != .Release, event.dt);
+        event.consume();
+    }
+
+    fn handleThrottleDown(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const selected_entity = ecs.control_system.selected_entity orelse return;
+
+        sendFlightInput(ecs, selected_entity, .throttle_down, event.action != .Release, event.dt);
+        event.consume();
+    }
+
+    fn handleYawLeft(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const selected_entity = ecs.control_system.selected_entity orelse return;
+
+        sendFlightInput(ecs, selected_entity, .yaw_left, event.action != .Release, event.dt);
+        event.consume();
+    }
+
+    fn handleYawRight(event: *Controller.InputEvent, context: ?*anyopaque) void {
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const selected_entity = ecs.control_system.selected_entity orelse return;
+
+        sendFlightInput(ecs, selected_entity, .yaw_right, event.action != .Release, event.dt);
+        event.consume();
+    }
+
+    fn handleMouseControl(event: *Controller.MouseEvent, context: ?*anyopaque) void {
+        const ecs = @as(*ECSManager, @ptrCast(@alignCast(context.?)));
+        const selected_entity = ecs.control_system.selected_entity orelse return;
+
+        // Only process mouse movement for flight input (not clicks)
+        if (event.button != null) return;
+
+        sendMouseInput(ecs, selected_entity, event.dx, event.dy, event.dt);
+        event.consume();
+    }
+
+    fn sendFlightInput(
+        ecs: *ECSManager,
+        entity_id: Core.EntityID,
+        input_type: enum {
+            throttle_up,
+            throttle_down,
+            yaw_left,
+            yaw_right,
+        },
+        pressed: bool,
+        dt: f32,
+    ) void {
+        if (ecs.flight_controller_components.get(entity_id)) |flight_controller| {
+            var input_state = InputState{};
+
+            // Set the specific input
+            switch (input_type) {
+                .throttle_up => input_state.throttle_up = pressed,
+                .throttle_down => input_state.throttle_down = pressed,
+                .yaw_left => input_state.yaw_left = pressed,
+                .yaw_right => input_state.yaw_right = pressed,
+            }
+
+            // Process input and generate setpoints
+            const params = InputParams{};
+            const setpoints = flight_controller.controller.processInput(input_state, params, dt);
+
+            // Apply setpoints to flight controller
+            flight_controller.setControlSetpoints(setpoints);
+        }
+    }
+
+    fn sendMouseInput(ecs: *ECSManager, entity_id: Core.EntityID, dx: f32, dy: f32, dt: f32) void {
+        if (ecs.flight_controller_components.get(entity_id)) |flight_controller| {
+            const input_state = InputState{
+                .mouse_dx = dx,
+                .mouse_dy = dy,
+            };
+
+            // Process mouse input
+            const params = InputParams{};
+            const setpoints = flight_controller.controller.processInput(input_state, params, dt);
+
+            // Apply setpoints to flight controller
+            flight_controller.setControlSetpoints(setpoints);
         }
     }
 };
