@@ -51,10 +51,10 @@ pub fn main() !void {
     const scene_height = 1080;
 
     _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
+    _ = try HintzeHall.spawn(alloc, ECS);
     // _ = try Box.spawn(alloc, ECS, .ConvexHull, .{ 0, 10, 0 }, .{ 1, 1, 1 }, 1.0, scene_width, scene_height);
     // _ = try Robot.spawn(alloc, ECS, .{ .position = .{ 0, 10, 0 } }, scene_width, scene_height);
     // _ = try Ground.spawn(alloc, ECS, .{});
-    _ = HintzeHall.spawn(alloc, ECS);
     _ = FreeCamera.spawn(alloc, ECS, scene_width, scene_height);
 
     // Position the hall

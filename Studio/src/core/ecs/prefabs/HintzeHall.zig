@@ -8,7 +8,7 @@ const Collisions = @import("../components/Collisions.zig");
 pub fn spawn(
     alloc: std.mem.Allocator,
     ecs: *ECSManager,
-) Core.EntityID {
+) !Core.EntityID {
     const resource_manager = ecs.world.resource_manager;
 
     // Load the GLTF model

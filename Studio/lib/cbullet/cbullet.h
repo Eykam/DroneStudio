@@ -397,6 +397,8 @@ void cbtBodySetCcdMotionThreshold(CbtBodyHandle body_handle, float threshold);
 
 void cbtBodySetCollisionFlags(CbtBodyHandle body_handle, int flags);
 
+void cbtBodyGetAabb(CbtBodyHandle body_handle, CbtVector3 aabb_min, CbtVector3 aabb_max);
+
 //
 // Constraints
 //

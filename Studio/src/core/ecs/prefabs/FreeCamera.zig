@@ -194,7 +194,7 @@ pub fn generate(
     desc: struct { pos: [3]f32 = .{ 0, 1, 5 }, fov: f32 = 90, aspect: f32 = 16.0 / 9.0 },
     width: u32,
     height: u32,
-) !struct {
+) struct {
     tf: Transform.TransformComponent,
     cam: Camera.CameraComponent,
     ctrl: Controller.ControllerComponent,
@@ -210,12 +210,15 @@ pub fn generate(
         .active = true,
     };
 
-    var vp = try Viewport.ViewportComponent.init(
+    var vp = Viewport.ViewportComponent.init(
         alloc,
         "free_cam",
         width,
         height,
-    );
+    ) catch |err| {
+        std.debug.print("Failed to create Viewport => {}\n", .{err});
+        @panic("Failed to create Viewport component for Freecamera");
+    };
     vp.resizable = true;
 
     const ctrl = FreeCameraController.createComponent();

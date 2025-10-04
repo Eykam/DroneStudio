@@ -12,6 +12,7 @@ const Recorder = @import("ecs/components/Recorder.zig");
 const IMUSensor = @import("ecs/components/IMUSensor.zig");
 const FlightController = @import("ecs/components/FlightController.zig");
 const FlightInput = @import("ecs/components/FlightInput.zig");
+const PathSystem = @import("ecs/components/PathSystem.zig");
 
 // const Vision = @import("Vision.zig");
 // const Drone = @import("Drone.zig");
@@ -33,6 +34,61 @@ const UIContext = struct {
     // scene: *Scene,
     // StereoVO: *StereoVO,
     // pose_handler: *Sensors.PoseHandler,
+};
+
+const PathGenUIParams = struct {
+    // UI-only params (not part of CreatePathParams)
+    use_random_start: bool = true,
+    use_random_seed: bool = true,
+    seed_counter: u32 = 0,
+    num_paths: i32 = 1,
+
+    // Path creation params (UI controls for CreatePathParams)
+    seed: i32 = 42,
+    L_min: f32 = 50.0,
+    L_max: f32 = 100.0,
+    s_min: f32 = 3.0,
+    s_max: f32 = 8.0,
+    max_pts: i32 = 50,
+    z_lo: f32 = 2.0,
+    z_hi: f32 = 20.0,
+    R_min: f32 = 5.0,
+    v_max: f32 = 10.0,
+    a_max: f32 = 5.0,
+    drone_radius: f32 = 0.3,
+
+    fn toCreatePathParams(self: *const PathGenUIParams, bounds: PathSystem.AABB3) PathSystem.CreatePathParams {
+        const actual_seed: u64 = if (self.use_random_seed) blk: {
+            const timestamp = @as(u32, @truncate(@as(u64, @intCast(std.time.milliTimestamp()))));
+            break :blk timestamp +% self.seed_counter;
+        } else @intCast(@as(u32, @bitCast(self.seed)));
+
+        return .{
+            .bounds = bounds,
+            .L_min = self.L_min,
+            .L_max = self.L_max,
+            .s_min = self.s_min,
+            .s_max = self.s_max,
+            .max_pts = @intCast(self.max_pts),
+            .z_lo = self.z_lo,
+            .z_hi = self.z_hi,
+            .dz_max = 5.0,
+            .R_min = self.R_min,
+            .max_turn_deg = 50.0,
+            .yaw_bias_w = 0.5,
+            .yaw_noise_deg = 10.0,
+            .drone_radius = self.drone_radius,
+            .sweep_margin = 0.1,
+            .tension_base = 0.9,
+            .flatness_eps = 0.1,
+            .v_max = self.v_max,
+            .a_max = self.a_max,
+            .j_max = 20.0,
+            .seed = actual_seed,
+            .max_local_retries = 100,
+            .backtrack_points = 3,
+        };
+    }
 };
 
 const CameraMetadataOverlay = struct {
@@ -662,16 +718,113 @@ pub const RootWindow = struct {
 
             imgui.igSeparator();
 
-            if (imgui.igCollapsingHeader_TreeNodeFlags("Path Settings", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
-                const S = struct {
-                    var path_smooth: f32 = 0.5;
-                    var path_height: f32 = 10.0;
-                    var path_speed: f32 = 5.0;
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Path Generation", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                const PathGen = struct {
+                    var params: PathGenUIParams = .{};
                 };
 
-                _ = imgui.igSliderFloat("Smoothing", &S.path_smooth, 0.0, 1.0, "%.2f", imgui.ImGuiSliderFlags_None);
-                _ = imgui.igSliderFloat("Default Height", &S.path_height, 1.0, 100.0, "%.1f m", imgui.ImGuiSliderFlags_None);
-                _ = imgui.igSliderFloat("Default Speed", &S.path_speed, 0.5, 20.0, "%.1f m/s", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igInputInt("Num Paths", &PathGen.params.num_paths, 1, 10, imgui.ImGuiInputTextFlags_None);
+                PathGen.params.num_paths = @max(1, PathGen.params.num_paths); // Ensure at least 1
+
+                _ = imgui.igCheckbox("Random Start Point", &PathGen.params.use_random_start);
+                _ = imgui.igCheckbox("Random Seed (non-deterministic)", &PathGen.params.use_random_seed);
+                imgui.igSeparator();
+
+                _ = imgui.igSliderFloat("Min Length", &PathGen.params.L_min, 10.0, 200.0, "%.0f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Max Length", &PathGen.params.L_max, 20.0, 500.0, "%.0f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Min Step", &PathGen.params.s_min, 1.0, 10.0, "%.1f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Max Step", &PathGen.params.s_max, 2.0, 20.0, "%.1f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderInt("Max Points", &PathGen.params.max_pts, 10, 200, "%d", imgui.ImGuiSliderFlags_None);
+
+                imgui.igSeparator();
+                _ = imgui.igSliderFloat("Min Height", &PathGen.params.z_lo, 0.5, 50.0, "%.1f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Max Height", &PathGen.params.z_hi, 1.0, 100.0, "%.1f m", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Min Turn Radius", &PathGen.params.R_min, 1.0, 20.0, "%.1f m", imgui.ImGuiSliderFlags_None);
+
+                imgui.igSeparator();
+                _ = imgui.igSliderFloat("Max Velocity", &PathGen.params.v_max, 1.0, 30.0, "%.1f m/s", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Max Accel", &PathGen.params.a_max, 1.0, 15.0, "%.1f m/s²", imgui.ImGuiSliderFlags_None);
+                _ = imgui.igSliderFloat("Drone Radius", &PathGen.params.drone_radius, 0.1, 2.0, "%.2f m", imgui.ImGuiSliderFlags_None);
+
+                if (!PathGen.params.use_random_seed) {
+                    _ = imgui.igSliderInt("Seed", &PathGen.params.seed, 0, 10000, "%d", imgui.ImGuiSliderFlags_None);
+                }
+
+                imgui.igSeparator();
+                if (imgui.igButton("Generate Paths", .{ .x = -1, .y = 30 })) {
+                    self.generateMultiplePaths(ctx, &PathGen.params) catch |err| {
+                        std.debug.print("Failed to generate paths: {}\n", .{err});
+                    };
+                }
+            }
+
+            imgui.igSeparator();
+
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Generated Paths", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (ctx.ecs.path_system) |path_system| {
+                    const paths = path_system.getPaths();
+
+                    if (paths.len == 0) {
+                        imgui.igTextDisabled("No paths generated yet");
+                    } else {
+                        imgui.igText("Total paths: %d", paths.len);
+                        imgui.igSeparator();
+
+                        var buf: [256]u8 = undefined;
+                        var buf2: [256]u8 = undefined;
+                        for (paths, 0..) |*path, i| {
+                            const header_label = std.fmt.bufPrintZ(&buf, "Path {d}##path_{d}", .{ i, i }) catch continue;
+
+                            // Visibility toggle button
+                            const eye_label = std.fmt.bufPrintZ(&buf2, "{s}##vis_{d}", .{ if (path.visible) "\xef\x81\xae" else "\xef\x81\xb0", i }) catch continue; // eye/eye-slash icons
+                            if (imgui.igButton(eye_label.ptr, .{ .x = 30, .y = 0 })) {
+                                const new_state = !path.visible;
+                                // Hide all paths first
+                                for (paths) |*p| {
+                                    p.setVisible(ctx.ecs, false);
+                                }
+                                // Then show only this one if toggling on
+                                if (new_state) {
+                                    path.setVisible(ctx.ecs, true);
+                                }
+                            }
+                            imgui.igSameLine(0, 5);
+
+                            if (imgui.igCollapsingHeader_TreeNodeFlags(header_label.ptr, imgui.ImGuiTreeNodeFlags_None)) {
+                                imgui.igIndent(10.0);
+                                imgui.igText("Waypoints: %d", path.waypoints.len);
+                                imgui.igText("Samples: %d", path.samples.len);
+                                imgui.igText("Length: %.2f m", path.length());
+                                imgui.igText("Duration: %.2f s", path.duration());
+
+                                if (path.velocities.len > 0) {
+                                    var v_min: f32 = std.math.floatMax(f32);
+                                    var v_max: f32 = -std.math.floatMax(f32);
+                                    for (path.velocities) |v| {
+                                        v_min = @min(v_min, v);
+                                        v_max = @max(v_max, v);
+                                    }
+                                    imgui.igText("Velocity: %.2f - %.2f m/s", v_min, v_max);
+                                }
+
+                                const delete_label = std.fmt.bufPrintZ(&buf, "Delete##delete_{d}", .{i}) catch continue;
+
+                                if (imgui.igButton(delete_label.ptr, .{ .x = -1, .y = 0 })) {
+                                    std.debug.print("TODO: Delete path {d}\n", .{i});
+                                }
+
+                                imgui.igUnindent(10.0);
+                            }
+                        }
+
+                        imgui.igSeparator();
+                        if (imgui.igButton("Clear All Paths", .{ .x = -1, .y = 0 })) {
+                            path_system.clearPaths();
+                        }
+                    }
+                } else {
+                    imgui.igTextDisabled("PathSystem not initialized");
+                }
             }
 
             imgui.igSeparator();
@@ -751,7 +904,14 @@ pub const RootWindow = struct {
                         imgui.igGetCursorScreenPos(&image_pos);
 
                         const tex_id: imgui.ImTextureID = @intCast(mvp.fbo.texture);
-                        imgui.igImage(tex_id, .{ .x = img_w, .y = img_h }, .{ .x = 0, .y = 1 }, .{ .x = 1, .y = 0 }, .{ .x = 1, .y = 1, .z = 1, .w = 1 }, .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1 });
+                        imgui.igImage(
+                            tex_id,
+                            .{ .x = img_w, .y = img_h },
+                            .{ .x = 0, .y = 1 },
+                            .{ .x = 1, .y = 0 },
+                            .{ .x = 1, .y = 1, .z = 1, .w = 1 },
+                            .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1 },
+                        );
 
                         // Check for mouse clicks on the viewport to add waypoints
                         if (imgui.igIsItemClicked(imgui.ImGuiMouseButton_Left)) {
@@ -783,6 +943,101 @@ pub const RootWindow = struct {
 
             imgui.igEndTable();
         } // end table
+    }
+
+    fn generatePath(self: *Self, ctx: *const UIContext, ui_params: *const PathGenUIParams) !void {
+        _ = self;
+
+        const path_system = ctx.ecs.path_system orelse {
+            std.debug.print("PathSystem not initialized\n", .{});
+            return error.PathSystemNotInitialized;
+        };
+
+        // Get bounds from the scene
+        const bounds = path_system.getSceneBounds() catch PathSystem.AABB3{
+            .min = Vec3.init(-50, -50, 0),
+            .max = Vec3.init(50, 50, 30),
+        };
+
+        const params = ui_params.toCreatePathParams(bounds);
+
+        const empty_anchors: []const PathSystem.Waypoint = &[_]PathSystem.Waypoint{};
+        const anchors = if (ui_params.use_random_start) null else empty_anchors;
+
+        const result = try path_system.createPath(params, anchors);
+
+        std.debug.print("Path generated successfully!\n", .{});
+        std.debug.print("  Waypoints: {d}\n", .{result.waypoints.len});
+        std.debug.print("  Samples: {d}\n", .{result.samples.len});
+        std.debug.print("  Length: {d:.2} m\n", .{result.length()});
+        std.debug.print("  Duration: {d:.2} s\n", .{result.duration()});
+    }
+
+    fn generateMultiplePaths(self: *Self, ctx: *const UIContext, ui_params: *PathGenUIParams) !void {
+        const num_paths: usize = @intCast(@max(1, ui_params.num_paths));
+        const max_consecutive_failures: usize = 500;
+        var consecutive_failures: usize = 0;
+        var successful_paths: usize = 0;
+        var total_attempts: usize = 0;
+
+        while (successful_paths < num_paths and consecutive_failures < max_consecutive_failures) {
+            total_attempts += 1;
+
+            // Increment seed_counter for each attempt when using random seed
+            if (ui_params.use_random_seed) {
+                ui_params.seed_counter +%= 1;
+            }
+
+            // Try to generate a path
+            self.generatePath(ctx, ui_params) catch |err| {
+                consecutive_failures += 1;
+                std.debug.print("Attempt {d} failed (consecutive failures: {d}): {}\n", .{ total_attempts, consecutive_failures, err });
+                continue;
+            };
+
+            // Success - reset consecutive failures
+            consecutive_failures = 0;
+            successful_paths += 1;
+            std.debug.print("Successfully generated path {d}/{d}\n", .{ successful_paths, num_paths });
+        }
+
+        if (successful_paths < num_paths) {
+            // Show error popup
+            std.debug.print("\n=== PATH GENERATION FAILED ===\n", .{});
+            std.debug.print("Only generated {d}/{d} paths after {d} total attempts\n", .{ successful_paths, num_paths, total_attempts });
+            std.debug.print("Stopped after {d} consecutive failures\n", .{consecutive_failures});
+            std.debug.print("The path generation parameters are too strict for this scene.\n", .{});
+            std.debug.print("Try adjusting:\n", .{});
+            std.debug.print("  - Increase Min/Max Step size\n", .{});
+            std.debug.print("  - Decrease Min Turn Radius\n", .{});
+            std.debug.print("  - Increase Drone Radius clearance\n", .{});
+            std.debug.print("  - Adjust Height bounds\n", .{});
+            std.debug.print("================================\n\n", .{});
+
+            // Open ImGui popup
+            imgui.igOpenPopup_Str("Path Generation Failed", imgui.ImGuiPopupFlags_None);
+        } else {
+            std.debug.print("Successfully generated all {d} paths in {d} total attempts!\n", .{ num_paths, total_attempts });
+        }
+
+        // Render the popup if it's open
+        if (imgui.igBeginPopupModal("Path Generation Failed", null, imgui.ImGuiWindowFlags_AlwaysAutoResize)) {
+            imgui.igText("Failed to generate %zu path(s) after %zu consecutive failures.", num_paths - successful_paths, consecutive_failures);
+            imgui.igText("Successfully generated: %zu/%zu paths", successful_paths, num_paths);
+            imgui.igText("The path generation parameters are too strict for this scene.");
+            imgui.igSeparator();
+            imgui.igText("Try adjusting:");
+            imgui.igBulletText("Increase Min/Max Step size");
+            imgui.igBulletText("Decrease Min Turn Radius");
+            imgui.igBulletText("Increase Drone Radius clearance");
+            imgui.igBulletText("Adjust Height bounds");
+            imgui.igSeparator();
+
+            if (imgui.igButton("OK", .{ .x = 120, .y = 0 })) {
+                imgui.igCloseCurrentPopup();
+            }
+            imgui.igEndPopup();
+        }
     }
 
     // The ViewportManager function as a widget (not a window)

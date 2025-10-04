@@ -106,7 +106,7 @@ pub fn generate(
     aspect_ratio: f32,
     far: f32,
     near: f32,
-) !struct { renderable: Renderable, tf: TransformComponent } {
+) struct { renderable: Renderable, tf: TransformComponent } {
     const self = Self{ .fov = fov, .aspect_ratio = aspect_ratio, .frustum_debug_far = far, .frustum_debug_near = near };
     const resources = self.create_frustum_visualization(alloc) catch |err| {
         std.debug.print("Failed to create frustum resourources => {}\n", .{err});

@@ -47,6 +47,7 @@ const CollisionSystem = Collisions.CollisionSystem;
 const SharedMemSystem = SharedMem.SharedMemSystem;
 const IMUSystem = IMUSensor.IMUSystem;
 const FlightControllerSystem = FlightController.FlightControllerSystem;
+const PathSystem = @import("components/PathSystem.zig");
 
 const Self = @This();
 
@@ -78,6 +79,7 @@ collision_system: CollisionSystem,
 shared_mem_system: SharedMemSystem,
 imu_system: IMUSystem,
 flight_controller_system: FlightControllerSystem,
+path_system: ?*PathSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const global_system = try GlobalsSystem.init(allocator, .{});
@@ -155,6 +157,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             allocator,
             &manager.flight_controller_components,
         ),
+        .path_system = null,
     };
 
     global_system.camera_system = &manager.camera_system;
@@ -172,6 +175,9 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         manager.flight_controller_system.setIMUSystem(&manager.imu_system);
         manager.flight_controller_system.setPhysicsThread(physics_thread);
         try manager.flight_controller_system.startControlThread();
+
+        // Initialize path system
+        manager.path_system = try PathSystem.init(allocator, manager);
     }
 
     return manager;
@@ -198,6 +204,11 @@ pub fn deinit(self: *Self) void {
     // Deinit flight controller and IMU systems to stop their threads
     self.flight_controller_system.deinit();
     self.imu_system.deinit();
+
+    // Deinit path system
+    if (self.path_system) |path_system| {
+        path_system.deinit();
+    }
 
     // Deinit collision system first to stop physics thread before cleaning up resources
     self.collision_system.deinit();

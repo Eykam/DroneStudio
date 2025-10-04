@@ -618,3 +618,18 @@ pub const SceneController = struct {
         std.debug.print("Reset requested!\n", .{});
     }
 };
+
+pub const PathController = struct {
+    pub fn createComponent() ControllerComponent {
+        var controller = ControllerComponent.init(2, "Paths", .Tab);
+
+        // V - Toggle viewport
+        controller.addBinding(.{
+            .key = .V,
+            .handler = SceneController.handleToggleViewport,
+            .context = null,
+        }) catch unreachable;
+
+        return controller;
+    }
+};

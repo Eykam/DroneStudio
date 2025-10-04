@@ -1075,6 +1075,20 @@ CbtShapeHandle cbtBodyGetShape(CbtBodyHandle body_handle) {
     return (CbtShapeHandle)body->getCollisionShape();
 }
 
+void cbtBodyGetAabb(CbtBodyHandle body_handle, CbtVector3 aabb_min, CbtVector3 aabb_max) {
+    assert(body_handle && cbtBodyIsCreated(body_handle));
+    assert(aabb_min && aabb_max);
+    auto body = (btRigidBody*)body_handle;
+    btVector3 bt_min, bt_max;
+    body->getAabb(bt_min, bt_max);
+    aabb_min[0] = bt_min.x();
+    aabb_min[1] = bt_min.y();
+    aabb_min[2] = bt_min.z();
+    aabb_max[0] = bt_max.x();
+    aabb_max[1] = bt_max.y();
+    aabb_max[2] = bt_max.z();
+}
+
 void cbtBodySetRestitution(CbtBodyHandle body_handle, float restitution) {
     assert(body_handle && cbtBodyIsCreated(body_handle));
     auto body = (btRigidBody*)body_handle;
