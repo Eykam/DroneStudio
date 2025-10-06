@@ -549,4 +549,19 @@ pub const RenderSystem = struct {
             std.debug.print("{any}\n", .{entry.component});
         }
     }
+
+    /// Set visibility for an entity and all its children recursively
+    pub fn setVisibility(self: *Self, entity_id: Core.EntityID, visible: bool) void {
+        // Set visibility for this entity if it has a renderable
+        if (self.renderables.get(entity_id)) |renderable_ptr| {
+            renderable_ptr.is_visible = visible;
+        }
+
+        // Set visibility for all children if this entity has a transform
+        if (self.transform_components.get(entity_id)) |transform| {
+            for (transform.children.items) |child_id| {
+                self.setVisibility(child_id, visible);
+            }
+        }
+    }
 };

@@ -6,42 +6,44 @@ const Mesh = @import("../../Mesh.zig");
 const Core = @import("../Core.zig");
 const Transform = @import("./Transform.zig");
 const Renderer = @import("./Renderer.zig");
+const PathPrefab = @import("../prefabs/Path.zig");
+const ECSManager = @import("../ECSManager.zig");
 
 const Vec3 = Math.Vec3;
 const Quaternion = Math.Quaternion;
+const Quat = Math.Quat;
 const glad = gl.glad;
 
-const ECSManager = @import("../ECSManager.zig");
-
 const Self = @This();
-
-fn drawPathLines(mesh: *Mesh) void {
-    glad.glLineWidth(3.0);
-    glad.glBindVertexArray(mesh.meta.VAO);
-    glad.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
-    glad.glLineWidth(1.0);
-}
-
-fn drawPathPoints(mesh: *Mesh) void {
-    glad.glPointSize(8.0);
-    glad.glBindVertexArray(mesh.meta.VAO);
-    glad.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
-    glad.glPointSize(1.0);
-}
 
 allocator: std.mem.Allocator,
 rng: std.Random.DefaultPrng,
 paths: std.ArrayList(PathResult),
 ecs: *ECSManager,
 path_counter: usize = 0,
+worker_collision_worlds: ?[]bt.CbtWorldHandle = null,
+worker_fleet: *WorkerFleet,
+
+// Async generation state
+generation_thread: ?std.Thread = null,
+is_generating: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+progress_current: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+progress_total: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+generation_failed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+pending_result: ?GenerateMultipleResult = null,
 
 pub fn init(allocator: std.mem.Allocator, ecs: *ECSManager) !*Self {
     const system = try allocator.create(Self);
+
+    const num_threads = try std.Thread.getCpuCount() - 1;
+    const fleet = try WorkerFleet.init(allocator, num_threads, pathGenWorker);
+
     system.* = .{
         .allocator = allocator,
         .rng = std.Random.DefaultPrng.init(0),
         .paths = std.ArrayList(PathResult).init(allocator),
         .ecs = ecs,
+        .worker_fleet = fleet,
     };
     return system;
 }
@@ -51,6 +53,15 @@ pub fn deinit(self: *Self) void {
         path.deinit();
     }
     self.paths.deinit();
+
+    // Free worker worlds array (worlds themselves are intentionally leaked - see generateMultiplePaths)
+    if (self.worker_collision_worlds) |worlds| {
+        self.allocator.free(worlds);
+    }
+
+    // Deinit worker fleet
+    self.worker_fleet.deinit();
+
     self.allocator.destroy(self);
 }
 
@@ -70,7 +81,7 @@ pub fn clearPaths(self: *Self) void {
     self.paths.clearRetainingCapacity();
 }
 
-pub fn getSceneBounds(self: *Self) !AABB3 {
+pub fn getSceneBounds(self: *Self, shrink_factor: f32) !AABB3 {
     const physics_thread = self.ecs.collision_system.physics_thread orelse return error.NoPhysicsWorld;
     const world = physics_thread.bullet_world;
 
@@ -106,9 +117,13 @@ pub fn getSceneBounds(self: *Self) !AABB3 {
         );
     }
 
+    // Apply shrink factor
+    const center = scene_min.add(scene_max).scale(0.5);
+    const half_size = scene_max.sub(scene_min).scale(0.5 * shrink_factor);
+
     return AABB3{
-        .min = scene_min,
-        .max = scene_max,
+        .min = center.sub(half_size),
+        .max = center.add(half_size),
     };
 }
 
@@ -133,6 +148,7 @@ pub const Waypoint = struct {
 
 pub const CreatePathParams = struct {
     bounds: AABB3,
+    bounds_shrink_factor: f32 = 0.75, // 1.0 = no shrink, 0.8 = 80% of original size
     // length & spacing
     L_min: f32,
     L_max: f32,
@@ -177,24 +193,15 @@ pub const PathResult = struct {
     // Quaternion orientation at each sample
     orientations: []Quaternion,
     // Visualization entities
-    path_entity: ?Core.EntityID,
-    waypoint_entity: ?Core.EntityID,
+    path_entities: ?PathPrefab.PathEntities,
     visible: bool = true,
     allocator: std.mem.Allocator,
 
     pub fn setVisible(self: *PathResult, ecs: *ECSManager, visible: bool) void {
         self.visible = visible;
 
-        if (self.path_entity) |entity_id| {
-            if (ecs.render_system.renderables.get(entity_id)) |renderable_ptr| {
-                renderable_ptr.is_visible = visible;
-            }
-        }
-
-        if (self.waypoint_entity) |entity_id| {
-            if (ecs.render_system.renderables.get(entity_id)) |renderable_ptr| {
-                renderable_ptr.is_visible = visible;
-            }
+        if (self.path_entities) |*entities| {
+            entities.setVisible(ecs, visible);
         }
     }
 
@@ -208,6 +215,11 @@ pub const PathResult = struct {
         self.allocator.free(self.t_cumsum);
         self.allocator.free(self.velocities);
         self.allocator.free(self.orientations);
+
+        // PathEntities no longer has allocated memory, so no deinit needed
+        if (self.path_entities) |*entities| {
+            entities.deinit();
+        }
     }
 
     pub fn evalPos(self: *const PathResult, t_norm: f32) Vec3 {
@@ -281,7 +293,364 @@ pub const PathResult = struct {
     }
 };
 
-pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint) !PathResult {
+pub const WorkerFleet = struct {
+    const Fleet = @This();
+
+    pub const WorkerFn = *const fn (*anyopaque, usize) void;
+
+    allocator: std.mem.Allocator,
+    threads: []std.Thread,
+    num_workers: usize,
+
+    // round control
+    mu: std.Thread.Mutex = .{},
+    cv: std.Thread.Condition = .{},
+    shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    epoch: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+
+    // set at startRound, read by workers
+    run_fn: WorkerFn,
+    round_ctx: *anyopaque = undefined,
+    wg: *std.Thread.WaitGroup = undefined,
+
+    pub fn init(allocator: std.mem.Allocator, num_workers: usize, run_fn: WorkerFn) !*Fleet {
+        std.debug.assert(num_workers > 0);
+
+        var self = try allocator.create(Fleet);
+        self.* = .{
+            .allocator = allocator,
+            .threads = try allocator.alloc(std.Thread, num_workers),
+            .num_workers = num_workers,
+            .run_fn = run_fn,
+        };
+
+        // spawn exactly num_workers OS threads once
+        for (0..num_workers) |wid| {
+            self.threads[wid] = try std.Thread.spawn(.{}, workerLoop, .{ self, wid });
+        }
+        return self;
+    }
+
+    pub fn deinit(self: *Fleet) void {
+        _ = self.shutdown.store(true, .release);
+        self.cv.broadcast(); // wake all
+        for (self.threads) |*t| t.join();
+        self.allocator.free(self.threads);
+        self.allocator.destroy(self);
+    }
+
+    /// Start a round: all workers will run run_fn(ctx, wid) once and then park again.
+    pub fn startRound(self: *Fleet, ctx: *anyopaque, wg: *std.Thread.WaitGroup) void {
+        // prepare wait group for num_workers finishes
+        wg.reset();
+        for (0..self.num_workers) |_| wg.start();
+
+        self.mu.lock();
+        self.round_ctx = ctx;
+        self.wg = wg;
+        _ = self.epoch.fetchAdd(1, .release); // signal a new round
+        self.cv.broadcast();
+        self.mu.unlock();
+    }
+
+    fn workerLoop(self: *Fleet, wid: usize) void {
+        var last_seen_epoch: u64 = 0;
+
+        while (!self.shutdown.load(.acquire)) {
+            // Wait for a new round
+            self.mu.lock();
+            while (!self.shutdown.load(.acquire)) {
+                const e = self.epoch.load(.acquire);
+                if (e != last_seen_epoch) {
+                    last_seen_epoch = e;
+                    break;
+                }
+                self.cv.wait(&self.mu);
+            }
+            const run_fn = self.run_fn;
+            const ctx = self.round_ctx;
+            const wg = self.wg;
+            self.mu.unlock();
+
+            if (self.shutdown.load(.acquire)) break;
+
+            // Run the user function once for this round
+            run_fn(ctx, wid);
+
+            // Signal this worker finished the round
+            wg.finish();
+        }
+    }
+};
+
+pub const GenerateMultipleResult = struct {
+    successful: usize,
+    total_attempts: usize,
+    failed: bool,
+    results: []PathResult,
+};
+
+const PathGenSharedState = struct {
+    results: []PathResult,
+    next_slot: std.atomic.Value(usize),
+    consecutive_failures: std.atomic.Value(usize),
+    total_attempts: std.atomic.Value(usize),
+    params: CreatePathParams,
+    use_random_start: bool,
+    use_random_seed: bool,
+    seed_base: u64,
+    max_consecutive: usize,
+    path_system: *Self,
+    worker_allocator: std.mem.Allocator,
+    worker_worlds: []bt.CbtWorldHandle,
+};
+
+fn pathGenWorker(ctx: *anyopaque, worker_id: usize) void {
+    const state: *PathGenSharedState = @ptrCast(@alignCast(ctx));
+
+    const world = state.worker_worlds[worker_id];
+
+    while (true) {
+        // Check if we're done or hit max consecutive failures
+        const current_slot = state.next_slot.load(.acquire);
+        const consec_fails = state.consecutive_failures.load(.acquire);
+
+        if (current_slot >= state.results.len or consec_fails >= state.max_consecutive) {
+            return;
+        }
+
+        const attempt = state.total_attempts.fetchAdd(1, .monotonic);
+
+        // Compute seed for this attempt
+        var params = state.params;
+        if (state.use_random_seed) {
+            const timestamp = @as(u64, @intCast(std.time.milliTimestamp()));
+            params.seed = timestamp +% attempt;
+        } else {
+            params.seed = state.seed_base +% attempt;
+        }
+
+        // Try to generate a path
+        const empty_anchors: []const Waypoint = &[_]Waypoint{};
+        const anchors = if (state.use_random_start) null else empty_anchors;
+        var result = state.path_system.createPath(
+            params,
+            anchors,
+            world,
+        ) catch {
+            _ = state.consecutive_failures.fetchAdd(1, .monotonic);
+            continue;
+        };
+
+        // Claim a slot
+        const slot = state.next_slot.fetchAdd(1, .monotonic);
+        if (slot < state.results.len) {
+            state.results[slot] = result;
+            _ = state.consecutive_failures.store(0, .release); // Reset consecutive failures
+
+            // Update progress
+            _ = state.path_system.progress_current.store(slot + 1, .release);
+
+            std.debug.print("Successfully generated path {d}/{d}\n", .{ slot + 1, state.results.len });
+        } else {
+            // Buffer full, clean up this result
+            result.deinit();
+            return;
+        }
+    }
+}
+
+pub fn generateMultiplePaths(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    num_paths: usize,
+    base_params: CreatePathParams,
+    use_random_start: bool,
+    use_random_seed: bool,
+    seed_base: u64,
+) !GenerateMultipleResult {
+    const max_consecutive_failures: usize = 1000;
+
+    // Allocate results buffer
+    const results = try allocator.alloc(PathResult, num_paths);
+
+    // Lazy initialize worker collision worlds (once per PathSystem lifetime)
+    if (self.worker_collision_worlds == null) {
+        const physics_thread = self.ecs.collision_system.physics_thread orelse return error.NoPhysicsWorld;
+        const source_world = physics_thread.bullet_world;
+
+        const num_workers = try std.Thread.getCpuCount() - 1;
+        const worker_worlds = try allocator.alloc(bt.CbtWorldHandle, num_workers);
+
+        for (worker_worlds) |*world| {
+            world.* = try cloneCollisionWorld(source_world, allocator);
+        }
+
+        self.worker_collision_worlds = worker_worlds;
+    }
+
+    const worker_worlds = self.worker_collision_worlds.?;
+
+    var wait_group: std.Thread.WaitGroup = undefined;
+
+    var shared = PathGenSharedState{
+        .results = results,
+        .next_slot = std.atomic.Value(usize).init(0),
+        .consecutive_failures = std.atomic.Value(usize).init(0),
+        .total_attempts = std.atomic.Value(usize).init(0),
+        .params = base_params,
+        .use_random_start = use_random_start,
+        .use_random_seed = use_random_seed,
+        .seed_base = seed_base,
+        .max_consecutive = max_consecutive_failures,
+        .path_system = self,
+        .worker_allocator = allocator,
+        .worker_worlds = worker_worlds,
+    };
+
+    // Start a round with the worker fleet
+    self.worker_fleet.startRound(@ptrCast(&shared), &wait_group);
+    wait_group.wait();
+
+    const successful = shared.next_slot.load(.acquire);
+    const total = shared.total_attempts.load(.acquire);
+    const failed = successful < num_paths;
+
+    if (failed) {
+        // Clean up partial results
+        for (results[0..successful]) |*result| {
+            result.deinit();
+        }
+        allocator.free(results);
+        return error.PathGenerationFailed;
+    }
+
+    // Return results without visualization (will be done on main thread)
+    return GenerateMultipleResult{
+        .successful = successful,
+        .total_attempts = total,
+        .failed = failed,
+        .results = results,
+    };
+}
+
+const AsyncGenParams = struct {
+    path_system: *Self,
+    allocator: std.mem.Allocator,
+    num_paths: usize,
+    base_params: CreatePathParams,
+    use_random_start: bool,
+    use_random_seed: bool,
+    seed_base: u64,
+};
+
+fn asyncGenerationThread(params: AsyncGenParams) void {
+    const self = params.path_system;
+
+    // Reset progress
+    _ = self.progress_current.store(0, .release);
+    _ = self.progress_total.store(params.num_paths, .release);
+    _ = self.generation_failed.store(false, .release);
+
+    // Run generation
+    const result = self.generateMultiplePaths(
+        params.allocator,
+        params.num_paths,
+        params.base_params,
+        params.use_random_start,
+        params.use_random_seed,
+        params.seed_base,
+    ) catch {
+        _ = self.generation_failed.store(true, .release);
+        _ = self.is_generating.store(false, .release);
+        return;
+    };
+
+    // Store result (will be picked up by main thread)
+    self.pending_result = result;
+
+    // Mark complete
+    _ = self.is_generating.store(false, .release);
+}
+
+pub fn startAsyncGeneration(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    num_paths: usize,
+    base_params: CreatePathParams,
+    use_random_start: bool,
+    use_random_seed: bool,
+    seed_base: u64,
+) !void {
+    // Check if already generating
+    if (self.is_generating.load(.acquire)) {
+        return error.AlreadyGenerating;
+    }
+
+    // Join previous thread if exists
+    if (self.generation_thread) |thread| {
+        thread.join();
+        self.generation_thread = null;
+    }
+
+    // Mark as generating
+    _ = self.is_generating.store(true, .release);
+
+    // Spawn thread
+    const params = AsyncGenParams{
+        .path_system = self,
+        .allocator = allocator,
+        .num_paths = num_paths,
+        .base_params = base_params,
+        .use_random_start = use_random_start,
+        .use_random_seed = use_random_seed,
+        .seed_base = seed_base,
+    };
+
+    self.generation_thread = try std.Thread.spawn(.{}, asyncGenerationThread, .{params});
+}
+
+pub fn getGenerationProgress(self: *Self) struct { current: usize, total: usize, is_generating: bool, failed: bool } {
+    return .{
+        .current = self.progress_current.load(.acquire),
+        .total = self.progress_total.load(.acquire),
+        .is_generating = self.is_generating.load(.acquire),
+        .failed = self.generation_failed.load(.acquire),
+    };
+}
+
+pub fn finalizePendingPaths(self: *Self) !void {
+    if (self.pending_result) |result| {
+        defer self.pending_result = null;
+
+        // Visualize all paths on main thread using Path prefab
+        for (result.results) |*path_result| {
+            const path_entities = try PathPrefab.spawn(
+                self.allocator,
+                self.ecs,
+                path_result.waypoints,
+                path_result.samples,
+                path_result.velocities,
+                self.path_counter,
+                .{ 1.0, 1.0, 0.0 },
+            );
+
+            path_result.path_entities = path_entities;
+
+            // Hide all previous paths
+            for (self.paths.items) |*existing_path| {
+                existing_path.setVisible(self.ecs, false);
+            }
+
+            try self.paths.append(path_result.*);
+            self.path_counter += 1;
+        }
+
+        self.allocator.free(result.results);
+    }
+}
+
+pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint, collision_world: ?bt.CbtWorldHandle) !PathResult {
     self.rng = std.Random.DefaultPrng.init(p.seed);
 
     // Generate waypoints
@@ -292,7 +661,7 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint) 
         try waypoints.appendSlice(anchor_slice);
     } else {
         // Generate random starting waypoint
-        const start = try self.generateRandomWaypoint(p);
+        const start = try self.generateRandomWaypoint(p, collision_world);
         try waypoints.append(start);
     }
 
@@ -393,13 +762,13 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint) 
         }
 
         // Collision check (TODO: implement bullet sweep)
-        if (!try self.segmentCollisionFree(prev.p, candidate_pos, p.drone_radius, p.sweep_margin)) {
+        if (!try self.segmentCollisionFree(prev.p, candidate_pos, p.drone_radius, p.sweep_margin, collision_world)) {
             collision_fails += 1;
             continue;
         }
 
-        // Compute yaw
-        const motion_yaw = std.math.atan2(new_dir.y(), new_dir.x());
+        // Compute yaw (rotation around Y-axis in XZ plane for Y-up world)
+        const motion_yaw = std.math.atan2(new_dir.x(), new_dir.z());
         const noise = (self.rng.random().float(f32) * 2.0 - 1.0) * Math.radians(p.yaw_noise_deg);
         var new_yaw = motion_yaw * p.yaw_bias_w + noise;
 
@@ -421,19 +790,19 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint) 
         }
     }
 
-    std.debug.print("PathSystem: Generated {d} waypoints, total_length={d:.2}, L_min={d:.2}, attempts={d}/{d}\n", .{
-        waypoints.items.len,
-        total_length,
-        p.L_min,
-        attempts,
-        max_attempts,
-    });
-    std.debug.print("  Failure breakdown - bounds:{d}, radius:{d}, spacing:{d}, collision:{d}\n", .{
-        bounds_fails,
-        radius_fails,
-        spacing_fails,
-        collision_fails,
-    });
+    // std.debug.print("PathSystem: Generated {d} waypoints, total_length={d:.2}, L_min={d:.2}, attempts={d}/{d}\n", .{
+    //     waypoints.items.len,
+    //     total_length,
+    //     p.L_min,
+    //     attempts,
+    //     max_attempts,
+    // });
+    // std.debug.print("  Failure breakdown - bounds:{d}, radius:{d}, spacing:{d}, collision:{d}\n", .{
+    //     bounds_fails,
+    //     radius_fails,
+    //     spacing_fails,
+    //     collision_fails,
+    // });
 
     if (total_length < p.L_min) {
         return error.PathTooShort;
@@ -506,7 +875,7 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint) 
         &orientations,
     );
 
-    var path_result = PathResult{
+    const path_result = PathResult{
         .waypoints = try waypoints.toOwnedSlice(),
         .beziers = try beziers.toOwnedSlice(),
         .samples = try samples.toOwnedSlice(),
@@ -516,132 +885,118 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint) 
         .t_cumsum = try t_cumsum.toOwnedSlice(),
         .velocities = try velocities.toOwnedSlice(),
         .orientations = try orientations.toOwnedSlice(),
-        .path_entity = null,
-        .waypoint_entity = null,
+        .path_entities = null,
         .allocator = self.allocator,
     };
-
-    const entities = try self.visualizePath(&path_result, .{ 1.0, 1.0, 0.0 });
-    path_result.path_entity = entities.path;
-    path_result.waypoint_entity = entities.waypoints;
-
-    // Hide all previous paths
-    for (self.paths.items) |*existing_path| {
-        existing_path.setVisible(self.ecs, false);
-    }
-
-    try self.paths.append(path_result);
-    self.path_counter += 1;
-
-    std.debug.print("Stored path in buffer. Total paths: {d}\n", .{self.paths.items.len});
 
     return path_result;
 }
 
-pub fn visualizePath(
-    self: *Self,
-    result: *const PathResult,
-    waypoint_color: [3]f32,
-) !struct { path: Core.EntityID, waypoints: Core.EntityID } {
-    const ecs = self.ecs;
+// pub fn visualizePath(
+//     self: *Self,
+//     result: *const PathResult,
+//     waypoint_color: [3]f32,
+// ) !struct { path: Core.EntityID, waypoints: Core.EntityID } {
+//     const ecs = self.ecs;
 
-    // Find min/max velocities for color mapping
-    var v_min: f32 = std.math.floatMax(f32);
-    var v_max: f32 = -std.math.floatMax(f32);
-    for (result.velocities) |v| {
-        v_min = @min(v_min, v);
-        v_max = @max(v_max, v);
-    }
+//     // Find min/max velocities for color mapping
+//     var v_min: f32 = std.math.floatMax(f32);
+//     var v_max: f32 = -std.math.floatMax(f32);
+//     for (result.velocities) |v| {
+//         v_min = @min(v_min, v);
+//         v_max = @max(v_max, v);
+//     }
 
-    const v_range = v_max - v_min;
+//     const v_range = v_max - v_min;
 
-    // Create path line segments
-    var path_vertices = std.ArrayList(Mesh.Vertex).init(self.allocator);
-    defer path_vertices.deinit();
+//     // Create path line segments
+//     var path_vertices = std.ArrayList(Mesh.Vertex).init(self.allocator);
+//     defer path_vertices.deinit();
 
-    for (0..result.samples.len - 1) |i| {
-        const sample = result.samples[i];
-        const next_sample = result.samples[i + 1];
+//     for (0..result.samples.len - 1) |i| {
+//         const sample = result.samples[i];
+//         const next_sample = result.samples[i + 1];
 
-        const v = if (i < result.velocities.len) result.velocities[i] else result.velocities[result.velocities.len - 1];
-        const t = if (v_range > 1e-6) (v - v_min) / v_range else 0.0;
+//         const v = if (i < result.velocities.len) result.velocities[i] else result.velocities[result.velocities.len - 1];
+//         const t = if (v_range > 1e-6) (v - v_min) / v_range else 0.0;
 
-        const color = [3]f32{
-            t,
-            1.0 - t,
-            0.0,
-        };
+//         const color = [3]f32{
+//             t,
+//             1.0 - t,
+//             0.0,
+//         };
 
-        try path_vertices.append(.{
-            .position = [3]f32{ sample.x(), sample.y(), sample.z() },
-            .color = color,
-        });
-        try path_vertices.append(.{
-            .position = [3]f32{ next_sample.x(), next_sample.y(), next_sample.z() },
-            .color = color,
-        });
-    }
+//         try path_vertices.append(.{
+//             .position = [3]f32{ sample.x(), sample.y(), sample.z() },
+//             .color = color,
+//         });
+//         try path_vertices.append(.{
+//             .position = [3]f32{ next_sample.x(), next_sample.y(), next_sample.z() },
+//             .color = color,
+//         });
+//     }
 
-    const path_vertices_owned = try self.allocator.dupe(Mesh.Vertex, path_vertices.items);
-    const path_mesh = try Mesh.init(self.allocator, path_vertices_owned, null, drawPathLines);
-    path_mesh.drawType = Mesh.DrawType.lines.toGL();
+//     const path_vertices_owned = try self.allocator.dupe(Mesh.Vertex, path_vertices.items);
+//     const path_mesh = try Mesh.init(self.allocator, path_vertices_owned, null, drawPathLines);
+//     path_mesh.drawType = Mesh.DrawType.lines.toGL();
 
-    const path_mesh_name = try std.fmt.allocPrint(self.allocator, "path_lines_{d}", .{self.path_counter});
-    defer self.allocator.free(path_mesh_name);
-    const path_mesh_name_owned = try self.allocator.dupe(u8, path_mesh_name);
+//     const path_mesh_name = try std.fmt.allocPrint(self.allocator, "path_lines_{d}", .{self.path_counter});
+//     defer self.allocator.free(path_mesh_name);
+//     const path_mesh_name_owned = try self.allocator.dupe(u8, path_mesh_name);
 
-    try ecs.world.resource_manager.meshes.put(path_mesh_name_owned, .{
-        .mesh = path_mesh,
-        .instance_count = 0,
-    });
+//     try ecs.world.resource_manager.meshes.put(path_mesh_name_owned, .{
+//         .mesh = path_mesh,
+//         .instance_count = 0,
+//     });
 
-    const path_transform = Transform.TransformComponent.init(self.allocator);
-    const path_renderer = try Renderer.Renderable.init(self.allocator, path_mesh_name_owned);
+//     const path_transform = Transform.TransformComponent.init(self.allocator);
+//     const path_renderer = try Renderer.Renderable.init(self.allocator, path_mesh_name_owned);
 
-    const path_entity = try ecs.spawn(.{
-        path_transform,
-        path_renderer,
-    });
+//     const path_entity = try ecs.spawn(.{
+//         path_transform,
+//         path_renderer,
+//     });
 
-    // Create waypoint points
-    var waypoint_vertices = std.ArrayList(Mesh.Vertex).init(self.allocator);
-    defer waypoint_vertices.deinit();
+//     // Create waypoint points
+//     var waypoint_vertices = std.ArrayList(Mesh.Vertex).init(self.allocator);
+//     defer waypoint_vertices.deinit();
 
-    for (result.waypoints) |wp| {
-        try waypoint_vertices.append(.{
-            .position = [3]f32{ wp.p.x(), wp.p.y(), wp.p.z() },
-            .color = waypoint_color,
-        });
-    }
+//     for (result.waypoints) |wp| {
+//         try waypoint_vertices.append(.{
+//             .position = [3]f32{ wp.p.x(), wp.p.y(), wp.p.z() },
+//             .color = waypoint_color,
+//         });
+//     }
 
-    const waypoint_vertices_owned = try self.allocator.dupe(Mesh.Vertex, waypoint_vertices.items);
-    const waypoint_mesh = try Mesh.init(self.allocator, waypoint_vertices_owned, null, drawPathPoints);
-    waypoint_mesh.drawType = Mesh.DrawType.points.toGL();
+//     const waypoint_vertices_owned = try self.allocator.dupe(Mesh.Vertex, waypoint_vertices.items);
+//     const waypoint_mesh = try Mesh.init(self.allocator, waypoint_vertices_owned, null, drawPathPoints);
+//     waypoint_mesh.drawType = Mesh.DrawType.points.toGL();
 
-    const waypoint_mesh_name = try std.fmt.allocPrint(self.allocator, "path_waypoints_{d}", .{self.path_counter});
-    defer self.allocator.free(waypoint_mesh_name);
-    const waypoint_mesh_name_owned = try self.allocator.dupe(u8, waypoint_mesh_name);
+//     const waypoint_mesh_name = try std.fmt.allocPrint(self.allocator, "path_waypoints_{d}", .{self.path_counter});
+//     defer self.allocator.free(waypoint_mesh_name);
+//     const waypoint_mesh_name_owned = try self.allocator.dupe(u8, waypoint_mesh_name);
 
-    try ecs.world.resource_manager.meshes.put(waypoint_mesh_name_owned, .{
-        .mesh = waypoint_mesh,
-        .instance_count = 0,
-    });
+//     try ecs.world.resource_manager.meshes.put(waypoint_mesh_name_owned, .{
+//         .mesh = waypoint_mesh,
+//         .instance_count = 0,
+//     });
 
-    const waypoint_transform = Transform.TransformComponent.init(self.allocator);
-    const waypoint_renderer = try Renderer.Renderable.init(self.allocator, waypoint_mesh_name_owned);
+//     const waypoint_transform = Transform.TransformComponent.init(self.allocator);
+//     const waypoint_renderer = try Renderer.Renderable.init(self.allocator, waypoint_mesh_name_owned);
 
-    const waypoint_entity = try ecs.spawn(.{
-        waypoint_transform,
-        waypoint_renderer,
-    });
+//     const waypoint_entity = try ecs.spawn(.{
+//         waypoint_transform,
+//         waypoint_renderer,
+//     });
 
-    std.debug.print("Created path visualization - path entity: {}, waypoints entity: {} (v_min={d:.2}, v_max={d:.2})\n", .{ path_entity, waypoint_entity, v_min, v_max });
+//     std.debug.print("Created path visualization - path entity: {}, waypoints entity: {} (v_min={d:.2}, v_max={d:.2})\n", .{ path_entity, waypoint_entity, v_min, v_max });
 
-    return .{ .path = path_entity, .waypoints = waypoint_entity };
-}
+//     return .{ .path = path_entity, .waypoints = waypoint_entity };
+// }
 
-fn segmentCollisionFree(self: *Self, from: Vec3, to: Vec3, radius: f32, margin: f32) !bool {
-    const physics_thread = self.ecs.collision_system.physics_thread orelse return true;
+fn segmentCollisionFree(self: *Self, from: Vec3, to: Vec3, radius: f32, margin: f32, world: ?bt.CbtWorldHandle) !bool {
+    _ = self;
+    const collision_world = world orelse return true;
 
     const total_radius = radius + margin;
 
@@ -655,7 +1010,7 @@ fn segmentCollisionFree(self: *Self, from: Vec3, to: Vec3, radius: f32, margin: 
     const to_arr = [3]f32{ to.x(), to.y(), to.z() };
 
     if (bt.cbtWorldRayTestClosest(
-        physics_thread.bullet_world,
+        collision_world,
         &from_arr,
         &to_arr,
         -1, // collision_filter_group
@@ -690,7 +1045,7 @@ fn segmentCollisionFree(self: *Self, from: Vec3, to: Vec3, radius: f32, margin: 
         const offset_to_arr = [3]f32{ offset_to.x(), offset_to.y(), offset_to.z() };
 
         if (bt.cbtWorldRayTestClosest(
-            physics_thread.bullet_world,
+            collision_world,
             &offset_from_arr,
             &offset_to_arr,
             -1,
@@ -703,6 +1058,45 @@ fn segmentCollisionFree(self: *Self, from: Vec3, to: Vec3, radius: f32, margin: 
     }
 
     return true;
+}
+
+fn cloneCollisionWorld(source_world: bt.CbtWorldHandle, allocator: std.mem.Allocator) !bt.CbtWorldHandle {
+    _ = allocator;
+
+    // Create new world
+    const new_world = bt.cbtWorldCreate() orelse return error.FailedToCreateWorld;
+
+    // Copy gravity
+    var gravity: [3]f32 = undefined;
+    bt.cbtWorldGetGravity(source_world, &gravity);
+    bt.cbtWorldSetGravity(new_world, &gravity);
+
+    // Clone all static bodies (collision geometry)
+    const num_bodies = bt.cbtWorldGetNumBodies(source_world);
+    var i: i32 = 0;
+    while (i < num_bodies) : (i += 1) {
+        const body = bt.cbtWorldGetBody(source_world, i);
+
+        // Only clone static bodies (mass == 0)
+        const mass = bt.cbtBodyGetMass(body);
+        if (mass == 0.0) {
+            // Get shape
+            const shape = bt.cbtBodyGetShape(body);
+
+            // Get transform (4x3 matrix)
+            var transform: [4][3]f32 = undefined;
+            bt.cbtBodyGetCenterOfMassTransform(body, &transform);
+
+            // Create new body - allocate first
+            const new_body = bt.cbtBodyAllocate();
+
+            // Create with same shape, transform and mass (mass, transform, shape)
+            bt.cbtBodyCreate(new_body, 0.0, &transform, shape);
+            bt.cbtWorldAddBody(new_world, new_body);
+        }
+    }
+
+    return new_world;
 }
 
 fn computeCatmullRomTangents(self: *Self, points: []const Waypoint, tension: f32) ![]Vec3 {
@@ -878,20 +1272,20 @@ fn computeOrientations(
         }
         const yaw = waypoints[nearest_idx].yaw;
 
-        // Compute pitch from forward vector
-        const pitch = std.math.asin(-forward.z());
+        // Compute pitch from forward vector (OpenGL Y-up: pitch is vertical angle)
+        const pitch = std.math.asin(forward.y());
 
-        // Build quaternion: yaw → pitch → roll
-        const q_yaw = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), Math.degrees(yaw));
+        // Build quaternion: yaw → pitch → roll (OpenGL Y-up convention)
+        const q_yaw = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(yaw));
         const q_pitch = Quaternion.from_axis_angle(Vec3.init(1, 0, 0), Math.degrees(pitch));
-        const q_roll = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(bank_angle));
+        const q_roll = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), Math.degrees(bank_angle));
 
         const orientation = q_yaw.multiply(q_pitch).multiply(q_roll).normalize();
         try orientations.append(orientation);
     }
 }
 
-fn generateRandomWaypoint(self: *Self, p: CreatePathParams) !Waypoint {
+fn generateRandomWaypoint(self: *Self, p: CreatePathParams, world: ?bt.CbtWorldHandle) !Waypoint {
     const max_attempts = 1000;
     var attempts: u32 = 0;
 
@@ -910,7 +1304,7 @@ fn generateRandomWaypoint(self: *Self, p: CreatePathParams) !Waypoint {
         const pos = Vec3.init(x, y, z);
 
         // Check if position is collision-free (test with small sphere)
-        const physics_thread = self.ecs.collision_system.physics_thread orelse {
+        const collision_world = world orelse {
             // No physics, just return the position
             const yaw = self.rng.random().float(f32) * 2.0 * std.math.pi - std.math.pi;
             return Waypoint{ .p = pos, .yaw = yaw };
@@ -934,7 +1328,7 @@ fn generateRandomWaypoint(self: *Self, p: CreatePathParams) !Waypoint {
             const to_arr = [3]f32{ test_point.x(), test_point.y(), test_point.z() };
 
             if (bt.cbtWorldRayTestClosest(
-                physics_thread.bullet_world,
+                collision_world,
                 &from_arr,
                 &to_arr,
                 -1,

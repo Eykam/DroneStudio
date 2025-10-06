@@ -42,6 +42,7 @@ const PathGenUIParams = struct {
     use_random_seed: bool = true,
     seed_counter: u32 = 0,
     num_paths: i32 = 1,
+    bounds_shrink_factor: f32 = 1.0,
 
     // Path creation params (UI controls for CreatePathParams)
     seed: i32 = 42,
@@ -65,6 +66,7 @@ const PathGenUIParams = struct {
 
         return .{
             .bounds = bounds,
+            .bounds_shrink_factor = self.bounds_shrink_factor,
             .L_min = self.L_min,
             .L_max = self.L_max,
             .s_min = self.s_min,
@@ -730,6 +732,9 @@ pub const RootWindow = struct {
                 _ = imgui.igCheckbox("Random Seed (non-deterministic)", &PathGen.params.use_random_seed);
                 imgui.igSeparator();
 
+                _ = imgui.igSliderFloat("Bounds Shrink", &PathGen.params.bounds_shrink_factor, 0.3, 1.0, "%.2f", imgui.ImGuiSliderFlags_None);
+                imgui.igSeparator();
+
                 _ = imgui.igSliderFloat("Min Length", &PathGen.params.L_min, 10.0, 200.0, "%.0f m", imgui.ImGuiSliderFlags_None);
                 _ = imgui.igSliderFloat("Max Length", &PathGen.params.L_max, 20.0, 500.0, "%.0f m", imgui.ImGuiSliderFlags_None);
                 _ = imgui.igSliderFloat("Min Step", &PathGen.params.s_min, 1.0, 10.0, "%.1f m", imgui.ImGuiSliderFlags_None);
@@ -752,9 +757,62 @@ pub const RootWindow = struct {
 
                 imgui.igSeparator();
                 if (imgui.igButton("Generate Paths", .{ .x = -1, .y = 30 })) {
-                    self.generateMultiplePaths(ctx, &PathGen.params) catch |err| {
-                        std.debug.print("Failed to generate paths: {}\n", .{err});
+                    self.startAsyncPathGeneration(ctx, &PathGen.params) catch |err| {
+                        std.debug.print("Failed to start path generation: {}\n", .{err});
                     };
+                }
+
+                // Show progress dialog
+                if (ctx.ecs.path_system) |path_system| {
+                    const progress = path_system.getGenerationProgress();
+                    if (progress.is_generating) {
+                        imgui.igOpenPopup_Str("Generating Paths##progress", imgui.ImGuiPopupFlags_None);
+                    }
+
+                    // Finalize paths on main thread when complete
+                    if (!progress.is_generating and path_system.pending_result != null) {
+                        path_system.finalizePendingPaths() catch |err| {
+                            std.debug.print("Failed to finalize paths: {}\n", .{err});
+                        };
+                    }
+
+                    var center: imgui.struct_ImVec2 = undefined;
+                    const viewport = imgui.igGetMainViewport();
+                    center.x = viewport.*.WorkPos.x + viewport.*.WorkSize.x * 0.5;
+                    center.y = viewport.*.WorkPos.y + viewport.*.WorkSize.y * 0.5;
+                    imgui.igSetNextWindowPos(center, imgui.ImGuiCond_Appearing, .{ .x = 0.5, .y = 0.5 });
+                    if (imgui.igBeginPopupModal("Generating Paths##progress", null, imgui.ImGuiWindowFlags_AlwaysAutoResize)) {
+                        imgui.igText("Generating paths...");
+                        imgui.igSpacing();
+
+                        const progress_fraction: f32 = if (progress.total > 0)
+                            @as(f32, @floatFromInt(progress.current)) / @as(f32, @floatFromInt(progress.total))
+                        else
+                            0.0;
+
+                        var buf: [64]u8 = undefined;
+                        const label = std.fmt.bufPrintZ(&buf, "{d}/{d}", .{ progress.current, progress.total }) catch "?/?";
+                        imgui.igProgressBar(progress_fraction, .{ .x = 300, .y = 0 }, label.ptr);
+
+                        if (!progress.is_generating) {
+                            imgui.igCloseCurrentPopup();
+                            if (progress.failed) {
+                                imgui.igOpenPopup_Str("Generation Failed", imgui.ImGuiPopupFlags_None);
+                            }
+                        }
+
+                        imgui.igEndPopup();
+                    }
+
+                    // Error popup
+                    if (imgui.igBeginPopupModal("Generation Failed", null, imgui.ImGuiWindowFlags_AlwaysAutoResize)) {
+                        imgui.igText("Path generation failed!");
+                        imgui.igSpacing();
+                        if (imgui.igButton("OK", .{ .x = 120, .y = 0 })) {
+                            imgui.igCloseCurrentPopup();
+                        }
+                        imgui.igEndPopup();
+                    }
                 }
             }
 
@@ -945,7 +1003,7 @@ pub const RootWindow = struct {
         } // end table
     }
 
-    fn generatePath(self: *Self, ctx: *const UIContext, ui_params: *const PathGenUIParams) !void {
+    fn startAsyncPathGeneration(self: *Self, ctx: *const UIContext, ui_params: *PathGenUIParams) !void {
         _ = self;
 
         const path_system = ctx.ecs.path_system orelse {
@@ -953,92 +1011,28 @@ pub const RootWindow = struct {
             return error.PathSystemNotInitialized;
         };
 
-        // Get bounds from the scene
-        const bounds = path_system.getSceneBounds() catch PathSystem.AABB3{
+        // Compute bounds once for all paths (with shrink factor applied)
+        const bounds = path_system.getSceneBounds(ui_params.bounds_shrink_factor) catch PathSystem.AABB3{
             .min = Vec3.init(-50, -50, 0),
             .max = Vec3.init(50, 50, 30),
         };
 
-        const params = ui_params.toCreatePathParams(bounds);
-
-        const empty_anchors: []const PathSystem.Waypoint = &[_]PathSystem.Waypoint{};
-        const anchors = if (ui_params.use_random_start) null else empty_anchors;
-
-        const result = try path_system.createPath(params, anchors);
-
-        std.debug.print("Path generated successfully!\n", .{});
-        std.debug.print("  Waypoints: {d}\n", .{result.waypoints.len});
-        std.debug.print("  Samples: {d}\n", .{result.samples.len});
-        std.debug.print("  Length: {d:.2} m\n", .{result.length()});
-        std.debug.print("  Duration: {d:.2} s\n", .{result.duration()});
-    }
-
-    fn generateMultiplePaths(self: *Self, ctx: *const UIContext, ui_params: *PathGenUIParams) !void {
+        // Build base params once
+        const base_params = ui_params.toCreatePathParams(bounds);
+        const seed_base = @as(u64, @intCast(@as(u32, @bitCast(ui_params.seed))));
         const num_paths: usize = @intCast(@max(1, ui_params.num_paths));
-        const max_consecutive_failures: usize = 500;
-        var consecutive_failures: usize = 0;
-        var successful_paths: usize = 0;
-        var total_attempts: usize = 0;
 
-        while (successful_paths < num_paths and consecutive_failures < max_consecutive_failures) {
-            total_attempts += 1;
-
-            // Increment seed_counter for each attempt when using random seed
-            if (ui_params.use_random_seed) {
-                ui_params.seed_counter +%= 1;
-            }
-
-            // Try to generate a path
-            self.generatePath(ctx, ui_params) catch |err| {
-                consecutive_failures += 1;
-                std.debug.print("Attempt {d} failed (consecutive failures: {d}): {}\n", .{ total_attempts, consecutive_failures, err });
-                continue;
-            };
-
-            // Success - reset consecutive failures
-            consecutive_failures = 0;
-            successful_paths += 1;
-            std.debug.print("Successfully generated path {d}/{d}\n", .{ successful_paths, num_paths });
-        }
-
-        if (successful_paths < num_paths) {
-            // Show error popup
-            std.debug.print("\n=== PATH GENERATION FAILED ===\n", .{});
-            std.debug.print("Only generated {d}/{d} paths after {d} total attempts\n", .{ successful_paths, num_paths, total_attempts });
-            std.debug.print("Stopped after {d} consecutive failures\n", .{consecutive_failures});
-            std.debug.print("The path generation parameters are too strict for this scene.\n", .{});
-            std.debug.print("Try adjusting:\n", .{});
-            std.debug.print("  - Increase Min/Max Step size\n", .{});
-            std.debug.print("  - Decrease Min Turn Radius\n", .{});
-            std.debug.print("  - Increase Drone Radius clearance\n", .{});
-            std.debug.print("  - Adjust Height bounds\n", .{});
-            std.debug.print("================================\n\n", .{});
-
-            // Open ImGui popup
-            imgui.igOpenPopup_Str("Path Generation Failed", imgui.ImGuiPopupFlags_None);
-        } else {
-            std.debug.print("Successfully generated all {d} paths in {d} total attempts!\n", .{ num_paths, total_attempts });
-        }
-
-        // Render the popup if it's open
-        if (imgui.igBeginPopupModal("Path Generation Failed", null, imgui.ImGuiWindowFlags_AlwaysAutoResize)) {
-            imgui.igText("Failed to generate %zu path(s) after %zu consecutive failures.", num_paths - successful_paths, consecutive_failures);
-            imgui.igText("Successfully generated: %zu/%zu paths", successful_paths, num_paths);
-            imgui.igText("The path generation parameters are too strict for this scene.");
-            imgui.igSeparator();
-            imgui.igText("Try adjusting:");
-            imgui.igBulletText("Increase Min/Max Step size");
-            imgui.igBulletText("Decrease Min Turn Radius");
-            imgui.igBulletText("Increase Drone Radius clearance");
-            imgui.igBulletText("Adjust Height bounds");
-            imgui.igSeparator();
-
-            if (imgui.igButton("OK", .{ .x = 120, .y = 0 })) {
-                imgui.igCloseCurrentPopup();
-            }
-            imgui.igEndPopup();
-        }
+        // Start async generation
+        try path_system.startAsyncGeneration(
+            path_system.allocator,
+            num_paths,
+            base_params,
+            ui_params.use_random_start,
+            ui_params.use_random_seed,
+            seed_base,
+        );
     }
+
 
     // The ViewportManager function as a widget (not a window)
     pub fn ViewportManager(visible: *bool, ctx: *const UIContext) void {
