@@ -132,8 +132,8 @@ pub fn spawn(
         frustum_transform.setPosition(wp.p.x(), wp.p.y(), wp.p.z());
 
         // Apply yaw rotation around Y axis
-        const yaw_quat = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), wp.yaw);
-        frustum_transform.rotate(yaw_quat);
+        const yaw_quat = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(wp.yaw));
+        frustum_transform.setRotation(yaw_quat);
 
         const frustum_entity = try ecs.spawn(frustum_resources);
 

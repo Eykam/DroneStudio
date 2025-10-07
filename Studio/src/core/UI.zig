@@ -970,23 +970,6 @@ pub const RootWindow = struct {
                             .{ .x = 1, .y = 1, .z = 1, .w = 1 },
                             .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1 },
                         );
-
-                        // Check for mouse clicks on the viewport to add waypoints
-                        if (imgui.igIsItemClicked(imgui.ImGuiMouseButton_Left)) {
-                            // TODO: Add waypoint at clicked position
-                            var mouse_pos: imgui.ImVec2 = undefined;
-                            imgui.igGetMousePos(&mouse_pos);
-                            const rel_x = (mouse_pos.x - image_pos.x) / img_w;
-                            const rel_y = (mouse_pos.y - image_pos.y) / img_h;
-                            std.debug.print("Path waypoint click at: {d:.2}, {d:.2}\n", .{ rel_x, rel_y });
-                        }
-
-                        if (imgui.igIsItemHovered(imgui.ImGuiHoveredFlags_None)) {
-                            _ = imgui.igBeginTooltip();
-                            imgui.igText("Left-click to add waypoints");
-                            imgui.igText("Right-click on waypoint to edit/delete");
-                            imgui.igEndTooltip();
-                        }
                     }
                 }
             } else {
@@ -1032,7 +1015,6 @@ pub const RootWindow = struct {
             seed_base,
         );
     }
-
 
     // The ViewportManager function as a widget (not a window)
     pub fn ViewportManager(visible: *bool, ctx: *const UIContext) void {

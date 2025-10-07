@@ -8,6 +8,7 @@ const Transform = @import("../components/Transform.zig");
 
 const glad = gl.glad;
 const Vec3 = Math.Vec3;
+const Quaternion = Math.Quaternion;
 const Renderable = Renderer.Renderable;
 const TransformComponent = Transform.TransformComponent;
 
@@ -124,7 +125,6 @@ pub fn generate(
     };
 
     var tf = Transform.TransformComponent.init(alloc);
-    tf.rotateWithEuler(0, 180, 0);
-
+    tf.rotate(Quaternion.from_axis_angle(Vec3.init(0, 1, 0), 180.0));
     return .{ .renderable = renderable, .tf = tf };
 }

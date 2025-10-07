@@ -634,6 +634,11 @@ pub fn finalizePendingPaths(self: *Self) !void {
                 self.path_counter,
                 .{ 1.0, 1.0, 0.0 },
             );
+            std.debug.print("{s}\n", .{"=" ** 80});
+            std.debug.print("{s}\n", .{"=" ** 80});
+            for (path_result.waypoints, 0..) |waypoint, idx| {
+                std.debug.print("Waypoint: {} => {d:.2}\n", .{ idx, Math.degrees(waypoint.yaw) });
+            }
 
             path_result.path_entities = path_entities;
 
@@ -769,20 +774,29 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint, 
 
         // Compute yaw (rotation around Y-axis in XZ plane for Y-up world)
         const motion_yaw = std.math.atan2(new_dir.x(), new_dir.z());
-        const noise = (self.rng.random().float(f32) * 2.0 - 1.0) * Math.radians(p.yaw_noise_deg);
-        var new_yaw = motion_yaw * p.yaw_bias_w + noise;
 
-        // Clamp yaw change
-        const yaw_diff = shortestAngleDiff(prev.yaw, new_yaw);
+        const q_prev = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(prev.yaw));
+        const q_motion = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(motion_yaw));
+
+        // Bias toward motion using SLERP on the circle
+        const t_bias = Math.clamp(p.yaw_bias_w, 0.0, 1.0);
+        var q_biased = Quaternion.slerp(q_prev, q_motion, t_bias);
+
+        // Convert back to yaw (radians). to_euler() returns [pitch, yaw, roll]
+        var desired_yaw = q_biased.to_euler()[1];
+
+        // Add noise
+        desired_yaw += (self.rng.random().float(f32) * 2.0 - 1.0) * Math.radians(p.yaw_noise_deg);
+
+        // Clamp per-step yaw change
         const max_yaw_change = Math.radians(p.max_turn_deg);
-        if (@abs(yaw_diff) > max_yaw_change) {
-            const sign: f32 = if (yaw_diff > 0) 1.0 else -1.0;
-            new_yaw = prev.yaw + max_yaw_change * sign;
+        const d = shortestAngleDiff(prev.yaw, desired_yaw);
+        if (@abs(d) > max_yaw_change) {
+            desired_yaw = prev.yaw + max_yaw_change * (d / @abs(d));
         }
 
-        new_yaw = wrapPi(new_yaw);
-
-        try waypoints.append(.{ .p = candidate_pos, .yaw = new_yaw });
+        desired_yaw = wrapPi(desired_yaw);
+        try waypoints.append(.{ .p = candidate_pos, .yaw = desired_yaw });
         total_length += step_len;
 
         if (total_length >= p.L_min and waypoints.items.len >= 2) {
@@ -1475,4 +1489,10 @@ fn shortestAngleDiff(a: f32, b: f32) f32 {
     var diff = b - a;
     diff = wrapPi(diff);
     return diff;
+}
+
+fn lerpAngle(a: f32, b: f32, t: f32) f32 {
+    const d = shortestAngleDiff(a, b);
+    const tt = Math.clamp(t, 0.0, 1.0);
+    return wrapPi(a + d * tt);
 }
