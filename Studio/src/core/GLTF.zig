@@ -204,12 +204,21 @@ pub const ModelResource = struct {
         name: ?[:0]const u8,
         mesh_name: ?[:0]const u8,
         material_name: ?[:0]const u8,
-        local_transformation: ?Mat4,
-        translation: ?[3]f32,
-        rotation: ?[4]f32,
-        scale: ?[3]f32,
+        local_transformation: ?Mat4, // Only set if GLTF node has explicit matrix property
+        translation: ?[3]f32, // Raw GLTF translation component
+        rotation: ?[4]f32, // Raw GLTF rotation component (quaternion)
+        scale: ?[3]f32, // Raw GLTF scale component
         parent_idx: ?usize,
         children: []usize,
+
+        // Pre-computed during GLTF load for performance
+        local_matrix: Mat4 = Mat4.identity(), // Always set: computed from matrix OR TRS - use this for entity transforms
+        world_transform: Mat4 = Mat4.identity(), // Accumulated from root
+        decomposed_world: struct { // Pre-decomposed for Bullet
+            translation: [3]f32 = .{ 0, 0, 0 },
+            rotation: [4]f32 = .{ 0, 0, 0, 1 }, // Quaternion (x,y,z,w)
+            scale: [3]f32 = .{ 1, 1, 1 },
+        } = .{},
     };
 
     pub fn deinit(self: *ModelResource) void {
@@ -247,7 +256,7 @@ pub fn createModelResource(
     // Recursively build up node/primitive entities
     if (gltf_scene.nodes) |top_level_nodes| {
         for (top_level_nodes) |node_idx| {
-            try processNodeAndChildren(allocator, gltf, model_id, node_idx, null, &entity_list);
+            try processNodeAndChildren(allocator, gltf, model_id, node_idx, null, Mat4.identity(), &entity_list);
         }
     }
 
@@ -271,6 +280,7 @@ fn processNodeAndChildren(
     model_id: []const u8,
     node_idx: usize,
     parent_idx: ?usize,
+    parent_world_transform: Mat4,
     entity_list: *std.ArrayList(ModelResource.EntityInfo),
 ) !void {
     if (gltf.document.value.nodes == null or node_idx >= gltf.document.value.nodes.?.len) {
@@ -299,32 +309,70 @@ fn processNodeAndChildren(
         node_entity_info.name = try allocator.dupeZ(u8, node_name);
     }
 
+    // Build local matrix from GLTF data
+    var local_matrix: Mat4 = undefined;
+
     // If the node has a matrix, use it directly
     if (gltf_node.matrix) |mat_array| {
-        // TODO: Investigate matrix format - GLTF spec uses column-major matrices,
-        // need to verify if our Mat4 expects row-major or column-major format.
-        // Models appearing upside-down might be related to coordinate system differences
-        // (Y-up vs Z-up) or matrix interpretation issues.
-        node_entity_info.local_transformation = Mat4.from_array(mat_array);
+        local_matrix = Mat4.from_array(mat_array);
+        node_entity_info.local_transformation = local_matrix;
     } else {
-        // Otherwise, store TRS
-        if (gltf_node.translation) |t| {
-            node_entity_info.translation = t;
+        // Build from TRS - use S×R×T order to match Transform.updateLocalTransform
+        local_matrix = Mat4.identity();
+
+        if (gltf_node.scale) |s| {
+            node_entity_info.scale = s;
+            local_matrix = local_matrix.multiply(Mat4.scaling(s[0], s[1], s[2]));
         }
         if (gltf_node.rotation) |r| {
             node_entity_info.rotation = r;
+            const quat = Quaternion.init(r[0], r[1], r[2], r[3]);
+            local_matrix = local_matrix.multiply(Mat4.from_quaternion(quat));
         }
-        if (gltf_node.scale) |s| {
-            node_entity_info.scale = s;
+        if (gltf_node.translation) |t| {
+            node_entity_info.translation = t;
+            local_matrix = local_matrix.multiply(Mat4.translation(t[0], t[1], t[2]));
         }
     }
 
-    // Add this node-entity to the list
-    const this_node_entity_idx = entity_list.items.len; // index of the new entity
+    // Store pre-computed local matrix
+    node_entity_info.local_matrix = local_matrix;
+    node_entity_info.world_transform = local_matrix.multiply(parent_world_transform);
+
+    // Pre-decompose for Bullet (avoids repeated decomposeTRS calls)
+    const trs = node_entity_info.world_transform.decomposeTRS();
+    node_entity_info.decomposed_world = .{
+        .translation = trs.translation,
+        .rotation = trs.rotation.data,
+        .scale = trs.scale,
+    };
+
+    const this_node_entity_idx = entity_list.items.len;
     try entity_list.append(node_entity_info);
 
     // -------------------------------
-    // 2) If the node has a mesh, create child-entities for each primitive
+    // 2) Calculate total children count (mesh primitives + GLTF node children)
+    // -------------------------------
+    var prim_count: usize = 0;
+    if (gltf_node.mesh) |mesh_idx| {
+        if (gltf.document.value.meshes) |all_meshes| {
+            if (mesh_idx < all_meshes.len) {
+                prim_count = all_meshes[mesh_idx].primitives.len;
+            }
+        }
+    }
+    const gltf_children_count = if (gltf_node.children) |ch| ch.len else 0;
+    const total_children = prim_count + gltf_children_count;
+
+    // Allocate children array once if we have any children
+    var children_indices: []usize = &.{};
+    if (total_children > 0) {
+        children_indices = try allocator.alloc(usize, total_children);
+    }
+    var child_idx: usize = 0;
+
+    // -------------------------------
+    // 3) If the node has a mesh, create child-entities for each primitive
     // -------------------------------
     if (gltf_node.mesh) |mesh_idx| {
         if (gltf.document.value.meshes) |all_meshes| {
@@ -340,12 +388,14 @@ fn processNodeAndChildren(
                         .name = null,
                         .mesh_name = null,
                         .material_name = null,
-                        .local_transformation = Mat4.identity(),
+                        .local_transformation = null,
                         .translation = null,
                         .rotation = null,
                         .scale = null,
                         .parent_idx = this_node_entity_idx, // parent is the node entity
                         .children = &.{},
+                        .world_transform = node_entity_info.world_transform,
+                        .decomposed_world = node_entity_info.decomposed_world,
                     };
 
                     // Build a unique mesh name for the ECS or ResourceManager
@@ -370,6 +420,11 @@ fn processNodeAndChildren(
                         }
                     }
 
+                    // Track this primitive child entity index
+                    const prim_entity_idx = entity_list.items.len;
+                    children_indices[child_idx] = prim_entity_idx;
+                    child_idx += 1;
+
                     // Append the child-entity
                     try entity_list.append(prim_entity_info);
                 }
@@ -377,11 +432,23 @@ fn processNodeAndChildren(
         }
     }
 
-    if (gltf_node.children) |child_indices| {
-        for (child_indices) |child_idx| {
-            try processNodeAndChildren(allocator, gltf, model_id, child_idx, this_node_entity_idx, entity_list);
+    // -------------------------------
+    // 4) Build children array from GLTF node children
+    // -------------------------------
+    if (gltf_node.children) |gltf_child_indices| {
+        for (gltf_child_indices) |child_node_idx| {
+            // The child entity will be added at the current end of the list
+            const child_entity_idx = entity_list.items.len;
+            children_indices[child_idx] = child_entity_idx;
+            child_idx += 1;
+
+            // Recursively process the child
+            try processNodeAndChildren(allocator, gltf, model_id, child_node_idx, this_node_entity_idx, node_entity_info.world_transform, entity_list);
         }
     }
+
+    // Update the parent node's children array (includes both primitives and GLTF children)
+    entity_list.items[this_node_entity_idx].children = children_indices;
 }
 
 /// Basic type definitions for glTF
@@ -396,19 +463,20 @@ pub const GLTF = struct {
 
     pub fn init(allocator: Allocator, filepath: []const u8) !*GLTF {
         // Determine base path for resolving relative paths
-        var base_path = try allocator.dupe(u8, filepath);
+        var base_path_full = try allocator.dupe(u8, filepath);
+        defer allocator.free(base_path_full);
+
         // Find the last slash
         var last_slash: ?usize = null;
-        for (base_path, 0..) |c, i| {
+        for (base_path_full, 0..) |c, i| {
             if (c == '/' or c == '\\') {
                 last_slash = i;
             }
         }
-        if (last_slash) |idx| {
-            base_path = base_path[0 .. idx + 1];
-        } else {
-            base_path = "";
-        }
+        const base_path = if (last_slash) |idx|
+            try allocator.dupe(u8, base_path_full[0 .. idx + 1])
+        else
+            try allocator.dupe(u8, "");
 
         // Load the file
         const file = try std.fs.cwd().openFile(filepath, .{});
@@ -527,7 +595,7 @@ pub const GLTF = struct {
 
         const mesh_def = self.document.value.meshes.?[mesh_idx];
 
-        // For simplicity, we only load the first primitive
+        // For simplicity, we only load the first primitive <= Why are we doing this, will it ever be the case where a mesh has multiple primitives?
         if (mesh_def.primitives.len == 0) {
             return null;
         }

@@ -487,7 +487,7 @@ pub fn loadMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices:
 
     // Create new mesh
     const mesh = try Mesh.init(self.allocator, vertices, indices, draw_fn);
-    const mesh_name = try self.allocator.dupeZ(u8, name);
+    const mesh_name = try self.allocator.dupe(u8, name);
     try self.meshes.put(mesh_name, MeshResource.init(mesh));
     return mesh;
 }
@@ -710,7 +710,7 @@ pub fn cachePath(alloc: std.mem.Allocator, gltf_path: []const u8) []const u8 {
     // scene.gltf -> cache/scene.gltf.bin
     const modified_path = std.mem.replaceOwned(u8, alloc, gltf_path, "/", "-") catch @panic("Failed to create modifiedPath");
     defer alloc.free(modified_path);
-    return std.fmt.allocPrintZ(alloc, "{s}/{s}.bin", .{ CACHE_DIR, modified_path }) catch @panic("Failed to create cachePath");
+    return std.fmt.allocPrint(alloc, "{s}/{s}.bin", .{ CACHE_DIR, modified_path }) catch @panic("Failed to create cachePath");
 }
 
 fn ensureCacheDir() void {

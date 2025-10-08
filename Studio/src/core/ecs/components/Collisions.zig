@@ -380,12 +380,16 @@ pub fn calculateMeshBounds(mesh: *Mesh) struct { min_bounds: [3]f32, max_bounds:
 
 // Create a collider based on mesh data with specified shape
 pub fn createColliderFromMesh(allocator: std.mem.Allocator, resource_manager: *ResourceManager, mesh: *Mesh, shape: ColliderShape) !ColliderComponent {
+    std.debug.print("createColliderFromMesh called, shape type: {s}\n", .{@tagName(shape)});
     switch (shape) {
         .TriangleMesh => return ColliderComponent.init(allocator, .{ .TriangleMesh = TriangleMeshShape{} }, mesh),
         .ConvexHull => |hulls| {
+            std.debug.print("  ConvexHull: hulls.len = {}\n", .{hulls.len});
             // If hulls are empty, generate them from the mesh
             if (hulls.len == 0) {
+                std.debug.print("  Calling getOrGenerateCollisionMesh...\n", .{});
                 const generated_hulls = try resource_manager.getOrGenerateCollisionMesh(mesh);
+                std.debug.print("  Generated {} hulls\n", .{generated_hulls.len});
                 return ColliderComponent.init(allocator, .{ .ConvexHull = generated_hulls }, mesh);
             } else {
                 // Use provided hulls
@@ -554,56 +558,17 @@ pub const ColliderComponent = struct {
         compound_shape: bullet.CbtShapeHandle,
         base_shape: ColliderShape,
         node_index: usize,
-        accumulated_transform: Mat4,
     ) !void {
         if (node_index >= model_resource.entities.len) return;
 
         const node = model_resource.entities[node_index];
 
-        // Calculate this node's transform by combining accumulated + local
-        var current_transform = accumulated_transform;
-        // var current_transform = Mat4.identity();
-
-        if (node.local_transformation) |local_transform| {
-            current_transform = local_transform.multiply(current_transform);
-        } else {
-            var local_matrix = Mat4.identity();
-
-            // Apply translation
-            if (node.translation) |t| {
-                local_matrix = local_matrix.translate(t[0], t[1], t[2]);
-            }
-
-            // Apply rotation
-            if (node.rotation) |r| {
-                const quat = Quaternion.init(r[0], r[1], r[2], r[3]);
-                local_matrix = local_matrix.multiply(Mat4.from_quaternion(quat));
-            }
-
-            // Apply scale
-            if (node.scale) |s| {
-                local_matrix = local_matrix.scale(s[0], s[1], s[2]);
-            }
-
-            current_transform = local_matrix.multiply(current_transform);
-        }
-
-        // If this node has a mesh, create collision shape with accumulated transform
-        var transform_for_children = current_transform;
+        // If this node has a mesh, create collision shape using pre-computed world transform
         if (node.mesh_name) |mesh_name| {
             if (resource_manager.meshes.get(mesh_name)) |*mesh_res| {
-                std.debug.print("Node {d}: Processing accumulated transform = {d:.3})\n", .{
-                    node_index,
-                    accumulated_transform,
-                });
-
-                std.debug.print("Node {d}: has local_transformation\n", .{node_index});
-                std.debug.print("Local Transform = {any}\n", .{node.local_transformation.?});
-
                 // Create child shape
                 const shape_type = base_shape.getBulletShapeType();
                 const mesh_shape = bullet.cbtShapeAllocate(shape_type);
-
                 if (mesh_shape != null) {
                     var indices_opt: ?[]u32 = null;
                     defer if (indices_opt) |indices| allocator.free(indices);
@@ -618,43 +583,28 @@ pub const ColliderComponent = struct {
                     var mesh_collider = try createColliderFromMesh(allocator, resource_manager, temp_mesh, base_shape);
                     try mesh_collider.shape.createBulletShape(allocator, mesh_shape.?, temp_mesh);
 
-                    const trs = current_transform.decomposeTRS();
+                    // Use pre-decomposed transform
+                    const trs = node.decomposed_world;
                     const position = trs.translation;
-                    const rotation = Math.Mat3.from_quaternion(trs.rotation).base.data;
+                    const quat = Quaternion.init(trs.rotation[0], trs.rotation[1], trs.rotation[2], trs.rotation[3]);
+                    const rotation = Math.Mat3.from_quaternion(quat).base.data;
+
                     var child_transform = [4][3]f32{
-                        [3]f32{ rotation[0], rotation[3], rotation[6] }, // First column of rotation
-                        [3]f32{ rotation[1], rotation[4], rotation[7] }, // Second column of rotation
-                        [3]f32{ rotation[2], rotation[5], rotation[8] }, // Third column of rotation
+                        [3]f32{ rotation[0], rotation[1], rotation[2] }, // First row of rotation
+                        [3]f32{ rotation[3], rotation[4], rotation[5] }, // Second row of rotation
+                        [3]f32{ rotation[6], rotation[7], rotation[8] }, // Third row of rotation
                         [3]f32{ position[0], position[1], position[2] }, // Translation
                     };
 
-                    std.debug.print("  Adding mesh '{s}' to compound with transform:\n", .{mesh_name});
-                    std.debug.print("    Row 0: [{d:.3}, {d:.3}, {d:.3}] (X axis)\n", .{ child_transform[0][0], child_transform[0][1], child_transform[0][2] });
-                    std.debug.print("    Row 1: [{d:.3}, {d:.3}, {d:.3}] (Y axis)\n", .{ child_transform[1][0], child_transform[1][1], child_transform[1][2] });
-                    std.debug.print("    Row 2: [{d:.3}, {d:.3}, {d:.3}] (Z axis)\n", .{ child_transform[2][0], child_transform[2][1], child_transform[2][2] });
-                    std.debug.print("    Row 3: [{d:.3}, {d:.3}, {d:.3}] (Position)\n", .{ child_transform[3][0], child_transform[3][1], child_transform[3][2] });
-
                     bullet.cbtShapeSetLocalScaling(mesh_shape.?, &trs.scale);
                     bullet.cbtShapeCompoundAddChild(compound_shape, &child_transform, mesh_shape.?);
-
-                    // Reset transform accumulation for children since this node has a mesh
-                    transform_for_children = Mat4.identity();
-                    std.debug.print("Node {d}: Found mesh, resetting transform accumulation for children\n", .{node_index});
                 }
             }
         }
 
-        // TODO: Fix the GLTF parser to properly populate children arrays with entity indices
-        // instead of GLTF node indices. For now, use O(n²) solution.
-
-        // Process all nodes that have this node as their parent
-        for (model_resource.entities, 0..) |child_node, child_idx| {
-            if (child_node.parent_idx) |parent| {
-                if (parent == node_index) {
-                    std.debug.print("  Node {d} has child {d}\n", .{ node_index, child_idx });
-                    try processNodeDFS(allocator, resource_manager, model_resource, compound_shape, base_shape, child_idx, transform_for_children);
-                }
-            }
+        // Process children using pre-built children array (O(n) instead of O(n²)!)
+        for (node.children) |child_idx| {
+            try processNodeDFS(allocator, resource_manager, model_resource, compound_shape, base_shape, child_idx);
         }
     }
 
@@ -669,7 +619,6 @@ pub const ColliderComponent = struct {
         for (model_resource.entities) |node| {
             if (node.mesh_name != null) mesh_count += 1;
         }
-
         if (mesh_count == 0) return error.NoMeshesToCreateColliderFrom;
         var compound_collider = Self{
             .shape = .{ .CompoundShape = CompoundShape{} },
@@ -685,12 +634,10 @@ pub const ColliderComponent = struct {
             @intCast(mesh_count),
         );
 
-        // The entities array is flattened, so we need to process all nodes
-        // and accumulate transforms based on parent_idx relationships
         // Process nodes starting from those with no parent (parent_idx == null)
+        // Transforms are already pre-computed in EntityInfo, so no accumulation needed
         for (model_resource.entities, 0..) |node, i| {
             if (node.parent_idx == null) {
-                std.debug.print("Processing root node {d} with no parent\n", .{i});
                 try processNodeDFS(
                     allocator,
                     resource_manager,
@@ -698,7 +645,6 @@ pub const ColliderComponent = struct {
                     compound_collider.bullet_shape.?,
                     base_shape,
                     i,
-                    Mat4.identity(),
                 );
             }
         }

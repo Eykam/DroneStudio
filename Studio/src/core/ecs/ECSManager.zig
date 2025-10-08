@@ -327,7 +327,7 @@ pub fn addTransform(self: *Self, entity_id: Core.EntityID) !*TransformComponent 
     return self.transform_components.get(entity_id).?;
 }
 
-pub fn addRenderer(self: *Self, entity_id: Core.EntityID, mesh_name: []const u8) !*Renderable {
+pub fn addRenderable(self: *Self, entity_id: Core.EntityID, mesh_name: []const u8) !*Renderable {
     const renderer = try Renderable.init(self.allocator, mesh_name);
     try self.renderer_components.add(entity_id, renderer);
     return self.renderer_components.get(entity_id).?;
@@ -354,54 +354,40 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
     root_entity: Core.EntityID,
     entity_map: std.AutoHashMap(usize, Core.EntityID),
 } {
+    //NOTE: not a fan of this. ResourceManager should probably handle this & why is this a hashmap?
     var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
-    // Don't defer deinit - we're returning this
 
     // Create ECS entity for every ModelResource.EntityInfo
     for (model_resource.entities, 0..) |node, idx| {
         const e_id = try self.createEntity();
         try entity_map.put(idx, e_id);
 
-        const transform = try self.addTransform(e_id);
+        var transform = try self.addTransform(e_id);
 
-        if (node.local_transformation) |local_transformation| {
-            const trs = local_transformation.decomposeTRS();
+        const trs = node.local_matrix.decomposeTRS();
+        transform.position = trs.translation;
+        transform.rotation = trs.rotation;
+        transform.scale = trs.scale;
 
-            transform.setPosition(trs.translation[0], trs.translation[1], trs.translation[2]);
-            transform.setRotation(trs.rotation);
-            transform.setScale(trs.scale[0], trs.scale[1], trs.scale[2]);
-        } else {
-            if (node.translation) |t| {
-                transform.setPosition(t[0], t[1], t[2]);
-            }
-            if (node.rotation) |r| {
-                transform.setRotation(Quaternion.init(r[0], r[1], r[2], r[3]));
-            }
-            if (node.scale) |s| {
-                transform.setScale(s[0], s[1], s[2]);
-            }
-        }
+        transform.updateLocalTransform();
+        std.debug.print("{s}\n{}\n", .{ "=" ** 40, trs });
+        std.debug.print("{}\n", .{node.local_matrix});
+        std.debug.print("{}\n", .{transform.local_transform});
 
         // If there is a mesh_name, add a renderer
-        if (node.mesh_name) |mesh_str| {
-            const renderer = try self.addRenderer(e_id, mesh_str);
+        const mesh_name = node.mesh_name orelse continue;
+        const renderable = try self.addRenderable(e_id, mesh_name);
 
-            // If material_name, bind material
-            if (node.material_name) |mat_str| {
-                try renderer.setMaterial(self.allocator, mat_str);
-            }
-        }
+        const material_name = node.material_name orelse continue;
+        try renderable.setMaterial(self.allocator, material_name);
     }
 
-    // Hook up parent-child relationships <= TODO: Verify this works correctly
+    // Hook up parent-child relationships
     for (model_resource.entities, 0..) |node, idx| {
-        if (node.parent_idx) |p_idx| {
-            if (entity_map.get(idx)) |child_eid| {
-                if (entity_map.get(p_idx)) |parent_eid| {
-                    try self.setParent(child_eid, parent_eid);
-                }
-            }
-        }
+        const child_eid = entity_map.get(idx) orelse continue;
+        const p_idx = node.parent_idx orelse continue;
+        const parent_eid = entity_map.get(p_idx) orelse continue;
+        try self.setParent(child_eid, parent_eid);
     }
 
     return .{

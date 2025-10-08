@@ -12,6 +12,7 @@ const HintzeHall = @import("core/ecs/prefabs/HintzeHall.zig");
 const Ground = @import("core/ecs/prefabs/Ground.zig");
 const Box = @import("core/ecs/prefabs/Box.zig");
 const Robot = @import("core/ecs/prefabs/Robot.zig");
+const Farm = @import("core/ecs/prefabs/Farm.zig");
 const Math = @import("core/Math.zig");
 const c = @import("core/bindings/c.zig");
 const imgui = c.imgui;
@@ -52,6 +53,7 @@ pub fn main() !void {
 
     _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
     _ = try HintzeHall.spawn(alloc, ECS);
+    // _ = try Farm.spawn(alloc, ECS);
     // _ = try Box.spawn(alloc, ECS, .ConvexHull, .{ 0, 10, 0 }, .{ 1, 1, 1 }, 1.0, scene_width, scene_height);
     // _ = try Robot.spawn(alloc, ECS, .{ .position = .{ 0, 10, 0 } }, scene_width, scene_height);
     // _ = try Ground.spawn(alloc, ECS, .{});

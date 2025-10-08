@@ -77,15 +77,9 @@ pub const TransformComponent = struct {
     pub fn updateLocalTransform(self: *Self) void {
         var transform = Mat4.identity();
 
-        transform = transform.translate(-self.position[0], -self.position[1], -self.position[2]);
-        transform = transform.scale(self.scale[0], self.scale[1], self.scale[2]);
-
-        const rotation_matrix = self.rotation.to_mat4();
-        transform = transform.multiply(rotation_matrix);
-
-        const inv_center = Mat4.translation(self.position[0], self.position[1], self.position[2]);
-        transform = transform.multiply(inv_center);
-        transform = transform.translate(self.position[0], self.position[1], self.position[2]);
+        transform = transform.multiply(Mat4.scaling(self.scale[0], self.scale[1], self.scale[2]));
+        transform = transform.multiply(self.rotation.to_mat4());
+        transform = transform.multiply(Mat4.translation(self.position[0], self.position[1], self.position[2]));
 
         self.local_transform = transform;
         self.markDirty();
@@ -175,7 +169,7 @@ pub const TransformSystem = struct {
                     try parent_transform.children.append(child_id);
                 }
 
-                child_transform.updateLocalTransform();
+                // child_transform.updateLocalTransform();
             }
         }
     }

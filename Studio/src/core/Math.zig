@@ -640,9 +640,9 @@ pub const Mat4 = struct {
     /// Create translation matrix
     pub fn translation(x: f32, y: f32, z: f32) Self {
         var result = Self{ .base = Matrix(4).identity() };
-        result.base.data[12] = x; // [0,3]
-        result.base.data[13] = y; // [1,3]
-        result.base.data[14] = z; // [2,3]
+        result.base.data[12] = x; // [3,0]
+        result.base.data[13] = y; // [3,1]
+        result.base.data[14] = z; // [3,2]
 
         return result;
     }
@@ -801,20 +801,22 @@ pub const Mat4 = struct {
         const _translation = [3]f32{ mat[12], mat[13], mat[14] };
 
         // Extract scale by taking the length of each of the first 3 columns.
-        const sx = math.sqrt(mat[0] * mat[0] + mat[1] * mat[1] + mat[2] * mat[2]);
-        const sy = math.sqrt(mat[4] * mat[4] + mat[5] * mat[5] + mat[6] * mat[6]);
-        const sz = math.sqrt(mat[8] * mat[8] + mat[9] * mat[9] + mat[10] * mat[10]);
+        // Matrices are stored row-major, so column 0 is at [0,4,8], column 1 at [1,5,9], column 2 at [2,6,10]
+        const sx = math.sqrt(mat[0] * mat[0] + mat[4] * mat[4] + mat[8] * mat[8]);
+        const sy = math.sqrt(mat[1] * mat[1] + mat[5] * mat[5] + mat[9] * mat[9]);
+        const sz = math.sqrt(mat[2] * mat[2] + mat[6] * mat[6] + mat[10] * mat[10]);
+
         const _scale = [3]f32{ sx, sy, sz };
 
         // Build a 3×3 rotation matrix by dividing out the scale from each column.
         const r00 = mat[0] / sx;
-        const r01 = mat[4] / sy;
-        const r02 = mat[8] / sz;
-        const r10 = mat[1] / sx;
+        const r01 = mat[1] / sy;
+        const r02 = mat[2] / sz;
+        const r10 = mat[4] / sx;
         const r11 = mat[5] / sy;
-        const r12 = mat[9] / sz;
-        const r20 = mat[2] / sx;
-        const r21 = mat[6] / sy;
+        const r12 = mat[6] / sz;
+        const r20 = mat[8] / sx;
+        const r21 = mat[9] / sy;
         const r22 = mat[10] / sz;
 
         // Convert this 3×3 rotation to a quaternion.
