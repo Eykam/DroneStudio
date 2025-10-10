@@ -236,7 +236,7 @@ pub const ModelResource = struct {
 
 pub fn createModelResource(
     allocator: std.mem.Allocator,
-    model_id: [:0]const u8,
+    model_id: []const u8,
     gltf: *GLTF,
 ) !*ModelResource {
     const scene_idx = gltf.document.value.scene orelse 0;
@@ -609,18 +609,21 @@ pub const GLTF = struct {
 
         // Load positions
         const positions = try self.loadAccessorVec3(primitive.attributes.POSITION.?);
+        defer allocator.free(positions);
 
         // Load colors (if available)
         const colors = if (primitive.attributes.COLOR_0) |color_accessor|
             try self.loadAccessorVec3(color_accessor)
         else
             null;
+        defer if (colors) |c| allocator.free(c);
 
         // Load texture coordinates (if available)
         const texcoords = if (primitive.attributes.TEXCOORD_0) |texcoord_accessor|
             try self.loadAccessorVec2(texcoord_accessor)
         else
             null;
+        defer if (texcoords) |t| allocator.free(t);
 
         // Load indices (if available)
         const indices = if (primitive.indices) |indices_accessor|
@@ -632,12 +635,14 @@ pub const GLTF = struct {
             try self.loadAccessorVec3(normal_accessor)
         else
             null;
+        defer if (normals) |n| allocator.free(n);
 
         // Load tangents (if available) - note: glTF tangents are vec4 with w component indicating handedness
         const tangents = if (primitive.attributes.TANGENT) |tangent_accessor|
             try self.loadAccessorVec4(tangent_accessor)
         else
             null;
+        defer if (tangents) |t| allocator.free(t);
 
         // Create vertices array
         const vertex_count = positions.len;

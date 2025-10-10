@@ -367,6 +367,7 @@ pub fn WindowManager(comptime Windows: []const type) type {
         pub fn deinit(self: *Self) void {
             inline for (Windows) |W| {
                 @field(self.windows, @typeName(W)).deinit(self.allocator);
+                self.allocator.destroy(@field(self.windows, @typeName(W)));
             }
         }
 
@@ -441,7 +442,7 @@ pub const RootWindow = struct {
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-        allocator.destroy(self);
+        allocator.destroy(self.entities_window);
     }
 
     /// This is the top-level "root" that occupies the entire screen
@@ -1235,7 +1236,8 @@ pub const EntitiesWindow = struct {
         return self;
     }
     pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {
-        alloc.destroy(self);
+        _ = self;
+        _ = alloc;
     }
 
     // ──────────────────────────────────────────────────────────────────────

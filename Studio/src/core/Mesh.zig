@@ -393,6 +393,7 @@ pub fn deinit(self: *Self) void {
     if (self.meta.VBO != 0) glad.glDeleteBuffers(1, &self.meta.VBO);
     if (self.meta.IBO != 0) glad.glDeleteBuffers(1, &self.meta.IBO);
     self.allocator.free(self.vertices);
+    if (self.indices) |idx| self.allocator.free(idx);
 }
 
 /// Update the mesh vertices with new data, updating the OpenGL buffer

@@ -570,23 +570,15 @@ pub const ColliderComponent = struct {
                 const shape_type = base_shape.getBulletShapeType();
                 const mesh_shape = bullet.cbtShapeAllocate(shape_type);
                 if (mesh_shape != null) {
-                    var indices_opt: ?[]u32 = null;
-                    defer if (indices_opt) |indices| allocator.free(indices);
-
-                    if (mesh_res.mesh.indices) |indices| {
-                        indices_opt = try allocator.dupe(u32, indices);
-                    }
-
-                    const temp_mesh = try Mesh.init(allocator, mesh_res.mesh.vertices, indices_opt, mesh_res.mesh._draw);
-                    // Don't deinit temp_mesh as it would free shared vertices from resource manager
-
-                    var mesh_collider = try createColliderFromMesh(allocator, resource_manager, temp_mesh, base_shape);
-                    try mesh_collider.shape.createBulletShape(allocator, mesh_shape.?, temp_mesh);
+                    var mesh_collider = try createColliderFromMesh(allocator, resource_manager, mesh_res.mesh, base_shape);
+                    try mesh_collider.shape.createBulletShape(allocator, mesh_shape.?, mesh_res.mesh);
 
                     // Use pre-decomposed transform
-                    const trs = node.decomposed_world;
+                    // const trs = node.decomposed_world;
+                    const local_mat = node.world_transform;
+                    const trs = local_mat.decomposeTRS();
                     const position = trs.translation;
-                    const quat = Quaternion.init(trs.rotation[0], trs.rotation[1], trs.rotation[2], trs.rotation[3]);
+                    const quat = trs.rotation;
                     const rotation = Math.Mat3.from_quaternion(quat).base.data;
 
                     var child_transform = [4][3]f32{

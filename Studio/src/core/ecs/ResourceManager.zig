@@ -383,8 +383,6 @@ pub const MaterialResource = struct {
     }
 
     pub fn setUniform(self: *MaterialResource, allocator: std.mem.Allocator, name: []const u8, value: UniformValue) !void {
-        const name_copy = try allocator.dupeZ(u8, name);
-
         // If the uniform already exists, free the old name
         if (self.uniforms.getKey(name)) |old_name| {
             if (self.uniforms.remove(name)) {
@@ -393,22 +391,16 @@ pub const MaterialResource = struct {
             allocator.free(old_name);
         }
 
-        try self.uniforms.put(name_copy, value);
+        try self.uniforms.put(name, value);
     }
 
     // Update deinit to free uniform names
     pub fn deinit(self: *MaterialResource, allocator: std.mem.Allocator) void {
         var it = self.texture_refs.iterator();
         while (it.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
             allocator.free(entry.value_ptr.*);
         }
         self.texture_refs.deinit();
-
-        var uniform_it = self.uniforms.iterator();
-        while (uniform_it.next()) |entry| {
-            allocator.free(entry.key_ptr.*);
-        }
         self.uniforms.deinit();
 
         if (self.shader_ref) |shader_name| {
@@ -526,7 +518,7 @@ pub fn loadTexture(self: *Self, name: []const u8, texture_id: c_uint, width: u32
     }
 
     // Create new texture resource
-    const texture_name = try self.allocator.dupeZ(u8, name);
+    const texture_name = try self.allocator.dupe(u8, name);
     try self.textures.put(texture_name, TextureResource.init(texture_id, width, height, channels));
 }
 
@@ -618,7 +610,7 @@ pub fn loadShader(self: *Self, name: []const u8, vertex_src: []const u8, fragmen
     }
 
     // Store the shader resource
-    const shader_name = try self.allocator.dupeZ(u8, name);
+    const shader_name = try self.allocator.dupe(u8, name);
     var shader_resource = try ShaderResource.init(self.allocator, program);
 
     shader_resource.cacheCommonUniforms(shader_type);
@@ -648,7 +640,7 @@ pub fn loadMaterial(self: *Self, name: []const u8, material: MaterialVariant, sh
         return;
     }
 
-    const material_name = try self.allocator.dupeZ(u8, name);
+    const material_name = try self.allocator.dupe(u8, name);
     var material_resource = try MaterialResource.init(self.allocator, material);
 
     // std.debug.print("Material Name: {s}", .{material_name});
@@ -787,9 +779,8 @@ pub fn writeCache(res: *GLTFParser.ModelResource, path: []const u8) !void {
         try cacheWriteZString(w, e.material_name);
 
         // --- optional matrix ----------------------------------------------
-        try w.writeByte(if (e.local_transformation != null) 1 else 0);
-        if (e.local_transformation) |m|
-            try w.writeAll(std.mem.asBytes(&m));
+        try writeOptArray(w, 16, e.local_matrix.base.data);
+        try writeOptArray(w, 16, e.world_transform.base.data);
 
         // --- TRS arrays ----------------------------------------------------
         try writeOptArray(w, 3, e.translation);
@@ -837,10 +828,18 @@ pub fn readCache(alloc: std.mem.Allocator, path: []const u8) !*GLTFParser.ModelR
 
         // --- optional matrix ---------------------------------------------
         if (try r.readByte() == 1) {
-            var m: Math.Mat4 = undefined;
-            _ = try r.readAll(std.mem.asBytes(&m));
-            e.local_transformation = m;
-        } else e.local_transformation = null;
+            var local_matrix: Math.Mat4 = undefined;
+            _ = try r.readAll(std.mem.asBytes(&local_matrix));
+            e.local_matrix = local_matrix;
+        } else e.local_matrix = Math.Mat4.identity();
+
+        if (try r.readByte() == 1) {
+            var world_matrix: Math.Mat4 = undefined;
+            _ = try r.readAll(std.mem.asBytes(&world_matrix));
+            e.world_transform = world_matrix;
+        } else e.world_transform = Math.Mat4.identity();
+
+        std.debug.print("Parsed: {}\n", .{e.world_transform});
 
         // --- TRS arrays ---------------------------------------------------
         e.translation = try readOptArray(r, 3);
@@ -867,7 +866,8 @@ pub fn loadGLTFModel(self: *Self, allocator: std.mem.Allocator, filepath: []cons
     var gltf = try GLTF.init(allocator, filepath);
     defer gltf.deinit();
 
-    const model_id = try std.fmt.allocPrintZ(allocator, "model_{s}", .{filepath});
+    const model_id = try std.fmt.allocPrint(allocator, "model_{s}", .{filepath});
+    defer allocator.free(model_id);
     try self.processGLTFResources(gltf, model_id);
     return GLTFParser.createModelResource(allocator, model_id, gltf);
 }
@@ -928,33 +928,28 @@ fn processGLTFTextures(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
             try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, img_idx });
         defer allocator.free(texture_name);
 
-        var texture_id: Mesh.TextureID = Mesh.TextureID{};
-        var img: *ImageLoader.Image = undefined;
-
         // Load from file
         if (image.uri) |uri| {
             const full_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ gltf.base_path, uri });
             defer allocator.free(full_path);
 
-            img = try ImageLoader.Image.loadFromFile(allocator, full_path);
+            const img = try ImageLoader.Image.loadFromFile(allocator, full_path);
             defer img.deinit();
 
-            texture_id = try img.createGLTexture();
+            const texture_id = try img.createGLTexture();
+            if (texture_id.y != 0) {
+                try self.loadTexture(texture_name, texture_id.y, img.width, img.height, img.getChannels());
+            }
         }
         // Load from buffer
         else if (image.bufferView != null) {
-            img = try gltf.loadBufferViewImage(allocator, image.bufferView.?);
+            const img = try gltf.loadBufferViewImage(allocator, image.bufferView.?);
             defer img.deinit();
 
-            texture_id = try img.createGLTexture();
-        }
-
-        // Register in resource manager
-        if (texture_id.y != 0) {
-            const width = img.width;
-            const height = img.height;
-            const channels = img.getChannels();
-            try self.loadTexture(texture_name, texture_id.y, width, height, channels);
+            const texture_id = try img.createGLTexture();
+            if (texture_id.y != 0) {
+                try self.loadTexture(texture_name, texture_id.y, img.width, img.height, img.getChannels());
+            }
         }
     }
 }
@@ -1303,18 +1298,20 @@ fn processGLTFMeshes(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
                 try std.fmt.allocPrint(allocator, "{s}_{s}_prim_{d}", .{ model_id, name, prim_idx })
             else
                 try std.fmt.allocPrint(allocator, "{s}_mesh_{d}_prim_{d}", .{ model_id, mesh_idx, prim_idx });
-            defer allocator.free(mesh_name);
 
-            std.debug.print("    Loading primitive {d} as {s}\n", .{ prim_idx, mesh_name });
+            std.debug.print("    processGLTFMeshes: Loading primitive {d} as '{s}' (len={})\n", .{ prim_idx, mesh_name, mesh_name.len });
             std.debug.print("      Material: {?d}\n", .{primitive.material});
 
-            const loaded_mesh = try gltf.loadMesh(allocator, mesh_idx);
-            if (loaded_mesh) |mesh| {
-                std.debug.print("      Loaded mesh: {d} vertices, {?d} indices\n", .{ mesh.vertices.len, if (mesh.indices) |idx| idx.len else null });
-                _ = try self.loadMesh(mesh_name, mesh.vertices, mesh.indices, mesh._draw);
-            } else {
-                std.debug.print("      Failed to load mesh!\n", .{});
+            if (self.meshes.getPtr(mesh_name)) |resource| {
+                std.debug.print("Mesh already exists!=> {s}\n", .{mesh_name});
+                resource.instance_count += 1;
+                continue;
             }
+
+            const loaded_mesh = try gltf.loadMesh(allocator, mesh_idx);
+            var mesh_resource = MeshResource.init(loaded_mesh.?);
+            mesh_resource.instance_count = 1;
+            try self.meshes.put(mesh_name, mesh_resource);
         }
     }
 }

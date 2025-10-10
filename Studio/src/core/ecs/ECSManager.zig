@@ -189,11 +189,22 @@ pub fn deinit(self: *Self) void {
     while (transform_iter.next()) |tuple| {
         tuple.component.deinit();
     }
+    var renderables_iter = self.renderer_components.iterator();
+    while (renderables_iter.next()) |tuple| {
+        tuple.component.deinit(self.allocator);
+    }
+    var viewports_iter = self.viewport_components.iterator();
+    while (viewports_iter.next()) |tuple| {
+        self.allocator.free(tuple.component.vp.name);
+    }
 
     // Controller components don't need deinit - they use fixed arrays
 
     // Deinit component storage
     self.transform_components.deinit();
+    self.viewport_components.deinit();
+    self.camera_components.deinit();
+    self.rigid_body_components.deinit();
     self.renderer_components.deinit();
     self.collider_components.deinit();
     self.physics_components.deinit();
@@ -219,6 +230,9 @@ pub fn deinit(self: *Self) void {
 
     // Deinit other systems
     self.shared_mem_system.deinit();
+    self.render_system.deinit();
+    self.viewport_system.deinit();
+    self.recorder_system.deinit();
     self.globals_system.deinit(); // This frees itself and destroys OpenGL context
     self.world.deinit();
     self.allocator.destroy(self.world);
@@ -369,13 +383,9 @@ pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelReso
         transform.rotation = trs.rotation;
         transform.scale = trs.scale;
 
-        transform.updateLocalTransform();
-        std.debug.print("{s}\n{}\n", .{ "=" ** 40, trs });
-        std.debug.print("{}\n", .{node.local_matrix});
-        std.debug.print("{}\n", .{transform.local_transform});
-
         // If there is a mesh_name, add a renderer
         const mesh_name = node.mesh_name orelse continue;
+        std.debug.print("    ECSManager: Creating renderable with mesh_name '{s}' (len={})\n", .{ mesh_name, mesh_name.len });
         const renderable = try self.addRenderable(e_id, mesh_name);
 
         const material_name = node.material_name orelse continue;

@@ -19,6 +19,7 @@ pub const TransformComponent = struct {
     world_transform: Mat4 = Mat4.identity(),
     parent: ?Core.EntityID = null,
     children: std.ArrayList(Core.EntityID),
+    dirty: bool = true,
     changed_this_frame: bool = true,
 
     pub fn init(allocator: std.mem.Allocator) Self {
@@ -31,27 +32,27 @@ pub const TransformComponent = struct {
         self.children.deinit();
     }
 
-    fn markDirty(self: *Self) void {
-        self.changed_this_frame = true;
+    pub fn markDirty(self: *Self) void {
+        self.dirty = true;
     }
 
-    fn resetFlag(self: *Self) void {
-        self.changed_this_frame = false;
+    fn markClean(self: *Self) void {
+        self.dirty = false;
     }
 
     pub fn setPosition(self: *Self, x: f32, y: f32, z: f32) void {
         self.position = .{ x, y, z };
-        self.updateLocalTransform();
+        self.markDirty();
     }
 
     pub fn setRotation(self: *Self, q: Quaternion) void {
         self.rotation = q.normalize();
-        self.updateLocalTransform();
+        self.markDirty();
     }
 
     pub fn setScale(self: *Self, x: f32, y: f32, z: f32) void {
         self.scale = .{ x, y, z };
-        self.updateLocalTransform();
+        self.markDirty();
     }
 
     pub fn translate(self: *Self, translation: [3]f32) void {
@@ -60,18 +61,18 @@ pub const TransformComponent = struct {
             self.position[1] + translation[1],
             self.position[2] + translation[2],
         };
-        self.updateLocalTransform();
+        self.markDirty();
     }
 
     pub fn rotate(self: *Self, q: Quaternion) void {
         self.rotation = self.rotation.multiply(q).normalize();
-        self.updateLocalTransform();
+        self.markDirty();
     }
 
     pub fn rotateWithEuler(self: *Self, pitch: f32, yaw: f32, roll: f32) void {
         const q = Quaternion.from_euler(pitch, yaw, roll);
         self.rotation = self.rotation.multiply(q).normalize();
-        self.updateLocalTransform();
+        self.markDirty();
     }
 
     pub fn updateLocalTransform(self: *Self) void {
@@ -82,7 +83,7 @@ pub const TransformComponent = struct {
         transform = transform.multiply(Mat4.translation(self.position[0], self.position[1], self.position[2]));
 
         self.local_transform = transform;
-        self.markDirty();
+        self.markClean();
     }
 
     pub fn attach(self: *TransformComponent, ecs: *ECSManager, eid: Core.EntityID) !void {
@@ -118,6 +119,7 @@ pub const TransformSystem = struct {
             if ((parent_id == null and transform.parent == null) or
                 (parent_id != null and transform.parent != null and transform.parent.?.id == parent_id.?.id))
             {
+                if (transform.dirty) transform.updateLocalTransform();
 
                 // Update world transform based on parent
                 if (transform.parent) |parent_entity_id| {

@@ -51,14 +51,15 @@ pub fn main() !void {
     const scene_width = 1920;
     const scene_height = 1080;
 
-    _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
-    _ = try HintzeHall.spawn(alloc, ECS);
-    // _ = try Farm.spawn(alloc, ECS);
+    // _ = try Drone.spawn(alloc, ECS, scene_width, scene_height);
+    // _ = try HintzeHall.spawn(alloc, ECS);
+    _ = try Farm.spawn(alloc, ECS);
     // _ = try Box.spawn(alloc, ECS, .ConvexHull, .{ 0, 10, 0 }, .{ 1, 1, 1 }, 1.0, scene_width, scene_height);
     // _ = try Robot.spawn(alloc, ECS, .{ .position = .{ 0, 10, 0 } }, scene_width, scene_height);
     // _ = try Ground.spawn(alloc, ECS, .{});
     _ = FreeCamera.spawn(alloc, ECS, scene_width, scene_height);
 
+    std.debug.print("{}\n", .{ECS.world.resource_manager});
     // Position the hall
     // const hall_transform = ECS.transform_components.get(hintze_hall_entity).?;
     // hall_transform.setPosition(0, -1.0, 0);
@@ -69,7 +70,8 @@ pub fn main() !void {
     };
 
     const TWindowManager = UI.WindowManager(&windows);
-    const WindowManager = try TWindowManager.init(alloc, .{ .ecs = ECS });
+    var WindowManager = try TWindowManager.init(alloc, .{ .ecs = ECS });
+    defer WindowManager.deinit();
 
     std.debug.print("Starting main loop...\n", .{});
     while (!should_exit.load(.acquire) and glfw.glfwWindowShouldClose(window) == 0) {

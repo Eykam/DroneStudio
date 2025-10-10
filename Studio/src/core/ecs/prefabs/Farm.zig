@@ -16,6 +16,7 @@ pub fn spawn(
         alloc,
         "assets/realistic_scene_3d/scene.gltf",
     );
+    defer farm_resource.deinit();
 
     // Create visual model entities
     var hintze_hall_result = try ecs.createEntitiesFromModel(farm_resource);

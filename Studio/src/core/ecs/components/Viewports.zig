@@ -68,6 +68,10 @@ pub const ViewportSystem = struct {
         return .{ .allocator = allocator, .globals = globals, .viewports = vps };
     }
 
+    pub fn deinit(self: Self) void {
+        _ = self;
+    }
+
     /// if window size changed: resize all FBOs
     pub fn update(self: *Self) !void {
         const w: i32 = @intCast(self.globals.scene_width);
