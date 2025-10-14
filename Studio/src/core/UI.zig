@@ -1043,6 +1043,7 @@ const TimelineRecorder = struct {
     load_popup_open: bool = false,
     selected_file: []const u8 = "",
     file_list: std.ArrayList([:0]const u8),
+    active_tab: enum { Recorder, Flamegraph } = .Recorder,
 
     pub fn init(alloc: std.mem.Allocator) Self {
         return Self{
@@ -1055,12 +1056,44 @@ const TimelineRecorder = struct {
     /// Place it immediately after the Sub‑viewports child in RootWindow.
     pub fn draw(self: *Self, ctx: *const UIContext) void {
         const ecs = ctx.ecs;
-        var rec = ecs.recorder_system;
+        const rec = ecs.recorder_system;
 
         var avail: imgui.ImVec2 = undefined;
         imgui.igGetContentRegionAvail(&avail);
-        const h: f32 = 70.0;
+        // Use 0 for height to fill available space (flexible height based on tab content)
+        const h: f32 = if (self.active_tab == .Flamegraph) 0 else 70.0;
         _ = imgui.igBeginChild_Str("TimelineWidget", .{ .x = avail.x, .y = h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+        // Draw tab bar
+        const RenderProfiler = @import("debug/RenderProfiler.zig");
+        const profiler_enabled = RenderProfiler.timersEnabled();
+
+        if (imgui.igBeginTabBar("##RecorderTabs", imgui.ImGuiTabBarFlags_None)) {
+            if (imgui.igBeginTabItem("Recorder", null, imgui.ImGuiTabItemFlags_None)) {
+                self.active_tab = .Recorder;
+                imgui.igEndTabItem();
+            }
+
+            if (profiler_enabled) {
+                if (imgui.igBeginTabItem("Flamegraph", null, imgui.ImGuiTabItemFlags_None)) {
+                    self.active_tab = .Flamegraph;
+                    imgui.igEndTabItem();
+                }
+            }
+
+            imgui.igEndTabBar();
+        }
+
+        // Draw content based on active tab
+        switch (self.active_tab) {
+            .Recorder => self.drawRecorderTab(ctx, rec),
+            .Flamegraph => if (profiler_enabled) self.drawFlamegraphTab(ctx),
+        }
+
+        imgui.igEndChild();
+    }
+
+    fn drawRecorderTab(self: *Self, ctx: *const UIContext, rec: anytype) void {
 
         if (self.mode == .Record) {
             const start_label = if (rec.is_recording) "Stop" else "Start";
@@ -1114,7 +1147,7 @@ const TimelineRecorder = struct {
             var max_dur = rec.duration;
             if (max_dur == 0) max_dur = 1; // avoid 0‑range slider
             if (imgui.igSliderFloat("##scrub", &self.scrub_pos, 0, max_dur, "%.2fs", 0)) {
-                rec.seek(ecs, self.scrub_pos) catch |err| {
+                rec.seek(ctx.ecs, self.scrub_pos) catch |err| {
                     std.debug.print("Error seeking: {any}\n", .{err});
                 };
             }
@@ -1216,7 +1249,69 @@ const TimelineRecorder = struct {
 
             imgui.igEndPopup();
         }
-        imgui.igEndChild();
+    }
+
+    fn drawFlamegraphTab(self: *Self, ctx: *const UIContext) void {
+        _ = self;
+
+        // Get profiler data from the render system
+        if (ctx.ecs.render_system.profiler.snapshot()) |stats| {
+            imgui.igText("Render Performance (1s avg)");
+            imgui.igSeparator();
+
+            imgui.igText("Commands: %.1f | Draws: %.1f", stats.commands, stats.draws);
+            imgui.igText("Shader switches: %.1f | Material switches: %.1f | VAO switches: %.1f",
+                stats.shader_switches, stats.material_switches, stats.vao_switches);
+
+            imgui.igSeparator();
+            imgui.igText("Timing:");
+
+            const frame_ms = @as(f32, @floatCast(stats.section_cpu_ns.get(.frame))) / 1_000_000.0;
+            const gather_ms = @as(f32, @floatCast(stats.section_cpu_ns.get(.gather_commands))) / 1_000_000.0;
+            const material_ms = @as(f32, @floatCast(stats.section_cpu_ns.get(.material_setup))) / 1_000_000.0;
+            const draw_ms = @as(f32, @floatCast(stats.section_cpu_ns.get(.draw_submission))) / 1_000_000.0;
+
+            imgui.igText("Frame: %.3f ms (%.1f FPS)", frame_ms, 1000.0 / @max(frame_ms, 0.001));
+            imgui.igText("  Gather commands: %.3f ms", gather_ms);
+            imgui.igText("  Material setup: %.3f ms", material_ms);
+            imgui.igText("  Draw submission: %.3f ms", draw_ms);
+
+            // Simple bar chart visualization
+            imgui.igSeparator();
+            imgui.igText("Timing Breakdown:");
+
+            const bar_width: f32 = -1;  // Full width
+            const bar_height: f32 = 20.0;
+
+            if (frame_ms > 0) {
+                const gather_ratio = gather_ms / frame_ms;
+                const material_ratio = material_ms / frame_ms;
+                const draw_ratio = draw_ms / frame_ms;
+
+                // Format labels with timing and percentage
+                var gather_label: [64]u8 = undefined;
+                var material_label: [64]u8 = undefined;
+                var draw_label: [64]u8 = undefined;
+
+                const gather_str = std.fmt.bufPrintZ(&gather_label, "Gather: {d:.2}ms ({d:.1}%%)", .{gather_ms, gather_ratio * 100.0}) catch "Gather";
+                const material_str = std.fmt.bufPrintZ(&material_label, "Material: {d:.2}ms ({d:.1}%%)", .{material_ms, material_ratio * 100.0}) catch "Material";
+                const draw_str = std.fmt.bufPrintZ(&draw_label, "Draw: {d:.2}ms ({d:.1}%%)", .{draw_ms, draw_ratio * 100.0}) catch "Draw";
+
+                imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_PlotHistogram, .{ .x = 0.2, .y = 0.8, .z = 0.3, .w = 1.0 });
+                imgui.igProgressBar(gather_ratio, .{ .x = bar_width, .y = bar_height }, gather_str.ptr);
+                imgui.igPopStyleColor(1);
+
+                imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_PlotHistogram, .{ .x = 0.8, .y = 0.5, .z = 0.2, .w = 1.0 });
+                imgui.igProgressBar(material_ratio, .{ .x = bar_width, .y = bar_height }, material_str.ptr);
+                imgui.igPopStyleColor(1);
+
+                imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_PlotHistogram, .{ .x = 0.2, .y = 0.5, .z = 0.8, .w = 1.0 });
+                imgui.igProgressBar(draw_ratio, .{ .x = bar_width, .y = bar_height }, draw_str.ptr);
+                imgui.igPopStyleColor(1);
+            }
+        } else {
+            imgui.igTextDisabled("No profiling data available");
+        }
     }
 };
 

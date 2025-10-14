@@ -12,6 +12,7 @@ const Globals = @import("Globals.zig");
 const ECSManager = @import("../ECSManager.zig");
 const Viewports = @import("Viewports.zig");
 const Camera = @import("Camera.zig");
+const RenderProfiler = @import("../../debug/RenderProfiler.zig");
 
 const glad = gl.glad;
 const Mat4 = Math.Mat4;
@@ -92,6 +93,7 @@ pub const RenderSystem = struct {
     viewport_components: *SparseSet(ViewportComponent),
     renderables: *SparseSet(Renderable),
     render_queue: std.ArrayList(RenderCommand),
+    profiler: RenderProfiler.Profiler,
 
     const RenderCommand = struct {
         shader_id: c_uint,
@@ -166,6 +168,7 @@ pub const RenderSystem = struct {
             .viewport_components = viewport_components,
             .renderables = renderables,
             .render_queue = try std.ArrayList(RenderCommand).initCapacity(allocator, 64),
+            .profiler = RenderProfiler.Profiler.init(allocator),
         };
     }
 
@@ -174,42 +177,52 @@ pub const RenderSystem = struct {
     }
 
     pub fn update(self: *Self) !void {
+        self.profiler.beginFrame();
+        defer self.profiler.endFrame();
+
         self.render_queue.clearRetainingCapacity();
 
-        var renderer_iter = self.renderables.iterator();
-        while (renderer_iter.next()) |tuple| {
-            const entity_id = tuple.entity_id;
-            const renderer = tuple.component.*;
+        {
+            var gather_scope = self.profiler.sectionScope(.gather_commands);
+            defer gather_scope.end();
 
-            // Skip invisible objects
-            if (!renderer.is_visible) continue;
+            var renderer_iter = self.renderables.iterator();
+            while (renderer_iter.next()) |tuple| {
+                const entity_id = tuple.entity_id;
+                const renderer = tuple.component.*;
 
-            if (self.transform_components.get(entity_id)) |transform| {
-                var material_resource: ?*ResourceManager.MaterialResource = null;
-                if (renderer.material_name) |material_name| {
-                    material_resource = self.world.resource_manager.materials.getPtr(material_name);
-                }
+                // Skip invisible objects
+                if (!renderer.is_visible) continue;
 
-                var shader_id: c_uint = 0;
-                var shader_name: ?[:0]const u8 = null;
+                if (self.transform_components.get(entity_id)) |transform| {
+                    var material_resource: ?*ResourceManager.MaterialResource = null;
+                    if (renderer.material_name) |material_name| {
+                        material_resource = self.world.resource_manager.materials.getPtr(material_name);
+                    }
 
-                // Check for material-specific shader
-                if (material_resource != null and material_resource.?.shader_ref != null) {
-                    shader_name = material_resource.?.shader_ref;
-                    if (shader_name) |name| {
-                        if (self.world.resource_manager.shaders.get(name)) |shader| {
-                            shader_id = shader.program_id;
+                    var shader_id: c_uint = 0;
+                    var shader_name: ?[:0]const u8 = null;
+
+                    // Check for material-specific shader
+                    if (material_resource != null and material_resource.?.shader_ref != null) {
+                        shader_name = material_resource.?.shader_ref;
+                        if (shader_name) |name| {
+                            if (self.world.resource_manager.shaders.get(name)) |shader| {
+                                shader_id = shader.program_id;
+                            }
                         }
                     }
-                }
 
-                try self.render_queue.append(.{
-                    .entity_id = entity_id,
-                    .renderer = renderer,
-                    .transform = transform.*,
-                    .shader_id = shader_id,
-                    .shader_name = shader_name,
-                });
+                    try self.render_queue.append(.{
+                        .entity_id = entity_id,
+                        .renderer = renderer,
+                        .transform = transform.*,
+                        .shader_id = shader_id,
+                        .shader_name = shader_name,
+                    });
+
+                    self.profiler.trackCommand();
+                }
             }
         }
 
@@ -245,7 +258,7 @@ pub const RenderSystem = struct {
                 const camera_position = tf.position;
 
                 // Process render queue
-                const current_shader_id: c_uint = 0;
+                var current_shader_id: c_uint = 0;
                 var prev_material: ?[]const u8 = null;
 
                 for (self.render_queue.items, 0..) |*cmd, idx| {
@@ -259,7 +272,11 @@ pub const RenderSystem = struct {
                         if (cmd.renderer.material_name) |material_name| {
                             if (prev_material == null or !std.mem.eql(u8, prev_material.?, material_name)) {
                                 if (self.world.resource_manager.materials.getPtr(material_name)) |material_resource| {
-                                    self.applyMaterial(material_resource, cmd.transform, &view_matrix, &projection_matrix, &camera_position);
+                                    var material_scope = self.profiler.sectionScope(.material_setup);
+                                    defer material_scope.end();
+
+                                    const program_id = self.applyMaterial(material_resource, cmd.transform, &view_matrix, &projection_matrix, &camera_position);
+                                    current_shader_id = program_id;
                                 }
 
                                 prev_material = material_name;
@@ -271,6 +288,7 @@ pub const RenderSystem = struct {
                                         .Phong => "standard_shader",
                                     };
                                     if (self.world.resource_manager.getShader(shader_name)) |shader| {
+                                        current_shader_id = shader.program_id;
                                         const uModelLoc = shader.uniforms.get("uModel") orelse -1;
                                         if (uModelLoc != -1) {
                                             glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &cmd.transform.world_transform.to_array());
@@ -280,10 +298,12 @@ pub const RenderSystem = struct {
                             }
                         } else {
                             // No material - use a default shader if needed
-                            if (current_shader_id == 0) {
-                                var shader = self.world.resource_manager.getShader("standard_shader") orelse return;
-
-                                glad.glUseProgram(shader.program_id);
+                            if (self.world.resource_manager.getShader("standard_shader")) |shader| {
+                                if (current_shader_id != shader.program_id) {
+                                    self.profiler.trackShaderBind(@intCast(shader.program_id));
+                                    glad.glUseProgram(shader.program_id);
+                                    current_shader_id = shader.program_id;
+                                }
 
                                 // Set transformation matrices
                                 const uModelLoc = shader.getorPutUniformLocation("uModel");
@@ -304,8 +324,15 @@ pub const RenderSystem = struct {
                             }
                         }
 
-                        // Draw the mesh
-                        mesh._draw(mesh);
+                        self.profiler.trackVaoBind(mesh.meta.VAO);
+
+                        {
+                            var draw_scope = self.profiler.sectionScope(.draw_submission);
+                            defer draw_scope.end();
+
+                            self.profiler.trackDraw();
+                            mesh._draw(mesh);
+                        }
 
                         // Reset per-material state if needed
                         glad.glDisable(glad.GL_BLEND);
@@ -330,12 +357,15 @@ pub const RenderSystem = struct {
         view_matrix: *const Mat4,
         projection_matrix: *const Mat4,
         view_position: *const [3]f32,
-    ) void {
+    ) c_uint {
         const shader_name = material_resource.shader_ref orelse switch (material_resource.material) {
             .PBR => "pbr_shader",
             .Phong => "standard_shader",
         };
-        var shader = self.world.resource_manager.getShader(shader_name) orelse return;
+        var shader = self.world.resource_manager.getShader(shader_name) orelse return 0;
+
+        self.profiler.trackMaterialBind(@intFromPtr(material_resource));
+        self.profiler.trackShaderBind(@intCast(shader.program_id));
 
         // Activate the shader program
         glad.glUseProgram(shader.program_id);
@@ -541,6 +571,8 @@ pub const RenderSystem = struct {
                 }
             },
         }
+
+        return shader.program_id;
     }
 
     pub fn debug(self: *Self) void {

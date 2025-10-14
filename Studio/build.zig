@@ -295,6 +295,7 @@ fn configureKernels(
 
 // Get command-line options
 pub fn build(b: *std.Build) void {
+    const render_profiler_level = b.option(u8, "render-profiler", "Render profiler level (0 = off, 1 = stats, 2 = stats + timers)") orelse 0;
     const build_desktop = b.option(bool, "desktop", "Build the desktop application") orelse true;
     const build_pi = b.option(bool, "pi", "Build the Raspberry Pi applications") orelse true;
     const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration for desktop") orelse false;
@@ -335,6 +336,9 @@ pub fn build(b: *std.Build) void {
     std.debug.print("Desktop target: {s} {s}\n", .{ @tagName(desktop_target.result.cpu.arch), desktop_target.result.cpu.model.name });
     std.debug.print("Pi target: {s} {s}\n", .{ @tagName(pi_target.result.cpu.arch), pi_target.result.cpu.model.name });
 
+    const build_options = b.addOptions();
+    build_options.addOption(u8, "render_profiler", render_profiler_level);
+
     // Desktop Application
     var desktop_step: ?*std.Build.Step = null;
     var test_desktop_step: ?*std.Build.Step = null;
@@ -364,6 +368,7 @@ pub fn build(b: *std.Build) void {
             .target = desktop_target,
             .optimize = optimize,
         });
+        desktop_exe.root_module.addOptions("build_options", build_options);
 
         // Configure libraries for the desktop executable
         configureDesktopLibs(
@@ -393,6 +398,7 @@ pub fn build(b: *std.Build) void {
             .target = desktop_target,
             .optimize = optimize,
         });
+        exe_check.root_module.addOptions("build_options", build_options);
 
         configureDesktopLibs(
             exe_check,
@@ -430,6 +436,7 @@ pub fn build(b: *std.Build) void {
             .target = desktop_target,
             .optimize = optimize,
         });
+        desktop_tests.root_module.addOptions("build_options", build_options);
 
         // Configure libraries for the desktop test executable
         configureDesktopLibs(
@@ -498,6 +505,7 @@ pub fn build(b: *std.Build) void {
             .target = pi_target,
             .optimize = optimize,
         });
+        imu_exe.root_module.addOptions("build_options", build_options);
         b.installArtifact(imu_exe);
         pi_step.?.dependOn(&imu_exe.step);
 
@@ -508,6 +516,7 @@ pub fn build(b: *std.Build) void {
             .target = pi_target,
             .optimize = optimize,
         });
+        motor_exe.root_module.addOptions("build_options", build_options);
         b.installArtifact(motor_exe);
         pi_step.?.dependOn(&motor_exe.step);
 
@@ -538,6 +547,7 @@ pub fn build(b: *std.Build) void {
             .target = pi_target,
             .optimize = optimize,
         });
+        imu_tests.root_module.addOptions("build_options", build_options);
         const run_imu_tests = b.addRunArtifact(imu_tests);
 
         // Unit tests for MotorController
@@ -546,6 +556,7 @@ pub fn build(b: *std.Build) void {
             .target = pi_target,
             .optimize = optimize,
         });
+        motor_tests.root_module.addOptions("build_options", build_options);
         const run_motor_tests = b.addRunArtifact(motor_tests);
 
         // Create test steps for each executable
