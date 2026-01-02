@@ -35,7 +35,7 @@ pub const ViewportComponent = struct {
     pub fn enableSharing(self: *Self) void {
         // Create shared CUDA-GL texture
         if (!self.shared or self.shared_info == null) {
-            self.shared_info = CudaGL.createCUDAGLTexture(
+            self.shared_info = CudaGL.CUDAGLTexture.init(
                 self.vp.fbo.width,
                 self.vp.fbo.height,
                 self.vp.fbo.texture,

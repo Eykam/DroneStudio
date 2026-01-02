@@ -7,49 +7,66 @@ const Camera = @import("../components/Camera.zig");
 const Controller = @import("../components/Controller.zig");
 const Transform = @import("../components/Transform.zig");
 const Viewport = @import("../components/Viewports.zig");
+const Renderer = @import("../components/Renderer.zig");
+const Frustum = @import("Frustum.zig");
+const ECSManager = @import("../ECSManager.zig");
+pub const Sensors = @import("Sensors.zig");
 
 const glfw = gl.glfw;
 const ControllerComponent = Controller.ControllerComponent;
 const TransformComponent = Transform.TransformComponent;
 const ViewportComponent = Viewport.ViewportComponent;
 
-const Defaults = struct {
-    pos: [3]f32 = .{ 0.0, 0.0, 0.15 }, // Position can be adjusted as needed
-    focal_length_mm: f32 = 3.04, // Focal length in mm (calculated for 102° FOV)
-    sensor_width_mm: f32 = 6.287, // Sensor width in mm (1/2.3" sensor)
-    sensor_height_mm: f32 = 4.712, // Sensor height in mm
-    resolution_width: u32 = 1280, // Resolution width in pixels
-    resolution_height: u32 = 720, // Resolution height in pixels
+pub const Config = struct {
+    pos: [3]f32 = .{ 0.0, 0.0, 0.15 },
+    module: Sensors.CameraModule = Sensors.Default,
+    resolution_width: u32 = 1280,
+    resolution_height: u32 = 720,
 };
 
-const defaults = Defaults{};
-
-pub fn generate(
+pub fn spawn(
     alloc: std.mem.Allocator,
+    ecs: *ECSManager,
     name: []const u8,
-    desc: Defaults,
-) !struct {
-    tf: Transform.TransformComponent,
-    cam: Camera.CameraComponent,
-    vp: Viewport.ViewportComponent,
-} {
+    config: Config,
+) !Core.EntityID {
     var tf = Transform.TransformComponent.init(alloc);
-    tf.setPosition(desc.pos[0], desc.pos[1], desc.pos[2]);
+    tf.setPosition(config.pos[0], config.pos[1], config.pos[2]);
+
+    const vfov = config.module.vfov();
+    const aspect = @as(f32, @floatFromInt(config.resolution_width)) / @as(f32, @floatFromInt(config.resolution_height));
 
     const cam = Camera.CameraComponent{
         .entity_id = undefined,
-        .fov = 2.0 * Math.degrees(std.math.atan(desc.sensor_height_mm / (2.0 * desc.focal_length_mm))),
-        .aspect = @as(f32, @floatFromInt(desc.resolution_width)) / @as(f32, @floatFromInt(desc.resolution_height)),
+        .fov = vfov,
+        .aspect = aspect,
         .active = true,
     };
 
-    var vp = try Viewport.ViewportComponent.init(
+    const vp = try Viewport.ViewportComponent.init(
         alloc,
         name,
-        defaults.resolution_width,
-        defaults.resolution_height,
+        config.resolution_width,
+        config.resolution_height,
     );
-    vp.enableSharing();
+    // vp.enableSharing();
 
-    return .{ .tf = tf, .cam = cam, .vp = vp };
+    const frustum = Frustum.generate(
+        alloc,
+        ecs,
+        name,
+        vfov,
+        aspect,
+        1.0,
+        0.1,
+    );
+
+    // Spawn camera entity
+    const cam_eid = try ecs.spawn(.{ tf, cam, vp });
+
+    // Spawn frustum as child
+    const frustum_eid = try ecs.spawn(.{ frustum.tf, frustum.renderable });
+    try ecs.transform_system.addChild(cam_eid, frustum_eid);
+
+    return cam_eid;
 }

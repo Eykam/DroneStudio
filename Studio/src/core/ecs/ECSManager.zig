@@ -21,6 +21,8 @@ const Collisions = @import("components/Collisions.zig");
 const SharedMem = @import("components/SharedMem.zig");
 const IMUSensor = @import("components/IMUSensor.zig");
 const FlightController = @import("components/FlightController.zig");
+const PathPlayback = @import("components/PathPlayback.zig");
+const SLAM = @import("components/SLAMSystem.zig");
 
 // Components
 const ControllerComponent = Controller.ControllerComponent;
@@ -34,6 +36,8 @@ const ColliderComponent = Collisions.ColliderComponent;
 const RigidBodyComponent = Collisions.RigidBodyComponent;
 const IMUSensorComponent = IMUSensor.IMUSensorComponent;
 const FlightControllerComponent = FlightController.FlightControllerComponent;
+const PathPlaybackComponent = PathPlayback.PathPlaybackComponent;
+const SLAMComponent = SLAM.SLAMComponent;
 
 // Systems
 const ControllerSytem = Controller.ControlSystem;
@@ -47,6 +51,8 @@ const CollisionSystem = Collisions.CollisionSystem;
 const SharedMemSystem = SharedMem.SharedMemSystem;
 const IMUSystem = IMUSensor.IMUSystem;
 const FlightControllerSystem = FlightController.FlightControllerSystem;
+const PathPlaybackSystem = PathPlayback.PathPlaybackSystem;
+const SLAMSystem = SLAM.SLAMSystem;
 const PathSystem = @import("components/PathSystem.zig");
 
 const Self = @This();
@@ -66,6 +72,8 @@ collider_components: SparseSet(ColliderComponent),
 rigid_body_components: SparseSet(RigidBodyComponent),
 imu_sensor_components: SparseSet(IMUSensorComponent),
 flight_controller_components: SparseSet(FlightControllerComponent),
+path_playback_components: SparseSet(PathPlaybackComponent),
+slam_components: SparseSet(SLAMComponent),
 
 // Systems
 globals_system: *GlobalsSystem,
@@ -79,6 +87,8 @@ collision_system: CollisionSystem,
 shared_mem_system: SharedMemSystem,
 imu_system: IMUSystem,
 flight_controller_system: FlightControllerSystem,
+path_playback_system: PathPlaybackSystem,
+slam_system: SLAMSystem,
 path_system: ?*PathSystem,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
@@ -103,6 +113,8 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         .rigid_body_components = SparseSet(RigidBodyComponent).init(allocator),
         .imu_sensor_components = SparseSet(IMUSensorComponent).init(allocator),
         .flight_controller_components = SparseSet(FlightControllerComponent).init(allocator),
+        .path_playback_components = SparseSet(PathPlaybackComponent).init(allocator),
+        .slam_components = SparseSet(SLAMComponent).init(allocator),
 
         // Initialize systems
         .globals_system = global_system,
@@ -157,6 +169,15 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             allocator,
             &manager.flight_controller_components,
         ),
+        .path_playback_system = PathPlaybackSystem.init(
+            &manager.path_playback_components,
+            &manager.transform_components,
+        ),
+        .slam_system = SLAMSystem.init(
+            allocator,
+            &manager.slam_components,
+            manager.globals,
+        ),
         .path_system = null,
     };
 
@@ -178,6 +199,9 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
 
         // Initialize path system
         manager.path_system = try PathSystem.init(allocator, manager);
+
+        // Link path system to path playback system
+        manager.path_playback_system.setPathSystem(manager.path_system.?);
     }
 
     return manager;
@@ -211,10 +235,13 @@ pub fn deinit(self: *Self) void {
     self.controller_components.deinit();
     self.imu_sensor_components.deinit();
     self.flight_controller_components.deinit();
+    self.path_playback_components.deinit();
+    self.slam_components.deinit();
 
-    // Deinit flight controller and IMU systems to stop their threads
+    // Deinit flight controller, IMU, and SLAM systems to stop their threads
     self.flight_controller_system.deinit();
     self.imu_system.deinit();
+    self.slam_system.deinit();
 
     // Deinit path system
     if (self.path_system) |path_system| {
@@ -281,6 +308,9 @@ pub fn update(self: *Self, time: f64) !void {
     self.control_system.updateContinuous();
     if (should_time) std.debug.print("  Flight input system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
+    self.path_playback_system.update(dt);
+    if (should_time) std.debug.print("  Path playback system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
     self.transform_system.update();
     if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 
@@ -295,6 +325,9 @@ pub fn update(self: *Self, time: f64) !void {
 
     self.shared_mem_system.update();
     if (should_time) std.debug.print("  SharedMem system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.slam_system.update();
+    if (should_time) std.debug.print("  SLAM system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
 }
 
 pub fn resetToInitialState(self: *Self) !void {

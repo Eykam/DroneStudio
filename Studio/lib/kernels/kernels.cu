@@ -45,6 +45,48 @@ __constant__ int2 fast_offsets[16] = {
 __constant__ float d_gaussian_kernel[GAUSSIAN_KERNEL_SIZE];
 
 
+// ============================================================= RGBA to Grayscale =================================================================
+
+__global__ void rgbaToGray(
+    const uint8_t* __restrict__ rgba_input,
+    uint8_t* __restrict__ gray_output,
+    int width,
+    int height,
+    int rgba_pitch,
+    int gray_pitch)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= width || y >= height) return;
+
+    // Read RGBA pixel (4 bytes per pixel)
+    const int rgba_idx = y * rgba_pitch + x * 4;
+    const uint8_t r = rgba_input[rgba_idx + 0];
+    const uint8_t g = rgba_input[rgba_idx + 1];
+    const uint8_t b = rgba_input[rgba_idx + 2];
+
+    // Convert to grayscale using luminance formula: Y = 0.299*R + 0.587*G + 0.114*B
+    const float gray = 0.299f * r + 0.587f * g + 0.114f * b;
+
+    // Write grayscale output
+    gray_output[y * gray_pitch + x] = (uint8_t)(gray + 0.5f);
+}
+
+void launch_rgba_to_gray(
+    const uint8_t* rgba_input,
+    uint8_t* gray_output,
+    int width,
+    int height,
+    int rgba_pitch,
+    int gray_pitch,
+    dim3 grid,
+    dim3 block)
+{
+    rgbaToGray<<<grid, block>>>(rgba_input, gray_output, width, height, rgba_pitch, gray_pitch);
+}
+
+
 // Separable Gaussian blur kernels
 __global__ void gaussianBlur(
     const uint8_t* __restrict__ input,

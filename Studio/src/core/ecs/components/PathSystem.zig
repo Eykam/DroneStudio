@@ -30,6 +30,7 @@ is_generating: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 progress_current: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 progress_total: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 generation_failed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+cancel_requested: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 pending_result: ?GenerateMultipleResult = null,
 
 pub fn init(allocator: std.mem.Allocator, ecs: *ECSManager) !*Self {
@@ -393,13 +394,11 @@ pub const GenerateMultipleResult = struct {
 const PathGenSharedState = struct {
     results: []PathResult,
     next_slot: std.atomic.Value(usize),
-    consecutive_failures: std.atomic.Value(usize),
     total_attempts: std.atomic.Value(usize),
     params: CreatePathParams,
     use_random_start: bool,
     use_random_seed: bool,
     seed_base: u64,
-    max_consecutive: usize,
     path_system: *Self,
     worker_allocator: std.mem.Allocator,
     worker_worlds: []bt.CbtWorldHandle,
@@ -411,11 +410,13 @@ fn pathGenWorker(ctx: *anyopaque, worker_id: usize) void {
     const world = state.worker_worlds[worker_id];
 
     while (true) {
-        // Check if we're done or hit max consecutive failures
-        const current_slot = state.next_slot.load(.acquire);
-        const consec_fails = state.consecutive_failures.load(.acquire);
+        // Check if cancelled or done
+        if (state.path_system.cancel_requested.load(.acquire)) {
+            return;
+        }
 
-        if (current_slot >= state.results.len or consec_fails >= state.max_consecutive) {
+        const current_slot = state.next_slot.load(.acquire);
+        if (current_slot >= state.results.len) {
             return;
         }
 
@@ -438,7 +439,6 @@ fn pathGenWorker(ctx: *anyopaque, worker_id: usize) void {
             anchors,
             world,
         ) catch {
-            _ = state.consecutive_failures.fetchAdd(1, .monotonic);
             continue;
         };
 
@@ -446,7 +446,6 @@ fn pathGenWorker(ctx: *anyopaque, worker_id: usize) void {
         const slot = state.next_slot.fetchAdd(1, .monotonic);
         if (slot < state.results.len) {
             state.results[slot] = result;
-            _ = state.consecutive_failures.store(0, .release); // Reset consecutive failures
 
             // Update progress
             _ = state.path_system.progress_current.store(slot + 1, .release);
@@ -469,8 +468,6 @@ pub fn generateMultiplePaths(
     use_random_seed: bool,
     seed_base: u64,
 ) !GenerateMultipleResult {
-    const max_consecutive_failures: usize = 1000;
-
     // Allocate results buffer
     const results = try allocator.alloc(PathResult, num_paths);
 
@@ -496,13 +493,11 @@ pub fn generateMultiplePaths(
     var shared = PathGenSharedState{
         .results = results,
         .next_slot = std.atomic.Value(usize).init(0),
-        .consecutive_failures = std.atomic.Value(usize).init(0),
         .total_attempts = std.atomic.Value(usize).init(0),
         .params = base_params,
         .use_random_start = use_random_start,
         .use_random_seed = use_random_seed,
         .seed_base = seed_base,
-        .max_consecutive = max_consecutive_failures,
         .path_system = self,
         .worker_allocator = allocator,
         .worker_worlds = worker_worlds,
@@ -514,14 +509,18 @@ pub fn generateMultiplePaths(
 
     const successful = shared.next_slot.load(.acquire);
     const total = shared.total_attempts.load(.acquire);
+    const cancelled = self.cancel_requested.load(.acquire);
     const failed = successful < num_paths;
 
-    if (failed) {
+    if (cancelled or failed) {
         // Clean up partial results
         for (results[0..successful]) |*result| {
             result.deinit();
         }
         allocator.free(results);
+        if (cancelled) {
+            return error.Cancelled;
+        }
         return error.PathGenerationFailed;
     }
 
@@ -593,7 +592,8 @@ pub fn startAsyncGeneration(
         self.generation_thread = null;
     }
 
-    // Mark as generating
+    // Reset cancel flag and mark as generating
+    _ = self.cancel_requested.store(false, .release);
     _ = self.is_generating.store(true, .release);
 
     // Spawn thread
@@ -617,6 +617,20 @@ pub fn getGenerationProgress(self: *Self) struct { current: usize, total: usize,
         .is_generating = self.is_generating.load(.acquire),
         .failed = self.generation_failed.load(.acquire),
     };
+}
+
+pub fn cancelGeneration(self: *Self) void {
+    // Signal workers to stop
+    _ = self.cancel_requested.store(true, .release);
+
+    // Wait for generation thread to finish
+    if (self.generation_thread) |thread| {
+        thread.join();
+        self.generation_thread = null;
+    }
+
+    // Mark as not generating
+    _ = self.is_generating.store(false, .release);
 }
 
 pub fn finalizePendingPaths(self: *Self) !void {
@@ -854,10 +868,16 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint, 
     var curvature_list = std.ArrayList(f32).init(self.allocator);
     defer curvature_list.deinit();
 
+    // Track arc-length at each waypoint for orientation interpolation
+    var waypoint_s = std.ArrayList(f32).init(self.allocator);
+    defer waypoint_s.deinit();
+
     var arc_len: f32 = 0.0;
     for (beziers.items) |bez| {
+        try waypoint_s.append(arc_len); // Record arc-length at start of this Bezier (= at this waypoint)
         try self.tessellate(bez, p.flatness_eps, &samples, &sample_tangents, &s_cumsum, &curvature_list, &arc_len);
     }
+    try waypoint_s.append(arc_len); // Record arc-length at final waypoint
 
     // Time parameterization with velocity/acceleration constraints
     var t_cumsum = std.ArrayList(f32).init(self.allocator);
@@ -885,6 +905,7 @@ pub fn createPath(self: *Self, p: CreatePathParams, anchors: ?[]const Waypoint, 
         sample_tangents.items,
         curvature_list.items,
         waypoints.items,
+        waypoint_s.items,
         s_cumsum.items,
         &orientations,
     );
@@ -1260,13 +1281,23 @@ fn computeOrientations(
     tangents: []const Vec3,
     curvature: []const f32,
     waypoints: []const Waypoint,
+    waypoint_s: []const f32,
     s_cumsum: []const f32,
     orientations: *std.ArrayList(Quaternion),
 ) !void {
     _ = self;
 
+    // Pre-compute yaw quaternions for each waypoint
+    var waypoint_yaw_quats = std.ArrayList(Quaternion).init(orientations.allocator);
+    defer waypoint_yaw_quats.deinit();
+    for (waypoints) |wp| {
+        const q_yaw = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(wp.yaw));
+        try waypoint_yaw_quats.append(q_yaw);
+    }
+
     for (0..samples.len) |i| {
         const forward = tangents[i].normalize();
+        const sample_s = s_cumsum[i];
 
         // Compute bank angle from curvature (coordinated turn)
         const g = 9.81;
@@ -1274,23 +1305,38 @@ fn computeOrientations(
         const v = 5.0; // nominal velocity for bank calculation
         const bank_angle = std.math.atan2(v * v * curv, g);
 
-        // Get yaw from nearest waypoint
-        var nearest_idx: usize = 0;
-        var min_dist = std.math.inf(f32);
-        for (waypoints, 0..) |_, idx| {
-            const dist = @abs(s_cumsum[i] - if (idx < s_cumsum.len) s_cumsum[idx] else s_cumsum[s_cumsum.len - 1]);
-            if (dist < min_dist) {
-                min_dist = dist;
-                nearest_idx = idx;
+        // Find which waypoint segment this sample belongs to (binary search)
+        var lo: usize = 0;
+        var hi: usize = waypoint_s.len - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) / 2;
+            if (waypoint_s[mid] < sample_s) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
             }
         }
-        const yaw = waypoints[nearest_idx].yaw;
+
+        // lo is the index of first waypoint with s >= sample_s
+        // We want to interpolate between waypoints[lo-1] and waypoints[lo]
+        const q_yaw = blk: {
+            if (lo == 0) {
+                break :blk waypoint_yaw_quats.items[0];
+            } else if (lo >= waypoints.len) {
+                break :blk waypoint_yaw_quats.items[waypoints.len - 1];
+            } else {
+                // Interpolate between waypoints[lo-1] and waypoints[lo]
+                const s0 = waypoint_s[lo - 1];
+                const s1 = waypoint_s[lo];
+                const t = if (s1 - s0 > 1e-6) (sample_s - s0) / (s1 - s0) else 0.0;
+                break :blk Quaternion.slerp(waypoint_yaw_quats.items[lo - 1], waypoint_yaw_quats.items[lo], t);
+            }
+        };
 
         // Compute pitch from forward vector (OpenGL Y-up: pitch is vertical angle)
-        const pitch = std.math.asin(forward.y());
+        const pitch = std.math.asin(Math.clamp(forward.y(), -1.0, 1.0));
 
         // Build quaternion: yaw → pitch → roll (OpenGL Y-up convention)
-        const q_yaw = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), Math.degrees(yaw));
         const q_pitch = Quaternion.from_axis_angle(Vec3.init(1, 0, 0), Math.degrees(pitch));
         const q_roll = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), Math.degrees(bank_angle));
 

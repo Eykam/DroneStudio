@@ -199,12 +199,31 @@ pub const UniformValue = union(enum) {
 pub const MeshResource = struct {
     mesh: *Mesh,
     instance_count: usize,
+    entities: std.ArrayList(u64), // Store entity IDs (EntityID.id)
 
-    pub fn init(mesh: *Mesh) MeshResource {
+    pub fn init(allocator: std.mem.Allocator, mesh: *Mesh) MeshResource {
         return .{
             .mesh = mesh,
             .instance_count = 0,
+            .entities = std.ArrayList(u64).init(allocator),
         };
+    }
+
+    pub fn addEntity(self: *MeshResource, entity_id: u64) !void {
+        try self.entities.append(entity_id);
+    }
+
+    pub fn removeEntity(self: *MeshResource, entity_id: u64) void {
+        for (self.entities.items, 0..) |eid, i| {
+            if (eid == entity_id) {
+                _ = self.entities.swapRemove(i);
+                return;
+            }
+        }
+    }
+
+    pub fn deinit(self: *MeshResource) void {
+        self.entities.deinit();
     }
 };
 
@@ -230,13 +249,28 @@ pub const ShaderResource = struct {
     program_id: c_uint,
     ref_count: usize,
     uniforms: std.StringHashMap(c_int),
+    materials: std.ArrayList(*MaterialResource),
 
     pub fn init(allocator: std.mem.Allocator, program_id: c_uint) !ShaderResource {
         return .{
             .program_id = program_id,
             .ref_count = 1,
             .uniforms = std.StringHashMap(c_int).init(allocator),
+            .materials = std.ArrayList(*MaterialResource).init(allocator),
         };
+    }
+
+    pub fn addMaterial(self: *ShaderResource, material: *MaterialResource) !void {
+        try self.materials.append(material);
+    }
+
+    pub fn removeMaterial(self: *ShaderResource, material: *MaterialResource) void {
+        for (self.materials.items, 0..) |mat, i| {
+            if (mat == material) {
+                _ = self.materials.swapRemove(i);
+                return;
+            }
+        }
     }
 
     pub fn getorPutUniformLocation(self: *ShaderResource, name: []const u8) c_int {
@@ -315,6 +349,7 @@ pub const ShaderResource = struct {
 
     pub fn deinit(self: *ShaderResource) void {
         self.uniforms.deinit();
+        self.materials.deinit();
 
         if (self.ref_count == 0 and self.program_id != 0) {
             glad.glDeleteProgram(self.program_id);
@@ -329,6 +364,7 @@ pub const MaterialResource = struct {
     texture_refs: std.StringArrayHashMap([:0]const u8),
     shader_ref: ?[:0]const u8 = null,
     uniforms: std.StringHashMap(UniformValue),
+    meshes: std.ArrayList(*MeshResource),
 
     pub fn init(allocator: std.mem.Allocator, material: MaterialVariant) !MaterialResource {
         var resource = MaterialResource{
@@ -336,10 +372,24 @@ pub const MaterialResource = struct {
             .ref_count = 1,
             .texture_refs = std.StringArrayHashMap([:0]const u8).init(allocator),
             .uniforms = std.StringHashMap(UniformValue).init(allocator),
+            .meshes = std.ArrayList(*MeshResource).init(allocator),
         };
 
         try resource.initDefaultUniforms(allocator);
         return resource;
+    }
+
+    pub fn addMesh(self: *MaterialResource, mesh: *MeshResource) !void {
+        try self.meshes.append(mesh);
+    }
+
+    pub fn removeMesh(self: *MaterialResource, mesh: *MeshResource) void {
+        for (self.meshes.items, 0..) |m, i| {
+            if (m == mesh) {
+                _ = self.meshes.swapRemove(i);
+                return;
+            }
+        }
     }
 
     // TODO: Why is this needed vs the uniforms on the shader
@@ -402,6 +452,7 @@ pub const MaterialResource = struct {
         }
         self.texture_refs.deinit();
         self.uniforms.deinit();
+        self.meshes.deinit();
 
         if (self.shader_ref) |shader_name| {
             allocator.free(shader_name);
@@ -441,7 +492,8 @@ pub fn deinit(self: *Self) void {
     var meshes_iter = self.meshes.iterator();
     while (meshes_iter.next()) |entry| {
         self.allocator.free(entry.key_ptr.*);
-        entry.value_ptr.mesh.deinit();
+        entry.value_ptr.deinit(); // Deinit the MeshResource
+        entry.value_ptr.mesh.deinit(); // Deinit the actual Mesh
         self.allocator.destroy(entry.value_ptr.mesh);
     }
     self.meshes.deinit();
@@ -480,7 +532,7 @@ pub fn loadMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices:
     // Create new mesh
     const mesh = try Mesh.init(self.allocator, vertices, indices, draw_fn);
     const mesh_name = try self.allocator.dupe(u8, name);
-    try self.meshes.put(mesh_name, MeshResource.init(mesh));
+    try self.meshes.put(mesh_name, MeshResource.init(self.allocator, mesh));
     return mesh;
 }
 
@@ -490,7 +542,8 @@ pub fn unloadMesh(self: *Self, name: []const u8) void {
         if (resource_ptr.instance_count == 0) {
             if (self.meshes.remove(name)) |kv| {
                 self.allocator.free(kv.key);
-                kv.value.mesh.deinit();
+                kv.value.deinit(); // Deinit the MeshResource
+                kv.value.mesh.deinit(); // Deinit the actual Mesh
                 self.allocator.destroy(kv.value.mesh);
             }
         }
@@ -646,40 +699,47 @@ pub fn loadMaterial(self: *Self, name: []const u8, material: MaterialVariant, sh
     // std.debug.print("Material Name: {s}", .{material_name});
 
     // Set shader reference if provided
-    if (shader_name) |shader| {
+    const used_shader_name = if (shader_name) |shader| blk: {
         try material_resource.setShaderRef(self.allocator, shader);
-
-        // Increase shader reference count
-        if (self.shaders.getPtr(shader)) |shader_res| {
-            shader_res.ref_count += 1;
-        }
-    } else {
+        break :blk shader;
+    } else blk: {
         // Use default shader based on material type
         const default_shader = switch (material.getType()) {
             .PBR => "pbr_shader",
             .Phong => "standard_shader",
         };
-
         try material_resource.setShaderRef(self.allocator, default_shader);
+        break :blk default_shader;
+    };
 
-        // Increase shader reference count if it exists
-        if (self.shaders.getPtr(default_shader)) |shader_res| {
-            shader_res.ref_count += 1;
-        }
-    }
-
+    // Insert material into hashmap
     try self.materials.put(material_name, material_resource);
+
+    // Get pointer to the material we just inserted
+    const material_ptr = self.materials.getPtr(material_name).?;
+
+    // Register material with shader and increase shader reference count
+    if (self.shaders.getPtr(used_shader_name)) |shader_res| {
+        shader_res.ref_count += 1;
+        try shader_res.addMaterial(material_ptr);
+    }
 }
 
 pub fn unloadMaterial(self: *Self, name: []const u8) void {
     if (self.materials.getPtr(name)) |resource_ptr| {
         resource_ptr.ref_count -= 1;
         if (resource_ptr.ref_count == 0) {
+            // Get shader_ref before removing material
+            const shader_name = if (resource_ptr.shader_ref) |sn| sn else null;
+
             if (self.materials.fetchRemove(name)) |kv| {
 
-                // Decrease shader reference count
-                if (kv.value.shader_ref) |shader_name| {
-                    self.unloadShader(shader_name);
+                // Remove material from shader's materials list
+                if (shader_name) |sn| {
+                    if (self.shaders.getPtr(sn)) |shader_res| {
+                        shader_res.removeMaterial(resource_ptr);
+                    }
+                    self.unloadShader(sn);
                 }
 
                 // Decrease texture reference counts
@@ -1309,7 +1369,7 @@ fn processGLTFMeshes(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
             }
 
             const loaded_mesh = try gltf.loadMesh(allocator, mesh_idx);
-            var mesh_resource = MeshResource.init(loaded_mesh.?);
+            var mesh_resource = MeshResource.init(self.allocator, loaded_mesh.?);
             mesh_resource.instance_count = 1;
             try self.meshes.put(mesh_name, mesh_resource);
         }

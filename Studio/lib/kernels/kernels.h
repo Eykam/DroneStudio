@@ -81,6 +81,18 @@ typedef struct StereoParams {
     bool disable_spatial_tracking;
 } StereoParams;
 
+// Convert RGBA to grayscale
+void launch_rgba_to_gray(
+    const uint8_t* rgba_input,
+    uint8_t* gray_output,
+    int width,
+    int height,
+    int rgba_pitch,
+    int gray_pitch,
+    dim3 grid,
+    dim3 block
+);
+
 // Initialize Gaussian kernel in constant memory
 void init_gaussian_kernel(float sigma);
 

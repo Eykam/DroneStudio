@@ -9,7 +9,6 @@ const Collisions = @import("../components/Collisions.zig");
 const Renderer = @import("../components/Renderer.zig");
 const Camera = @import("../components/Camera.zig");
 const DroneCamera = @import("DroneCamera.zig");
-const Frustum = @import("Frustum.zig");
 const ResourceManager = @import("../ResourceManager.zig");
 const GLTF = @import("../../GLTF.zig");
 const Mesh = @import("../../Mesh.zig");
@@ -33,7 +32,6 @@ pub const RobotComponents = struct {
     root: Core.EntityID,
     model_entities: []Core.EntityID,
     camera: Core.EntityID,
-    frustum: Core.EntityID,
 
     pub fn deinit(self: *RobotComponents, alloc: std.mem.Allocator) void {
         alloc.free(self.model_entities);
@@ -204,30 +202,16 @@ pub fn spawn(
         });
     }
 
-    // Create camera and frustum
-    const robot_camera = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
-    const robot_frustum = try Frustum.generate(
-        alloc,
-        ecs,
-        "robot_cam_frustum",
-        robot_camera.cam.fov,
-        robot_camera.cam.aspect,
-        10.0, // far
-        0.1, // near
-    );
-
-    const camera_eid = try ecs.spawn(robot_camera);
-    const frustum_eid = try ecs.spawn(robot_frustum);
+    // Create camera (includes frustum as child)
+    const camera_eid = try DroneCamera.spawn(alloc, ecs, .{}, scene_width, scene_height);
 
     // Position camera above the robot
     if (ecs.transform_components.get(camera_eid)) |cam_transform| {
         cam_transform.setPosition(0, 2.0 * config.scale, 3.0 * config.scale);
-        // Camera will look forward by default
     }
 
-    // Set up camera hierarchy: root -> camera -> frustum
+    // Set up camera hierarchy: root -> camera (frustum is already child of camera)
     try ecs.transform_system.addChild(root_eid, camera_eid);
-    try ecs.transform_system.addChild(camera_eid, frustum_eid);
 
     std.debug.print("Created robot with compound collision: root={d}, model_parts={d}, camera={d}\n", .{
         root_eid.id, model_entities.len, camera_eid.id,
@@ -237,7 +221,6 @@ pub fn spawn(
         .root = root_eid,
         .model_entities = model_entities,
         .camera = camera_eid,
-        .frustum = frustum_eid,
     };
 }
 

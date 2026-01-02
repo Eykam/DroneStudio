@@ -9,7 +9,6 @@ const Collisions = @import("../components/Collisions.zig");
 const Renderer = @import("../components/Renderer.zig");
 const Camera = @import("../components/Camera.zig");
 const DroneCamera = @import("DroneCamera.zig");
-const Frustum = @import("Frustum.zig");
 const Mesh = @import("../../Mesh.zig");
 
 const glfw = gl.glfw;
@@ -230,28 +229,14 @@ pub fn spawn(
         mass,
     });
 
-    // Create camera using DroneCamera
-    const box_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
-
-    // Create camera frustum for visualization
-    const box_cam_frustum = try Frustum.generate(
-        alloc,
-        ecs,
-        "box_cam_frustum",
-        box_cam.cam.fov,
-        box_cam.cam.aspect,
-        1.0, // far
-        0.1, // near
-    );
-
     // Spawn entities
     const box_eid = try ecs.spawn(.{ root_tf, root_ctrl, collider, rigid_body, box_renderer });
-    const box_cam_eid = try ecs.spawn(box_cam);
-    const box_cam_frustum_eid = try ecs.spawn(box_cam_frustum);
 
-    // Set up parent-child relationships: box -> camera -> frustum
+    // Create camera using DroneCamera (includes frustum as child)
+    const box_cam_eid = try DroneCamera.spawn(alloc, ecs, .{}, scene_width, scene_height);
+
+    // Set up parent-child relationships: box -> camera (frustum is already child of camera)
     try ecs.transform_system.addChild(box_eid, box_cam_eid);
-    try ecs.transform_system.addChild(box_cam_eid, box_cam_frustum_eid);
 
     return box_eid;
 }

@@ -1289,30 +1289,29 @@ pub const Quaternion = struct {
         const az = a.z();
         const aw = a.w();
 
-        const bx = b.x();
-        const by = b.y();
-        const bz = b.z();
-        const bw = b.w();
+        var bx = b.x();
+        var by = b.y();
+        var bz = b.z();
+        var bw = b.w();
 
         var cos_half_theta = aw * bw + ax * bx + ay * by + az * bz;
 
-        var b_copy: Self = undefined;
+        // Flip b if on opposite hemisphere to ensure shortest path
         if (cos_half_theta < 0.0) {
-            b_copy = Self.init(-bx, -by, -bz, -bw);
+            bx = -bx;
+            by = -by;
+            bz = -bz;
+            bw = -bw;
             cos_half_theta = -cos_half_theta;
         }
 
-        const bcx = b_copy.x();
-        const bcy = b_copy.y();
-        const bcz = b_copy.z();
-        const bcw = b_copy.w();
-
         if (cos_half_theta > 0.9995) {
+            // Quaternions are very close, use linear interpolation
             return Self.normalize(Self.init(
-                ax + t * (bcx - ax),
-                ay + t * (bcy - ay),
-                az + t * (bcz - az),
-                aw + t * (bcw - aw),
+                ax + t * (bx - ax),
+                ay + t * (by - ay),
+                az + t * (bz - az),
+                aw + t * (bw - aw),
             ));
         } else {
             const half_theta = std.math.acos(cos_half_theta);
@@ -1321,10 +1320,10 @@ pub const Quaternion = struct {
             const ratio_b = @sin(t * half_theta) / sin_half_theta;
 
             return Self.init(
-                ax * ratio_a + bcx * ratio_b,
-                ay * ratio_a + bcy * ratio_b,
-                az * ratio_a + bcz * ratio_b,
-                aw * ratio_a + bcw * ratio_b,
+                ax * ratio_a + bx * ratio_b,
+                ay * ratio_a + by * ratio_b,
+                az * ratio_a + bz * ratio_b,
+                aw * ratio_a + bw * ratio_b,
             );
         }
     }

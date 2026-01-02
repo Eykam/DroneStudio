@@ -11,9 +11,10 @@ const Viewport = @import("../components/Viewports.zig");
 const Collisions = @import("../components/Collisions.zig");
 const IMUSensor = @import("../components/IMUSensor.zig");
 const FlightController = @import("../components/FlightController.zig");
+const PathPlayback = @import("../components/PathPlayback.zig");
+const SLAM = @import("../components/SLAMSystem.zig");
 const DroneCamera = @import("DroneCamera.zig");
 const SensorCamera = @import("SensorCamera.zig");
-const Frustum = @import("Frustum.zig");
 
 const glfw = gl.glfw;
 const Vec3 = Math.Vec3;
@@ -81,40 +82,9 @@ pub fn spawn(
     );
     // Create drone controller for flight input
     const drone_input_controller = FlightController.DroneInputController.createComponent();
-    const drone_cam = try DroneCamera.generate(alloc, .{}, scene_width, scene_height);
 
-    const disparity = 0.075; // 75mm
-    const sensor_cam_left = try SensorCamera.generate(alloc, "sensor_cam_left", .{ .pos = .{ -disparity / 2.0, 0.0, 0.15 } });
-    const sensor_cam_right = try SensorCamera.generate(alloc, "sensor_cam_right", .{ .pos = .{ disparity / 2.0, 0.0, 0.15 } });
-
-    const drone_cam_frustum = Frustum.generate(
-        alloc,
-        ecs,
-        "drone_cam_frustum",
-        drone_cam.cam.fov,
-        drone_cam.cam.aspect,
-        1.0,
-        0.1,
-    );
-    const sensor_cam_frustum_left = Frustum.generate(
-        alloc,
-        ecs,
-        "sensor_cam_frustum",
-        sensor_cam_left.cam.fov,
-        sensor_cam_left.cam.aspect,
-        1.0,
-        0.1,
-    );
-
-    const sensor_cam_frustum_right = Frustum.generate(
-        alloc,
-        ecs,
-        "sensor_cam_frustum",
-        sensor_cam_right.cam.fov,
-        sensor_cam_right.cam.aspect,
-        1.0,
-        0.1,
-    );
+    // Create path playback component for simulation
+    const path_playback = PathPlayback.PathPlaybackComponent{};
 
     // Spawn drone with all flight control components
     const root_eid = try ecs.spawn(.{
@@ -124,6 +94,7 @@ pub fn spawn(
         imu_sensor,
         flight_controller,
         drone_input_controller,
+        path_playback,
     });
 
     // Set this drone as the selected entity for control
@@ -132,23 +103,39 @@ pub fn spawn(
     // Clean up the entity map since we no longer need it
     entities.entity_map.deinit();
 
-    const drone_cam_eid = try ecs.spawn(drone_cam);
-    const sensor_cam_left_eid = try ecs.spawn(sensor_cam_left);
-    const sensor_cam_right_eid = try ecs.spawn(sensor_cam_right);
+    // Stereo camera configuration
+    const baseline = 0.075; // 75mm stereo baseline
+    const sensor_config = SensorCamera.Config{};
 
-    const drone_cam_frustum_eid = try ecs.spawn(drone_cam_frustum);
-    const sensor_cam_frustum_left_eid = try ecs.spawn(sensor_cam_frustum_left);
-    const sensor_cam_frustum_right_eid = try ecs.spawn(sensor_cam_frustum_right);
+    // Spawn cameras (each prefab spawns entity + frustum child)
+    const drone_cam_eid = try DroneCamera.spawn(alloc, ecs, .{}, scene_width, scene_height);
+    const sensor_cam_left_eid = try SensorCamera.spawn(alloc, ecs, "sensor_cam_left", .{ .pos = .{ -baseline / 2.0, 0.0, 0.15 } });
+    const sensor_cam_right_eid = try SensorCamera.spawn(alloc, ecs, "sensor_cam_right", .{ .pos = .{ baseline / 2.0, 0.0, 0.15 } });
 
+    // Parent cameras to drone
     try ecs.transform_system.addChild(root_eid, drone_body_entity);
     try ecs.transform_system.addChild(root_eid, drone_cam_eid);
-    try ecs.transform_system.addChild(drone_cam_eid, drone_cam_frustum_eid);
-
     try ecs.transform_system.addChild(root_eid, sensor_cam_left_eid);
-    try ecs.transform_system.addChild(sensor_cam_left_eid, sensor_cam_frustum_left_eid);
-
     try ecs.transform_system.addChild(root_eid, sensor_cam_right_eid);
-    try ecs.transform_system.addChild(sensor_cam_right_eid, sensor_cam_frustum_right_eid);
+
+    // Create SLAM component with stereo camera viewports
+    const left_vp = ecs.viewport_components.get(sensor_cam_left_eid).?;
+    const right_vp = ecs.viewport_components.get(sensor_cam_right_eid).?;
+    const drone_tf = ecs.transform_components.get(root_eid).?;
+
+    var slam_component = try SLAM.SLAMComponent.init(alloc, .{
+        .config = SLAM.SLAMConfig.initWithIntrinsics(
+            sensor_config.resolution_width,
+            sensor_config.resolution_height,
+            sensor_config.module.fx(sensor_config.resolution_width),
+            sensor_config.module.fy(sensor_config.resolution_height),
+            baseline,
+        ),
+        .left_viewport = left_vp,
+        .right_viewport = right_vp,
+        .ground_truth_transform = drone_tf,
+    });
+    try slam_component.attach(ecs, root_eid);
 
     return root_eid;
 }

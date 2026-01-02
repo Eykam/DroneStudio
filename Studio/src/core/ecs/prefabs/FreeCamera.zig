@@ -16,7 +16,6 @@ const glfw = gl.glfw;
 const Vec3 = Math.Vec3;
 const ControllerComponent = Controller.ControllerComponent;
 const TransformComponent = Transform.TransformComponent;
-const ViewportComponent = Viewport.ViewportComponent;
 
 // Free camera controller with limited movement (yaw and up/down only)
 pub const FreeCameraController = struct {

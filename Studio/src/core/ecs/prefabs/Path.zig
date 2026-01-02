@@ -86,10 +86,9 @@ pub fn spawn(
     defer allocator.free(path_mesh_name);
     const path_mesh_name_owned = try allocator.dupe(u8, path_mesh_name);
 
-    try ecs.world.resource_manager.meshes.put(path_mesh_name_owned, .{
-        .mesh = path_mesh,
-        .instance_count = 0,
-    });
+    const ResourceManager = @import("../ResourceManager.zig");
+    const path_mesh_resource = ResourceManager.MeshResource.init(allocator, path_mesh);
+    try ecs.world.resource_manager.meshes.put(path_mesh_name_owned, path_mesh_resource);
 
     const path_transform = TransformComponent.init(allocator);
     const path_renderer = try Renderable.init(allocator, path_mesh_name_owned);
@@ -150,10 +149,8 @@ pub fn spawn(
     defer allocator.free(waypoint_mesh_name);
     const waypoint_mesh_name_owned = try allocator.dupe(u8, waypoint_mesh_name);
 
-    try ecs.world.resource_manager.meshes.put(waypoint_mesh_name_owned, .{
-        .mesh = waypoint_mesh,
-        .instance_count = 0,
-    });
+    const waypoint_mesh_resource = ResourceManager.MeshResource.init(allocator, waypoint_mesh);
+    try ecs.world.resource_manager.meshes.put(waypoint_mesh_name_owned, waypoint_mesh_resource);
 
     const waypoint_transform = TransformComponent.init(allocator);
     const waypoint_renderer = try Renderable.init(allocator, waypoint_mesh_name_owned);

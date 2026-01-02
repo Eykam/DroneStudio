@@ -103,14 +103,17 @@ pub const SharedMemSystem = struct {
             if (!vc.shared or idx >= MAX_VIEWPORTS) continue;
 
             // CudaGL.inspectFBO(vc.vp.fbo.fbo, vc.vp.fbo.width, vc.vp.fbo.height,);
-            vc.shared_info.?.copyFromGL();
+            if (vc.shared_info) |*info| {
+                _ = info.copyFromGL(self.globals.frame_count);
+            }
             // CudaGL.inspectCUDABuffer(vc.shared_info.?.gpu_ptr, vc.shared_info.?.width, vc.shared_info.?.height, vc.shared_info.?.pitch,);
             const e = &hdr.entries[idx];
             @memcpy(&e.name, vc.vp.name.ptr);
 
-            // copy FD and dimensions
+            // copy FD and dimensions (use write buffer's IPC handle for external access)
             if (vc.shared_info) |info| {
-                e.ipc = info.ipc;
+                const buf_idx = info.write_idx.load(.acquire);
+                e.ipc = info.ipc[buf_idx];
                 e.width = @intCast(info.width);
                 e.height = @intCast(info.height);
                 e.pitch = @intCast(info.pitch);

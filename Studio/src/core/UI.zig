@@ -13,6 +13,7 @@ const IMUSensor = @import("ecs/components/IMUSensor.zig");
 const FlightController = @import("ecs/components/FlightController.zig");
 const FlightInput = @import("ecs/components/FlightInput.zig");
 const PathSystem = @import("ecs/components/PathSystem.zig");
+const PathPlayback = @import("ecs/components/PathPlayback.zig");
 
 // const Vision = @import("Vision.zig");
 // const Drone = @import("Drone.zig");
@@ -42,18 +43,18 @@ const PathGenUIParams = struct {
     use_random_seed: bool = true,
     seed_counter: u32 = 0,
     num_paths: i32 = 1,
-    bounds_shrink_factor: f32 = 1.0,
+    bounds_shrink_factor: f32 = 0.75,
 
     // Path creation params (UI controls for CreatePathParams)
     seed: i32 = 42,
-    L_min: f32 = 50.0,
-    L_max: f32 = 100.0,
+    L_min: f32 = 100.0,
+    L_max: f32 = 500.0,
     s_min: f32 = 3.0,
     s_max: f32 = 8.0,
-    max_pts: i32 = 50,
+    max_pts: i32 = 200,
     z_lo: f32 = 2.0,
     z_hi: f32 = 20.0,
-    R_min: f32 = 5.0,
+    R_min: f32 = 1.0,
     v_max: f32 = 10.0,
     a_max: f32 = 5.0,
     drone_radius: f32 = 0.3,
@@ -419,7 +420,7 @@ pub const RootWindow = struct {
     visible: bool,
     sidebar_width: f32 = 0, // Default width, will be adjusted by user
     is_resizing: bool = false, // Track if currently resizing
-    active_tab: enum { Scene, Paths } = .Scene, // Current active tab
+    active_tab: enum { SceneEditor, PathEditor, Simulation } = .SceneEditor, // Current active tab
 
     // Paths tab specific state
     paths_sidebar_width: f32 = 0,
@@ -477,13 +478,18 @@ pub const RootWindow = struct {
         imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_ItemSpacing, .{ .x = 1.0, .y = 1.0 });
 
         if (imgui.igBeginTabBar("##MainTabs", imgui.ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)) {
-            if (imgui.igBeginTabItem("Scene", null, imgui.ImGuiTabItemFlags_None)) {
-                self.active_tab = .Scene;
+            if (imgui.igBeginTabItem("Scene Editor", null, imgui.ImGuiTabItemFlags_None)) {
+                self.active_tab = .SceneEditor;
                 imgui.igEndTabItem();
             }
 
-            if (imgui.igBeginTabItem("Paths", null, imgui.ImGuiTabItemFlags_None)) {
-                self.active_tab = .Paths;
+            if (imgui.igBeginTabItem("Path Editor", null, imgui.ImGuiTabItemFlags_None)) {
+                self.active_tab = .PathEditor;
+                imgui.igEndTabItem();
+            }
+
+            if (imgui.igBeginTabItem("Simulation", null, imgui.ImGuiTabItemFlags_None)) {
+                self.active_tab = .Simulation;
                 imgui.igEndTabItem();
             }
 
@@ -498,8 +504,9 @@ pub const RootWindow = struct {
 
         // Draw the appropriate tab content
         switch (self.active_tab) {
-            .Scene => self.drawSceneTab(ctx, avail, main_area_h),
-            .Paths => self.drawPathsTab(ctx, avail, main_area_h),
+            .SceneEditor => self.drawSceneTab(ctx, avail, main_area_h),
+            .PathEditor => self.drawPathsTab(ctx, avail, main_area_h),
+            .Simulation => self.drawSimulationTab(ctx, avail, main_area_h),
         }
 
         imgui.igEnd(); // end root window
@@ -795,6 +802,12 @@ pub const RootWindow = struct {
                         const label = std.fmt.bufPrintZ(&buf, "{d}/{d}", .{ progress.current, progress.total }) catch "?/?";
                         imgui.igProgressBar(progress_fraction, .{ .x = 300, .y = 0 }, label.ptr);
 
+                        imgui.igSpacing();
+                        if (imgui.igButton("Cancel", .{ .x = -1, .y = 0 })) {
+                            path_system.cancelGeneration();
+                            imgui.igCloseCurrentPopup();
+                        }
+
                         if (!progress.is_generating) {
                             imgui.igCloseCurrentPopup();
                             if (progress.failed) {
@@ -987,6 +1000,294 @@ pub const RootWindow = struct {
         } // end table
     }
 
+    fn drawSimulationTab(self: *Self, ctx: *const UIContext, avail: imgui.ImVec2, main_area_h: f32) void {
+        _ = self;
+        _ = avail;
+
+        // Simulation tab state (static for persistence across frames)
+        const SimState = struct {
+            var selected_path: ?usize = null;
+            var slam_enabled: bool = false;
+            var show_features: bool = true;
+            var show_landmarks: bool = true;
+            var show_pose_graph: bool = true;
+        };
+
+        // Begin 2-column resizable table for Simulation layout
+        if (imgui.igBeginTable("SimulationLayoutTable", 2, imgui.ImGuiTableFlags_Resizable | imgui.ImGuiTableFlags_NoPadInnerX | imgui.ImGuiTableFlags_BordersInnerV | imgui.ImGuiTableFlags_SizingFixedFit, .{ .x = 0, .y = 0 }, 0)) {
+            // column 0 = sidebar (fixed), 1 = main viewport (stretch)
+            imgui.igTableSetupColumn("SimSidebar", imgui.ImGuiTableColumnFlags_WidthFixed, 350.0, 0);
+            imgui.igTableSetupColumn("SimViewport", imgui.ImGuiTableColumnFlags_WidthStretch, 0, 1);
+
+            imgui.igTableNextRow(imgui.ImGuiLogFlags_None, 0);
+
+            // ========================================================== Simulation Sidebar
+            _ = imgui.igTableSetColumnIndex(0);
+
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str("SimSidebarChild", .{ .x = 0, .y = main_area_h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+            imgui.igText("Simulation");
+            imgui.igSeparator();
+
+            // ================== Path Selection ==================
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Path Selection", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (ctx.ecs.path_system) |path_system| {
+                    const paths = path_system.getPaths();
+
+                    if (paths.len == 0) {
+                        imgui.igTextDisabled("No paths available");
+                        imgui.igTextDisabled("Generate paths in Path Editor tab");
+                    } else {
+                        imgui.igText("Available paths: %d", paths.len);
+                        imgui.igSeparator();
+
+                        var buf: [128]u8 = undefined;
+                        for (paths, 0..) |path, i| {
+                            const is_selected = SimState.selected_path != null and SimState.selected_path.? == i;
+                            const label = std.fmt.bufPrintZ(&buf, "Path {d} ({d:.1}m, {d:.1}s)##simpath_{d}", .{ i, path.length(), path.duration(), i }) catch continue;
+
+                            if (imgui.igSelectable_Bool(label.ptr, is_selected, imgui.ImGuiSelectableFlags_None, .{ .x = 0, .y = 0 })) {
+                                SimState.selected_path = i;
+
+                                // Update path playback component on drone
+                                var playback_it = ctx.ecs.path_playback_components.iterator();
+                                while (playback_it.next()) |entry| {
+                                    entry.component.selectPath(i);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    imgui.igTextDisabled("PathSystem not initialized");
+                }
+            }
+
+            imgui.igSeparator();
+
+            // ================== Playback Controls ==================
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Playback Controls", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                // Get playback component (if any)
+                var playback_it = ctx.ecs.path_playback_components.iterator();
+                if (playback_it.next()) |entry| {
+                    const playback = entry.component;
+
+                    if (playback.path_index == null) {
+                        imgui.igTextDisabled("No path selected");
+                    } else {
+                        // Play/Pause/Stop buttons
+                        if (playback.is_playing) {
+                            if (imgui.igButton("Pause", .{ .x = 80, .y = 30 })) {
+                                playback.pause();
+                            }
+                        } else {
+                            if (imgui.igButton("Play", .{ .x = 80, .y = 30 })) {
+                                playback.play();
+                            }
+                        }
+                        imgui.igSameLine(0, 10);
+                        if (imgui.igButton("Stop", .{ .x = 80, .y = 30 })) {
+                            playback.stop();
+                        }
+                        imgui.igSameLine(0, 10);
+                        if (imgui.igButton("Reset", .{ .x = 80, .y = 30 })) {
+                            playback.seek(0);
+                        }
+
+                        imgui.igSeparator();
+
+                        // Speed slider
+                        var speed = playback.playback_speed;
+                        if (imgui.igSliderFloat("Speed", &speed, 0.1, 10.0, "%.1fx", imgui.ImGuiSliderFlags_Logarithmic)) {
+                            playback.setSpeed(speed);
+                        }
+
+                        // Get path duration for scrubber
+                        if (ctx.ecs.path_system) |path_system| {
+                            if (path_system.getPath(playback.path_index.?)) |path| {
+                                const duration = path.duration();
+
+                                // Time scrubber
+                                var time_f32: f32 = @floatCast(playback.playback_time);
+                                if (imgui.igSliderFloat("Time", &time_f32, 0, duration, "%.2fs", imgui.ImGuiSliderFlags_None)) {
+                                    playback.seek(time_f32);
+                                }
+
+                                // Progress display
+                                const progress: f32 = if (duration > 0) @as(f32, @floatCast(playback.playback_time)) / duration else 0;
+                                imgui.igProgressBar(progress, .{ .x = -1, .y = 0 }, null);
+                            }
+                        }
+
+                        imgui.igSeparator();
+
+                        // Step mode
+                        _ = imgui.igCheckbox("Step Mode", &playback.step_mode);
+                        if (playback.step_mode) {
+                            if (imgui.igButton("<< Back", .{ .x = 80, .y = 25 })) {
+                                playback.stepBackward();
+                            }
+                            imgui.igSameLine(0, 10);
+                            if (imgui.igButton("Forward >>", .{ .x = 80, .y = 25 })) {
+                                playback.stepForward();
+                            }
+                        }
+
+                        imgui.igSeparator();
+                        _ = imgui.igCheckbox("Loop", &playback.loop);
+
+                        // Status display
+                        imgui.igSeparator();
+                        if (playback.at_end) {
+                            imgui.igTextColored(.{ .x = 0.2, .y = 0.8, .z = 0.2, .w = 1 }, "Playback complete");
+                        } else if (playback.is_playing) {
+                            imgui.igTextColored(.{ .x = 0.2, .y = 0.6, .z = 1.0, .w = 1 }, "Playing...");
+                        } else {
+                            imgui.igTextDisabled("Paused");
+                        }
+                    }
+                } else {
+                    imgui.igTextDisabled("No drone with playback component");
+                }
+            }
+
+            imgui.igSeparator();
+
+            // ================== SLAM Controls ==================
+            if (imgui.igCollapsingHeader_TreeNodeFlags("SLAM", imgui.ImGuiTreeNodeFlags_DefaultOpen)) {
+                // Get SLAM component from ECS
+                var slam_it = ctx.ecs.slam_components.iterator();
+                if (slam_it.next()) |entry| {
+                    const slam = entry.component;
+                    const stats = slam.processor.getStats();
+                    const tracking_state = slam.processor.getTrackingState();
+
+                    // Enable toggle with start/stop
+                    if (imgui.igCheckbox("Enable SLAM", &SimState.slam_enabled)) {
+                        slam.setEnabled(SimState.slam_enabled) catch {};
+                    }
+
+                    if (SimState.slam_enabled) {
+                        imgui.igSeparator();
+
+                        // Tracking state indicator
+                        const state_color: imgui.ImVec4 = switch (tracking_state) {
+                            .not_initialized => .{ .x = 0.5, .y = 0.5, .z = 0.5, .w = 1 },
+                            .relocalization => .{ .x = 1.0, .y = 0.8, .z = 0.0, .w = 1 },
+                            .tracking => .{ .x = 0.2, .y = 0.8, .z = 0.2, .w = 1 },
+                            .lost => .{ .x = 1.0, .y = 0.2, .z = 0.2, .w = 1 },
+                        };
+                        const state_text = switch (tracking_state) {
+                            .not_initialized => "Not Initialized",
+                            .relocalization => "Relocalization",
+                            .tracking => "Tracking",
+                            .lost => "LOST",
+                        };
+                        imgui.igTextColored(state_color, "%s", state_text.ptr);
+
+                        imgui.igSeparator();
+                        imgui.igText("Visualization:");
+                        _ = imgui.igCheckbox("Show Features", &SimState.show_features);
+                        _ = imgui.igCheckbox("Show Landmarks", &SimState.show_landmarks);
+                        _ = imgui.igCheckbox("Show Pose Graph", &SimState.show_pose_graph);
+
+                        imgui.igSeparator();
+                        imgui.igText("Statistics:");
+                        imgui.igText("  Features: %d", stats.tracked_features);
+                        imgui.igText("  Stereo matches: %d", stats.stereo_matches);
+                        imgui.igText("  Temporal matches: %d", stats.temporal_matches);
+                        imgui.igText("  Inliers: %d", stats.inliers);
+                        imgui.igText("  Keyframes: %d", stats.keyframes);
+                        imgui.igText("  Landmarks: %d", stats.landmarks);
+                        imgui.igText("  Processing: %.2fms", @as(f32, @floatFromInt(stats.processing_time_us)) / 1000.0);
+                    } else {
+                        imgui.igTextDisabled("Enable SLAM to start processing");
+                    }
+                } else {
+                    imgui.igTextDisabled("No SLAM component attached");
+                    imgui.igTextDisabled("Attach to entity with stereo cameras");
+
+                    if (SimState.slam_enabled) {
+                        SimState.slam_enabled = false;
+                    }
+                }
+            }
+
+            imgui.igSeparator();
+
+            // ================== Map Export (Placeholder) ==================
+            if (imgui.igCollapsingHeader_TreeNodeFlags("Map Export", imgui.ImGuiTreeNodeFlags_None)) {
+                if (imgui.igButton("Export to PLY", .{ .x = -1, .y = 25 })) {
+                    std.debug.print("TODO: Export map to PLY\n", .{});
+                }
+                if (imgui.igButton("Import PLY as Renderable", .{ .x = -1, .y = 25 })) {
+                    std.debug.print("TODO: Import PLY as renderable\n", .{});
+                }
+            }
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+
+            // ========================================================== Simulation Main Viewport
+            _ = imgui.igTableSetColumnIndex(1);
+
+            var contentAvail: imgui.ImVec2 = undefined;
+            imgui.igGetContentRegionAvail(&contentAvail);
+
+            imgui.igPushStyleVar_Vec2(imgui.ImGuiStyleVar_WindowPadding, .{ .x = 10, .y = 10 });
+            _ = imgui.igBeginChild_Str("SimViewportArea", .{ .x = contentAvail.x, .y = main_area_h }, imgui.ImGuiChildFlags_None, imgui.ImGuiWindowFlags_None);
+
+            // Display main camera view
+            const camera_system = &ctx.ecs.camera_system;
+            var vp_store = ctx.ecs.viewport_components;
+
+            if (camera_system.active_camera_eid) |main_cam| {
+                if (vp_store.get(main_cam)) |main_entry| {
+                    const mvp = main_entry.vp;
+                    if (mvp.enabled) {
+                        imgui.igTextColored(.{ .x = 0, .y = 0.8, .z = 1, .w = 1 }, "Simulation View: %s", mvp.name.ptr);
+
+                        imgui.igSeparator();
+
+                        // Keep aspect ratio for viewport
+                        const tex_w: f32 = @floatFromInt(mvp.fbo.width);
+                        const tex_h: f32 = @floatFromInt(mvp.fbo.height);
+                        const aspect = tex_w / tex_h;
+
+                        var region: imgui.ImVec2 = undefined;
+                        imgui.igGetContentRegionAvail(&region);
+
+                        var img_w = region.x;
+                        var img_h = img_w / aspect;
+                        if (img_h > region.y - 50) {
+                            img_h = region.y - 50;
+                            img_w = img_h * aspect;
+                        }
+                        if (img_w < region.x)
+                            imgui.igSetCursorPosX(imgui.igGetCursorPosX() + (region.x - img_w) * 0.5);
+
+                        const tex_id: imgui.ImTextureID = @intCast(mvp.fbo.texture);
+                        imgui.igImage(
+                            tex_id,
+                            .{ .x = img_w, .y = img_h },
+                            .{ .x = 0, .y = 1 },
+                            .{ .x = 1, .y = 0 },
+                            .{ .x = 1, .y = 1, .z = 1, .w = 1 },
+                            .{ .x = 0.3, .y = 0.3, .z = 0.3, .w = 1 },
+                        );
+                    }
+                }
+            } else {
+                imgui.igTextColored(.{ .x = 1, .y = 0, .z = 0, .w = 1 }, "No active camera");
+            }
+
+            imgui.igEndChild();
+            imgui.igPopStyleVar(1);
+
+            imgui.igEndTable();
+        } // end table
+    }
+
     fn startAsyncPathGeneration(self: *Self, ctx: *const UIContext, ui_params: *PathGenUIParams) !void {
         _ = self;
 
@@ -1094,7 +1395,6 @@ const TimelineRecorder = struct {
     }
 
     fn drawRecorderTab(self: *Self, ctx: *const UIContext, rec: anytype) void {
-
         if (self.mode == .Record) {
             const start_label = if (rec.is_recording) "Stop" else "Start";
             if (imgui.igButton(start_label, .{ .x = 50, .y = 0 })) {
@@ -1260,8 +1560,7 @@ const TimelineRecorder = struct {
             imgui.igSeparator();
 
             imgui.igText("Commands: %.1f | Draws: %.1f", stats.commands, stats.draws);
-            imgui.igText("Shader switches: %.1f | Material switches: %.1f | VAO switches: %.1f",
-                stats.shader_switches, stats.material_switches, stats.vao_switches);
+            imgui.igText("Shader switches: %.1f | Material switches: %.1f | VAO switches: %.1f", stats.shader_switches, stats.material_switches, stats.vao_switches);
 
             imgui.igSeparator();
             imgui.igText("Timing:");
@@ -1280,7 +1579,7 @@ const TimelineRecorder = struct {
             imgui.igSeparator();
             imgui.igText("Timing Breakdown:");
 
-            const bar_width: f32 = -1;  // Full width
+            const bar_width: f32 = -1; // Full width
             const bar_height: f32 = 20.0;
 
             if (frame_ms > 0) {
@@ -1293,9 +1592,9 @@ const TimelineRecorder = struct {
                 var material_label: [64]u8 = undefined;
                 var draw_label: [64]u8 = undefined;
 
-                const gather_str = std.fmt.bufPrintZ(&gather_label, "Gather: {d:.2}ms ({d:.1}%%)", .{gather_ms, gather_ratio * 100.0}) catch "Gather";
-                const material_str = std.fmt.bufPrintZ(&material_label, "Material: {d:.2}ms ({d:.1}%%)", .{material_ms, material_ratio * 100.0}) catch "Material";
-                const draw_str = std.fmt.bufPrintZ(&draw_label, "Draw: {d:.2}ms ({d:.1}%%)", .{draw_ms, draw_ratio * 100.0}) catch "Draw";
+                const gather_str = std.fmt.bufPrintZ(&gather_label, "Gather: {d:.2}ms ({d:.1}%%)", .{ gather_ms, gather_ratio * 100.0 }) catch "Gather";
+                const material_str = std.fmt.bufPrintZ(&material_label, "Material: {d:.2}ms ({d:.1}%%)", .{ material_ms, material_ratio * 100.0 }) catch "Material";
+                const draw_str = std.fmt.bufPrintZ(&draw_label, "Draw: {d:.2}ms ({d:.1}%%)", .{ draw_ms, draw_ratio * 100.0 }) catch "Draw";
 
                 imgui.igPushStyleColor_Vec4(imgui.ImGuiCol_PlotHistogram, .{ .x = 0.2, .y = 0.8, .z = 0.3, .w = 1.0 });
                 imgui.igProgressBar(gather_ratio, .{ .x = bar_width, .y = bar_height }, gather_str.ptr);
