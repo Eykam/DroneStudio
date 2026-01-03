@@ -8,7 +8,6 @@ const c = @cImport({
 });
 
 const Allocator = std.mem.Allocator;
-const Mesh = @import("Mesh.zig");
 const gl = @import("bindings/gl.zig");
 const glad = gl.glad;
 
@@ -305,105 +304,4 @@ pub const Image = struct {
         return image;
     }
 
-    // Create OpenGL textures from this image for our renderer
-    pub fn createGLTexture(self: *Image) !Mesh.TextureID {
-        var texture_id = Mesh.TextureID{};
-
-        // Generate texture IDs
-        glad.glGenTextures(1, &texture_id.y);
-        glad.glGenTextures(1, &texture_id.uv);
-        glad.glGenTextures(1, &texture_id.depth);
-
-        // Setup RGB texture (using y field for main texture)
-        glad.glBindTexture(glad.GL_TEXTURE_2D, texture_id.y);
-
-        // Set basic parameters
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_REPEAT);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_REPEAT);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR_MIPMAP_LINEAR);
-
-        // Directly upload the RGB(A) data
-        const channels = self.getChannels();
-        var internal_format: c_int = glad.GL_RGB8;
-        var format: c_uint = glad.GL_RGB;
-
-        if (channels == 4) {
-            internal_format = glad.GL_RGBA8;
-            format = glad.GL_RGBA;
-        }
-
-        // Upload RGB texture data
-        glad.glTexImage2D(
-            glad.GL_TEXTURE_2D,
-            0,
-            internal_format,
-            @intCast(self.width),
-            @intCast(self.height),
-            0,
-            format,
-            glad.GL_UNSIGNED_BYTE,
-            self.data.ptr,
-        );
-        glad.glGenerateMipmap(glad.GL_TEXTURE_2D);
-
-        // Create dummy UV and depth textures for compatibility
-        // UV texture (1x1 white texture)
-        glad.glBindTexture(glad.GL_TEXTURE_2D, texture_id.uv);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_REPEAT);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_REPEAT);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-
-        const uv_dummy = [_]u8{ 255, 255 };
-        glad.glTexImage2D(
-            glad.GL_TEXTURE_2D,
-            0,
-            glad.GL_RG8,
-            1,
-            1,
-            0,
-            glad.GL_RG,
-            glad.GL_UNSIGNED_BYTE,
-            &uv_dummy,
-        );
-
-        // Depth texture (1x1 white)
-        glad.glBindTexture(glad.GL_TEXTURE_2D, texture_id.depth);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, glad.GL_REPEAT);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, glad.GL_REPEAT);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, glad.GL_LINEAR);
-        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, glad.GL_LINEAR);
-
-        const depth_dummy = [_]u8{255};
-        glad.glTexImage2D(
-            glad.GL_TEXTURE_2D,
-            0,
-            glad.GL_R8,
-            1,
-            1,
-            0,
-            glad.GL_RED,
-            glad.GL_UNSIGNED_BYTE,
-            &depth_dummy,
-        );
-
-        // Unbind texture
-        glad.glBindTexture(glad.GL_TEXTURE_2D, 0);
-
-        return texture_id;
-    }
-};
-
-// Struct for bundling loaded images with their GLTF texture info
-pub const TextureImage = struct {
-    image: *Image,
-    texture_id: Mesh.TextureID,
-
-    pub fn deinit(self: *TextureImage) void {
-        self.image.deinit();
-        glad.glDeleteTextures(1, &self.texture_id.y);
-        glad.glDeleteTextures(1, &self.texture_id.uv);
-        glad.glDeleteTextures(1, &self.texture_id.depth);
-    }
 };

@@ -6,7 +6,7 @@ const SparseSet = @import("../SparseSet.zig").SparseSet;
 const Transform = @import("../components/Transform.zig");
 const ResourceManager = @import("../ResourceManager.zig");
 const Mesh = @import("../../Mesh.zig");
-const TextureUnit = @import("../../Node.zig").TextureUnit;
+const TextureUnit = ResourceManager.TextureUnit;
 const gl = @import("../../bindings/gl.zig");
 const Globals = @import("Globals.zig");
 const ECSManager = @import("../ECSManager.zig");
@@ -442,12 +442,12 @@ pub const RenderSystem = struct {
                 const hasSpecularTexLoc = shader.uniforms.get("hasSpecularTexture") orelse -1;
 
                 // Set texture presence flags
-                if (hasBaseColorTexLoc != -1) glad.glUniform1i(hasBaseColorTexLoc, @intFromBool(pbr.textures.baseColor != null));
-                if (hasNormalTexLoc != -1) glad.glUniform1i(hasNormalTexLoc, @intFromBool(pbr.textures.normal != null));
-                if (hasMetallicRoughnessTexLoc != -1) glad.glUniform1i(hasMetallicRoughnessTexLoc, @intFromBool(pbr.textures.metallicRoughness != null));
-                if (hasOcclusionTexLoc != -1) glad.glUniform1i(hasOcclusionTexLoc, @intFromBool(pbr.textures.occlusion != null));
-                if (hasEmissiveTexLoc != -1) glad.glUniform1i(hasEmissiveTexLoc, @intFromBool(pbr.textures.emissive != null));
-                if (hasSpecularTexLoc != -1) glad.glUniform1i(hasSpecularTexLoc, @intFromBool(pbr.textures.specular != null));
+                if (hasBaseColorTexLoc != -1) glad.glUniform1i(hasBaseColorTexLoc, @intFromBool(pbr.textures.get(.BaseColor) != null));
+                if (hasNormalTexLoc != -1) glad.glUniform1i(hasNormalTexLoc, @intFromBool(pbr.textures.get(.NormalMap) != null));
+                if (hasMetallicRoughnessTexLoc != -1) glad.glUniform1i(hasMetallicRoughnessTexLoc, @intFromBool(pbr.textures.get(.MetallicRoughness) != null));
+                if (hasOcclusionTexLoc != -1) glad.glUniform1i(hasOcclusionTexLoc, @intFromBool(pbr.textures.get(.Occlusion) != null));
+                if (hasEmissiveTexLoc != -1) glad.glUniform1i(hasEmissiveTexLoc, @intFromBool(pbr.textures.get(.Emissive) != null));
+                if (hasSpecularTexLoc != -1) glad.glUniform1i(hasSpecularTexLoc, @intFromBool(pbr.textures.get(.Specular) != null));
 
                 // Texture sampler locations
                 const baseColorTexLoc = shader.uniforms.get("baseColorTexture") orelse -1;
@@ -458,37 +458,37 @@ pub const RenderSystem = struct {
                 const specularTexLoc = shader.uniforms.get("specularTexture") orelse -1;
 
                 // Bind PBR textures
-                if (pbr.textures.baseColor) |tex_id| {
+                if (pbr.textures.get(.BaseColor)) |tex_id| {
                     glad.glActiveTexture(TextureUnit.BaseColor.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
                     if (baseColorTexLoc != -1) glad.glUniform1i(baseColorTexLoc, TextureUnit.BaseColor.index());
                 }
 
-                if (pbr.textures.normal) |tex_id| {
+                if (pbr.textures.get(.NormalMap)) |tex_id| {
                     glad.glActiveTexture(TextureUnit.NormalMap.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
                     if (normalTexLoc != -1) glad.glUniform1i(normalTexLoc, TextureUnit.NormalMap.index());
                 }
 
-                if (pbr.textures.metallicRoughness) |tex_id| {
+                if (pbr.textures.get(.MetallicRoughness)) |tex_id| {
                     glad.glActiveTexture(TextureUnit.MetallicRoughness.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
                     if (metallicRoughnessTexLoc != -1) glad.glUniform1i(metallicRoughnessTexLoc, TextureUnit.MetallicRoughness.index());
                 }
 
-                if (pbr.textures.occlusion) |tex_id| {
+                if (pbr.textures.get(.Occlusion)) |tex_id| {
                     glad.glActiveTexture(TextureUnit.Occlusion.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
                     if (occlusionTexLoc != -1) glad.glUniform1i(occlusionTexLoc, TextureUnit.Occlusion.index());
                 }
 
-                if (pbr.textures.emissive) |tex_id| {
+                if (pbr.textures.get(.Emissive)) |tex_id| {
                     glad.glActiveTexture(TextureUnit.Emissive.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
                     if (emissiveTexLoc != -1) glad.glUniform1i(emissiveTexLoc, TextureUnit.Emissive.index());
                 }
 
-                if (pbr.textures.specular) |tex_id| {
+                if (pbr.textures.get(.Specular)) |tex_id| {
                     glad.glActiveTexture(TextureUnit.Specular.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
                     if (specularTexLoc != -1) glad.glUniform1i(specularTexLoc, TextureUnit.Specular.index());
@@ -530,9 +530,9 @@ pub const RenderSystem = struct {
                 const hasSpecularTexLoc = shader.uniforms.get("hasSpecularTexture") orelse -1;
                 const hasNormalTexLoc = shader.uniforms.get("hasNormalTexture") orelse -1;
 
-                if (hasDiffuseTexLoc != -1) glad.glUniform1i(hasDiffuseTexLoc, @intFromBool(phong.data.diffuseTexture != null));
-                if (hasSpecularTexLoc != -1) glad.glUniform1i(hasSpecularTexLoc, @intFromBool(phong.data.specularTexture != null));
-                if (hasNormalTexLoc != -1) glad.glUniform1i(hasNormalTexLoc, @intFromBool(phong.data.normalTexture != null));
+                if (hasDiffuseTexLoc != -1) glad.glUniform1i(hasDiffuseTexLoc, @intFromBool(phong.textures.get(.BaseColor) != null));
+                if (hasSpecularTexLoc != -1) glad.glUniform1i(hasSpecularTexLoc, @intFromBool(phong.textures.get(.Specular) != null));
+                if (hasNormalTexLoc != -1) glad.glUniform1i(hasNormalTexLoc, @intFromBool(phong.textures.get(.NormalMap) != null));
 
                 // Texture sampler locations
                 const diffuseTexLoc = shader.uniforms.get("diffuseTexture") orelse -1;
@@ -540,22 +540,22 @@ pub const RenderSystem = struct {
                 const normalTexLoc = shader.uniforms.get("normalTexture") orelse -1;
 
                 // Bind Phong textures
-                if (phong.data.diffuseTexture) |tex_id| {
-                    glad.glActiveTexture(glad.GL_TEXTURE0);
+                if (phong.textures.get(.BaseColor)) |tex_id| {
+                    glad.glActiveTexture(TextureUnit.BaseColor.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (diffuseTexLoc != -1) glad.glUniform1i(diffuseTexLoc, 0);
+                    if (diffuseTexLoc != -1) glad.glUniform1i(diffuseTexLoc, TextureUnit.BaseColor.index());
                 }
 
-                if (phong.data.specularTexture) |tex_id| {
-                    glad.glActiveTexture(glad.GL_TEXTURE1);
+                if (phong.textures.get(.Specular)) |tex_id| {
+                    glad.glActiveTexture(TextureUnit.Specular.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (specularTexLoc != -1) glad.glUniform1i(specularTexLoc, 1);
+                    if (specularTexLoc != -1) glad.glUniform1i(specularTexLoc, TextureUnit.Specular.index());
                 }
 
-                if (phong.data.normalTexture) |tex_id| {
-                    glad.glActiveTexture(glad.GL_TEXTURE2);
+                if (phong.textures.get(.NormalMap)) |tex_id| {
+                    glad.glActiveTexture(TextureUnit.NormalMap.glValue());
                     glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (normalTexLoc != -1) glad.glUniform1i(normalTexLoc, 2);
+                    if (normalTexLoc != -1) glad.glUniform1i(normalTexLoc, TextureUnit.NormalMap.index());
                 }
 
                 // Apply default rendering state for Phong

@@ -187,12 +187,35 @@ pub const Image = struct {
     bufferView: ?usize = null,
 };
 
+/// glTF 2.0 magnification filter modes
+pub const MagFilter = enum(u32) {
+    nearest = 9728,
+    linear = 9729,
+};
+
+/// glTF 2.0 minification filter modes
+pub const MinFilter = enum(u32) {
+    nearest = 9728,
+    linear = 9729,
+    nearest_mipmap_nearest = 9984,
+    linear_mipmap_nearest = 9985,
+    nearest_mipmap_linear = 9986,
+    linear_mipmap_linear = 9987,
+};
+
+/// glTF 2.0 texture wrap modes
+pub const WrapMode = enum(u32) {
+    clamp_to_edge = 33071,
+    mirrored_repeat = 33648,
+    repeat = 10497,
+};
+
 pub const Sampler = struct {
     name: ?[]const u8 = null,
-    magFilter: ?u32 = null,
-    minFilter: ?u32 = null,
-    wrapS: ?u32 = null,
-    wrapT: ?u32 = null,
+    magFilter: ?MagFilter = null,
+    minFilter: ?MinFilter = null,
+    wrapS: ?WrapMode = null,
+    wrapT: ?WrapMode = null,
 };
 
 pub const ModelResource = struct {
@@ -458,8 +481,6 @@ pub const GLTF = struct {
     document: json.Parsed(Document),
     buffers: std.ArrayList([]const u8),
     base_path: []const u8,
-    textures: std.ArrayList(Mesh.TextureID),
-    materials: std.ArrayList(Mesh.Material),
 
     pub fn init(allocator: Allocator, filepath: []const u8) !*GLTF {
         // Determine base path for resolving relative paths
@@ -507,8 +528,6 @@ pub const GLTF = struct {
             .document = document,
             .buffers = std.ArrayList([]const u8).init(allocator),
             .base_path = base_path,
-            .textures = std.ArrayList(Mesh.TextureID).init(allocator),
-            .materials = std.ArrayList(Mesh.Material).init(allocator),
         };
 
         // Load buffers
@@ -525,8 +544,6 @@ pub const GLTF = struct {
 
         self.document.deinit();
         self.buffers.deinit();
-        self.textures.deinit();
-        self.materials.deinit();
 
         // Free raw JSON and base path
         self.allocator.free(self.raw_json);
@@ -687,28 +704,12 @@ pub const GLTF = struct {
         // Create mesh
         const mesh = try Mesh.init(allocator, vertices, indices, Mesh.gen_draw(.triangles));
 
-        // Load texture if present
+        // Set PBR flag if material reference exists (material data is in ResourceManager)
         if (primitive.material != null) {
-            const material_idx = primitive.material.?;
-            if (material_idx < self.materials.items.len) {
-                mesh.material = self.materials.items[material_idx];
-
-                // Set up flags based on material
-                if (mesh.flags == null) {
-                    mesh.flags = Mesh.MeshFlags{};
-                }
-
-                // Check if we have any textures
-                const has_textures = (mesh.material.textures.baseColor != null or
-                    mesh.material.textures.normal != null or
-                    mesh.material.textures.metallicRoughness != null or
-                    mesh.material.textures.occlusion != null or
-                    mesh.material.textures.emissive != null or
-                    mesh.material.textures.specular != null);
-
-                mesh.flags.?.use_texture = has_textures;
-                mesh.flags.?.use_pbr = true;
+            if (mesh.flags == null) {
+                mesh.flags = Mesh.MeshFlags{};
             }
+            mesh.flags.?.use_pbr = true;
         }
 
         return mesh;
@@ -733,6 +734,21 @@ pub const GLTF = struct {
         const image_data = buffer[offset .. offset + length];
 
         return try ImageLoader.Image.loadFromMemory(allocator, image_data);
+    }
+
+    /// Get the sampler for a given image index by scanning textures that reference it.
+    /// Returns null if no texture references this image or if no sampler is defined.
+    pub fn getSamplerForImage(self: *GLTF, image_idx: usize) ?Sampler {
+        const textures = self.document.value.textures orelse return null;
+        const samplers = self.document.value.samplers orelse return null;
+
+        for (textures) |tex| {
+            if (tex.source == image_idx) {
+                const sampler_idx = tex.sampler orelse return null;
+                if (sampler_idx < samplers.len) return samplers[sampler_idx];
+            }
+        }
+        return null;
     }
 
     fn loadAccessorVec4(self: *GLTF, accessor_idx: usize) ![][4]f32 {

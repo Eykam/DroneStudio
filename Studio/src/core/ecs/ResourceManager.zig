@@ -5,18 +5,69 @@ const Math = @import("../Math.zig");
 const gl = @import("../bindings/gl.zig");
 const ImageLoader = @import("../Image.zig");
 const GLTFParser = @import("../GLTF.zig");
+const OpenGL = @import("graphics/OpenGL.zig");
 const GLTF = GLTFParser.GLTF;
 const glad = gl.glad;
+const Sampler = OpenGL.Sampler;
+const SamplerParams = OpenGL.SamplerParams;
+
+// Re-export TextureUnit from OpenGL for backwards compatibility
+pub const TextureUnit = OpenGL.TextureUnit;
+
+/// Unified texture storage for all material types.
+/// Uses TextureUnit slots for consistent texture binding.
+pub const MaterialTextures = struct {
+    /// GL texture IDs for each canonical slot. null = not provided.
+    slots: [TextureUnit.SlotCount]?c_uint = .{null} ** TextureUnit.SlotCount,
+
+    pub inline fn get(self: *const MaterialTextures, slot: TextureUnit) ?c_uint {
+        return self.slots[slot.idx()];
+    }
+
+    pub inline fn set(self: *MaterialTextures, slot: TextureUnit, tex: ?c_uint) void {
+        self.slots[slot.idx()] = tex;
+    }
+
+    pub inline fn clear(self: *MaterialTextures, slot: TextureUnit) void {
+        self.slots[slot.idx()] = null;
+    }
+
+    /// Build a presence bitmask (useful for GPU header / quick checks)
+    pub inline fn presentMask(self: *const MaterialTextures) u32 {
+        var mask: u32 = 0;
+        inline for (0..TextureUnit.SlotCount) |i| {
+            if (self.slots[i] != null) mask |= (@as(u32, 1) << @intCast(i));
+        }
+        return mask;
+    }
+
+    pub fn format(
+        self: MaterialTextures,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("MaterialTextures (", .{});
+        inline for (0..TextureUnit.SlotCount) |i| {
+            if (self.slots[i]) |tex_id| {
+                try writer.print(" [{d}]={d}", .{ i, tex_id });
+            }
+        }
+        try writer.print(" )", .{});
+    }
+};
+
+// ============================================================================
+// Material Data Types
+// ============================================================================
 
 pub const PhongData = struct {
     ambientColor: [3]f32 = .{ 0.1, 0.1, 0.1 },
     diffuseColor: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
     specularColor: [3]f32 = .{ 1.0, 1.0, 1.0 },
     shininess: f32 = 32.0,
-
-    diffuseTexture: ?c_uint = null,
-    specularTexture: ?c_uint = null,
-    normalTexture: ?c_uint = null,
 };
 
 /// For a PBR material, store typical metallic/roughness, normal, etc.
@@ -74,80 +125,11 @@ pub const PBRData = struct {
     }
 };
 
-pub const PBRTextures = struct {
-    baseColor: ?c_uint = null,
-    normal: ?c_uint = null,
-    metallicRoughness: ?c_uint = null,
-    occlusion: ?c_uint = null,
-    emissive: ?c_uint = null,
-    specular: ?c_uint = null,
-
-    pub fn format(
-        self: PBRTextures,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("PBRTextures (\n", .{});
-
-        try writer.print("\tbaseColor: ", .{});
-        if (self.baseColor) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tnormal: ", .{});
-        if (self.normal) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tmetallicRoughness: ", .{});
-        if (self.metallicRoughness) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tocclusion: ", .{});
-        if (self.occlusion) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\temissive: ", .{});
-        if (self.emissive) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tspecular: ", .{});
-        if (self.specular) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print("\n)\n", .{});
-    }
-};
-
 pub const MaterialType = enum {
     Phong,
     PBR,
 };
 
-// TODO: Add support for Phong Textures
 pub fn Material(T: MaterialType) type {
     return struct {
         matType: MaterialType = T,
@@ -157,10 +139,7 @@ pub fn Material(T: MaterialType) type {
             .PBR => PBRData,
         } = .{},
 
-        textures: switch (T) {
-            .Phong => PBRTextures,
-            .PBR => PBRTextures,
-        } = .{},
+        textures: MaterialTextures = .{},
     };
 }
 
@@ -229,6 +208,8 @@ pub const MeshResource = struct {
 
 pub const TextureResource = struct {
     texture_id: c_uint,
+    bindless_handle: u64 = 0,
+    is_resident: bool = false,
     ref_count: usize,
     width: u32 = 0,
     height: u32 = 0,
@@ -242,6 +223,76 @@ pub const TextureResource = struct {
             .height = height,
             .channels = channels,
         };
+    }
+
+    /// Create a TextureResource from an Image, uploading to GPU.
+    /// Sampler params are applied before mipmap generation so they're baked into bindless handles.
+    pub fn initFromImage(image: *ImageLoader.Image, sampler_params: ?SamplerParams) TextureResource {
+        var texture_id: c_uint = 0;
+        glad.glGenTextures(1, &texture_id);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, texture_id);
+
+        // Determine format based on channels
+        const channels = image.getChannels();
+        const internal_format: c_int = if (channels == 4) glad.GL_RGBA8 else glad.GL_RGB8;
+        const gl_format: c_uint = if (channels == 4) glad.GL_RGBA else glad.GL_RGB;
+
+        // Upload texture data
+        glad.glTexImage2D(
+            glad.GL_TEXTURE_2D,
+            0,
+            internal_format,
+            @intCast(image.width),
+            @intCast(image.height),
+            0,
+            gl_format,
+            glad.GL_UNSIGNED_BYTE,
+            image.data.ptr,
+        );
+
+        // Apply sampler params (use defaults if not specified)
+        const params = sampler_params orelse SamplerParams.default;
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, params.mag_filter);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, params.min_filter);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, params.wrap_s);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, params.wrap_t);
+
+        glad.glGenerateMipmap(glad.GL_TEXTURE_2D);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, 0);
+
+        return .{
+            .texture_id = texture_id,
+            .ref_count = 1,
+            .width = image.width,
+            .height = image.height,
+            .channels = channels,
+        };
+    }
+
+    /// Make this texture bindless (requires GL_ARB_bindless_texture)
+    pub fn makeBindless(self: *TextureResource) void {
+        if (self.bindless_handle != 0) return; // Already bindless
+
+        self.bindless_handle = glad.glGetTextureHandleARB(self.texture_id);
+        if (self.bindless_handle != 0) {
+            glad.glMakeTextureHandleResidentARB(self.bindless_handle);
+            self.is_resident = true;
+        }
+    }
+
+    /// Make this texture non-resident (call before deleting)
+    pub fn makeNonResident(self: *TextureResource) void {
+        if (self.is_resident and self.bindless_handle != 0) {
+            glad.glMakeTextureHandleNonResidentARB(self.bindless_handle);
+            self.is_resident = false;
+        }
+    }
+
+    pub fn deinit(self: *TextureResource) void {
+        self.makeNonResident();
+        if (self.texture_id != 0) {
+            glad.glDeleteTextures(1, &self.texture_id);
+        }
     }
 };
 
@@ -365,6 +416,8 @@ pub const MaterialResource = struct {
     shader_ref: ?[:0]const u8 = null,
     uniforms: std.StringHashMap(UniformValue),
     meshes: std.ArrayList(*MeshResource),
+    /// Index into MaterialBuffer SSBO (null if not uploaded yet)
+    gpu_index: ?u32 = null,
 
     pub fn init(allocator: std.mem.Allocator, material: MaterialVariant) !MaterialResource {
         var resource = MaterialResource{
@@ -400,9 +453,9 @@ pub const MaterialResource = struct {
                 try self.setUniform(allocator, "diffuseColor", .{ .Vec4 = phong.data.diffuseColor });
                 try self.setUniform(allocator, "specularColor", .{ .Vec3 = phong.data.specularColor });
                 try self.setUniform(allocator, "shininess", .{ .Float = phong.data.shininess });
-                try self.setUniform(allocator, "hasDiffuseTexture", .{ .Int = @intFromBool(phong.data.diffuseTexture != null) });
-                try self.setUniform(allocator, "hasSpecularTexture", .{ .Int = @intFromBool(phong.data.specularTexture != null) });
-                try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(phong.data.normalTexture != null) });
+                try self.setUniform(allocator, "hasDiffuseTexture", .{ .Int = @intFromBool(phong.textures.get(.BaseColor) != null) });
+                try self.setUniform(allocator, "hasSpecularTexture", .{ .Int = @intFromBool(phong.textures.get(.Specular) != null) });
+                try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(phong.textures.get(.NormalMap) != null) });
             },
             .PBR => |pbr| {
                 // std.debug.print("{any}", .{pbr.data});
@@ -416,11 +469,11 @@ pub const MaterialResource = struct {
 
                 // Texture flags
                 // std.debug.print("{any}", .{pbr.textures});
-                try self.setUniform(allocator, "hasBaseColorTexture", .{ .Int = @intFromBool(pbr.textures.baseColor != null) });
-                try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(pbr.textures.normal != null) });
-                try self.setUniform(allocator, "hasMetallicRoughnessTexture", .{ .Int = @intFromBool(pbr.textures.metallicRoughness != null) });
-                try self.setUniform(allocator, "hasOcclusionTexture", .{ .Int = @intFromBool(pbr.textures.occlusion != null) });
-                try self.setUniform(allocator, "hasEmissiveTexture", .{ .Int = @intFromBool(pbr.textures.emissive != null) });
+                try self.setUniform(allocator, "hasBaseColorTexture", .{ .Int = @intFromBool(pbr.textures.get(.BaseColor) != null) });
+                try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(pbr.textures.get(.NormalMap) != null) });
+                try self.setUniform(allocator, "hasMetallicRoughnessTexture", .{ .Int = @intFromBool(pbr.textures.get(.MetallicRoughness) != null) });
+                try self.setUniform(allocator, "hasOcclusionTexture", .{ .Int = @intFromBool(pbr.textures.get(.Occlusion) != null) });
+                try self.setUniform(allocator, "hasEmissiveTexture", .{ .Int = @intFromBool(pbr.textures.get(.Emissive) != null) });
             },
         }
     }
@@ -573,6 +626,32 @@ pub fn loadTexture(self: *Self, name: []const u8, texture_id: c_uint, width: u32
     // Create new texture resource
     const texture_name = try self.allocator.dupe(u8, name);
     try self.textures.put(texture_name, TextureResource.init(texture_id, width, height, channels));
+
+    // Make bindless (caller is responsible for setting texture params before this call)
+    if (self.textures.getPtr(texture_name)) |resource| {
+        resource.makeBindless();
+    }
+}
+
+/// Load a texture directly from an Image, creating the GL texture and making it bindless
+pub fn loadTextureFromImage(self: *Self, name: []const u8, image: *ImageLoader.Image, sampler_params: ?SamplerParams) !void {
+    // Check if texture already exists
+    if (self.textures.getPtr(name)) |resource| {
+        resource.ref_count += 1;
+        return;
+    }
+
+    // Create texture resource from image (uploads to GPU with sampler params baked in)
+    const tex_resource = TextureResource.initFromImage(image, sampler_params);
+
+    // Store with duplicated name
+    const texture_name = try self.allocator.dupe(u8, name);
+    try self.textures.put(texture_name, tex_resource);
+
+    // Make bindless (sampler params already applied, so they're baked into the handle)
+    if (self.textures.getPtr(texture_name)) |resource| {
+        resource.makeBindless();
+    }
 }
 
 pub fn unloadTexture(self: *Self, name: []const u8) void {
@@ -988,6 +1067,12 @@ fn processGLTFTextures(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
             try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, img_idx });
         defer allocator.free(texture_name);
 
+        // Get sampler params for this image (if any texture references it with a sampler)
+        const sampler_params: ?SamplerParams = if (gltf.getSamplerForImage(img_idx)) |gltf_sampler|
+            Sampler.paramsFromGltf(gltf_sampler)
+        else
+            null;
+
         // Load from file
         if (image.uri) |uri| {
             const full_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ gltf.base_path, uri });
@@ -996,20 +1081,14 @@ fn processGLTFTextures(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
             const img = try ImageLoader.Image.loadFromFile(allocator, full_path);
             defer img.deinit();
 
-            const texture_id = try img.createGLTexture();
-            if (texture_id.y != 0) {
-                try self.loadTexture(texture_name, texture_id.y, img.width, img.height, img.getChannels());
-            }
+            try self.loadTextureFromImage(texture_name, img, sampler_params);
         }
         // Load from buffer
         else if (image.bufferView != null) {
             const img = try gltf.loadBufferViewImage(allocator, image.bufferView.?);
             defer img.deinit();
 
-            const texture_id = try img.createGLTexture();
-            if (texture_id.y != 0) {
-                try self.loadTexture(texture_name, texture_id.y, img.width, img.height, img.getChannels());
-            }
+            try self.loadTextureFromImage(texture_name, img, sampler_params);
         }
     }
 }
@@ -1106,7 +1185,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
                                 defer allocator.free(tex_name);
 
                                 if (self.textures.get(tex_name)) |tex_resource| {
-                                    material.textures.baseColor = tex_resource.texture_id;
+                                    material.textures.set(.BaseColor, tex_resource.texture_id);
                                 }
                             }
                         }
@@ -1131,7 +1210,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
                                 defer allocator.free(tex_name);
 
                                 if (self.textures.get(tex_name)) |tex_resource| {
-                                    material.textures.metallicRoughness = tex_resource.texture_id;
+                                    material.textures.set(.MetallicRoughness, tex_resource.texture_id);
                                 }
                             }
                         }
@@ -1157,7 +1236,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
                             defer allocator.free(tex_name);
 
                             if (self.textures.get(tex_name)) |tex_resource| {
-                                material.textures.normal = tex_resource.texture_id;
+                                material.textures.set(.NormalMap, tex_resource.texture_id);
                             }
                         }
                     }
@@ -1182,7 +1261,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
                             defer allocator.free(tex_name);
 
                             if (self.textures.get(tex_name)) |tex_resource| {
-                                material.textures.occlusion = tex_resource.texture_id;
+                                material.textures.set(.Occlusion, tex_resource.texture_id);
                             }
                         }
                     }
@@ -1207,7 +1286,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
                             defer allocator.free(tex_name);
 
                             if (self.textures.get(tex_name)) |tex_resource| {
-                                material.textures.emissive = tex_resource.texture_id;
+                                material.textures.set(.Emissive, tex_resource.texture_id);
                             }
                         }
                     }
@@ -1249,7 +1328,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
                                     if (self.textures.get(tex_name)) |tex_resource| {
                                         // In specular-glossiness workflow, diffuse texture goes to baseColor
-                                        material.textures.baseColor = tex_resource.texture_id;
+                                        material.textures.set(.BaseColor, tex_resource.texture_id);
                                     }
                                 }
                             }
@@ -1275,7 +1354,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
 
                                     if (self.textures.get(tex_name)) |tex_resource| {
                                         // In specular-glossiness workflow, specular-glossiness maps to metallicRoughness slot
-                                        material.textures.metallicRoughness = tex_resource.texture_id;
+                                        material.textures.set(.MetallicRoughness, tex_resource.texture_id);
                                     }
                                 }
                             }
@@ -1318,7 +1397,7 @@ fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF
                                     defer allocator.free(tex_name);
 
                                     if (self.textures.get(tex_name)) |tex_resource| {
-                                        material.textures.specular = tex_resource.texture_id;
+                                        material.textures.set(.Specular, tex_resource.texture_id);
                                     }
                                 }
                             }

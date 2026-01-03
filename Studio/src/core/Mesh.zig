@@ -1,3 +1,5 @@
+// src/core/Mesh.zig
+
 const std = @import("std");
 const Debug = @import("Debug.zig");
 const gl = @import("bindings/gl.zig");
@@ -39,162 +41,6 @@ pub const Metadata = struct {
     IBO: u32 = 0,
 };
 
-pub const TextureID = struct {
-    y: c_uint = 0,
-    uv: c_uint = 0,
-    depth: c_uint = 0,
-
-    pub fn clone(self: TextureID, allocator: std.mem.Allocator) !*TextureID {
-        const new_id = try allocator.create(TextureID);
-        new_id.* = self;
-        return new_id;
-    }
-
-    pub fn format(
-        self: TextureID,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print(
-            "(\n\t\t\ty: {d},\n\t\t\tuv: {d},\n\t\t\tdepth: {d}\n\t\t)",
-            .{ self.y, self.uv, self.depth },
-        );
-    }
-};
-
-pub const PBRTextures = struct {
-    baseColor: ?c_uint = null,
-    normal: ?c_uint = null,
-    metallicRoughness: ?c_uint = null,
-    occlusion: ?c_uint = null,
-    emissive: ?c_uint = null,
-    specular: ?c_uint = null,
-
-    pub fn format(
-        self: PBRTextures,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
-        try writer.print("PBRTextures {{\n", .{});
-
-        try writer.print("\tbaseColor: ", .{});
-        if (self.baseColor) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tnormal: ", .{});
-        if (self.normal) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tmetallicRoughness: ", .{});
-        if (self.metallicRoughness) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tocclusion: ", .{});
-        if (self.occlusion) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\temissive: ", .{});
-        if (self.emissive) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print(",\n", .{});
-
-        try writer.print("\tspecular: ", .{});
-        if (self.specular) |texture| {
-            try writer.print("{any}", .{texture});
-        } else {
-            try writer.print("null", .{});
-        }
-        try writer.print("\n", .{});
-
-        try writer.print("}}", .{});
-    }
-};
-
-pub const Material = struct {
-
-    // Standard metallic-roughness parameters
-    baseColorFactor: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
-    metallicFactor: f32 = 1.0,
-    roughnessFactor: f32 = 1.0,
-
-    // Specular-glossiness extension
-    diffuseFactor: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
-    specularFactor: [3]f32 = .{ 1.0, 1.0, 1.0 },
-    glossinessFactor: f32 = 1.0,
-
-    // Emissive parameters
-    emissiveFactor: [3]f32 = .{ 0.0, 0.0, 0.0 },
-    emissiveStrength: f32 = 1.0,
-
-    // KHR_materials_specular extension
-    specularColor: [3]f32 = .{ 1.0, 1.0, 1.0 },
-    specularStrength: f32 = 0.0,
-
-    // Other material properties
-    doubleSided: bool = false,
-    alphaMode: AlphaMode = .OPAQUE,
-    alphaCutoff: f32 = 0.5,
-
-    textures: PBRTextures = PBRTextures{},
-
-    pub fn format(
-        self: Material,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print(
-            "\nMaterial (\n\tFactors: (\n\t\tbaseColorFactor: {d:.4},\n\t\tmetallicFactor: {d:.4},\n\t\troughnessFactor: {d:.4}\n\t),\n",
-            .{ self.baseColorFactor, self.metallicFactor, self.roughnessFactor },
-        );
-        try writer.print(
-            "\tSpecular-Glossiness: (\n\t\tdiffuseFactor: {d:.4},\n\t\tspecularFactor: {d:.4},\n\t\tglossinessFactor: {d:.4}\n\t),\n",
-            .{ self.diffuseFactor, self.specularFactor, self.glossinessFactor },
-        );
-        try writer.print(
-            "\tSpecular: (\n\t\tspecularColor: {d:.4},\n\t\tspecularStrength: {d:.4}\n\t)\n",
-            .{ self.specularColor, self.specularStrength },
-        );
-        try writer.print(
-            "\tEmission: (\n\t\temissiveFactor: {d:.4},\n\t\temissiveStrength: {d:.4}\n\t),\n",
-            .{ self.emissiveFactor, self.emissiveStrength },
-        );
-        try writer.print(
-            "\tOther Parameters: (\n\t\tdoubleSided: {any},\n\t\talphaMode: {s},\n\t\talphaCutoff: {d:.4}\n\t)\n",
-            .{ self.doubleSided, @tagName(self.alphaMode), self.alphaCutoff },
-        );
-        try writer.print("PBR Textures: {any}\n)\n", .{self.textures});
-    }
-};
-
 pub const AlphaMode = enum {
     OPAQUE,
     MASK,
@@ -211,14 +57,12 @@ pub const MeshFlags = struct {
 pub const draw = *const fn (mesh: *Self) void;
 
 allocator: std.mem.Allocator,
-textureID: TextureID = TextureID{},
 vertices: []Vertex,
 indices: ?[]u32 = null,
 meta: Metadata,
 _draw: draw = default_draw,
 drawType: glad.GLenum = glad.GL_TRIANGLES,
 flags: ?MeshFlags = MeshFlags{},
-material: Material = Material{},
 
 pub fn init(allocator: std.mem.Allocator, vertices: []Vertex, indices: ?[]u32, draw_fn: ?draw) !*Self {
     var mesh = try allocator.create(Self);
@@ -504,9 +348,17 @@ pub fn calculateTangents(vertices: []Vertex, indices: ?[]u32) void {
 
         const f = 1.0 / (deltaUV1[0] * deltaUV2[1] - deltaUV2[0] * deltaUV1[1]);
 
-        var tangent = [3]f32{ f * (deltaUV2[1] * edge1[0] - deltaUV1[1] * edge2[0]), f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1]), f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2]) };
+        var tangent = [3]f32{
+            f * (deltaUV2[1] * edge1[0] - deltaUV1[1] * edge2[0]),
+            f * (deltaUV2[1] * edge1[1] - deltaUV1[1] * edge2[1]),
+            f * (deltaUV2[1] * edge1[2] - deltaUV1[1] * edge2[2]),
+        };
 
-        var bitangent = [3]f32{ f * (-deltaUV2[0] * edge1[0] + deltaUV1[0] * edge2[0]), f * (-deltaUV2[0] * edge1[1] + deltaUV1[0] * edge2[1]), f * (-deltaUV2[0] * edge1[2] + deltaUV1[0] * edge2[2]) };
+        var bitangent = [3]f32{
+            f * (-deltaUV2[0] * edge1[0] + deltaUV1[0] * edge2[0]),
+            f * (-deltaUV2[0] * edge1[1] + deltaUV1[0] * edge2[1]),
+            f * (-deltaUV2[0] * edge1[2] + deltaUV1[0] * edge2[2]),
+        };
 
         // Normalize
         const tangent_length = std.math.sqrt(tangent[0] * tangent[0] +
@@ -541,9 +393,3 @@ pub fn calculateTangents(vertices: []Vertex, indices: ?[]u32) void {
         v2.bitangent = bitangent;
     }
 }
-
-// pub fn debug(self: Self) void {
-//     Debug.printVertexShader(self.meta.VBO, self.vertices.len) catch |err| {
-//         std.debug.print("Failed to debug vertex shader {any}\n", .{err});
-//     };
-// }
