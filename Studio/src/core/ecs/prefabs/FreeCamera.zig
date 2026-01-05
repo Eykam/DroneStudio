@@ -219,6 +219,7 @@ pub fn generate(
         @panic("Failed to create Viewport component for Freecamera");
     };
     vp.resizable = true;
+    vp.visibility_mask = Viewport.VisibilityLayer.DEFAULT | Viewport.VisibilityLayer.DEBUG;
 
     const ctrl = FreeCameraController.createComponent();
     return .{ .tf = tf, .cam = cam, .ctrl = ctrl, .vp = vp };

@@ -10,6 +10,10 @@ const GLTF = GLTFParser.GLTF;
 const glad = gl.glad;
 const Sampler = OpenGL.Sampler;
 const SamplerParams = OpenGL.SamplerParams;
+const MaterialBuffer = OpenGL.MaterialBuffer;
+const MaterialGPU = OpenGL.MaterialGPU;
+const PBRDataGPU = OpenGL.PBRDataGPU;
+const PhongDataGPU = OpenGL.PhongDataGPU;
 
 // Re-export TextureUnit from OpenGL for backwards compatibility
 pub const TextureUnit = OpenGL.TextureUnit;
@@ -175,17 +179,176 @@ pub const UniformValue = union(enum) {
     }
 };
 
+/// Instance buffer data for instanced rendering (points, lines, landmarks, etc.)
+pub const InstanceData = struct {
+    position_buffer: c_uint = 0, // vec4 positions (location 4), w can be point size
+    end_buffer: c_uint = 0, // vec4 end positions for lines (location 5)
+    color_buffer: c_uint = 0, // vec4 colors (location 6)
+    max_instances: u32,
+    count: u32 = 0,
+
+    pub fn init(max_instances: u32) @This() {
+        var self = @This(){ .max_instances = max_instances };
+
+        // Position buffer (location 4)
+        glad.glGenBuffers(1, &self.position_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.position_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_instances * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        // Color buffer (location 6)
+        glad.glGenBuffers(1, &self.color_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.color_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_instances * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+        return self;
+    }
+
+    /// Initialize with line support (adds end position buffer)
+    pub fn initWithLines(max_instances: u32) @This() {
+        var self = @This().init(max_instances);
+
+        glad.glGenBuffers(1, &self.end_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.end_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_instances * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+        return self;
+    }
+
+    /// Bind instance attributes to VAO (call with VAO already bound)
+    pub fn bindToVAO(self: *const @This()) void {
+        // Position (location 4)
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.position_buffer);
+        glad.glEnableVertexAttribArray(4);
+        glad.glVertexAttribPointer(4, 4, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf([4]f32), null);
+        glad.glVertexAttribDivisor(4, 1);
+
+        // End position for lines (location 5)
+        if (self.end_buffer != 0) {
+            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.end_buffer);
+            glad.glEnableVertexAttribArray(5);
+            glad.glVertexAttribPointer(5, 4, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf([4]f32), null);
+            glad.glVertexAttribDivisor(5, 1);
+        }
+
+        // Color (location 6)
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.color_buffer);
+        glad.glEnableVertexAttribArray(6);
+        glad.glVertexAttribPointer(6, 4, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf([4]f32), null);
+        glad.glVertexAttribDivisor(6, 1);
+
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
+    pub fn updatePositions(self: *@This(), positions: []const [4]f32) void {
+        const count = @min(positions.len, self.max_instances);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.position_buffer);
+        glad.glBufferSubData(glad.GL_ARRAY_BUFFER, 0, @intCast(count * @sizeOf([4]f32)), @ptrCast(positions.ptr));
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+        self.count = @intCast(count);
+    }
+
+    pub fn updateColors(self: *@This(), colors: []const [4]f32) void {
+        const count = @min(colors.len, self.max_instances);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.color_buffer);
+        glad.glBufferSubData(glad.GL_ARRAY_BUFFER, 0, @intCast(count * @sizeOf([4]f32)), @ptrCast(colors.ptr));
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
+    pub fn updateEndPositions(self: *@This(), positions: []const [4]f32) void {
+        if (self.end_buffer == 0) return;
+        const count = @min(positions.len, self.max_instances);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.end_buffer);
+        glad.glBufferSubData(glad.GL_ARRAY_BUFFER, 0, @intCast(count * @sizeOf([4]f32)), @ptrCast(positions.ptr));
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.position_buffer != 0) glad.glDeleteBuffers(1, &self.position_buffer);
+        if (self.end_buffer != 0) glad.glDeleteBuffers(1, &self.end_buffer);
+        if (self.color_buffer != 0) glad.glDeleteBuffers(1, &self.color_buffer);
+        self.* = .{ .max_instances = 0 };
+    }
+};
+
 pub const MeshResource = struct {
     mesh: *Mesh,
-    instance_count: usize,
-    entities: std.ArrayList(u64), // Store entity IDs (EntityID.id)
+    ref_count: usize = 0, // Number of entities/loads using this mesh
+    entities: std.ArrayList(u64), // Entity IDs using this mesh
+    instance_data: ?InstanceData = null,
 
     pub fn init(allocator: std.mem.Allocator, mesh: *Mesh) MeshResource {
         return .{
             .mesh = mesh,
-            .instance_count = 0,
+            .ref_count = 0,
             .entities = std.ArrayList(u64).init(allocator),
         };
+    }
+
+    /// Initialize instance buffers for instanced point rendering
+    pub fn initInstancedPoints(self: *MeshResource, max_instances: u32) void {
+        self.initInstanceBuffersInternal(max_instances, false);
+        self.mesh._draw = Mesh.instanced_point_draw;
+    }
+
+    /// Initialize instance buffers for instanced line rendering
+    pub fn initInstancedLines(self: *MeshResource, max_instances: u32) void {
+        self.initInstanceBuffersInternal(max_instances, true);
+        self.mesh._draw = Mesh.instanced_line_draw;
+    }
+
+    fn initInstanceBuffersInternal(self: *MeshResource, max_instances: u32, with_lines: bool) void {
+        if (self.instance_data != null) {
+            self.instance_data.?.deinit();
+        }
+
+        self.instance_data = if (with_lines)
+            InstanceData.initWithLines(max_instances)
+        else
+            InstanceData.init(max_instances);
+
+        // Bind instance attributes to mesh's VAO
+        glad.glBindVertexArray(self.mesh.meta.VAO);
+        self.instance_data.?.bindToVAO();
+        glad.glBindVertexArray(0);
+    }
+
+    /// Update instance positions and sync count to mesh
+    pub fn updateInstancePositions(self: *MeshResource, positions: []const [4]f32) void {
+        if (self.instance_data) |*inst| {
+            inst.updatePositions(positions);
+            self.mesh.instance_count = inst.count;
+        }
+    }
+
+    /// Update instance colors
+    pub fn updateInstanceColors(self: *MeshResource, colors: []const [4]f32) void {
+        if (self.instance_data) |*inst| {
+            inst.updateColors(colors);
+        }
+    }
+
+    /// Update line end positions
+    pub fn updateInstanceEndPositions(self: *MeshResource, positions: []const [4]f32) void {
+        if (self.instance_data) |*inst| {
+            inst.updateEndPositions(positions);
+        }
     }
 
     pub fn addEntity(self: *MeshResource, entity_id: u64) !void {
@@ -202,6 +365,9 @@ pub const MeshResource = struct {
     }
 
     pub fn deinit(self: *MeshResource) void {
+        if (self.instance_data) |*inst| {
+            inst.deinit();
+        }
         self.entities.deinit();
     }
 };
@@ -337,65 +503,25 @@ pub const ShaderResource = struct {
         return location;
     }
 
-    // TODO: Can probably avoid this by using meta programming to get fields of each Variant
+    /// Cache uniform locations for SSBO-based rendering
     pub fn cacheCommonUniforms(self: *ShaderResource, shader_type: MaterialType) void {
+        _ = shader_type;
+
+        // Transform uniforms
         _ = self.getorPutUniformLocation("uModel");
         _ = self.getorPutUniformLocation("uView");
         _ = self.getorPutUniformLocation("uProjection");
-        _ = self.getorPutUniformLocation("uNormalMatrix");
 
+        // Camera/lighting
         _ = self.getorPutUniformLocation("viewPos");
-        _ = self.getorPutUniformLocation("ambientLight");
-        _ = self.getorPutUniformLocation("useTexture");
 
-        switch (shader_type) {
-            .PBR => {
-                // Cache PBR uniform locations
-                _ = self.getorPutUniformLocation("baseColorFactor");
-                _ = self.getorPutUniformLocation("metallicFactor");
-                _ = self.getorPutUniformLocation("roughnessFactor");
-                _ = self.getorPutUniformLocation("emissiveFactor");
-                _ = self.getorPutUniformLocation("emissiveStrength");
-                _ = self.getorPutUniformLocation("alphaCutoff");
-                _ = self.getorPutUniformLocation("alphaModeEnum");
-                _ = self.getorPutUniformLocation("doubleSided");
-                _ = self.getorPutUniformLocation("specularColor");
-                _ = self.getorPutUniformLocation("specularStrength");
+        // SSBO material index
+        _ = self.getorPutUniformLocation("uMaterialIndex");
 
-                // Texture flags
-                _ = self.getorPutUniformLocation("hasBaseColorTexture");
-                _ = self.getorPutUniformLocation("hasNormalTexture");
-                _ = self.getorPutUniformLocation("hasMetallicRoughnessTexture");
-                _ = self.getorPutUniformLocation("hasOcclusionTexture");
-                _ = self.getorPutUniformLocation("hasEmissiveTexture");
-                _ = self.getorPutUniformLocation("hasSpecularTexture");
-
-                // Texture samplers
-                _ = self.getorPutUniformLocation("baseColorTexture");
-                _ = self.getorPutUniformLocation("normalTexture");
-                _ = self.getorPutUniformLocation("metallicRoughnessTexture");
-                _ = self.getorPutUniformLocation("occlusionTexture");
-                _ = self.getorPutUniformLocation("emissiveTexture");
-                _ = self.getorPutUniformLocation("specularTexture");
-            },
-            .Phong => {
-                // Cache Phong uniform locations
-                _ = self.getorPutUniformLocation("ambientColor");
-                _ = self.getorPutUniformLocation("diffuseColor");
-                _ = self.getorPutUniformLocation("specularColor");
-                _ = self.getorPutUniformLocation("shininess");
-
-                // Texture flags
-                _ = self.getorPutUniformLocation("hasDiffuseTexture");
-                _ = self.getorPutUniformLocation("hasSpecularTexture");
-                _ = self.getorPutUniformLocation("hasNormalTexture");
-
-                // Texture samplers
-                _ = self.getorPutUniformLocation("diffuseTexture");
-                _ = self.getorPutUniformLocation("specularTexture");
-                _ = self.getorPutUniformLocation("normalTexture");
-            },
-        }
+        // Instancing and vertex color flags (for standard shader)
+        _ = self.getorPutUniformLocation("uInstancedKeypoints");
+        _ = self.getorPutUniformLocation("uInstancedLines");
+        _ = self.getorPutUniformLocation("uUseVertexColor");
     }
 
     pub fn deinit(self: *ShaderResource) void {
@@ -521,6 +647,7 @@ meshes: std.StringHashMap(MeshResource),
 textures: std.StringHashMap(TextureResource),
 shaders: std.StringHashMap(ShaderResource),
 materials: std.StringHashMap(MaterialResource),
+material_buffer: MaterialBuffer,
 
 pub fn init(allocator: std.mem.Allocator) !*Self {
     const manager = try allocator.create(Self);
@@ -530,6 +657,7 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
         .textures = std.StringHashMap(TextureResource).init(allocator),
         .shaders = std.StringHashMap(ShaderResource).init(allocator),
         .materials = std.StringHashMap(MaterialResource).init(allocator),
+        .material_buffer = try MaterialBuffer.init(allocator),
     };
 
     try manager.initDefaultShaders(
@@ -573,26 +701,30 @@ pub fn deinit(self: *Self) void {
         entry.value_ptr.deinit(self.allocator);
     }
     self.materials.deinit();
+
+    self.material_buffer.deinit();
 }
 
 pub fn loadMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices: ?[]u32, draw_fn: ?Mesh.draw) !*Mesh {
     // Check if mesh already exists
     if (self.meshes.getPtr(name)) |resource| {
-        resource.instance_count += 1;
+        resource.ref_count += 1;
         return resource.mesh;
     }
 
     // Create new mesh
     const mesh = try Mesh.init(self.allocator, vertices, indices, draw_fn);
     const mesh_name = try self.allocator.dupe(u8, name);
-    try self.meshes.put(mesh_name, MeshResource.init(self.allocator, mesh));
+    var mesh_resource = MeshResource.init(self.allocator, mesh);
+    mesh_resource.ref_count = 1;
+    try self.meshes.put(mesh_name, mesh_resource);
     return mesh;
 }
 
 pub fn unloadMesh(self: *Self, name: []const u8) void {
     if (self.meshes.getPtr(name)) |resource_ptr| {
-        resource_ptr.instance_count -= 1;
-        if (resource_ptr.instance_count == 0) {
+        resource_ptr.ref_count -= 1;
+        if (resource_ptr.ref_count == 0) {
             if (self.meshes.remove(name)) |kv| {
                 self.allocator.free(kv.key);
                 kv.value.deinit(); // Deinit the MeshResource
@@ -802,6 +934,75 @@ pub fn loadMaterial(self: *Self, name: []const u8, material: MaterialVariant, sh
         shader_res.ref_count += 1;
         try shader_res.addMaterial(material_ptr);
     }
+
+    // Upload material to GPU buffer
+    self.uploadMaterialToGPU(material_ptr);
+}
+
+/// Upload a material to the GPU SSBO and store the index
+fn uploadMaterialToGPU(self: *Self, material_res: *MaterialResource) void {
+    // Build texture handles array from material's texture slots
+    var texture_handles: [TextureUnit.SlotCount]u64 = .{0} ** TextureUnit.SlotCount;
+    var texture_mask: u32 = 0;
+
+    const textures = switch (material_res.material) {
+        .PBR => |pbr| pbr.textures,
+        .Phong => |phong| phong.textures,
+    };
+
+    inline for (0..TextureUnit.SlotCount) |i| {
+        if (textures.slots[i]) |tex_id| {
+            // Find the TextureResource to get its bindless handle
+            var tex_iter = self.textures.iterator();
+            while (tex_iter.next()) |entry| {
+                if (entry.value_ptr.texture_id == tex_id) {
+                    texture_handles[i] = entry.value_ptr.bindless_handle;
+                    if (texture_handles[i] != 0) {
+                        texture_mask |= (@as(u32, 1) << @intCast(i));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // Convert and upload based on material type
+    const gpu_index = switch (material_res.material) {
+        .PBR => |pbr| blk: {
+            const flags: u32 = (@as(u32, @intFromEnum(pbr.data.alphaMode)) & 0x3) |
+                (if (pbr.data.doubleSided) MaterialGPU.FLAG_DOUBLE_SIDED else 0);
+
+            break :blk self.material_buffer.addPBRMaterial(
+                texture_handles,
+                texture_mask,
+                .{
+                    .baseColorFactor = pbr.data.baseColorFactor,
+                    .emissiveFactor = pbr.data.emissiveFactor,
+                    .emissiveStrength = pbr.data.emissiveStrength,
+                    .specularColor = pbr.data.specularColor,
+                    .specularStrength = pbr.data.specularStrength,
+                    .metallicFactor = pbr.data.metallicFactor,
+                    .roughnessFactor = pbr.data.roughnessFactor,
+                    .alphaCutoff = pbr.data.alphaCutoff,
+                },
+                flags,
+            );
+        },
+        .Phong => |phong| blk: {
+            break :blk self.material_buffer.addPhongMaterial(
+                texture_handles,
+                texture_mask,
+                .{
+                    .ambientColor = phong.data.ambientColor,
+                    .shininess = phong.data.shininess,
+                    .diffuseColor = phong.data.diffuseColor,
+                    .specularColor = phong.data.specularColor,
+                },
+            );
+        },
+    };
+
+    material_res.gpu_index = gpu_index;
 }
 
 pub fn unloadMaterial(self: *Self, name: []const u8) void {
@@ -1443,13 +1644,13 @@ fn processGLTFMeshes(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
 
             if (self.meshes.getPtr(mesh_name)) |resource| {
                 std.debug.print("Mesh already exists!=> {s}\n", .{mesh_name});
-                resource.instance_count += 1;
+                resource.ref_count += 1;
                 continue;
             }
 
             const loaded_mesh = try gltf.loadMesh(allocator, mesh_idx);
             var mesh_resource = MeshResource.init(self.allocator, loaded_mesh.?);
-            mesh_resource.instance_count = 1;
+            mesh_resource.ref_count = 1;
             try self.meshes.put(mesh_name, mesh_resource);
         }
     }
@@ -1467,9 +1668,9 @@ pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptio
     while (mesh_it.next()) |entry| {
         // Each entry has .key_ptr (pointer to the name string)
         // and .value_ptr (pointer to the MeshResource).
-        try writer.print("\t'{s}':\n\t\t(instance_count={d})\n", .{
+        try writer.print("\t'{s}':\n\t\t(ref_count={d})\n", .{
             entry.key_ptr.*,
-            entry.value_ptr.instance_count,
+            entry.value_ptr.ref_count,
         });
     }
     try writer.print("\n", .{});

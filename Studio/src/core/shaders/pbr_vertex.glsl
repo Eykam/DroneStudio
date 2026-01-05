@@ -1,4 +1,4 @@
-#version 330 core
+#version 460 core
 
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aColor;
@@ -17,27 +17,26 @@ out vec3 FragPos;
 out vec3 Normal;
 out vec2 TexCoord;
 out vec3 VertexColor;
-out mat3 TBN; // Tangent-Bitangent-Normal matrix for normal mapping
+out mat3 TBN;
 
 void main() {
     // Calculate vertex position in world space
     vec4 worldPosition = uModel * vec4(aPos, 1.0);
     FragPos = worldPosition.xyz;
-    
+
     // Calculate position in clip space
     gl_Position = uProjection * uView * worldPosition;
-    
+
     // Pass texture coordinates to fragment shader
     TexCoord = aTexCoord;
-    
+
     // Pass vertex color to fragment shader
     VertexColor = aColor;
-    
+
     // Transform normal to world space
-    // Note: This assumes uniform scaling. For non-uniform scaling, use the transpose of the inverse of the model matrix
     mat3 normalMatrix = transpose(inverse(mat3(uModel)));
     Normal = normalize(normalMatrix * aNormal);
-    
+
     // Calculate TBN matrix for normal mapping
     vec3 T = normalize(normalMatrix * aTangent);
     vec3 B = normalize(normalMatrix * aBitangent);

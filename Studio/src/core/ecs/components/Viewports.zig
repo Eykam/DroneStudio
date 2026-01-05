@@ -12,6 +12,9 @@ const SparseSet = @import("../SparseSet.zig").SparseSet;
 const glad = gl.glad;
 const Viewport = OpenGL.Viewport;
 
+const Renderer = @import("Renderer.zig");
+pub const VisibilityLayer = Renderer.VisibilityLayer;
+
 pub const ViewportComponent = struct {
     const Self = @This();
 
@@ -20,6 +23,7 @@ pub const ViewportComponent = struct {
     shared: bool = false,
     shared_info: ?CudaGL.CUDAGLTexture = null,
     active: bool = true,
+    visibility_mask: u32 = VisibilityLayer.ALL, // Which layers this viewport can see
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8, width: u32, height: u32) !Self {
         return .{

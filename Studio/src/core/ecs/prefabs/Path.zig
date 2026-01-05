@@ -91,7 +91,8 @@ pub fn spawn(
     try ecs.world.resource_manager.meshes.put(path_mesh_name_owned, path_mesh_resource);
 
     const path_transform = TransformComponent.init(allocator);
-    const path_renderer = try Renderable.init(allocator, path_mesh_name_owned);
+    var path_renderer = try Renderable.init(allocator, path_mesh_name_owned);
+    path_renderer.visibility_mask = Renderer.VisibilityLayer.DEBUG;
 
     const path_entity = try ecs.spawn(.{
         path_transform,
@@ -153,7 +154,8 @@ pub fn spawn(
     try ecs.world.resource_manager.meshes.put(waypoint_mesh_name_owned, waypoint_mesh_resource);
 
     const waypoint_transform = TransformComponent.init(allocator);
-    const waypoint_renderer = try Renderable.init(allocator, waypoint_mesh_name_owned);
+    var waypoint_renderer = try Renderable.init(allocator, waypoint_mesh_name_owned);
+    waypoint_renderer.visibility_mask = Renderer.VisibilityLayer.DEBUG;
 
     const waypoint_entity = try ecs.spawn(.{
         waypoint_transform,

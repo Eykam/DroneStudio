@@ -32,12 +32,13 @@ pub fn spawn(
         .aspect = desc.aspect,
     };
 
-    const vp = try Viewport.ViewportComponent.init(
+    var vp = try Viewport.ViewportComponent.init(
         alloc,
         "drone_camera",
         width,
         height,
     );
+    vp.visibility_mask = Viewport.VisibilityLayer.DEFAULT; // Don't render debug visualizations
 
     const frustum = Frustum.generate(
         alloc,

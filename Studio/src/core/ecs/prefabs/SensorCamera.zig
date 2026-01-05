@@ -43,12 +43,13 @@ pub fn spawn(
         .active = true,
     };
 
-    const vp = try Viewport.ViewportComponent.init(
+    var vp = try Viewport.ViewportComponent.init(
         alloc,
         name,
         config.resolution_width,
         config.resolution_height,
     );
+    vp.visibility_mask = Viewport.VisibilityLayer.DEFAULT; // Don't render debug visualizations
     // vp.enableSharing();
 
     const frustum = Frustum.generate(

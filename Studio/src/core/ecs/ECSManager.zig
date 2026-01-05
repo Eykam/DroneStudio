@@ -173,10 +173,11 @@ pub fn init(allocator: std.mem.Allocator) !*Self {
             &manager.path_playback_components,
             &manager.transform_components,
         ),
-        .slam_system = SLAMSystem.init(
+        .slam_system = try SLAMSystem.init(
             allocator,
             &manager.slam_components,
             manager.globals,
+            manager,
         ),
         .path_system = null,
     };

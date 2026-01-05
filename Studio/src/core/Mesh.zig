@@ -63,15 +63,17 @@ meta: Metadata,
 _draw: draw = default_draw,
 drawType: glad.GLenum = glad.GL_TRIANGLES,
 flags: ?MeshFlags = MeshFlags{},
+instance_count: u32 = 0, // For instanced rendering
 
 pub fn init(allocator: std.mem.Allocator, vertices: []Vertex, indices: ?[]u32, draw_fn: ?draw) !*Self {
     var mesh = try allocator.create(Self);
-
-    mesh.allocator = allocator;
-    mesh.vertices = vertices;
-    mesh.indices = indices;
-    mesh.meta = Metadata{};
-    mesh._draw = draw_fn orelse default_draw;
+    mesh.* = Self{
+        .allocator = allocator,
+        .vertices = vertices,
+        .indices = indices,
+        .meta = Metadata{},
+        ._draw = draw_fn orelse default_draw,
+    };
 
     // OpenGL initialization...
     mesh.initGL() catch |err| {
@@ -294,6 +296,30 @@ pub fn default_draw(mesh: *Self) void {
     } else {
         glad.glDrawArrays(mesh.drawType, 0, @intCast(mesh.vertices.len));
     }
+}
+
+/// Draw function for instanced points - uses mesh.instance_count
+pub fn instanced_point_draw(mesh: *Self) void {
+    if (mesh.instance_count == 0) return;
+
+    glad.glBindVertexArray(mesh.meta.VAO);
+    glad.glEnable(glad.GL_PROGRAM_POINT_SIZE);
+
+    glad.glDrawArraysInstanced(glad.GL_POINTS, 0, 1, @intCast(mesh.instance_count));
+
+    glad.glDisable(glad.GL_PROGRAM_POINT_SIZE);
+    glad.glBindVertexArray(0);
+}
+
+/// Draw function for instanced lines - uses mesh.instance_count
+pub fn instanced_line_draw(mesh: *Self) void {
+    if (mesh.instance_count == 0) return;
+
+    glad.glBindVertexArray(mesh.meta.VAO);
+
+    glad.glDrawArraysInstanced(glad.GL_LINES, 0, 2, @intCast(mesh.instance_count));
+
+    glad.glBindVertexArray(0);
 }
 
 pub fn calculateTangents(vertices: []Vertex, indices: ?[]u32) void {

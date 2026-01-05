@@ -86,7 +86,8 @@ pub fn generateDebugVisualization(
 
     _ = try ecs.world.resource_manager.loadMesh(name, vertices, null, Mesh.gen_draw(glad.GL_LINES));
 
-    const renderable = try Renderable.init(alloc, name);
+    var renderable = try Renderable.init(alloc, name);
+    renderable.visibility_mask = Renderer.VisibilityLayer.DEBUG;
     const tf = TransformComponent.init(alloc);
 
     const debug_eid = try ecs.spawn(.{ renderable, tf });

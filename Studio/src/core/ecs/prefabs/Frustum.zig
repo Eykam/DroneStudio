@@ -119,10 +119,11 @@ pub fn generate(
         std.debug.print("Failed to load frustum mesh from resource manager => {}\n", .{err});
         @panic("Failed to load Frustum Mesh...");
     };
-    const renderable = Renderable.init(alloc, name) catch |err| {
+    var renderable = Renderable.init(alloc, name) catch |err| {
         std.debug.print("Failed to initialize renderable for frustum=> {}\n", .{err});
         @panic("Failed to initialize renderable for frustum...");
     };
+    renderable.visibility_mask = Renderer.VisibilityLayer.DEBUG;
 
     var tf = Transform.TransformComponent.init(alloc);
     tf.rotate(Quaternion.from_axis_angle(Vec3.init(0, 1, 0), 180.0));

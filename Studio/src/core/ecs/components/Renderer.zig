@@ -6,7 +6,6 @@ const SparseSet = @import("../SparseSet.zig").SparseSet;
 const Transform = @import("../components/Transform.zig");
 const ResourceManager = @import("../ResourceManager.zig");
 const Mesh = @import("../../Mesh.zig");
-const TextureUnit = ResourceManager.TextureUnit;
 const gl = @import("../../bindings/gl.zig");
 const Globals = @import("Globals.zig");
 const ECSManager = @import("../ECSManager.zig");
@@ -23,6 +22,14 @@ const TransformComponent = Transform.TransformComponent;
 const GlobalsComponent = Globals.GlobalsComponent;
 const CameraComponent = Camera.CameraComponent;
 
+/// Visibility layer constants for filtering renderables per viewport
+pub const VisibilityLayer = struct {
+    pub const DEFAULT: u32 = 1 << 0; // Regular scene geometry
+    pub const DEBUG: u32 = 1 << 1; // Debug visualizations (frustums, paths, landmarks)
+    pub const UI: u32 = 1 << 2; // UI elements
+    pub const ALL: u32 = 0xFFFFFFFF; // Sees everything
+};
+
 pub const Renderable = struct {
     const Self = @This();
 
@@ -32,6 +39,7 @@ pub const Renderable = struct {
     render_order: i32 = 0,
     cast_shadows: bool = false,
     receive_shadows: bool = false,
+    visibility_mask: u32 = VisibilityLayer.ALL, // Which layers this renderable belongs to
 
     pub fn init(allocator: std.mem.Allocator, mesh_name: []const u8) !Self {
         return .{
@@ -229,117 +237,79 @@ pub const RenderSystem = struct {
         // Sort render queue to minimize state changes
         // std.sort.insertion(RenderCommand, self.render_queue.items, {}, RenderCommand.lessThan);
 
+        // Upload material buffer to GPU (if dirty) and bind SSBOs
+        self.world.resource_manager.material_buffer.upload();
+        self.world.resource_manager.material_buffer.bind();
+
         var vp_it = self.viewport_components.iterator();
         while (vp_it.next()) |vp_entry| {
             const entity_id = vp_entry.entity_id;
             const viewport = vp_entry.component.vp;
 
-            // Retrieve the actual Camera* from camera_manager:
-            const camera = self.camera_components.get(entity_id);
-            const transform = self.transform_components.get(entity_id);
+            const cam = self.camera_components.get(entity_id) orelse continue;
+            const tf = self.transform_components.get(entity_id) orelse continue;
 
-            if (camera != null and transform != null) {
-                const cam = camera.?;
-                const tf = transform.?;
+            // Bind FBO and clear
+            glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, viewport.fbo.fbo);
+            glad.glViewport(0, 0, viewport.fbo.width, viewport.fbo.height);
+            glad.glClearColor(0.1, 0.1, 0.1, 1.0);
+            glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
 
-                // Skip disabled viewports
-                // if (!cam.active) continue;
+            const view_matrix = cam.view(tf);
+            const projection_matrix = cam.projection();
+            const camera_position = tf.position;
 
-                // Bind FBO
-                glad.glBindFramebuffer(glad.GL_FRAMEBUFFER, viewport.fbo.fbo);
-                glad.glViewport(0, 0, viewport.fbo.width, viewport.fbo.height);
+            var prev_material: ?[]const u8 = null;
+            const viewport_visibility = vp_entry.component.visibility_mask;
 
-                // Clear
-                glad.glClearColor(0.1, 0.1, 0.1, 1.0);
-                glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
+            for (self.render_queue.items) |*cmd| {
+                // Skip if renderable not visible to this viewport's layer mask
+                if (cmd.renderer.visibility_mask & viewport_visibility == 0) continue;
 
-                const view_matrix = cam.view(tf);
-                const projection_matrix = cam.projection();
-                const camera_position = tf.position;
+                const mesh_resource = self.world.resource_manager.meshes.get(cmd.renderer.mesh_name) orelse continue;
+                const mesh = mesh_resource.mesh;
 
-                // Process render queue
-                var current_shader_id: c_uint = 0;
-                var prev_material: ?[]const u8 = null;
-
-                for (self.render_queue.items, 0..) |*cmd, idx| {
-                    _ = idx;
-
-                    // Get mesh from resource manager
-                    if (self.world.resource_manager.meshes.get(cmd.renderer.mesh_name)) |mesh_resource| {
-                        const mesh = mesh_resource.mesh;
-
-                        // Get material if available
-                        if (cmd.renderer.material_name) |material_name| {
-                            if (prev_material == null or !std.mem.eql(u8, prev_material.?, material_name)) {
-                                if (self.world.resource_manager.materials.getPtr(material_name)) |material_resource| {
-                                    var material_scope = self.profiler.sectionScope(.material_setup);
-                                    defer material_scope.end();
-
-                                    const program_id = self.applyMaterial(material_resource, cmd.transform, &view_matrix, &projection_matrix, &camera_position);
-                                    current_shader_id = program_id;
-                                }
-
-                                prev_material = material_name;
-                            } else {
-                                // Same material as previous, but still need to update model matrix for this entity
-                                if (self.world.resource_manager.materials.getPtr(material_name)) |material_resource| {
-                                    const shader_name = material_resource.shader_ref orelse switch (material_resource.material) {
-                                        .PBR => "pbr_shader",
-                                        .Phong => "standard_shader",
-                                    };
-                                    if (self.world.resource_manager.getShader(shader_name)) |shader| {
-                                        current_shader_id = shader.program_id;
-                                        const uModelLoc = shader.uniforms.get("uModel") orelse -1;
-                                        if (uModelLoc != -1) {
-                                            glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &cmd.transform.world_transform.to_array());
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // No material - use a default shader if needed
-                            if (self.world.resource_manager.getShader("standard_shader")) |shader| {
-                                if (current_shader_id != shader.program_id) {
-                                    self.profiler.trackShaderBind(@intCast(shader.program_id));
-                                    glad.glUseProgram(shader.program_id);
-                                    current_shader_id = shader.program_id;
-                                }
-
-                                // Set transformation matrices
-                                const uModelLoc = shader.getorPutUniformLocation("uModel");
-                                const uViewLoc = shader.getorPutUniformLocation("uView");
-                                const uProjectionLoc = shader.getorPutUniformLocation("uProjection");
-
-                                if (uModelLoc != -1) {
-                                    glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &cmd.transform.world_transform.to_array());
-                                }
-
-                                if (uViewLoc != -1) {
-                                    glad.glUniformMatrix4fv(uViewLoc, 1, glad.GL_FALSE, &view_matrix.to_array());
-                                }
-
-                                if (uProjectionLoc != -1) {
-                                    glad.glUniformMatrix4fv(uProjectionLoc, 1, glad.GL_FALSE, &projection_matrix.to_array());
-                                }
-                            }
+                // Setup material/shader
+                const material_changed = blk: {
+                    if (prev_material) |prev| {
+                        if (cmd.renderer.material_name) |curr| {
+                            break :blk !std.mem.eql(u8, prev, curr);
                         }
+                    }
+                    break :blk true;
+                };
 
-                        self.profiler.trackVaoBind(mesh.meta.VAO);
+                if (cmd.renderer.material_name) |material_name| {
+                    const material_resource = self.world.resource_manager.materials.getPtr(material_name) orelse continue;
 
-                        {
-                            var draw_scope = self.profiler.sectionScope(.draw_submission);
-                            defer draw_scope.end();
-
-                            self.profiler.trackDraw();
-                            mesh._draw(mesh);
-                        }
-
-                        // Reset per-material state if needed
-                        glad.glDisable(glad.GL_BLEND);
-                        glad.glEnable(glad.GL_CULL_FACE);
-                        glad.glCullFace(glad.GL_BACK);
-                    } else {}
+                    if (material_changed) {
+                        var material_scope = self.profiler.sectionScope(.material_setup);
+                        defer material_scope.end();
+                        _ = self.applyMaterial(material_resource, cmd.transform, &view_matrix, &projection_matrix, &camera_position);
+                        prev_material = material_name;
+                    } else {
+                        // Same material - just update model matrix
+                        self.updateModelMatrix(material_resource, &cmd.transform.world_transform);
+                    }
+                } else {
+                    // No material - use default shader
+                    self.applyDefaultShader(&cmd.transform.world_transform, &view_matrix, &projection_matrix, mesh);
                 }
+
+                // Draw
+                self.profiler.trackVaoBind(mesh.meta.VAO);
+                {
+                    var draw_scope = self.profiler.sectionScope(.draw_submission);
+                    defer draw_scope.end();
+                    self.profiler.trackDraw();
+
+                    mesh._draw(mesh);
+                }
+
+                // Reset state
+                glad.glDisable(glad.GL_BLEND);
+                glad.glEnable(glad.GL_CULL_FACE);
+                glad.glCullFace(glad.GL_BACK);
             }
         }
 
@@ -350,6 +320,12 @@ pub const RenderSystem = struct {
         glad.glClear(glad.GL_COLOR_BUFFER_BIT | glad.GL_DEPTH_BUFFER_BIT);
     }
 
+    /// Apply material for rendering. With SSBOs, this now only sets:
+    /// - Shader program
+    /// - Transform matrices (uModel, uView, uProjection)
+    /// - Camera position (viewPos)
+    /// - Material index (uMaterialIndex) for SSBO lookup
+    /// - Render state (blend, cull face)
     pub fn applyMaterial(
         self: *Self,
         material_resource: *ResourceManager.MaterialResource,
@@ -362,12 +338,12 @@ pub const RenderSystem = struct {
             .PBR => "pbr_shader",
             .Phong => "standard_shader",
         };
-        var shader = self.world.resource_manager.getShader(shader_name) orelse return 0;
+        const shader = self.world.resource_manager.getShader(shader_name) orelse return 0;
 
         self.profiler.trackMaterialBind(@intFromPtr(material_resource));
         self.profiler.trackShaderBind(@intCast(shader.program_id));
 
-        // Activate the shader program
+        // Activate shader
         glad.glUseProgram(shader.program_id);
 
         // Set transformation matrices
@@ -375,137 +351,44 @@ pub const RenderSystem = struct {
         const uViewLoc = shader.uniforms.get("uView") orelse -1;
         const uProjectionLoc = shader.uniforms.get("uProjection") orelse -1;
         const viewPosLoc = shader.uniforms.get("viewPos") orelse -1;
-        const useTexureLoc = shader.uniforms.get("useTexture") orelse -1;
-        // const uNormalMatrixLoc = shader.uniforms.get("uNormalMatrix") orelse -1;
-
-        // std.debug.print("View Mat {any}\nProj Mat: {any}\nCamera Position: {any}\n", .{ view_matrix, projection_matrix, view_position });
+        const uMaterialIndexLoc = shader.uniforms.get("uMaterialIndex") orelse -1;
 
         if (uModelLoc != -1) {
             glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &transform.world_transform.to_array());
         }
-
         if (uViewLoc != -1) {
             glad.glUniformMatrix4fv(uViewLoc, 1, glad.GL_FALSE, &view_matrix.to_array());
         }
-
         if (uProjectionLoc != -1) {
             glad.glUniformMatrix4fv(uProjectionLoc, 1, glad.GL_FALSE, &projection_matrix.to_array());
         }
-
         if (viewPosLoc != -1) {
             glad.glUniform3f(viewPosLoc, view_position[0], view_position[1], view_position[2]);
         }
 
-        if (useTexureLoc != -1) {
-            glad.glUniform1i(useTexureLoc, @intFromBool(true));
+        // Set material index for SSBO lookup
+        if (uMaterialIndexLoc != -1) {
+            if (material_resource.gpu_index) |idx| {
+                glad.glUniform1ui(uMaterialIndexLoc, idx);
+            }
         }
 
-        // if (uNormalMatrixLoc != -1) {
-        //     // Calculate normal matrix (inverse transpose of the model matrix's upper 3x3 part)
-        //     var normal_matrix = transform.world_transform.to_mat3().inverse().transpose();
-        //     glad.glUniformMatrix3fv(uNormalMatrixLoc, 1, glad.GL_FALSE, &normal_matrix.to_array()[0]);
-        // }
+        // Disable vertex color mode (we're using material)
+        const uUseVertexColorLoc = shader.uniforms.get("uUseVertexColor") orelse -1;
+        if (uUseVertexColorLoc != -1) glad.glUniform1i(uUseVertexColorLoc, 0);
 
-        // Apply material based on type
+        // Apply render state based on material type
         switch (material_resource.material) {
             .PBR => |pbr| {
-                // Apply PBR material properties using cached uniform locations
-                const baseColorFactorLoc = shader.uniforms.get("baseColorFactor") orelse -1;
-                const metallicFactorLoc = shader.uniforms.get("metallicFactor") orelse -1;
-                const roughnessFactorLoc = shader.uniforms.get("roughnessFactor") orelse -1;
-                const emissiveFactorLoc = shader.uniforms.get("emissiveFactor") orelse -1;
-                const emissiveStrengthLoc = shader.uniforms.get("emissiveStrength") orelse -1;
-                const alphaCutoffLoc = shader.uniforms.get("alphaCutoff") orelse -1;
-                const alphaModeEnumLoc = shader.uniforms.get("alphaModeEnum") orelse -1;
-                const doubleSidedLoc = shader.uniforms.get("doubleSided") orelse -1;
-                const specularColorLoc = shader.uniforms.get("specularColor") orelse -1;
-                const specularStrengthLoc = shader.uniforms.get("specularStrength") orelse -1;
-
-                // Apply all PBR parameters
-                if (baseColorFactorLoc != -1) glad.glUniform4fv(baseColorFactorLoc, 1, &pbr.data.baseColorFactor);
-                if (metallicFactorLoc != -1) glad.glUniform1f(metallicFactorLoc, pbr.data.metallicFactor);
-                if (roughnessFactorLoc != -1) glad.glUniform1f(roughnessFactorLoc, pbr.data.roughnessFactor);
-                if (emissiveFactorLoc != -1) glad.glUniform3fv(emissiveFactorLoc, 1, &pbr.data.emissiveFactor);
-                if (emissiveStrengthLoc != -1) glad.glUniform1f(emissiveStrengthLoc, pbr.data.emissiveStrength);
-                if (alphaCutoffLoc != -1) glad.glUniform1f(alphaCutoffLoc, pbr.data.alphaCutoff);
-                if (alphaModeEnumLoc != -1) glad.glUniform1i(alphaModeEnumLoc, @intFromEnum(pbr.data.alphaMode));
-                if (doubleSidedLoc != -1) glad.glUniform1i(doubleSidedLoc, @intFromBool(pbr.data.doubleSided));
-                if (specularColorLoc != -1) glad.glUniform3fv(specularColorLoc, 1, &pbr.data.specularColor);
-                if (specularStrengthLoc != -1) glad.glUniform1f(specularStrengthLoc, pbr.data.specularStrength);
-
-                // Texture presence flags
-                const hasBaseColorTexLoc = shader.uniforms.get("hasBaseColorTexture") orelse -1;
-                const hasNormalTexLoc = shader.uniforms.get("hasNormalTexture") orelse -1;
-                const hasMetallicRoughnessTexLoc = shader.uniforms.get("hasMetallicRoughnessTexture") orelse -1;
-                const hasOcclusionTexLoc = shader.uniforms.get("hasOcclusionTexture") orelse -1;
-                const hasEmissiveTexLoc = shader.uniforms.get("hasEmissiveTexture") orelse -1;
-                const hasSpecularTexLoc = shader.uniforms.get("hasSpecularTexture") orelse -1;
-
-                // Set texture presence flags
-                if (hasBaseColorTexLoc != -1) glad.glUniform1i(hasBaseColorTexLoc, @intFromBool(pbr.textures.get(.BaseColor) != null));
-                if (hasNormalTexLoc != -1) glad.glUniform1i(hasNormalTexLoc, @intFromBool(pbr.textures.get(.NormalMap) != null));
-                if (hasMetallicRoughnessTexLoc != -1) glad.glUniform1i(hasMetallicRoughnessTexLoc, @intFromBool(pbr.textures.get(.MetallicRoughness) != null));
-                if (hasOcclusionTexLoc != -1) glad.glUniform1i(hasOcclusionTexLoc, @intFromBool(pbr.textures.get(.Occlusion) != null));
-                if (hasEmissiveTexLoc != -1) glad.glUniform1i(hasEmissiveTexLoc, @intFromBool(pbr.textures.get(.Emissive) != null));
-                if (hasSpecularTexLoc != -1) glad.glUniform1i(hasSpecularTexLoc, @intFromBool(pbr.textures.get(.Specular) != null));
-
-                // Texture sampler locations
-                const baseColorTexLoc = shader.uniforms.get("baseColorTexture") orelse -1;
-                const normalTexLoc = shader.uniforms.get("normalTexture") orelse -1;
-                const metallicRoughnessTexLoc = shader.uniforms.get("metallicRoughnessTexture") orelse -1;
-                const occlusionTexLoc = shader.uniforms.get("occlusionTexture") orelse -1;
-                const emissiveTexLoc = shader.uniforms.get("emissiveTexture") orelse -1;
-                const specularTexLoc = shader.uniforms.get("specularTexture") orelse -1;
-
-                // Bind PBR textures
-                if (pbr.textures.get(.BaseColor)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.BaseColor.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (baseColorTexLoc != -1) glad.glUniform1i(baseColorTexLoc, TextureUnit.BaseColor.index());
-                }
-
-                if (pbr.textures.get(.NormalMap)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.NormalMap.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (normalTexLoc != -1) glad.glUniform1i(normalTexLoc, TextureUnit.NormalMap.index());
-                }
-
-                if (pbr.textures.get(.MetallicRoughness)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.MetallicRoughness.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (metallicRoughnessTexLoc != -1) glad.glUniform1i(metallicRoughnessTexLoc, TextureUnit.MetallicRoughness.index());
-                }
-
-                if (pbr.textures.get(.Occlusion)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.Occlusion.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (occlusionTexLoc != -1) glad.glUniform1i(occlusionTexLoc, TextureUnit.Occlusion.index());
-                }
-
-                if (pbr.textures.get(.Emissive)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.Emissive.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (emissiveTexLoc != -1) glad.glUniform1i(emissiveTexLoc, TextureUnit.Emissive.index());
-                }
-
-                if (pbr.textures.get(.Specular)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.Specular.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (specularTexLoc != -1) glad.glUniform1i(specularTexLoc, TextureUnit.Specular.index());
-                }
-
-                // Apply rendering state based on material properties
+                // Blend state
                 if (pbr.data.alphaMode == .BLEND) {
                     glad.glEnable(glad.GL_BLEND);
                     glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
-                } else if (pbr.data.alphaMode == .MASK) {
-                    glad.glEnable(glad.GL_BLEND);
-                    glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
-                    glad.glUniform1f(shader.getorPutUniformLocation("alphaCutoff"), pbr.data.alphaCutoff);
                 } else {
                     glad.glDisable(glad.GL_BLEND);
                 }
 
+                // Cull state
                 if (pbr.data.doubleSided) {
                     glad.glDisable(glad.GL_CULL_FACE);
                 } else {
@@ -514,55 +397,11 @@ pub const RenderSystem = struct {
                 }
             },
             .Phong => |phong| {
-                // Apply Phong material properties
-                const ambientColorLoc = shader.uniforms.get("ambientColor") orelse -1;
-                const diffuseColorLoc = shader.uniforms.get("diffuseColor") orelse -1;
-                const specularColorLoc = shader.uniforms.get("specularColor") orelse -1;
-                const shininessLoc = shader.uniforms.get("shininess") orelse -1;
-
-                if (ambientColorLoc != -1) glad.glUniform3fv(ambientColorLoc, 1, &phong.data.ambientColor);
-                if (diffuseColorLoc != -1) glad.glUniform4fv(diffuseColorLoc, 1, &phong.data.diffuseColor);
-                if (specularColorLoc != -1) glad.glUniform3fv(specularColorLoc, 1, &phong.data.specularColor);
-                if (shininessLoc != -1) glad.glUniform1f(shininessLoc, phong.data.shininess);
-
-                // Texture presence flags
-                const hasDiffuseTexLoc = shader.uniforms.get("hasDiffuseTexture") orelse -1;
-                const hasSpecularTexLoc = shader.uniforms.get("hasSpecularTexture") orelse -1;
-                const hasNormalTexLoc = shader.uniforms.get("hasNormalTexture") orelse -1;
-
-                if (hasDiffuseTexLoc != -1) glad.glUniform1i(hasDiffuseTexLoc, @intFromBool(phong.textures.get(.BaseColor) != null));
-                if (hasSpecularTexLoc != -1) glad.glUniform1i(hasSpecularTexLoc, @intFromBool(phong.textures.get(.Specular) != null));
-                if (hasNormalTexLoc != -1) glad.glUniform1i(hasNormalTexLoc, @intFromBool(phong.textures.get(.NormalMap) != null));
-
-                // Texture sampler locations
-                const diffuseTexLoc = shader.uniforms.get("diffuseTexture") orelse -1;
-                const specularTexLoc = shader.uniforms.get("specularTexture") orelse -1;
-                const normalTexLoc = shader.uniforms.get("normalTexture") orelse -1;
-
-                // Bind Phong textures
-                if (phong.textures.get(.BaseColor)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.BaseColor.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (diffuseTexLoc != -1) glad.glUniform1i(diffuseTexLoc, TextureUnit.BaseColor.index());
-                }
-
-                if (phong.textures.get(.Specular)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.Specular.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (specularTexLoc != -1) glad.glUniform1i(specularTexLoc, TextureUnit.Specular.index());
-                }
-
-                if (phong.textures.get(.NormalMap)) |tex_id| {
-                    glad.glActiveTexture(TextureUnit.NormalMap.glValue());
-                    glad.glBindTexture(glad.GL_TEXTURE_2D, tex_id);
-                    if (normalTexLoc != -1) glad.glUniform1i(normalTexLoc, TextureUnit.NormalMap.index());
-                }
-
-                // Apply default rendering state for Phong
+                // Cull state
                 glad.glEnable(glad.GL_CULL_FACE);
                 glad.glCullFace(glad.GL_BACK);
 
-                // Enable blending only if alpha < 1.0
+                // Blend state
                 if (phong.data.diffuseColor[3] < 1.0) {
                     glad.glEnable(glad.GL_BLEND);
                     glad.glBlendFunc(glad.GL_SRC_ALPHA, glad.GL_ONE_MINUS_SRC_ALPHA);
@@ -573,6 +412,43 @@ pub const RenderSystem = struct {
         }
 
         return shader.program_id;
+    }
+
+    /// Update only the model matrix for same-material draws
+    fn updateModelMatrix(self: *Self, material_resource: *ResourceManager.MaterialResource, world_transform: *const Mat4) void {
+        const shader_name = material_resource.shader_ref orelse switch (material_resource.material) {
+            .PBR => "pbr_shader",
+            .Phong => "standard_shader",
+        };
+        const shader = self.world.resource_manager.getShader(shader_name) orelse return;
+        const uModelLoc = shader.uniforms.get("uModel") orelse return;
+        glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &world_transform.to_array());
+    }
+
+    /// Apply default shader for entities without materials (uses vertex colors)
+    fn applyDefaultShader(self: *Self, world_transform: *const Mat4, view_matrix: *const Mat4, projection_matrix: *const Mat4, mesh: *Mesh) void {
+        const shader = self.world.resource_manager.getShader("standard_shader") orelse return;
+
+        self.profiler.trackShaderBind(@intCast(shader.program_id));
+        glad.glUseProgram(shader.program_id);
+
+        const uModelLoc = shader.uniforms.get("uModel") orelse -1;
+        const uViewLoc = shader.uniforms.get("uView") orelse -1;
+        const uProjectionLoc = shader.uniforms.get("uProjection") orelse -1;
+        const uUseVertexColorLoc = shader.uniforms.get("uUseVertexColor") orelse -1;
+
+        if (uModelLoc != -1) glad.glUniformMatrix4fv(uModelLoc, 1, glad.GL_FALSE, &world_transform.to_array());
+        if (uViewLoc != -1) glad.glUniformMatrix4fv(uViewLoc, 1, glad.GL_FALSE, &view_matrix.to_array());
+        if (uProjectionLoc != -1) glad.glUniformMatrix4fv(uProjectionLoc, 1, glad.GL_FALSE, &projection_matrix.to_array());
+        if (uUseVertexColorLoc != -1) glad.glUniform1i(uUseVertexColorLoc, 1);
+
+        // Set instancing flags based on mesh draw function
+        const is_points: c_int = if (mesh._draw == Mesh.instanced_point_draw) 1 else 0;
+        const is_lines: c_int = if (mesh._draw == Mesh.instanced_line_draw) 1 else 0;
+        const uInstancedKeypointsLoc = shader.uniforms.get("uInstancedKeypoints") orelse -1;
+        const uInstancedLinesLoc = shader.uniforms.get("uInstancedLines") orelse -1;
+        if (uInstancedKeypointsLoc != -1) glad.glUniform1i(uInstancedKeypointsLoc, is_points);
+        if (uInstancedLinesLoc != -1) glad.glUniform1i(uInstancedLinesLoc, is_lines);
     }
 
     pub fn debug(self: *Self) void {

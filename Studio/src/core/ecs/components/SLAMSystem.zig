@@ -614,6 +614,7 @@ const Viewports = @import("Viewports.zig");
 const ViewportComponent = Viewports.ViewportComponent;
 const Transform = @import("Transform.zig");
 const TransformComponent = Transform.TransformComponent;
+const LandmarkCloud = @import("../prefabs/LandmarkCloud.zig");
 
 pub const SLAMComponent = struct {
     entity_id: ?Core.EntityID = null,
@@ -628,6 +629,10 @@ pub const SLAMComponent = struct {
 
     // Optional ground truth source
     ground_truth_transform: ?*TransformComponent = null,
+
+    // Landmark visualization
+    landmark_mesh_name: [:0]const u8 = "slam_landmarks",
+    landmarks_initialized: bool = false,
 
     // State
     enabled: bool = false,
@@ -780,22 +785,42 @@ pub const SLAMComponent = struct {
 // SLAMSystem: ECS system that drives SLAM frame capture on main thread
 // ============================================================================
 
+const ECSManager = @import("../ECSManager.zig");
+
 pub const SLAMSystem = struct {
+    pub const MAX_LANDMARKS = 2500000;
+
     allocator: std.mem.Allocator,
     slam_components: *SparseSet(SLAMComponent),
     globals: *Globals.GlobalsComponent,
+    ecs: *ECSManager,
+
+    // Pre-allocated buffers for landmark visualization
+    landmark_positions: []align(16) [4]f32,
+    landmark_colors: []align(16) [4]f32,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, slam_components: *SparseSet(SLAMComponent), globals: *Globals.GlobalsComponent) Self {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        slam_components: *SparseSet(SLAMComponent),
+        globals: *Globals.GlobalsComponent,
+        ecs: *ECSManager,
+    ) !Self {
         return .{
             .allocator = allocator,
             .slam_components = slam_components,
             .globals = globals,
+            .ecs = ecs,
+            .landmark_positions = try allocator.alignedAlloc([4]f32, 16, MAX_LANDMARKS),
+            .landmark_colors = try allocator.alignedAlloc([4]f32, 16, MAX_LANDMARKS),
         };
     }
 
     pub fn deinit(self: *Self) void {
+        self.allocator.free(self.landmark_positions);
+        self.allocator.free(self.landmark_colors);
+
         // Cleanup all SLAM components
         var it = self.slam_components.iterator();
         while (it.next()) |entry| {
@@ -807,7 +832,77 @@ pub const SLAMSystem = struct {
     pub fn update(self: *Self) void {
         var it = self.slam_components.iterator();
         while (it.next()) |entry| {
-            entry.component.captureFrame(self.globals.frame_count);
+            const component = entry.component;
+
+            // Initialize landmark visualization if not done
+            if (component.enabled and !component.landmarks_initialized) {
+                self.initLandmarks(component);
+            }
+
+            // Capture and process frame
+            component.captureFrame(self.globals.frame_count);
+
+            // Update landmark visualization
+            if (component.enabled and component.landmarks_initialized) {
+                self.updateLandmarks(component);
+            }
+        }
+    }
+
+    /// Initialize the landmark cloud mesh
+    fn initLandmarks(self: *Self, component: *SLAMComponent) void {
+        _ = LandmarkCloud.spawn(
+            self.allocator,
+            self.ecs,
+            component.landmark_mesh_name,
+            MAX_LANDMARKS,
+        ) catch |err| {
+            std.debug.print("Failed to spawn landmark cloud: {}\n", .{err});
+            return;
+        };
+
+        component.landmarks_initialized = true;
+    }
+
+    /// Update landmark positions from the SLAM map
+    fn updateLandmarks(self: *Self, component: *SLAMComponent) void {
+        const mesh_resource = self.ecs.world.resource_manager.meshes.getPtr(component.landmark_mesh_name) orelse return;
+
+        // Lock processor for thread-safe access to map
+        component.processor.output_mutex.lock();
+        defer component.processor.output_mutex.unlock();
+
+        const landmarks = &component.processor.map.landmarks;
+        const count = @min(landmarks.count(), MAX_LANDMARKS);
+
+        if (count == 0) return;
+
+        var idx: usize = 0;
+        var lm_iter = landmarks.valueIterator();
+        while (lm_iter.next()) |lm_ptr| {
+            if (idx >= count) break;
+            const lm = lm_ptr.*;
+
+            if (lm.is_bad) continue;
+
+            // Position (xyz) + point size (w)
+            self.landmark_positions[idx] = .{
+                lm.position.x(),
+                lm.position.y(),
+                lm.position.z(),
+                3.0,
+            };
+
+            // Color based on observation count
+            const brightness = @min(1.0, @as(f32, @floatFromInt(lm.observation_count)) / 10.0);
+            self.landmark_colors[idx] = .{ 0.2, 0.5 + brightness * 0.5, 0.2, 1.0 };
+
+            idx += 1;
+        }
+
+        if (idx > 0) {
+            mesh_resource.updateInstancePositions(self.landmark_positions[0..idx]);
+            mesh_resource.updateInstanceColors(self.landmark_colors[0..idx]);
         }
     }
 };
@@ -1724,10 +1819,17 @@ pub const SLAMProcessor = struct {
             const desc_bytes: [*]const u8 = @ptrCast(&gm.left_desc.descriptor);
             @memcpy(&desc, desc_bytes[0..32]);
 
+            // Triangulate 3D point in camera frame using pixel coords and disparity
+            const world_pos = self.config.triangulate(
+                gm.world.image_coords.x,
+                gm.world.image_coords.y,
+                gm.world.disparity,
+            ) orelse Vec3.init(0, 0, 0);
+
             self.cpu.curr_matched_keypoints[i] = .{
                 .left_pos = .{ gm.left_pos.x, gm.left_pos.y },
                 .right_pos = .{ gm.right_pos.x, gm.right_pos.y },
-                .world_pos = Vec3.init(gm.world.position.x, gm.world.position.y, gm.world.position.z),
+                .world_pos = world_pos,
                 .descriptor = desc,
                 .disparity = gm.world.disparity,
             };
@@ -1763,9 +1865,10 @@ pub const SLAMProcessor = struct {
 
                         // Update landmark position (running average)
                         if (self.map.getLandmark(landmark_id)) |lm| {
-                            const curr_world_pos = self.current_pose.transformPoint(
-                                self.cpu.curr_matched_keypoints[curr_idx].world_pos,
-                            );
+                            const cam_pos = self.cpu.curr_matched_keypoints[curr_idx].world_pos;
+                            // Convert from camera frame to OpenGL frame
+                            const cam_to_gl = Vec3.init(cam_pos.x(), -cam_pos.y(), -cam_pos.z());
+                            const curr_world_pos = self.current_pose.transformPoint(cam_to_gl);
                             const n = @as(f32, @floatFromInt(lm.observation_count + 1));
                             lm.position = lm.position.scale((n - 1.0) / n).add(curr_world_pos.scale(1.0 / n));
                         }
@@ -1796,8 +1899,12 @@ pub const SLAMProcessor = struct {
         for (0..count) |idx| {
             const mkp = self.cpu.curr_matched_keypoints[idx];
 
+            // Convert from camera frame (Z forward, Y down) to OpenGL frame (Z backward, Y up)
+            // This is a 180° rotation around X axis: Y and Z are negated
+            const cam_to_gl = Vec3.init(mkp.world_pos.x(), -mkp.world_pos.y(), -mkp.world_pos.z());
+
             // Transform to world coordinates
-            const world_pos = self.current_pose.transformPoint(mkp.world_pos);
+            const world_pos = self.current_pose.transformPoint(cam_to_gl);
 
             var landmark_id: u64 = undefined;
 
