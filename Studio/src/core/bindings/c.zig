@@ -1,0 +1,20 @@
+pub const imgui = @cImport({
+    @cDefine("CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "");
+    @cDefine("CIMGUI_USE_OPENGL3", "");
+    @cDefine("CIMGUI_USE_GLFW", "");
+    @cInclude("cimgui.h");
+    @cInclude("cimgui_impl.h");
+});
+
+pub const cuda = @cImport({
+    @cInclude("cuda_wrapper.h");
+    @cInclude("kernels.h");
+});
+
+pub const bullet = @cImport({
+    @cInclude("cbullet.h");
+});
+
+pub const vhacd = @cImport({
+    @cInclude("vhacd_wrapper.h");
+});

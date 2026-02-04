@@ -17,7 +17,7 @@ fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
 }
 
 // Helper function to configure library paths and link libraries
-fn configureLibs(
+fn configureDesktopLibs(
     exe: *Build.Step.Compile,
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -44,7 +44,6 @@ fn configureLibs(
         const cuda_lib_path: ?std.Build.LazyPath = switch (target.result.os.tag) {
             .windows => blk: {
                 // If cross-compiling from Linux to Windows, adjust the path accordingly
-                // Example placeholder logic; adjust as needed
                 if (builtin.target.os.tag == .linux) {
                     break :blk b.path(b.pathJoin(&.{ cuda_path, "lib" }));
                 }
@@ -202,91 +201,374 @@ fn configureLibs(
         });
     }
 
+    exe.addIncludePath(b.path("lib/cbullet"));
+    exe.addIncludePath(b.path("lib/bullet"));
+    exe.addIncludePath(b.path("lib/vhacd"));
+
+    // TODO: Use the old damping method for now otherwise there is a hang in powf().
+    const flags = &.{
+        "-DBT_USE_OLD_DAMPING_METHOD",
+        "-DBT_THREADSAFE=1",
+        "-std=c++11",
+        "-fno-sanitize=undefined",
+        "-O3", // Maximum optimization
+        "-ffast-math", // Enable fast math optimizations
+        "-march=native", // Use native CPU instructions
+        "-mtune=native", // Tune for native CPU
+        "-fomit-frame-pointer", // Omit frame pointer for better performance
+        "-funroll-loops", // Unroll loops for better performance
+    };
+    exe.addCSourceFiles(.{
+        .files = &.{
+            "lib/cbullet/cbullet.cpp",
+            "lib/bullet/btLinearMathAll.cpp",
+            "lib/bullet/btBulletCollisionAll.cpp",
+            "lib/bullet/btBulletDynamicsAll.cpp",
+            "lib/vhacd/vhacd_wrapper.cpp",
+        },
+        .flags = flags,
+    });
+
     // Link the C standard library
     exe.linkLibC();
     exe.linkLibCpp();
 }
 
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration") orelse false;
-    const ffmpeg_path = switch (target.result.os.tag) {
-        .windows => "lib/ffmpeg-windows",
-        .linux => b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg",
-        .macos => @panic("MacOS is currently not supported!"),
-        else => @panic("Unsupported operating system"),
-    };
-
-    const name = switch (target.result.os.tag) {
-        .windows => "DroneStudio-x86_64-windows-gnu.exe",
-        .linux => "DroneStudio-x86_64-linux-gnu.exe",
-        .macos => @panic("MacOS is currently not supported!"),
-        else => @panic("Unsupported OS!"),
-    };
-
-    // Add the main executable
-    const exe = b.addExecutable(.{
-        .name = name,
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Configure libraries for the main executable
-    configureLibs(exe, b, target, use_cuda, ffmpeg_path);
+fn configureKernels(
+    b: *std.Build,
+    exe: *Build.Step.Compile,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    use_cuda: bool,
+) void {
+    _ = target;
+    _ = optimize;
 
     if (use_cuda) {
-        const cuda_detector_obj = b.addSystemCommand(&.{
-            "nvcc",
-            "-O3",
-            "--compiler-options",
-            "'-fPIC'",
-            "-c",
-            "lib/kernels/keypoint_detector.cu",
-            "-o",
-            "lib/kernels/keypoint_detector.o",
+        const kernel_cu_path = "lib/kernels/kernels.cu";
+        const kernel_o_path = "lib/kernels/kernels.o";
+
+        // Check if we need to recompile the CUDA kernels
+        var need_cuda_compile = false;
+
+        // Check if .o file exists
+        const obj_stat = std.fs.cwd().statFile(kernel_o_path) catch |err| blk: {
+            if (err == error.FileNotFound) {
+                std.debug.print("CUDA kernels.o not found, will compile...\n", .{});
+                need_cuda_compile = true;
+            }
+            break :blk null;
+        };
+
+        // If .o exists, check if .cu is newer
+        if (!need_cuda_compile and obj_stat != null) {
+            const cu_stat = std.fs.cwd().statFile(kernel_cu_path) catch unreachable;
+            if (cu_stat.mtime > obj_stat.?.mtime) {
+                std.debug.print("CUDA kernels.cu is newer than kernels.o, will recompile...\n", .{});
+                need_cuda_compile = true;
+            }
+        }
+
+        // Only run nvcc if needed
+        if (need_cuda_compile) {
+            const cuda_compile_cmd = b.addSystemCommand(&.{
+                "nvcc",
+                "-O3",
+                "--compiler-options",
+                "'-fPIC'",
+                "-c",
+                kernel_cu_path,
+                "-o",
+                kernel_o_path,
+            });
+            cuda_compile_cmd.step.name = "Compile CUDA kernels";
+            // Make sure nvcc runs before we try to link the object file
+            b.getInstallStep().dependOn(&cuda_compile_cmd.step);
+        }
+
+        // Always link the object file (either newly compiled or existing)
+        exe.addObjectFile(b.path(kernel_o_path));
+    }
+
+    exe.addIncludePath(b.path("lib/kernels"));
+}
+
+// Get command-line options
+pub fn build(b: *std.Build) void {
+    const render_profiler_level = b.option(u8, "render-profiler", "Render profiler level (0 = off, 1 = stats, 2 = stats + timers)") orelse 0;
+    const build_desktop = b.option(bool, "desktop", "Build the desktop application") orelse true;
+    const build_pi = b.option(bool, "pi", "Build the Raspberry Pi applications") orelse true;
+    const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration for desktop") orelse false;
+    const test_gui = b.option(bool, "test-gui", "Enable GUI mode for physics tests") orelse false;
+
+    // Get target modification options
+    const global_target = b.option(bool, "global-target", "Apply target settings to both desktop and Pi builds") orelse false;
+    const desktop_only = b.option(bool, "desktop-target", "Apply target settings only to desktop build") orelse false;
+    const pi_only = b.option(bool, "pi-target", "Apply target settings only to Pi build") orelse false;
+
+    // User can provide a global target that applies to all builds
+    const user_target = b.standardTargetOptions(.{}); // User can override with -Dtarget
+
+    // Default optimization option
+    const optimize = b.standardOptimizeOption(.{});
+
+    // Handle desktop target selection
+    const desktop_target = if (global_target or desktop_only)
+        user_target // Use user-provided target for desktop if requested
+    else
+        b.graph.host; // Default to host architecture for desktop
+
+    // Handle Raspberry Pi target selection
+    const pi_target = if (global_target or pi_only)
+        user_target // Use user-provided target for Pi if requested
+    else blk: {
+        // Create a specific target for Raspberry Pi with cortex_a53
+        const target_options = std.Target.Query{
+            .cpu_arch = .aarch64,
+            .os_tag = .linux,
+            .abi = .gnu,
+            .cpu_model = .{ .explicit = &std.Target.aarch64.cpu.cortex_a53 },
+        };
+        break :blk b.resolveTargetQuery(target_options);
+    };
+
+    // Log the targets being used
+    std.debug.print("Desktop target: {s} {s}\n", .{ @tagName(desktop_target.result.cpu.arch), desktop_target.result.cpu.model.name });
+    std.debug.print("Pi target: {s} {s}\n", .{ @tagName(pi_target.result.cpu.arch), pi_target.result.cpu.model.name });
+
+    const build_options = b.addOptions();
+    build_options.addOption(u8, "render_profiler", render_profiler_level);
+
+    // Desktop Application
+    var desktop_step: ?*std.Build.Step = null;
+    var test_desktop_step: ?*std.Build.Step = null;
+    if (build_desktop) {
+        desktop_step = b.step("desktop", "Build the desktop application");
+
+        // Determine FFmpeg path based on OS
+        const ffmpeg_path = switch (desktop_target.result.os.tag) {
+            .windows => "lib/ffmpeg-windows",
+            .linux => b.option([]const u8, "ffmpeg_path", "Path to ffmpeg installation") orelse "ffmpeg",
+            .macos => @panic("MacOS is currently not supported!"),
+            else => @panic("Unsupported operating system"),
+        };
+
+        // Determine executable name based on OS and architecture
+        const arch_name = @tagName(desktop_target.result.cpu.arch);
+        const exe_name = b.fmt("DroneStudio-{s}-{s}-gnu{s}", .{
+            arch_name,
+            @tagName(desktop_target.result.os.tag),
+            if (desktop_target.result.os.tag == .windows) ".exe" else "",
         });
 
-        const cuda_detector_artifact = b.addObject(.{
-            .name = "cuda_keypoint_detector",
-            .root_source_file = null,
-            .target = target,
+        // Add the main desktop executable
+        const desktop_exe = b.addExecutable(.{
+            .name = exe_name,
+            .root_source_file = b.path("src/Studio.zig"),
+            .target = desktop_target,
             .optimize = optimize,
         });
-        cuda_detector_artifact.addObjectFile(b.path("lib/kernels/keypoint_detector.o"));
-        cuda_detector_artifact.step.dependOn(&cuda_detector_obj.step);
+        desktop_exe.root_module.addOptions("build_options", build_options);
 
-        exe.addObjectFile(cuda_detector_artifact.getEmittedBin());
-        exe.addIncludePath(b.path("lib/kernels"));
+        // Configure libraries for the desktop executable
+        configureDesktopLibs(
+            desktop_exe,
+            b,
+            desktop_target,
+            use_cuda,
+            ffmpeg_path,
+        );
+
+        // Configure CUDA if enabled
+        configureKernels(
+            b,
+            desktop_exe,
+            desktop_target,
+            optimize,
+            use_cuda,
+        );
+
+        // Install the desktop executable
+        b.installArtifact(desktop_exe);
+        desktop_step.?.dependOn(&desktop_exe.step);
+
+        const exe_check = b.addExecutable(.{
+            .name = exe_name,
+            .root_source_file = b.path("src/Studio.zig"),
+            .target = desktop_target,
+            .optimize = optimize,
+        });
+        exe_check.root_module.addOptions("build_options", build_options);
+
+        configureDesktopLibs(
+            exe_check,
+            b,
+            desktop_target,
+            use_cuda,
+            ffmpeg_path,
+        );
+
+        // Configure CUDA if enabled
+        configureKernels(
+            b,
+            exe_check,
+            desktop_target,
+            optimize,
+            use_cuda,
+        );
+
+        const check = b.step("check", "Check if it compiles");
+        check.dependOn(&exe_check.step);
+
+        // Run command for the desktop executable
+        const run_desktop_cmd = b.addRunArtifact(desktop_exe);
+        run_desktop_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            run_desktop_cmd.addArgs(args);
+        }
+
+        const run_desktop_step = b.step("run-desktop", "Run the desktop application");
+        run_desktop_step.dependOn(&run_desktop_cmd.step);
+
+        // Add the desktop test executable
+        const desktop_tests = b.addTest(.{
+            .root_source_file = b.path("src/Studio.zig"),
+            .target = desktop_target,
+            .optimize = optimize,
+        });
+        desktop_tests.root_module.addOptions("build_options", build_options);
+
+        // Configure libraries for the desktop test executable
+        configureDesktopLibs(
+            desktop_tests,
+            b,
+            desktop_target,
+            use_cuda,
+            ffmpeg_path,
+        );
+
+        // Configure kernels for tests
+        configureKernels(
+            b,
+            desktop_tests,
+            desktop_target,
+            optimize,
+            use_cuda,
+        );
+
+        // Add test GUI configuration
+        desktop_tests.root_module.addAnonymousImport("test_config", .{
+            .root_source_file = b.addWriteFiles().add("test_config.zig", b.fmt("pub const GUI_ENABLED = {any};\n", .{test_gui})),
+        });
+
+        // Run command for the desktop test executable
+        const run_desktop_tests = b.addRunArtifact(desktop_tests);
+        test_desktop_step = b.step("test-desktop", "Run desktop application unit tests");
+        test_desktop_step.?.dependOn(&run_desktop_tests.step);
+
+        // // Add collision tests as a test, not an executable
+        // const collision_tests = b.addTest(.{
+        //     .name = "collision_tests",
+        //     .root_source_file = b.path("src/core/ecs/components/PhysicsThread.zig"),
+        //     .target = desktop_target,
+        //     .optimize = optimize,
+        // });
+
+        // // Configure libraries for collision tests
+        // configureDesktopLibs(
+        //     collision_tests,
+        //     b,
+        //     desktop_target,
+        //     use_cuda,
+        //     ffmpeg_path,
+        // );
+
+        // // Run command for collision tests
+        // const run_collision_tests = b.addRunArtifact(collision_tests);
+        // const test_collision_step = b.step("test-collision", "Run collision system tests");
+        // test_collision_step.dependOn(&run_collision_tests.step);
     }
 
-    // Install the executable
-    b.installArtifact(exe);
+    // Raspberry Pi Applications
+    var pi_step: ?*std.Build.Step = null;
+    var test_pi_step: ?*std.Build.Step = null;
+    if (build_pi) {
+        pi_step = b.step("pi", "Build the Raspberry Pi applications");
 
-    // Run command for the main executable
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+        // Log Raspberry Pi target information
+        std.debug.print("Building for Raspberry Pi: aarch64-linux-gnu with {s} CPU\n", .{pi_target.result.cpu.model.name});
+
+        // Create IMU executable
+        const imu_exe = b.addExecutable(.{
+            .name = "IMU",
+            .root_source_file = b.path("src/IMU.zig"),
+            .target = pi_target,
+            .optimize = optimize,
+        });
+        imu_exe.root_module.addOptions("build_options", build_options);
+        b.installArtifact(imu_exe);
+        pi_step.?.dependOn(&imu_exe.step);
+
+        // Create MotorController executable
+        const motor_exe = b.addExecutable(.{
+            .name = "MotorController",
+            .root_source_file = b.path("src/MotorController.zig"),
+            .target = pi_target,
+            .optimize = optimize,
+        });
+        motor_exe.root_module.addOptions("build_options", build_options);
+        b.installArtifact(motor_exe);
+        pi_step.?.dependOn(&motor_exe.step);
+
+        // Run commands for IMU (will only run if we're on the correct architecture)
+        const run_imu_cmd = b.addRunArtifact(imu_exe);
+        run_imu_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            run_imu_cmd.addArgs(args);
+        }
+
+        // Run commands for MotorController
+        const run_motor_cmd = b.addRunArtifact(motor_exe);
+        run_motor_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            run_motor_cmd.addArgs(args);
+        }
+
+        // Create run steps for each executable
+        const run_imu_step = b.step("run-imu", "Run the IMU application");
+        run_imu_step.dependOn(&run_imu_cmd.step);
+
+        const run_motor_step = b.step("run-motor", "Run the MotorController application");
+        run_motor_step.dependOn(&run_motor_cmd.step);
+
+        // Unit tests for IMU
+        const imu_tests = b.addTest(.{
+            .root_source_file = b.path("src/IMU.zig"),
+            .target = pi_target,
+            .optimize = optimize,
+        });
+        imu_tests.root_module.addOptions("build_options", build_options);
+        const run_imu_tests = b.addRunArtifact(imu_tests);
+
+        // Unit tests for MotorController
+        const motor_tests = b.addTest(.{
+            .root_source_file = b.path("src/MotorController.zig"),
+            .target = pi_target,
+            .optimize = optimize,
+        });
+        motor_tests.root_module.addOptions("build_options", build_options);
+        const run_motor_tests = b.addRunArtifact(motor_tests);
+
+        // Create test steps for each executable
+        const test_imu_step = b.step("test-imu", "Run IMU unit tests");
+        test_imu_step.dependOn(&run_imu_tests.step);
+
+        const test_motor_step = b.step("test-motor", "Run MotorController unit tests");
+        test_motor_step.dependOn(&run_motor_tests.step);
+
+        // Combined test step for all Pi applications
+        test_pi_step = b.step("test-pi", "Run all Raspberry Pi unit tests");
+        test_pi_step.?.dependOn(&run_imu_tests.step);
+        test_pi_step.?.dependOn(&run_motor_tests.step);
     }
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
-
-    // Add the test executable
-    const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"), // Adjust if your tests are in a different file
-        .target = target,
-        .optimize = optimize,
-    });
-
-    // Configure libraries for the test executable
-    configureLibs(exe_unit_tests, b, target, use_cuda, ffmpeg_path);
-
-    // Run command for the test executable
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_exe_unit_tests.step);
 }

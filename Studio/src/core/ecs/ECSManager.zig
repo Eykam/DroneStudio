@@ -1,0 +1,485 @@
+// src/ecs/ECSManager.zig
+const std = @import("std");
+const Core = @import("Core.zig");
+const SparseSet = @import("SparseSet.zig").SparseSet;
+const ResourceManager = @import("ResourceManager.zig");
+const Math = @import("../Math.zig");
+const GLTFPaser = @import("../GLTF.zig");
+const meta = std.meta;
+const GLTF = GLTFPaser.GLTF;
+const Quaternion = Math.Quaternion;
+
+const Transform = @import("components/Transform.zig");
+const Renderer = @import("components/Renderer.zig");
+const Physics = @import("components/Physics.zig");
+const Controller = @import("components/Controller.zig");
+const Camera = @import("components/Camera.zig");
+const Globals = @import("components/Globals.zig");
+const Viewports = @import("components/Viewports.zig");
+const Recorder = @import("components/Recorder.zig");
+const Collisions = @import("components/Collisions.zig");
+const SharedMem = @import("components/SharedMem.zig");
+const IMUSensor = @import("components/IMUSensor.zig");
+const FlightController = @import("components/FlightController.zig");
+const PathPlayback = @import("components/PathPlayback.zig");
+const SLAM = @import("components/SLAMSystem.zig");
+
+// Components
+const ControllerComponent = Controller.ControllerComponent;
+const TransformComponent = Transform.TransformComponent;
+const PhysicsComponent = Physics.PhysicsComponent;
+const Renderable = Renderer.Renderable;
+const CameraComponent = Camera.CameraComponent;
+const GlobalsComponent = Globals.GlobalsComponent;
+const ViewportComponent = Viewports.ViewportComponent;
+const ColliderComponent = Collisions.ColliderComponent;
+const RigidBodyComponent = Collisions.RigidBodyComponent;
+const IMUSensorComponent = IMUSensor.IMUSensorComponent;
+const FlightControllerComponent = FlightController.FlightControllerComponent;
+const PathPlaybackComponent = PathPlayback.PathPlaybackComponent;
+const SLAMComponent = SLAM.SLAMComponent;
+
+// Systems
+const ControllerSytem = Controller.ControlSystem;
+const TransformSystem = Transform.TransformSystem;
+const RenderSystem = Renderer.RenderSystem;
+const CameraSystem = Camera.CameraSystem;
+const GlobalsSystem = Globals.GlobalsSystem;
+const ViewportSystem = Viewports.ViewportSystem;
+const RecorderSystem = Recorder.RecorderSystem;
+const CollisionSystem = Collisions.CollisionSystem;
+const SharedMemSystem = SharedMem.SharedMemSystem;
+const IMUSystem = IMUSensor.IMUSystem;
+const FlightControllerSystem = FlightController.FlightControllerSystem;
+const PathPlaybackSystem = PathPlayback.PathPlaybackSystem;
+const SLAMSystem = SLAM.SLAMSystem;
+const PathSystem = @import("components/PathSystem.zig");
+
+const Self = @This();
+
+allocator: std.mem.Allocator,
+world: *Core.World,
+
+// Component storage
+globals: *GlobalsComponent,
+transform_components: SparseSet(TransformComponent),
+camera_components: SparseSet(CameraComponent),
+renderer_components: SparseSet(Renderable),
+physics_components: SparseSet(PhysicsComponent),
+controller_components: SparseSet(ControllerComponent),
+viewport_components: SparseSet(ViewportComponent),
+collider_components: SparseSet(ColliderComponent),
+rigid_body_components: SparseSet(RigidBodyComponent),
+imu_sensor_components: SparseSet(IMUSensorComponent),
+flight_controller_components: SparseSet(FlightControllerComponent),
+path_playback_components: SparseSet(PathPlaybackComponent),
+slam_components: SparseSet(SLAMComponent),
+
+// Systems
+globals_system: *GlobalsSystem,
+transform_system: TransformSystem,
+camera_system: CameraSystem,
+render_system: RenderSystem,
+control_system: ControllerSytem,
+viewport_system: ViewportSystem,
+recorder_system: *RecorderSystem,
+collision_system: CollisionSystem,
+shared_mem_system: SharedMemSystem,
+imu_system: IMUSystem,
+flight_controller_system: FlightControllerSystem,
+path_playback_system: PathPlaybackSystem,
+slam_system: SLAMSystem,
+path_system: ?*PathSystem,
+
+pub fn init(allocator: std.mem.Allocator) !*Self {
+    const global_system = try GlobalsSystem.init(allocator, .{});
+
+    const resource_manager = try ResourceManager.init(allocator);
+    const world = try Core.World.init(allocator, resource_manager);
+
+    var manager = try allocator.create(Self);
+
+    manager.* = .{
+        .allocator = allocator,
+        .world = world,
+        .globals = &global_system.globals,
+        .transform_components = SparseSet(TransformComponent).init(allocator),
+        .viewport_components = SparseSet(ViewportComponent).init(allocator),
+        .camera_components = SparseSet(CameraComponent).init(allocator),
+        .renderer_components = SparseSet(Renderable).init(allocator),
+        .physics_components = SparseSet(PhysicsComponent).init(allocator),
+        .controller_components = SparseSet(ControllerComponent).init(allocator),
+        .collider_components = SparseSet(ColliderComponent).init(allocator),
+        .rigid_body_components = SparseSet(RigidBodyComponent).init(allocator),
+        .imu_sensor_components = SparseSet(IMUSensorComponent).init(allocator),
+        .flight_controller_components = SparseSet(FlightControllerComponent).init(allocator),
+        .path_playback_components = SparseSet(PathPlaybackComponent).init(allocator),
+        .slam_components = SparseSet(SLAMComponent).init(allocator),
+
+        // Initialize systems
+        .globals_system = global_system,
+        .recorder_system = try RecorderSystem.init(allocator),
+        .transform_system = TransformSystem.init(
+            world,
+            &manager.transform_components,
+        ),
+        .viewport_system = ViewportSystem.init(
+            allocator,
+            manager.globals,
+            &manager.viewport_components,
+        ),
+        .camera_system = CameraSystem.init(
+            world,
+            &manager.camera_components,
+            &manager.transform_components,
+        ),
+        .control_system = try ControllerSytem.init(
+            world,
+            manager.globals,
+            &manager.controller_components,
+            manager,
+        ),
+        .render_system = try RenderSystem.init(
+            allocator,
+            world,
+            manager.globals,
+            &manager.transform_components,
+            &manager.camera_components,
+            &manager.viewport_components,
+            &manager.renderer_components,
+        ),
+        .collision_system = try CollisionSystem.init(
+            allocator,
+            world,
+            &manager.transform_components,
+            &manager.rigid_body_components,
+            &manager.collider_components,
+            &manager.renderer_components,
+        ),
+        .shared_mem_system = try SharedMemSystem.init(
+            allocator,
+            manager.globals,
+            &manager.viewport_components,
+        ),
+        .imu_system = IMUSystem.init(
+            allocator,
+            &manager.imu_sensor_components,
+        ),
+        .flight_controller_system = FlightControllerSystem.init(
+            allocator,
+            &manager.flight_controller_components,
+        ),
+        .path_playback_system = PathPlaybackSystem.init(
+            &manager.path_playback_components,
+            &manager.transform_components,
+        ),
+        .slam_system = try SLAMSystem.init(
+            allocator,
+            &manager.slam_components,
+            manager.globals,
+            manager,
+        ),
+        .path_system = null,
+    };
+
+    global_system.camera_system = &manager.camera_system;
+    global_system.control_system = &manager.control_system;
+    global_system.viewport_system = &manager.viewport_system;
+    global_system.transform_system = &manager.transform_system;
+    global_system.collision_system = &manager.collision_system;
+
+    // Link IMU system to physics thread for sensor data
+    if (manager.collision_system.physics_thread) |physics_thread| {
+        manager.imu_system.setPhysicsThread(physics_thread);
+        try manager.imu_system.startIMUThread();
+
+        // Link flight controller system to other systems
+        manager.flight_controller_system.setIMUSystem(&manager.imu_system);
+        manager.flight_controller_system.setPhysicsThread(physics_thread);
+        try manager.flight_controller_system.startControlThread();
+
+        // Initialize path system
+        manager.path_system = try PathSystem.init(allocator, manager);
+
+        // Link path system to path playback system
+        manager.path_playback_system.setPathSystem(manager.path_system.?);
+    }
+
+    return manager;
+}
+
+pub fn deinit(self: *Self) void {
+    // Deinit all components
+    var transform_iter = self.transform_components.iterator();
+    while (transform_iter.next()) |tuple| {
+        tuple.component.deinit();
+    }
+    var renderables_iter = self.renderer_components.iterator();
+    while (renderables_iter.next()) |tuple| {
+        tuple.component.deinit(self.allocator);
+    }
+    var viewports_iter = self.viewport_components.iterator();
+    while (viewports_iter.next()) |tuple| {
+        self.allocator.free(tuple.component.vp.name);
+    }
+
+    // Controller components don't need deinit - they use fixed arrays
+
+    // Deinit component storage
+    self.transform_components.deinit();
+    self.viewport_components.deinit();
+    self.camera_components.deinit();
+    self.rigid_body_components.deinit();
+    self.renderer_components.deinit();
+    self.collider_components.deinit();
+    self.physics_components.deinit();
+    self.controller_components.deinit();
+    self.imu_sensor_components.deinit();
+    self.flight_controller_components.deinit();
+    self.path_playback_components.deinit();
+    self.slam_components.deinit();
+
+    // Deinit flight controller, IMU, and SLAM systems to stop their threads
+    self.flight_controller_system.deinit();
+    self.imu_system.deinit();
+    self.slam_system.deinit();
+
+    // Deinit path system
+    if (self.path_system) |path_system| {
+        path_system.deinit();
+    }
+
+    // Deinit collision system first to stop physics thread before cleaning up resources
+    self.collision_system.deinit();
+
+    // Deinit resource manager (while OpenGL context is still alive)
+    self.world.resource_manager.deinit();
+    self.allocator.destroy(self.world.resource_manager);
+
+    // Deinit other systems
+    self.shared_mem_system.deinit();
+    self.render_system.deinit();
+    self.viewport_system.deinit();
+    self.recorder_system.deinit();
+    self.globals_system.deinit(); // This frees itself and destroys OpenGL context
+    self.world.deinit();
+    self.allocator.destroy(self.world);
+
+    // Free self
+    self.allocator.destroy(self);
+}
+
+pub fn update(self: *Self, time: f64) !void {
+    // Check for reset request first
+    if (self.globals.reset_requested) {
+        try self.resetToInitialState();
+        self.globals.reset_requested = false;
+        return;
+    }
+
+    if (self.globals.last_frame_time == 0) {
+        self.globals.last_frame_time = time;
+        self.globals.last_fps_time = time;
+    }
+
+    const dt = time - self.globals.last_frame_time;
+    const dt_fps = time - self.globals.last_fps_time;
+    self.globals.dt = dt;
+    self.globals.last_frame_time = time;
+    self.globals.frame_count += 1;
+
+    if (dt_fps >= 1) {
+        self.globals.last_fps_time = time;
+        self.globals.avg_fps = @as(f32, @floatFromInt(self.globals.frame_count));
+        self.globals.frame_count = 0;
+
+        std.debug.print("Avg FPS: {d:.2}\n", .{self.globals.avg_fps});
+    }
+
+    // Add timing for system updates (only for first 10 frames to avoid spam)
+    // const should_time = self.globals.frame_count <= 10;
+    const should_time = false;
+    const timer = if (should_time) std.time.Timer.start() catch unreachable else undefined;
+
+    if (should_time) std.debug.print("Frame {d} system timings:\n", .{self.globals.frame_count});
+
+    try self.collision_system.update();
+    if (should_time) std.debug.print("  Collision system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.control_system.updateContinuous();
+    if (should_time) std.debug.print("  Flight input system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.path_playback_system.update(dt);
+    if (should_time) std.debug.print("  Path playback system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.transform_system.update();
+    if (should_time) std.debug.print("  Transform system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    try self.viewport_system.update();
+    if (should_time) std.debug.print("  Viewport system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    try self.render_system.update();
+    if (should_time) std.debug.print("  Render system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    try self.recorder_system.update(self);
+    if (should_time) std.debug.print("  Recorder system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.shared_mem_system.update();
+    if (should_time) std.debug.print("  SharedMem system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+
+    self.slam_system.update();
+    if (should_time) std.debug.print("  SLAM system: {d:.2}ms\n", .{@as(f64, @floatFromInt(timer.lap())) / 1e6});
+}
+
+pub fn resetToInitialState(self: *Self) !void {
+    std.debug.print("Resetting ECS to initial state...\n", .{});
+
+    // Reset collision system (existing functionality)
+    self.collision_system.resetAllDynamicBodies();
+
+    // Reset all flight controller components
+    var fc_iter = self.flight_controller_components.iterator();
+    while (fc_iter.next()) |entry| {
+        entry.component.reset();
+    }
+
+    // Reset all IMU sensor components
+    var imu_iter = self.imu_sensor_components.iterator();
+    while (imu_iter.next()) |entry| {
+        entry.component.reset();
+    }
+
+    std.debug.print("Reset complete! (including flight control systems)\n", .{});
+}
+
+// Entity management methods
+pub fn createEntity(self: *Self) !Core.EntityID {
+    return self.world.createEntity();
+}
+
+pub fn destroyEntity(self: *Self, entity_id: Core.EntityID) void {
+    // Remove all components first
+    _ = self.transform_components.remove(entity_id) catch false;
+    _ = self.renderer_components.remove(entity_id) catch false;
+    _ = self.physics_components.remove(entity_id) catch false;
+    _ = self.controller_components.remove(entity_id) catch false;
+
+    // Then remove the entity from the world
+    self.world.destroyEntity(entity_id);
+}
+
+// Component methods
+pub fn addTransform(self: *Self, entity_id: Core.EntityID) !*TransformComponent {
+    const transform = TransformComponent.init(self.allocator);
+    try self.transform_components.add(entity_id, transform);
+    return self.transform_components.get(entity_id).?;
+}
+
+pub fn addRenderable(self: *Self, entity_id: Core.EntityID, mesh_name: []const u8) !*Renderable {
+    const renderer = try Renderable.init(self.allocator, mesh_name);
+    try self.renderer_components.add(entity_id, renderer);
+    return self.renderer_components.get(entity_id).?;
+}
+
+pub fn addPhysicsBody(self: *Self, entity_id: Core.EntityID, body_type: Physics.BodyType) !*PhysicsComponent {
+    const physics = PhysicsComponent.init(body_type);
+    try self.physics_components.add(entity_id, physics);
+    return self.physics_components.get(entity_id).?;
+}
+
+pub fn addController(self: *Self, entity_id: Core.EntityID) !*ControllerComponent {
+    const controller = ControllerComponent.init(self.allocator);
+    try self.controller_components.add(entity_id, controller);
+    return self.controller_components.get(entity_id).?;
+}
+
+// Transform methods
+pub fn setParent(self: *Self, child_id: Core.EntityID, parent_id: Core.EntityID) !void {
+    try self.transform_system.addChild(parent_id, child_id);
+}
+
+pub fn createEntitiesFromModel(self: *Self, model_resource: *GLTFPaser.ModelResource) !struct {
+    root_entity: Core.EntityID,
+    entity_map: std.AutoHashMap(usize, Core.EntityID),
+} {
+    //NOTE: not a fan of this. ResourceManager should probably handle this & why is this a hashmap?
+    var entity_map = std.AutoHashMap(usize, Core.EntityID).init(self.allocator);
+
+    // Create ECS entity for every ModelResource.EntityInfo
+    for (model_resource.entities, 0..) |node, idx| {
+        const e_id = try self.createEntity();
+        try entity_map.put(idx, e_id);
+
+        var transform = try self.addTransform(e_id);
+
+        const trs = node.local_matrix.decomposeTRS();
+        transform.position = trs.translation;
+        transform.rotation = trs.rotation;
+        transform.scale = trs.scale;
+
+        // If there is a mesh_name, add a renderer
+        const mesh_name = node.mesh_name orelse continue;
+        std.debug.print("    ECSManager: Creating renderable with mesh_name '{s}' (len={})\n", .{ mesh_name, mesh_name.len });
+        const renderable = try self.addRenderable(e_id, mesh_name);
+
+        const material_name = node.material_name orelse continue;
+        try renderable.setMaterial(self.allocator, material_name);
+    }
+
+    // Hook up parent-child relationships
+    for (model_resource.entities, 0..) |node, idx| {
+        const child_eid = entity_map.get(idx) orelse continue;
+        const p_idx = node.parent_idx orelse continue;
+        const parent_eid = entity_map.get(p_idx) orelse continue;
+        try self.setParent(child_eid, parent_eid);
+    }
+
+    return .{
+        .root_entity = entity_map.get(0).?,
+        .entity_map = entity_map,
+    };
+}
+
+pub fn findControllerAncestor(self: *Self, start: Core.EntityID) ?Core.EntityID {
+    var current = start;
+    while (true) {
+        if (self.controller_components.has(current))
+            return current;
+
+        const tf_opt = self.transform_components.get(current);
+        if (tf_opt == null or tf_opt.?.parent == null)
+            break;
+
+        current = tf_opt.?.parent.?; // climb one level
+    }
+
+    return null;
+}
+
+pub fn spawn(self: *Self, bundle: anytype) !Core.EntityID {
+    const T = @TypeOf(bundle);
+    comptime switch (@typeInfo(T)) {
+        .@"struct" => {}, // supported
+        else => @compileError("spawn() expects a struct or tuple of components"),
+    };
+
+    const eid = try self.createEntity();
+
+    inline for (meta.fields(T)) |fld| {
+        const field_val = @field(bundle, fld.name);
+        try attachComponent(self, eid, field_val);
+    }
+    return eid;
+}
+
+fn attachComponent(self: *Self, eid: Core.EntityID, comp_any: anytype) !void {
+    // Pointer => use directly
+    if (@typeInfo(@TypeOf(comp_any)) == .pointer) {
+        try @field(@TypeOf(comp_any.*), "attach")(comp_any, self, eid);
+        return;
+    }
+
+    // By value => make a copy on stack then attach
+    var tmp = comp_any;
+    try @field(@TypeOf(tmp), "attach")(&tmp, self, eid);
+}

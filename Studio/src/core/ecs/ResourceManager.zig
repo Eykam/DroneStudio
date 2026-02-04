@@ -1,0 +1,1870 @@
+// src/ecs/ResourceManager.zig
+const std = @import("std");
+const Mesh = @import("../Mesh.zig");
+const Math = @import("../Math.zig");
+const gl = @import("../bindings/gl.zig");
+const ImageLoader = @import("../Image.zig");
+const GLTFParser = @import("../GLTF.zig");
+const OpenGL = @import("graphics/OpenGL.zig");
+const GLTF = GLTFParser.GLTF;
+const glad = gl.glad;
+const Sampler = OpenGL.Sampler;
+const SamplerParams = OpenGL.SamplerParams;
+const MaterialBuffer = OpenGL.MaterialBuffer;
+const MaterialGPU = OpenGL.MaterialGPU;
+const PBRDataGPU = OpenGL.PBRDataGPU;
+const PhongDataGPU = OpenGL.PhongDataGPU;
+
+// Re-export TextureUnit from OpenGL for backwards compatibility
+pub const TextureUnit = OpenGL.TextureUnit;
+
+/// Unified texture storage for all material types.
+/// Uses TextureUnit slots for consistent texture binding.
+pub const MaterialTextures = struct {
+    /// GL texture IDs for each canonical slot. null = not provided.
+    slots: [TextureUnit.SlotCount]?c_uint = .{null} ** TextureUnit.SlotCount,
+
+    pub inline fn get(self: *const MaterialTextures, slot: TextureUnit) ?c_uint {
+        return self.slots[slot.idx()];
+    }
+
+    pub inline fn set(self: *MaterialTextures, slot: TextureUnit, tex: ?c_uint) void {
+        self.slots[slot.idx()] = tex;
+    }
+
+    pub inline fn clear(self: *MaterialTextures, slot: TextureUnit) void {
+        self.slots[slot.idx()] = null;
+    }
+
+    /// Build a presence bitmask (useful for GPU header / quick checks)
+    pub inline fn presentMask(self: *const MaterialTextures) u32 {
+        var mask: u32 = 0;
+        inline for (0..TextureUnit.SlotCount) |i| {
+            if (self.slots[i] != null) mask |= (@as(u32, 1) << @intCast(i));
+        }
+        return mask;
+    }
+
+    pub fn format(
+        self: MaterialTextures,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print("MaterialTextures (", .{});
+        inline for (0..TextureUnit.SlotCount) |i| {
+            if (self.slots[i]) |tex_id| {
+                try writer.print(" [{d}]={d}", .{ i, tex_id });
+            }
+        }
+        try writer.print(" )", .{});
+    }
+};
+
+// ============================================================================
+// Material Data Types
+// ============================================================================
+
+pub const PhongData = struct {
+    ambientColor: [3]f32 = .{ 0.1, 0.1, 0.1 },
+    diffuseColor: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    specularColor: [3]f32 = .{ 1.0, 1.0, 1.0 },
+    shininess: f32 = 32.0,
+};
+
+/// For a PBR material, store typical metallic/roughness, normal, etc.
+pub const PBRData = struct {
+    baseColorFactor: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    metallicFactor: f32 = 1.0,
+    roughnessFactor: f32 = 1.0,
+
+    // Specular-glossiness extension
+    diffuseFactor: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    specularFactor: [3]f32 = .{ 1.0, 1.0, 1.0 },
+    glossinessFactor: f32 = 1.0,
+
+    // Emissive parameters
+    emissiveFactor: [3]f32 = .{ 0.0, 0.0, 0.0 },
+    emissiveStrength: f32 = 1.0,
+
+    // KHR_materials_specular extension
+    specularColor: [3]f32 = .{ 1.0, 1.0, 1.0 },
+    specularStrength: f32 = 0.0,
+
+    // Other material properties
+    doubleSided: bool = false,
+    alphaMode: Mesh.AlphaMode = .OPAQUE,
+    alphaCutoff: f32 = 0.5,
+
+    pub fn format(
+        self: @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try writer.print(
+            "\nPBR Data (\n\tFactors: (\n\t\tbaseColorFactor: {d:.4},\n\t\tmetallicFactor: {d:.4},\n\t\troughnessFactor: {d:.4}\n\t),\n",
+            .{ self.baseColorFactor, self.metallicFactor, self.roughnessFactor },
+        );
+        try writer.print(
+            "\tSpecular-Glossiness: (\n\t\tdiffuseFactor: {d:.4},\n\t\tspecularFactor: {d:.4},\n\t\tglossinessFactor: {d:.4}\n\t),\n",
+            .{ self.diffuseFactor, self.specularFactor, self.glossinessFactor },
+        );
+        try writer.print(
+            "\tSpecular: (\n\t\tspecularColor: {d:.4},\n\t\tspecularStrength: {d:.4}\n\t)\n",
+            .{ self.specularColor, self.specularStrength },
+        );
+        try writer.print(
+            "\tEmission: (\n\t\temissiveFactor: {d:.4},\n\t\temissiveStrength: {d:.4}\n\t),\n",
+            .{ self.emissiveFactor, self.emissiveStrength },
+        );
+        try writer.print(
+            "\tOther Parameters: (\n\t\tdoubleSided: {any},\n\t\talphaMode: {s},\n\t\talphaCutoff: {d:.4}\n\t)\n",
+            .{ self.doubleSided, @tagName(self.alphaMode), self.alphaCutoff },
+        );
+    }
+};
+
+pub const MaterialType = enum {
+    Phong,
+    PBR,
+};
+
+pub fn Material(T: MaterialType) type {
+    return struct {
+        matType: MaterialType = T,
+
+        data: switch (T) {
+            .Phong => PhongData,
+            .PBR => PBRData,
+        } = .{},
+
+        textures: MaterialTextures = .{},
+    };
+}
+
+pub const MaterialVariant = union(MaterialType) {
+    Phong: Material(.Phong),
+    PBR: Material(.PBR),
+
+    pub fn getType(self: @This()) MaterialType {
+        return switch (self) {
+            .Phong => .Phong,
+            .PBR => .PBR,
+        };
+    }
+};
+
+pub const UniformValue = union(enum) {
+    Int: i32,
+    Float: f32,
+    Vec2: [2]f32,
+    Vec3: [3]f32,
+    Vec4: [4]f32,
+    Mat4: [16]f32,
+
+    pub fn setToShader(self: UniformValue, location: c_int) void {
+        switch (self) {
+            .Int => |v| glad.glUniform1i(location, v),
+            .Float => |v| glad.glUniform1f(location, v),
+            .Vec2 => |v| glad.glUniform2fv(location, 1, &v),
+            .Vec3 => |v| glad.glUniform3fv(location, 1, &v),
+            .Vec4 => |v| glad.glUniform4fv(location, 1, &v),
+            .Mat4 => |v| glad.glUniformMatrix4fv(location, 1, glad.GL_FALSE, &v),
+        }
+    }
+};
+
+/// Instance buffer data for instanced rendering (points, lines, landmarks, etc.)
+pub const InstanceData = struct {
+    position_buffer: c_uint = 0, // vec4 positions (location 4), w can be point size
+    end_buffer: c_uint = 0, // vec4 end positions for lines (location 5)
+    color_buffer: c_uint = 0, // vec4 colors (location 6)
+    max_instances: u32,
+    count: u32 = 0,
+
+    pub fn init(max_instances: u32) @This() {
+        var self = @This(){ .max_instances = max_instances };
+
+        // Position buffer (location 4)
+        glad.glGenBuffers(1, &self.position_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.position_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_instances * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        // Color buffer (location 6)
+        glad.glGenBuffers(1, &self.color_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.color_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_instances * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+        return self;
+    }
+
+    /// Initialize with line support (adds end position buffer)
+    pub fn initWithLines(max_instances: u32) @This() {
+        var self = @This().init(max_instances);
+
+        glad.glGenBuffers(1, &self.end_buffer);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.end_buffer);
+        glad.glBufferData(
+            glad.GL_ARRAY_BUFFER,
+            @intCast(max_instances * @sizeOf([4]f32)),
+            null,
+            glad.GL_DYNAMIC_DRAW,
+        );
+
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+        return self;
+    }
+
+    /// Bind instance attributes to VAO (call with VAO already bound)
+    pub fn bindToVAO(self: *const @This()) void {
+        // Position (location 4)
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.position_buffer);
+        glad.glEnableVertexAttribArray(4);
+        glad.glVertexAttribPointer(4, 4, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf([4]f32), null);
+        glad.glVertexAttribDivisor(4, 1);
+
+        // End position for lines (location 5)
+        if (self.end_buffer != 0) {
+            glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.end_buffer);
+            glad.glEnableVertexAttribArray(5);
+            glad.glVertexAttribPointer(5, 4, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf([4]f32), null);
+            glad.glVertexAttribDivisor(5, 1);
+        }
+
+        // Color (location 6)
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.color_buffer);
+        glad.glEnableVertexAttribArray(6);
+        glad.glVertexAttribPointer(6, 4, glad.GL_FLOAT, glad.GL_FALSE, @sizeOf([4]f32), null);
+        glad.glVertexAttribDivisor(6, 1);
+
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
+    pub fn updatePositions(self: *@This(), positions: []const [4]f32) void {
+        const count = @min(positions.len, self.max_instances);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.position_buffer);
+        glad.glBufferSubData(glad.GL_ARRAY_BUFFER, 0, @intCast(count * @sizeOf([4]f32)), @ptrCast(positions.ptr));
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+        self.count = @intCast(count);
+    }
+
+    pub fn updateColors(self: *@This(), colors: []const [4]f32) void {
+        const count = @min(colors.len, self.max_instances);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.color_buffer);
+        glad.glBufferSubData(glad.GL_ARRAY_BUFFER, 0, @intCast(count * @sizeOf([4]f32)), @ptrCast(colors.ptr));
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
+    pub fn updateEndPositions(self: *@This(), positions: []const [4]f32) void {
+        if (self.end_buffer == 0) return;
+        const count = @min(positions.len, self.max_instances);
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, self.end_buffer);
+        glad.glBufferSubData(glad.GL_ARRAY_BUFFER, 0, @intCast(count * @sizeOf([4]f32)), @ptrCast(positions.ptr));
+        glad.glBindBuffer(glad.GL_ARRAY_BUFFER, 0);
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.position_buffer != 0) glad.glDeleteBuffers(1, &self.position_buffer);
+        if (self.end_buffer != 0) glad.glDeleteBuffers(1, &self.end_buffer);
+        if (self.color_buffer != 0) glad.glDeleteBuffers(1, &self.color_buffer);
+        self.* = .{ .max_instances = 0 };
+    }
+};
+
+pub const MeshResource = struct {
+    mesh: *Mesh,
+    ref_count: usize = 0, // Number of entities/loads using this mesh
+    entities: std.ArrayList(u64), // Entity IDs using this mesh
+    instance_data: ?InstanceData = null,
+
+    pub fn init(allocator: std.mem.Allocator, mesh: *Mesh) MeshResource {
+        return .{
+            .mesh = mesh,
+            .ref_count = 0,
+            .entities = std.ArrayList(u64).init(allocator),
+        };
+    }
+
+    /// Initialize instance buffers for instanced point rendering
+    pub fn initInstancedPoints(self: *MeshResource, max_instances: u32) void {
+        self.initInstanceBuffersInternal(max_instances, false);
+        self.mesh._draw = Mesh.instanced_point_draw;
+    }
+
+    /// Initialize instance buffers for instanced line rendering
+    pub fn initInstancedLines(self: *MeshResource, max_instances: u32) void {
+        self.initInstanceBuffersInternal(max_instances, true);
+        self.mesh._draw = Mesh.instanced_line_draw;
+    }
+
+    fn initInstanceBuffersInternal(self: *MeshResource, max_instances: u32, with_lines: bool) void {
+        if (self.instance_data != null) {
+            self.instance_data.?.deinit();
+        }
+
+        self.instance_data = if (with_lines)
+            InstanceData.initWithLines(max_instances)
+        else
+            InstanceData.init(max_instances);
+
+        // Bind instance attributes to mesh's VAO
+        glad.glBindVertexArray(self.mesh.meta.VAO);
+        self.instance_data.?.bindToVAO();
+        glad.glBindVertexArray(0);
+    }
+
+    /// Update instance positions and sync count to mesh
+    pub fn updateInstancePositions(self: *MeshResource, positions: []const [4]f32) void {
+        if (self.instance_data) |*inst| {
+            inst.updatePositions(positions);
+            self.mesh.instance_count = inst.count;
+        }
+    }
+
+    /// Update instance colors
+    pub fn updateInstanceColors(self: *MeshResource, colors: []const [4]f32) void {
+        if (self.instance_data) |*inst| {
+            inst.updateColors(colors);
+        }
+    }
+
+    /// Update line end positions
+    pub fn updateInstanceEndPositions(self: *MeshResource, positions: []const [4]f32) void {
+        if (self.instance_data) |*inst| {
+            inst.updateEndPositions(positions);
+        }
+    }
+
+    pub fn addEntity(self: *MeshResource, entity_id: u64) !void {
+        try self.entities.append(entity_id);
+    }
+
+    pub fn removeEntity(self: *MeshResource, entity_id: u64) void {
+        for (self.entities.items, 0..) |eid, i| {
+            if (eid == entity_id) {
+                _ = self.entities.swapRemove(i);
+                return;
+            }
+        }
+    }
+
+    pub fn deinit(self: *MeshResource) void {
+        if (self.instance_data) |*inst| {
+            inst.deinit();
+        }
+        self.entities.deinit();
+    }
+};
+
+pub const TextureResource = struct {
+    texture_id: c_uint,
+    bindless_handle: u64 = 0,
+    is_resident: bool = false,
+    ref_count: usize,
+    width: u32 = 0,
+    height: u32 = 0,
+    channels: u32 = 0,
+
+    pub fn init(texture_id: c_uint, width: u32, height: u32, channels: u32) TextureResource {
+        return .{
+            .texture_id = texture_id,
+            .ref_count = 1,
+            .width = width,
+            .height = height,
+            .channels = channels,
+        };
+    }
+
+    /// Create a TextureResource from an Image, uploading to GPU.
+    /// Sampler params are applied before mipmap generation so they're baked into bindless handles.
+    pub fn initFromImage(image: *ImageLoader.Image, sampler_params: ?SamplerParams) TextureResource {
+        var texture_id: c_uint = 0;
+        glad.glGenTextures(1, &texture_id);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, texture_id);
+
+        // Determine format based on channels
+        const channels = image.getChannels();
+        const internal_format: c_int = if (channels == 4) glad.GL_RGBA8 else glad.GL_RGB8;
+        const gl_format: c_uint = if (channels == 4) glad.GL_RGBA else glad.GL_RGB;
+
+        // Upload texture data
+        glad.glTexImage2D(
+            glad.GL_TEXTURE_2D,
+            0,
+            internal_format,
+            @intCast(image.width),
+            @intCast(image.height),
+            0,
+            gl_format,
+            glad.GL_UNSIGNED_BYTE,
+            image.data.ptr,
+        );
+
+        // Apply sampler params (use defaults if not specified)
+        const params = sampler_params orelse SamplerParams.default;
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MAG_FILTER, params.mag_filter);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_MIN_FILTER, params.min_filter);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_S, params.wrap_s);
+        glad.glTexParameteri(glad.GL_TEXTURE_2D, glad.GL_TEXTURE_WRAP_T, params.wrap_t);
+
+        glad.glGenerateMipmap(glad.GL_TEXTURE_2D);
+        glad.glBindTexture(glad.GL_TEXTURE_2D, 0);
+
+        return .{
+            .texture_id = texture_id,
+            .ref_count = 1,
+            .width = image.width,
+            .height = image.height,
+            .channels = channels,
+        };
+    }
+
+    /// Make this texture bindless (requires GL_ARB_bindless_texture)
+    pub fn makeBindless(self: *TextureResource) void {
+        if (self.bindless_handle != 0) return; // Already bindless
+
+        self.bindless_handle = glad.glGetTextureHandleARB(self.texture_id);
+        if (self.bindless_handle != 0) {
+            glad.glMakeTextureHandleResidentARB(self.bindless_handle);
+            self.is_resident = true;
+        }
+    }
+
+    /// Make this texture non-resident (call before deleting)
+    pub fn makeNonResident(self: *TextureResource) void {
+        if (self.is_resident and self.bindless_handle != 0) {
+            glad.glMakeTextureHandleNonResidentARB(self.bindless_handle);
+            self.is_resident = false;
+        }
+    }
+
+    pub fn deinit(self: *TextureResource) void {
+        self.makeNonResident();
+        if (self.texture_id != 0) {
+            glad.glDeleteTextures(1, &self.texture_id);
+        }
+    }
+};
+
+pub const ShaderResource = struct {
+    program_id: c_uint,
+    ref_count: usize,
+    uniforms: std.StringHashMap(c_int),
+    materials: std.ArrayList(*MaterialResource),
+
+    pub fn init(allocator: std.mem.Allocator, program_id: c_uint) !ShaderResource {
+        return .{
+            .program_id = program_id,
+            .ref_count = 1,
+            .uniforms = std.StringHashMap(c_int).init(allocator),
+            .materials = std.ArrayList(*MaterialResource).init(allocator),
+        };
+    }
+
+    pub fn addMaterial(self: *ShaderResource, material: *MaterialResource) !void {
+        try self.materials.append(material);
+    }
+
+    pub fn removeMaterial(self: *ShaderResource, material: *MaterialResource) void {
+        for (self.materials.items, 0..) |mat, i| {
+            if (mat == material) {
+                _ = self.materials.swapRemove(i);
+                return;
+            }
+        }
+    }
+
+    pub fn getorPutUniformLocation(self: *ShaderResource, name: []const u8) c_int {
+        if (self.uniforms.get(name)) |location| {
+            return location;
+        }
+
+        const location = glad.glGetUniformLocation(self.program_id, @ptrCast(name.ptr));
+        if (location != -1) {
+            self.uniforms.put(name, location) catch {};
+        }
+
+        return location;
+    }
+
+    /// Cache uniform locations for SSBO-based rendering
+    pub fn cacheCommonUniforms(self: *ShaderResource, shader_type: MaterialType) void {
+        _ = shader_type;
+
+        // Transform uniforms
+        _ = self.getorPutUniformLocation("uModel");
+        _ = self.getorPutUniformLocation("uView");
+        _ = self.getorPutUniformLocation("uProjection");
+
+        // Camera/lighting
+        _ = self.getorPutUniformLocation("viewPos");
+
+        // SSBO material index
+        _ = self.getorPutUniformLocation("uMaterialIndex");
+
+        // Instancing and vertex color flags (for standard shader)
+        _ = self.getorPutUniformLocation("uInstancedKeypoints");
+        _ = self.getorPutUniformLocation("uInstancedLines");
+        _ = self.getorPutUniformLocation("uUseVertexColor");
+    }
+
+    pub fn deinit(self: *ShaderResource) void {
+        self.uniforms.deinit();
+        self.materials.deinit();
+
+        if (self.ref_count == 0 and self.program_id != 0) {
+            glad.glDeleteProgram(self.program_id);
+            self.program_id = 0;
+        }
+    }
+};
+
+pub const MaterialResource = struct {
+    material: MaterialVariant,
+    ref_count: usize,
+    texture_refs: std.StringArrayHashMap([:0]const u8),
+    shader_ref: ?[:0]const u8 = null,
+    uniforms: std.StringHashMap(UniformValue),
+    meshes: std.ArrayList(*MeshResource),
+    /// Index into MaterialBuffer SSBO (null if not uploaded yet)
+    gpu_index: ?u32 = null,
+
+    pub fn init(allocator: std.mem.Allocator, material: MaterialVariant) !MaterialResource {
+        var resource = MaterialResource{
+            .material = material,
+            .ref_count = 1,
+            .texture_refs = std.StringArrayHashMap([:0]const u8).init(allocator),
+            .uniforms = std.StringHashMap(UniformValue).init(allocator),
+            .meshes = std.ArrayList(*MeshResource).init(allocator),
+        };
+
+        try resource.initDefaultUniforms(allocator);
+        return resource;
+    }
+
+    pub fn addMesh(self: *MaterialResource, mesh: *MeshResource) !void {
+        try self.meshes.append(mesh);
+    }
+
+    pub fn removeMesh(self: *MaterialResource, mesh: *MeshResource) void {
+        for (self.meshes.items, 0..) |m, i| {
+            if (m == mesh) {
+                _ = self.meshes.swapRemove(i);
+                return;
+            }
+        }
+    }
+
+    // TODO: Why is this needed vs the uniforms on the shader
+    pub fn initDefaultUniforms(self: *MaterialResource, allocator: std.mem.Allocator) !void {
+        switch (self.material) {
+            .Phong => |phong| {
+                try self.setUniform(allocator, "ambientColor", .{ .Vec3 = phong.data.ambientColor });
+                try self.setUniform(allocator, "diffuseColor", .{ .Vec4 = phong.data.diffuseColor });
+                try self.setUniform(allocator, "specularColor", .{ .Vec3 = phong.data.specularColor });
+                try self.setUniform(allocator, "shininess", .{ .Float = phong.data.shininess });
+                try self.setUniform(allocator, "hasDiffuseTexture", .{ .Int = @intFromBool(phong.textures.get(.BaseColor) != null) });
+                try self.setUniform(allocator, "hasSpecularTexture", .{ .Int = @intFromBool(phong.textures.get(.Specular) != null) });
+                try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(phong.textures.get(.NormalMap) != null) });
+            },
+            .PBR => |pbr| {
+                // std.debug.print("{any}", .{pbr.data});
+                try self.setUniform(allocator, "baseColorFactor", .{ .Vec4 = pbr.data.baseColorFactor });
+                try self.setUniform(allocator, "metallicFactor", .{ .Float = pbr.data.metallicFactor });
+                try self.setUniform(allocator, "roughnessFactor", .{ .Float = pbr.data.roughnessFactor });
+                try self.setUniform(allocator, "emissiveFactor", .{ .Vec3 = pbr.data.emissiveFactor });
+                try self.setUniform(allocator, "emissiveStrength", .{ .Float = pbr.data.emissiveStrength });
+                try self.setUniform(allocator, "alphaCutoff", .{ .Float = pbr.data.alphaCutoff });
+                try self.setUniform(allocator, "doubleSided", .{ .Int = @intFromBool(pbr.data.doubleSided) });
+
+                // Texture flags
+                // std.debug.print("{any}", .{pbr.textures});
+                try self.setUniform(allocator, "hasBaseColorTexture", .{ .Int = @intFromBool(pbr.textures.get(.BaseColor) != null) });
+                try self.setUniform(allocator, "hasNormalTexture", .{ .Int = @intFromBool(pbr.textures.get(.NormalMap) != null) });
+                try self.setUniform(allocator, "hasMetallicRoughnessTexture", .{ .Int = @intFromBool(pbr.textures.get(.MetallicRoughness) != null) });
+                try self.setUniform(allocator, "hasOcclusionTexture", .{ .Int = @intFromBool(pbr.textures.get(.Occlusion) != null) });
+                try self.setUniform(allocator, "hasEmissiveTexture", .{ .Int = @intFromBool(pbr.textures.get(.Emissive) != null) });
+            },
+        }
+    }
+
+    pub fn setShaderRef(self: *MaterialResource, allocator: std.mem.Allocator, shader_name: []const u8) !void {
+        if (self.shader_ref) |old_ref| {
+            allocator.free(old_ref);
+        }
+        self.shader_ref = try allocator.dupeZ(u8, shader_name);
+    }
+
+    pub fn setUniform(self: *MaterialResource, allocator: std.mem.Allocator, name: []const u8, value: UniformValue) !void {
+        // If the uniform already exists, free the old name
+        if (self.uniforms.getKey(name)) |old_name| {
+            if (self.uniforms.remove(name)) {
+                return error.FailedToRemoveUniform;
+            }
+            allocator.free(old_name);
+        }
+
+        try self.uniforms.put(name, value);
+    }
+
+    // Update deinit to free uniform names
+    pub fn deinit(self: *MaterialResource, allocator: std.mem.Allocator) void {
+        var it = self.texture_refs.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.value_ptr.*);
+        }
+        self.texture_refs.deinit();
+        self.uniforms.deinit();
+        self.meshes.deinit();
+
+        if (self.shader_ref) |shader_name| {
+            allocator.free(shader_name);
+            self.shader_ref = null;
+        }
+    }
+};
+
+const Self = @This();
+
+allocator: std.mem.Allocator,
+meshes: std.StringHashMap(MeshResource),
+textures: std.StringHashMap(TextureResource),
+shaders: std.StringHashMap(ShaderResource),
+materials: std.StringHashMap(MaterialResource),
+material_buffer: MaterialBuffer,
+
+pub fn init(allocator: std.mem.Allocator) !*Self {
+    const manager = try allocator.create(Self);
+    manager.* = .{
+        .allocator = allocator,
+        .meshes = std.StringHashMap(MeshResource).init(allocator),
+        .textures = std.StringHashMap(TextureResource).init(allocator),
+        .shaders = std.StringHashMap(ShaderResource).init(allocator),
+        .materials = std.StringHashMap(MaterialResource).init(allocator),
+        .material_buffer = try MaterialBuffer.init(allocator),
+    };
+
+    try manager.initDefaultShaders(
+        @embedFile("../shaders/standard_vertex.glsl"),
+        @embedFile("../shaders/standard_fragment.glsl"),
+        @embedFile("../shaders/pbr_vertex.glsl"),
+        @embedFile("../shaders/pbr_fragment.glsl"),
+    );
+    return manager;
+}
+
+pub fn deinit(self: *Self) void {
+    var meshes_iter = self.meshes.iterator();
+    while (meshes_iter.next()) |entry| {
+        self.allocator.free(entry.key_ptr.*);
+        entry.value_ptr.deinit(); // Deinit the MeshResource
+        entry.value_ptr.mesh.deinit(); // Deinit the actual Mesh
+        self.allocator.destroy(entry.value_ptr.mesh);
+    }
+    self.meshes.deinit();
+
+    var textures_iter = self.textures.iterator();
+    while (textures_iter.next()) |entry| {
+        self.allocator.free(entry.key_ptr.*);
+        if (entry.value_ptr.texture_id != 0) {
+            glad.glDeleteTextures(1, &entry.value_ptr.texture_id);
+        }
+    }
+    self.textures.deinit();
+
+    var shaders_iter = self.shaders.iterator();
+    while (shaders_iter.next()) |entry| {
+        self.allocator.free(entry.key_ptr.*);
+        entry.value_ptr.deinit();
+    }
+    self.shaders.deinit();
+
+    var materials_iter = self.materials.iterator();
+    while (materials_iter.next()) |entry| {
+        self.allocator.free(entry.key_ptr.*);
+        entry.value_ptr.deinit(self.allocator);
+    }
+    self.materials.deinit();
+
+    self.material_buffer.deinit();
+}
+
+pub fn loadMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices: ?[]u32, draw_fn: ?Mesh.draw) !*Mesh {
+    // Check if mesh already exists
+    if (self.meshes.getPtr(name)) |resource| {
+        resource.ref_count += 1;
+        return resource.mesh;
+    }
+
+    // Create new mesh
+    const mesh = try Mesh.init(self.allocator, vertices, indices, draw_fn);
+    const mesh_name = try self.allocator.dupe(u8, name);
+    var mesh_resource = MeshResource.init(self.allocator, mesh);
+    mesh_resource.ref_count = 1;
+    try self.meshes.put(mesh_name, mesh_resource);
+    return mesh;
+}
+
+pub fn unloadMesh(self: *Self, name: []const u8) void {
+    if (self.meshes.getPtr(name)) |resource_ptr| {
+        resource_ptr.ref_count -= 1;
+        if (resource_ptr.ref_count == 0) {
+            if (self.meshes.remove(name)) |kv| {
+                self.allocator.free(kv.key);
+                kv.value.deinit(); // Deinit the MeshResource
+                kv.value.mesh.deinit(); // Deinit the actual Mesh
+                self.allocator.destroy(kv.value.mesh);
+            }
+        }
+    }
+}
+
+/// Update an existing mesh with new vertices, or create it if it doesn't exist
+pub fn updateMesh(self: *Self, name: []const u8, vertices: []Mesh.Vertex, indices: ?[]u32, draw_fn: ?Mesh.draw) !void {
+    // Check if mesh already exists
+    if (self.meshes.getPtr(name)) |resource| {
+        try resource.mesh.updateVertices(vertices);
+        // self.allocator.free(vertices);
+    } else {
+        _ = self.loadMesh(name, vertices, indices, draw_fn) catch |err| {
+            std.debug.print("Failed to Update Mesh: {s} => {any}", .{ name, err });
+        };
+    }
+}
+
+pub fn loadTexture(self: *Self, name: []const u8, texture_id: c_uint, width: u32, height: u32, channels: u32) !void {
+    // Check if texture already exists
+    if (self.textures.getPtr(name)) |resource| {
+        resource.ref_count += 1;
+        return;
+    }
+
+    // Create new texture resource
+    const texture_name = try self.allocator.dupe(u8, name);
+    try self.textures.put(texture_name, TextureResource.init(texture_id, width, height, channels));
+
+    // Make bindless (caller is responsible for setting texture params before this call)
+    if (self.textures.getPtr(texture_name)) |resource| {
+        resource.makeBindless();
+    }
+}
+
+/// Load a texture directly from an Image, creating the GL texture and making it bindless
+pub fn loadTextureFromImage(self: *Self, name: []const u8, image: *ImageLoader.Image, sampler_params: ?SamplerParams) !void {
+    // Check if texture already exists
+    if (self.textures.getPtr(name)) |resource| {
+        resource.ref_count += 1;
+        return;
+    }
+
+    // Create texture resource from image (uploads to GPU with sampler params baked in)
+    const tex_resource = TextureResource.initFromImage(image, sampler_params);
+
+    // Store with duplicated name
+    const texture_name = try self.allocator.dupe(u8, name);
+    try self.textures.put(texture_name, tex_resource);
+
+    // Make bindless (sampler params already applied, so they're baked into the handle)
+    if (self.textures.getPtr(texture_name)) |resource| {
+        resource.makeBindless();
+    }
+}
+
+pub fn unloadTexture(self: *Self, name: []const u8) void {
+    if (self.textures.getPtr(name)) |resource_ptr| {
+        resource_ptr.ref_count -= 1;
+        if (resource_ptr.ref_count == 0) {
+            if (self.textures.remove(name)) |kv| {
+                self.allocator.free(kv.key);
+                if (kv.value.texture_id != 0) {
+                    glad.glDeleteTextures(1, &kv.value.texture_id);
+                }
+            }
+        }
+    }
+}
+
+pub fn initDefaultShaders(self: *Self, vertex_src_standard: []const u8, fragment_src_standard: []const u8, vertex_src_pbr: []const u8, fragment_src_pbr: []const u8) !void {
+    // Add standard shader if it doesn't exist
+    if (!self.shaders.contains("standard_shader")) {
+        try self.loadShader("standard_shader", vertex_src_standard, fragment_src_standard, .Phong);
+    }
+
+    // Add PBR shader if it doesn't exist
+    if (!self.shaders.contains("pbr_shader")) {
+        try self.loadShader("pbr_shader", vertex_src_pbr, fragment_src_pbr, .PBR);
+    }
+}
+
+pub fn loadShader(self: *Self, name: []const u8, vertex_src: []const u8, fragment_src: []const u8, shader_type: MaterialType) !void {
+    // Check if shader already exists
+    if (self.shaders.getPtr(name)) |resource| {
+        resource.ref_count = 1;
+        return;
+    }
+
+    // Create new shader program
+    const vertex_shader = glad.glCreateShader(glad.GL_VERTEX_SHADER);
+    defer glad.glDeleteShader(vertex_shader);
+
+    const fragment_shader = glad.glCreateShader(glad.GL_FRAGMENT_SHADER);
+    defer glad.glDeleteShader(fragment_shader);
+
+    // Compile vertex shader
+    const vsrc_ptr: [*c]const u8 = @ptrCast(vertex_src.ptr);
+    const vsrc_len: c_int = @intCast(vertex_src.len);
+    glad.glShaderSource(vertex_shader, 1, &vsrc_ptr, &vsrc_len);
+    glad.glCompileShader(vertex_shader);
+
+    // Check vertex shader compilation
+    var success: c_int = 0;
+    glad.glGetShaderiv(vertex_shader, glad.GL_COMPILE_STATUS, &success);
+    if (success == 0) {
+        var infoLog: [512]u8 = undefined;
+        glad.glGetShaderInfoLog(vertex_shader, 512, null, &infoLog);
+        std.debug.print("Vertex shader compilation failed: {s}\n", .{infoLog});
+        return error.ShaderCompilationFailed;
+    }
+
+    // Compile fragment shader
+    const fsrc_ptr: [*c]const u8 = @ptrCast(fragment_src.ptr);
+    const fsrc_len: c_int = @intCast(fragment_src.len);
+    glad.glShaderSource(fragment_shader, 1, &fsrc_ptr, &fsrc_len);
+    glad.glCompileShader(fragment_shader);
+
+    // Check fragment shader compilation
+    glad.glGetShaderiv(fragment_shader, glad.GL_COMPILE_STATUS, &success);
+    if (success == 0) {
+        var infoLog: [512]u8 = undefined;
+        glad.glGetShaderInfoLog(fragment_shader, 512, null, &infoLog);
+        std.debug.print("Fragment shader compilation failed: {s}\n", .{infoLog});
+        return error.ShaderCompilationFailed;
+    }
+
+    // Link shader program
+    const program = glad.glCreateProgram();
+    glad.glAttachShader(program, vertex_shader);
+    glad.glAttachShader(program, fragment_shader);
+    glad.glLinkProgram(program);
+
+    // Check linking
+    glad.glGetProgramiv(program, glad.GL_LINK_STATUS, &success);
+    if (success == 0) {
+        var infoLog: [512]u8 = undefined;
+        glad.glGetProgramInfoLog(program, 512, null, &infoLog);
+        std.debug.print("Shader program linking failed: {s}\n", .{infoLog});
+        glad.glDeleteProgram(program);
+        return error.ShaderLinkingFailed;
+    }
+
+    // Store the shader resource
+    const shader_name = try self.allocator.dupe(u8, name);
+    var shader_resource = try ShaderResource.init(self.allocator, program);
+
+    shader_resource.cacheCommonUniforms(shader_type);
+
+    try self.shaders.put(shader_name, shader_resource);
+}
+
+pub fn getShader(self: *Self, name: []const u8) ?*ShaderResource {
+    return self.shaders.getPtr(name);
+}
+
+pub fn unloadShader(self: *Self, name: []const u8) void {
+    if (self.shaders.getPtr(name)) |resource_ptr| {
+        resource_ptr.ref_count -= 1;
+        if (resource_ptr.ref_count == 0) {
+            if (self.shaders.fetchRemove(name)) |kv| {
+                self.allocator.free(kv.key);
+                kv.value.deinit();
+            }
+        }
+    }
+}
+
+pub fn loadMaterial(self: *Self, name: []const u8, material: MaterialVariant, shader_name: ?[]const u8) !void {
+    if (self.materials.getPtr(name)) |resource| {
+        resource.ref_count += 1;
+        return;
+    }
+
+    const material_name = try self.allocator.dupe(u8, name);
+    var material_resource = try MaterialResource.init(self.allocator, material);
+
+    // std.debug.print("Material Name: {s}", .{material_name});
+
+    // Set shader reference if provided
+    const used_shader_name = if (shader_name) |shader| blk: {
+        try material_resource.setShaderRef(self.allocator, shader);
+        break :blk shader;
+    } else blk: {
+        // Use default shader based on material type
+        const default_shader = switch (material.getType()) {
+            .PBR => "pbr_shader",
+            .Phong => "standard_shader",
+        };
+        try material_resource.setShaderRef(self.allocator, default_shader);
+        break :blk default_shader;
+    };
+
+    // Insert material into hashmap
+    try self.materials.put(material_name, material_resource);
+
+    // Get pointer to the material we just inserted
+    const material_ptr = self.materials.getPtr(material_name).?;
+
+    // Register material with shader and increase shader reference count
+    if (self.shaders.getPtr(used_shader_name)) |shader_res| {
+        shader_res.ref_count += 1;
+        try shader_res.addMaterial(material_ptr);
+    }
+
+    // Upload material to GPU buffer
+    self.uploadMaterialToGPU(material_ptr);
+}
+
+/// Upload a material to the GPU SSBO and store the index
+fn uploadMaterialToGPU(self: *Self, material_res: *MaterialResource) void {
+    // Build texture handles array from material's texture slots
+    var texture_handles: [TextureUnit.SlotCount]u64 = .{0} ** TextureUnit.SlotCount;
+    var texture_mask: u32 = 0;
+
+    const textures = switch (material_res.material) {
+        .PBR => |pbr| pbr.textures,
+        .Phong => |phong| phong.textures,
+    };
+
+    inline for (0..TextureUnit.SlotCount) |i| {
+        if (textures.slots[i]) |tex_id| {
+            // Find the TextureResource to get its bindless handle
+            var tex_iter = self.textures.iterator();
+            while (tex_iter.next()) |entry| {
+                if (entry.value_ptr.texture_id == tex_id) {
+                    texture_handles[i] = entry.value_ptr.bindless_handle;
+                    if (texture_handles[i] != 0) {
+                        texture_mask |= (@as(u32, 1) << @intCast(i));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // Convert and upload based on material type
+    const gpu_index = switch (material_res.material) {
+        .PBR => |pbr| blk: {
+            const flags: u32 = (@as(u32, @intFromEnum(pbr.data.alphaMode)) & 0x3) |
+                (if (pbr.data.doubleSided) MaterialGPU.FLAG_DOUBLE_SIDED else 0);
+
+            break :blk self.material_buffer.addPBRMaterial(
+                texture_handles,
+                texture_mask,
+                .{
+                    .baseColorFactor = pbr.data.baseColorFactor,
+                    .emissiveFactor = pbr.data.emissiveFactor,
+                    .emissiveStrength = pbr.data.emissiveStrength,
+                    .specularColor = pbr.data.specularColor,
+                    .specularStrength = pbr.data.specularStrength,
+                    .metallicFactor = pbr.data.metallicFactor,
+                    .roughnessFactor = pbr.data.roughnessFactor,
+                    .alphaCutoff = pbr.data.alphaCutoff,
+                },
+                flags,
+            );
+        },
+        .Phong => |phong| blk: {
+            break :blk self.material_buffer.addPhongMaterial(
+                texture_handles,
+                texture_mask,
+                .{
+                    .ambientColor = phong.data.ambientColor,
+                    .shininess = phong.data.shininess,
+                    .diffuseColor = phong.data.diffuseColor,
+                    .specularColor = phong.data.specularColor,
+                },
+            );
+        },
+    };
+
+    material_res.gpu_index = gpu_index;
+}
+
+pub fn unloadMaterial(self: *Self, name: []const u8) void {
+    if (self.materials.getPtr(name)) |resource_ptr| {
+        resource_ptr.ref_count -= 1;
+        if (resource_ptr.ref_count == 0) {
+            // Get shader_ref before removing material
+            const shader_name = if (resource_ptr.shader_ref) |sn| sn else null;
+
+            if (self.materials.fetchRemove(name)) |kv| {
+
+                // Remove material from shader's materials list
+                if (shader_name) |sn| {
+                    if (self.shaders.getPtr(sn)) |shader_res| {
+                        shader_res.removeMaterial(resource_ptr);
+                    }
+                    self.unloadShader(sn);
+                }
+
+                // Decrease texture reference counts
+                var it = kv.value.texture_refs.iterator();
+                while (it.next()) |entry| {
+                    self.unloadTexture(entry.value_ptr.*);
+                }
+
+                self.allocator.free(kv.key);
+                kv.value.deinit(self.allocator);
+            }
+        }
+    }
+}
+
+const CACHE_DIR = ".asset-cache";
+const CACHE_MAGIC = 0x474C5446; // "GLTF" little‑endian
+
+pub fn cachePath(alloc: std.mem.Allocator, gltf_path: []const u8) []const u8 {
+    // scene.gltf -> cache/scene.gltf.bin
+    const modified_path = std.mem.replaceOwned(u8, alloc, gltf_path, "/", "-") catch @panic("Failed to create modifiedPath");
+    defer alloc.free(modified_path);
+    return std.fmt.allocPrint(alloc, "{s}/{s}.bin", .{ CACHE_DIR, modified_path }) catch @panic("Failed to create cachePath");
+}
+
+fn ensureCacheDir() void {
+    std.fs.cwd().makeDir(CACHE_DIR) catch |err| switch (err) {
+        error.PathAlreadyExists => {}, // Directory exists, that's fine
+        else => std.debug.print("Warning: Failed to create cache directory: {}\n", .{err}),
+    };
+}
+
+fn isFresh(gltf_path: []const u8, bin_path: []const u8) bool {
+    const gltf_mtime = std.fs.cwd().statFile(gltf_path) catch return false;
+    const bin_mtime = std.fs.cwd().statFile(bin_path) catch return false;
+    return bin_mtime.mtime >= gltf_mtime.mtime;
+}
+
+fn cacheWriteZString(writer: anytype, s: ?[:0]const u8) !void {
+    // 0xFFFF_FFFF → “null”
+    if (s) |str| {
+        try writer.writeInt(u32, @intCast(str.len), .little);
+        try writer.writeAll(str);
+    } else {
+        try writer.writeInt(u32, 0xFFFF_FFFF, .little);
+    }
+}
+
+fn cacheReadZString(reader: anytype, alloc: std.mem.Allocator) !?[:0]const u8 {
+    const len = try reader.readInt(u32, .little);
+    if (len == 0xFFFF_FFFF) return null;
+
+    const buf = try alloc.alloc(u8, len);
+    _ = try reader.readAll(buf);
+    defer alloc.free(buf);
+
+    // dupeZ creates a null-terminated copy
+    return try alloc.dupeZ(u8, buf);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers – optional fixed‑size float arrays
+// ---------------------------------------------------------------------------
+
+fn writeOptArray(writer: anytype, comptime N: usize, val: ?[N]f32) !void {
+    try writer.writeByte(if (val != null) 1 else 0);
+    if (val) |v| try writer.writeAll(std.mem.asBytes(&v));
+}
+
+fn readOptArray(
+    reader: anytype,
+    comptime N: usize,
+) !?[N]f32 {
+    if (try reader.readByte() == 0) return null;
+
+    var out: [N]f32 = undefined;
+    _ = try reader.readAll(std.mem.asBytes(&out));
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// writeCache – serialise ModelResource into <path>.bin
+// ---------------------------------------------------------------------------
+
+pub fn writeCache(res: *GLTFParser.ModelResource, path: []const u8) !void {
+    var file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    defer file.close();
+    var w = file.writer();
+
+    try w.writeInt(u32, CACHE_MAGIC, .little);
+    try w.writeInt(u32, @intCast(res.entities.len), .little);
+
+    for (res.entities) |e| {
+        // --- variable‑length strings --------------------------------------
+        try cacheWriteZString(w, e.name);
+        try cacheWriteZString(w, e.mesh_name);
+        try cacheWriteZString(w, e.material_name);
+
+        // --- optional matrix ----------------------------------------------
+        try writeOptArray(w, 16, e.local_matrix.base.data);
+        try writeOptArray(w, 16, e.world_transform.base.data);
+
+        // --- TRS arrays ----------------------------------------------------
+        try writeOptArray(w, 3, e.translation);
+        try writeOptArray(w, 4, e.rotation);
+        try writeOptArray(w, 3, e.scale);
+
+        // --- hierarchy -----------------------------------------------------
+        try w.writeInt(i32, if (e.parent_idx) |idx| @intCast(idx) else -1, .little);
+
+        try w.writeInt(u32, @intCast(e.children.len), .little);
+        for (e.children) |c|
+            try w.writeInt(u32, @intCast(c), .little);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// readCache – load ModelResource from <path>.bin
+// ---------------------------------------------------------------------------
+
+pub fn readCache(alloc: std.mem.Allocator, path: []const u8) !*GLTFParser.ModelResource {
+    var file = try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+    var r = file.reader();
+
+    if (try r.readInt(u32, .little) != CACHE_MAGIC)
+        return error.BadCache;
+
+    const count = try r.readInt(u32, .little);
+
+    var res = try alloc.create(GLTFParser.ModelResource);
+    res.* = .{
+        .model_id = try alloc.dupeZ(u8, path), // useful for debugging
+        .entities = try alloc.alloc(GLTFParser.ModelResource.EntityInfo, count),
+        .allocator = alloc,
+    };
+
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        var e = &res.entities[i];
+
+        // --- strings ------------------------------------------------------
+        e.name = try cacheReadZString(r, alloc);
+        e.mesh_name = try cacheReadZString(r, alloc);
+        e.material_name = try cacheReadZString(r, alloc);
+
+        // --- optional matrix ---------------------------------------------
+        if (try r.readByte() == 1) {
+            var local_matrix: Math.Mat4 = undefined;
+            _ = try r.readAll(std.mem.asBytes(&local_matrix));
+            e.local_matrix = local_matrix;
+        } else e.local_matrix = Math.Mat4.identity();
+
+        if (try r.readByte() == 1) {
+            var world_matrix: Math.Mat4 = undefined;
+            _ = try r.readAll(std.mem.asBytes(&world_matrix));
+            e.world_transform = world_matrix;
+        } else e.world_transform = Math.Mat4.identity();
+
+        std.debug.print("Parsed: {}\n", .{e.world_transform});
+
+        // --- TRS arrays ---------------------------------------------------
+        e.translation = try readOptArray(r, 3);
+        e.rotation = try readOptArray(r, 4);
+        e.scale = try readOptArray(r, 3);
+
+        // --- hierarchy ----------------------------------------------------
+        const parent_raw = try r.readInt(i32, .little);
+        e.parent_idx = if (parent_raw >= 0) @as(usize, @intCast(parent_raw)) else null;
+
+        const child_cnt = try r.readInt(u32, .little);
+        const child_buf = try alloc.alloc(usize, child_cnt);
+        var j: usize = 0;
+        while (j < child_cnt) : (j += 1)
+            child_buf[j] = @as(usize, @intCast(try r.readInt(u32, .little)));
+        e.children = child_buf;
+    }
+
+    return res;
+}
+
+pub fn loadGLTFModel(self: *Self, allocator: std.mem.Allocator, filepath: []const u8) !*GLTFParser.ModelResource {
+    std.debug.print("model filepath: {s}\n", .{filepath});
+    var gltf = try GLTF.init(allocator, filepath);
+    defer gltf.deinit();
+
+    const model_id = try std.fmt.allocPrint(allocator, "model_{s}", .{filepath});
+    defer allocator.free(model_id);
+    try self.processGLTFResources(gltf, model_id);
+    return GLTFParser.createModelResource(allocator, model_id, gltf);
+}
+
+pub fn loadGLTFModelCached(
+    self: *Self,
+    allocator: std.mem.Allocator,
+    gltf_path: []const u8,
+) !*GLTFParser.ModelResource {
+    ensureCacheDir();
+
+    const bin_path = cachePath(allocator, gltf_path);
+    defer allocator.free(bin_path);
+
+    // ---------- fast path -------------------------------------------------
+    if (isFresh(gltf_path, bin_path)) {
+        if (readCache(allocator, bin_path)) |mr| {
+            // Fix the model_id to match what's expected
+            const model_id = try std.fmt.allocPrintZ(allocator, "model_{s}", .{gltf_path});
+            allocator.free(mr.model_id);
+            mr.model_id = model_id;
+
+            const gltf = try GLTF.init(allocator, gltf_path);
+            defer gltf.deinit();
+
+            // Process all GLTF resources - textures, materials, AND meshes
+            // TODO: Find a way to cache these as well
+            try self.processGLTFResources(gltf, model_id);
+            return mr;
+        } else |_| {}
+    }
+
+    // ---------- cold path -------------------------------------------------
+    std.debug.print("GLTF_PATH: {s}\n", .{gltf_path});
+    const mr = try self.loadGLTFModel(allocator, gltf_path);
+
+    writeCache(mr, bin_path) catch |err| {
+        @panic(@errorName(err));
+    };
+
+    return mr;
+}
+
+fn processGLTFResources(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
+    try self.processGLTFTextures(gltf, model_id);
+    try self.processGLTFMaterials(gltf, model_id);
+    try self.processGLTFMeshes(gltf, model_id);
+}
+
+fn processGLTFTextures(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
+    const images = gltf.document.value.images orelse return;
+
+    const allocator = self.allocator;
+    for (images, 0..) |image, img_idx| {
+        const texture_name = if (image.name) |name|
+            try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+        else
+            try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, img_idx });
+        defer allocator.free(texture_name);
+
+        // Get sampler params for this image (if any texture references it with a sampler)
+        const sampler_params: ?SamplerParams = if (gltf.getSamplerForImage(img_idx)) |gltf_sampler|
+            Sampler.paramsFromGltf(gltf_sampler)
+        else
+            null;
+
+        // Load from file
+        if (image.uri) |uri| {
+            const full_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ gltf.base_path, uri });
+            defer allocator.free(full_path);
+
+            const img = try ImageLoader.Image.loadFromFile(allocator, full_path);
+            defer img.deinit();
+
+            try self.loadTextureFromImage(texture_name, img, sampler_params);
+        }
+        // Load from buffer
+        else if (image.bufferView != null) {
+            const img = try gltf.loadBufferViewImage(allocator, image.bufferView.?);
+            defer img.deinit();
+
+            try self.loadTextureFromImage(texture_name, img, sampler_params);
+        }
+    }
+}
+
+fn processGLTFMaterials(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
+    if (gltf.document.value.materials == null) return;
+
+    const allocator = self.allocator;
+    for (gltf.document.value.materials.?, 0..) |material_def, mat_idx| {
+        // Generate unique material name
+        const material_name = if (material_def.name) |name|
+            try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+        else
+            try std.fmt.allocPrint(allocator, "{s}_material_{d}", .{ model_id, mat_idx });
+        defer allocator.free(material_name);
+
+        // Determine material type
+        const material_type: MaterialType = if (material_def.pbrMetallicRoughness != null or (material_def.extensions != null and material_def.extensions.?.KHR_materials_pbrSpecularGlossiness != null))
+            MaterialType.PBR
+        else
+            MaterialType.Phong;
+
+        if (material_type == .Phong) {
+            std.debug.print("Phong detected: {s} => {}\n", .{ material_name, material_def });
+            // @panic("Detected phong material!\n");
+        }
+
+        const material = switch (material_type) {
+            .PBR => try self.createPBRMaterial(material_def, gltf, model_id),
+            else => continue,
+            // .Phong => try self.createPhongMaterial(material_def, gltf, model_id),
+        };
+
+        // Register material in resource manager
+        try self.loadMaterial(material_name, material, null);
+    }
+}
+
+fn createPBRMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF, model_id: []const u8) !MaterialVariant {
+    const allocator = self.allocator;
+    var material = Material(.PBR){};
+
+    // Set material properties
+    if (material_def.doubleSided) |double_sided| {
+        material.data.doubleSided = double_sided;
+    }
+
+    if (material_def.alphaMode) |alpha_mode_str| {
+        if (std.mem.eql(u8, alpha_mode_str, @tagName(Mesh.AlphaMode.MASK))) {
+            material.data.alphaMode = .MASK;
+        } else if (std.mem.eql(u8, alpha_mode_str, @tagName(Mesh.AlphaMode.BLEND))) {
+            material.data.alphaMode = .BLEND;
+        } else {
+            material.data.alphaMode = .OPAQUE;
+        }
+    }
+
+    if (material_def.alphaCutoff) |alpha_cutoff| {
+        material.data.alphaCutoff = alpha_cutoff;
+    }
+
+    // Set emissive factor if present
+    if (material_def.emissiveFactor) |emissive| {
+        material.data.emissiveFactor = emissive;
+    }
+
+    // Process PBR Metallic-Roughness parameters
+    if (material_def.pbrMetallicRoughness) |pbr_mr| {
+        if (pbr_mr.baseColorFactor) |base_color| {
+            material.data.baseColorFactor = base_color;
+        }
+
+        if (pbr_mr.metallicFactor) |metallic| {
+            material.data.metallicFactor = metallic;
+        }
+
+        if (pbr_mr.roughnessFactor) |roughness| {
+            material.data.roughnessFactor = roughness;
+        }
+
+        // Associate base color texture if present
+        if (pbr_mr.baseColorTexture) |tex_info| {
+            if (gltf.document.value.textures) |textures| {
+                if (tex_info.index < textures.len) {
+                    const texture = textures[tex_info.index];
+                    if (texture.source) |source_idx| {
+                        if (gltf.document.value.images) |images| {
+                            if (source_idx < images.len) {
+                                const img = images[source_idx];
+                                const tex_name = if (img.name) |name|
+                                    try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                                else
+                                    try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                                defer allocator.free(tex_name);
+
+                                if (self.textures.get(tex_name)) |tex_resource| {
+                                    material.textures.set(.BaseColor, tex_resource.texture_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Associate metallic-roughness texture if present
+        if (pbr_mr.metallicRoughnessTexture) |tex_info| {
+            if (gltf.document.value.textures) |textures| {
+                if (tex_info.index < textures.len) {
+                    const texture = textures[tex_info.index];
+                    if (texture.source) |source_idx| {
+                        if (gltf.document.value.images) |images| {
+                            if (source_idx < images.len) {
+                                const img = images[source_idx];
+                                const tex_name = if (img.name) |name|
+                                    try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                                else
+                                    try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                                defer allocator.free(tex_name);
+
+                                if (self.textures.get(tex_name)) |tex_resource| {
+                                    material.textures.set(.MetallicRoughness, tex_resource.texture_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Process normal map texture
+    if (material_def.normalTexture) |tex_info| {
+        if (gltf.document.value.textures) |textures| {
+            if (tex_info.index < textures.len) {
+                const texture = textures[tex_info.index];
+                if (texture.source) |source_idx| {
+                    if (gltf.document.value.images) |images| {
+                        if (source_idx < images.len) {
+                            const img = images[source_idx];
+                            const tex_name = if (img.name) |name|
+                                try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                            else
+                                try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                            defer allocator.free(tex_name);
+
+                            if (self.textures.get(tex_name)) |tex_resource| {
+                                material.textures.set(.NormalMap, tex_resource.texture_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Process occlusion texture
+    if (material_def.occlusionTexture) |tex_info| {
+        if (gltf.document.value.textures) |textures| {
+            if (tex_info.index < textures.len) {
+                const texture = textures[tex_info.index];
+                if (texture.source) |source_idx| {
+                    if (gltf.document.value.images) |images| {
+                        if (source_idx < images.len) {
+                            const img = images[source_idx];
+                            const tex_name = if (img.name) |name|
+                                try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                            else
+                                try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                            defer allocator.free(tex_name);
+
+                            if (self.textures.get(tex_name)) |tex_resource| {
+                                material.textures.set(.Occlusion, tex_resource.texture_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Process emissive texture
+    if (material_def.emissiveTexture) |tex_info| {
+        if (gltf.document.value.textures) |textures| {
+            if (tex_info.index < textures.len) {
+                const texture = textures[tex_info.index];
+                if (texture.source) |source_idx| {
+                    if (gltf.document.value.images) |images| {
+                        if (source_idx < images.len) {
+                            const img = images[source_idx];
+                            const tex_name = if (img.name) |name|
+                                try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                            else
+                                try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                            defer allocator.free(tex_name);
+
+                            if (self.textures.get(tex_name)) |tex_resource| {
+                                material.textures.set(.Emissive, tex_resource.texture_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Process extensions
+    if (material_def.extensions) |extensions| {
+        // KHR_materials_pbrSpecularGlossiness
+        if (extensions.KHR_materials_pbrSpecularGlossiness) |sg| {
+            if (sg.diffuseFactor) |diffuse| {
+                material.data.diffuseFactor = diffuse;
+            }
+
+            if (sg.specularFactor) |specular| {
+                material.data.specularFactor = specular;
+            }
+
+            if (sg.glossinessFactor) |glossiness| {
+                material.data.glossinessFactor = glossiness;
+            }
+
+            // Process diffuse texture
+            if (sg.diffuseTexture) |tex_info| {
+                if (gltf.document.value.textures) |textures| {
+                    if (tex_info.index < textures.len) {
+                        const texture = textures[tex_info.index];
+                        if (texture.source) |source_idx| {
+                            if (gltf.document.value.images) |images| {
+                                if (source_idx < images.len) {
+                                    const img = images[source_idx];
+                                    const tex_name = if (img.name) |name|
+                                        try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                                    else
+                                        try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                                    defer allocator.free(tex_name);
+
+                                    if (self.textures.get(tex_name)) |tex_resource| {
+                                        // In specular-glossiness workflow, diffuse texture goes to baseColor
+                                        material.textures.set(.BaseColor, tex_resource.texture_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Process specular-glossiness texture
+            if (sg.specularGlossinessTexture) |tex_info| {
+                if (gltf.document.value.textures) |textures| {
+                    if (tex_info.index < textures.len) {
+                        const texture = textures[tex_info.index];
+                        if (texture.source) |source_idx| {
+                            if (gltf.document.value.images) |images| {
+                                if (source_idx < images.len) {
+                                    const img = images[source_idx];
+                                    const tex_name = if (img.name) |name|
+                                        try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                                    else
+                                        try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                                    defer allocator.free(tex_name);
+
+                                    if (self.textures.get(tex_name)) |tex_resource| {
+                                        // In specular-glossiness workflow, specular-glossiness maps to metallicRoughness slot
+                                        material.textures.set(.MetallicRoughness, tex_resource.texture_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // KHR_materials_emissive_strength extension
+        if (extensions.KHR_materials_emissive_strength) |es| {
+            if (es.emissiveStrength) |strength| {
+                material.data.emissiveStrength = strength;
+            }
+        }
+
+        // KHR_materials_specular extension
+        if (extensions.KHR_materials_specular) |spec| {
+            if (spec.specularFactor) |factor| {
+                material.data.specularStrength = factor;
+            }
+
+            if (spec.specularColorFactor) |color| {
+                material.data.specularColor = color;
+            }
+
+            // Process specular texture
+            if (spec.specularTexture) |tex_info| {
+                if (gltf.document.value.textures) |textures| {
+                    if (tex_info.index < textures.len) {
+                        const texture = textures[tex_info.index];
+                        if (texture.source) |source_idx| {
+                            if (gltf.document.value.images) |images| {
+                                if (source_idx < images.len) {
+                                    const img = images[source_idx];
+                                    const tex_name = if (img.name) |name|
+                                        try std.fmt.allocPrint(allocator, "{s}_{s}", .{ model_id, name })
+                                    else
+                                        try std.fmt.allocPrint(allocator, "{s}_texture_{d}", .{ model_id, source_idx });
+                                    defer allocator.free(tex_name);
+
+                                    if (self.textures.get(tex_name)) |tex_resource| {
+                                        material.textures.set(.Specular, tex_resource.texture_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return MaterialVariant{ .PBR = material };
+}
+
+fn createPhongMaterial(self: *Self, material_def: GLTFParser.Material, gltf: *GLTF, model_id: []const u8) !MaterialVariant {
+    _ = self;
+    _ = material_def;
+    _ = gltf;
+    _ = model_id;
+    @panic("Not Implemented!");
+}
+
+fn processGLTFMeshes(self: *Self, gltf: *GLTF, model_id: []const u8) !void {
+    if (gltf.document.value.meshes == null) {
+        std.debug.print("No meshes in GLTF document\n", .{});
+        return;
+    }
+
+    const allocator = self.allocator;
+    std.debug.print("Processing {d} meshes for model {s}\n", .{ gltf.document.value.meshes.?.len, model_id });
+
+    for (gltf.document.value.meshes.?, 0..) |mesh_def, mesh_idx| {
+        std.debug.print("  Mesh {d}: {s}, primitives: {d}\n", .{ mesh_idx, mesh_def.name orelse "unnamed", mesh_def.primitives.len });
+
+        for (mesh_def.primitives, 0..) |primitive, prim_idx| {
+            // Generate unique mesh name
+            const mesh_name = if (mesh_def.name) |name|
+                try std.fmt.allocPrint(allocator, "{s}_{s}_prim_{d}", .{ model_id, name, prim_idx })
+            else
+                try std.fmt.allocPrint(allocator, "{s}_mesh_{d}_prim_{d}", .{ model_id, mesh_idx, prim_idx });
+
+            std.debug.print("    processGLTFMeshes: Loading primitive {d} as '{s}' (len={})\n", .{ prim_idx, mesh_name, mesh_name.len });
+            std.debug.print("      Material: {?d}\n", .{primitive.material});
+
+            if (self.meshes.getPtr(mesh_name)) |resource| {
+                std.debug.print("Mesh already exists!=> {s}\n", .{mesh_name});
+                resource.ref_count += 1;
+                continue;
+            }
+
+            const loaded_mesh = try gltf.loadMesh(allocator, mesh_idx);
+            var mesh_resource = MeshResource.init(self.allocator, loaded_mesh.?);
+            mesh_resource.ref_count = 1;
+            try self.meshes.put(mesh_name, mesh_resource);
+        }
+    }
+}
+
+pub fn format(self: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    _ = fmt;
+    _ = options;
+
+    try writer.print("ResourceManager(\n", .{});
+
+    // -- Meshes --
+    try writer.print("  Meshes:\n", .{});
+    var mesh_it = self.meshes.iterator();
+    while (mesh_it.next()) |entry| {
+        // Each entry has .key_ptr (pointer to the name string)
+        // and .value_ptr (pointer to the MeshResource).
+        try writer.print("\t'{s}':\n\t\t(ref_count={d})\n", .{
+            entry.key_ptr.*,
+            entry.value_ptr.ref_count,
+        });
+    }
+    try writer.print("\n", .{});
+
+    // -- Textures --
+    try writer.print("  Textures:\n", .{});
+    var tex_it = self.textures.iterator();
+    while (tex_it.next()) |entry| {
+        const texture = entry.value_ptr.*;
+        try writer.print("\t'{s}:\n\t\t(texture_id={d}, ref_count={d}, size={d}x{d}, channels={d})\n", .{
+            entry.key_ptr.*,
+            texture.texture_id,
+            texture.ref_count,
+            texture.width,
+            texture.height,
+            texture.channels,
+        });
+    }
+    try writer.print("\n", .{});
+
+    // -- Shaders --
+    try writer.print("  Shaders:\n", .{});
+    var sh_it = self.shaders.iterator();
+    while (sh_it.next()) |entry| {
+        const shader = entry.value_ptr.*;
+        try writer.print("\t'{s}':\n\t\t(program_id={d}, ref_count={d}, uniform_count={d})\n", .{
+            entry.key_ptr.*,
+            shader.program_id,
+            shader.ref_count,
+            shader.uniforms.count(),
+        });
+    }
+    try writer.print("\n", .{});
+
+    // -- Materials --
+    try writer.print("  Materials:\n", .{});
+    var mat_it = self.materials.iterator();
+    while (mat_it.next()) |entry| {
+        const material_res = entry.value_ptr.*;
+        try writer.print("\t'{s}':\n\t\t(ref_count={d}, material_type={s}, shader={s}, texture_ref_count={d})\n", .{
+            entry.key_ptr.*,
+            material_res.ref_count,
+            @tagName(material_res.material.getType()),
+            if (material_res.shader_ref) |sh| sh else "null",
+            material_res.texture_refs.count(),
+        });
+
+        // If you want to print out each texture ref (texture_type -> texture_name), do:
+        var tex_ref_it = material_res.texture_refs.iterator();
+        while (tex_ref_it.next()) |tex_entry| {
+            try writer.print("\t\t\ttexture_type='{s}' => texture_name='{s}'\n", .{
+                tex_entry.key_ptr.*,
+                tex_entry.value_ptr.*,
+            });
+        }
+    }
+
+    try writer.print(")\n", .{});
+}
+
+// Collision mesh caching functions
+fn createMeshCacheKey(self: *Self, mesh: *@import("../Mesh.zig")) ![]u8 {
+    var hasher = std.hash.Wyhash.init(0);
+
+    // Hash vertex positions
+    if (mesh.vertices.len > 0) {
+        for (mesh.vertices) |vertex| {
+            hasher.update(std.mem.asBytes(&vertex.position));
+        }
+    }
+
+    // Hash indices if present - safely handle empty slices
+    if (mesh.indices) |indices| {
+        if (indices.len > 0) {
+            // Use a loop to safely hash each index instead of slicing the entire array
+            for (indices) |index| {
+                hasher.update(std.mem.asBytes(&index));
+            }
+        }
+    }
+
+    const hash_value = hasher.final();
+    return try std.fmt.allocPrint(self.allocator, "collision_mesh_{x}", .{hash_value});
+}
+
+pub fn getOrGenerateCollisionMesh(self: *Self, mesh: *@import("../Mesh.zig")) ![]@import("components/Collisions.zig").ConvexHullShape {
+    const ConvexHullShape = @import("components/Collisions.zig").ConvexHullShape;
+
+    // Create cache key
+    const mesh_key = try self.createMeshCacheKey(mesh);
+    defer self.allocator.free(mesh_key);
+
+    // Check disk cache first
+    const cache_path = try self.getCollisionCachePath(mesh_key);
+    defer self.allocator.free(cache_path);
+
+    if (self.readCollisionCache(cache_path)) |cached_hulls| {
+        return cached_hulls;
+    } else |_| {
+        // Cache miss or read error
+    }
+
+    // Generate fresh convex hulls
+    const generated_hulls = try ConvexHullShape.generateFromMesh(self.allocator, mesh);
+
+    // Write to disk cache
+    self.writeCollisionCache(cache_path, generated_hulls) catch |err| {
+        @panic(@errorName(err));
+    };
+
+    return generated_hulls;
+}
+
+// Collision cache disk I/O functions
+fn getCollisionCachePath(self: *Self, mesh_key: []const u8) ![]u8 {
+    ensureCacheDir();
+    return try std.fmt.allocPrint(self.allocator, ".asset-cache/{s}.collision", .{mesh_key});
+}
+
+const COLLISION_CACHE_MAGIC: u32 = 0x43484C4C; // "CHLL"
+
+fn writeCollisionCache(_: *Self, cache_path: []const u8, hulls: []const @import("components/Collisions.zig").ConvexHullShape) !void {
+    var file = try std.fs.cwd().createFile(cache_path, .{});
+    defer file.close();
+    var w = file.writer();
+
+    // Write magic number and hull count
+    try w.writeInt(u32, COLLISION_CACHE_MAGIC, .little);
+    try w.writeInt(u32, @intCast(hulls.len), .little);
+
+    // Write each hull
+    for (hulls) |hull| {
+        try w.writeInt(u32, hull.n_points, .little);
+        try w.writeInt(u32, hull.n_triangles, .little);
+
+        // Write points
+        try w.writeInt(u32, @intCast(hull.points.len), .little);
+        if (hull.points.len > 0) {
+            for (hull.points) |point| {
+                try w.writeInt(u64, @bitCast(point), .little);
+            }
+        }
+
+        // Write triangles
+        try w.writeInt(u32, @intCast(hull.triangles.len), .little);
+        if (hull.triangles.len > 0) {
+            for (hull.triangles) |triangle| {
+                try w.writeInt(u32, triangle, .little);
+            }
+        }
+    }
+}
+
+// TODO: Make a generic Cache Manager. Read / Write based on struct type passed in. Iterate over struct fields. Automatically serialize / deserialize based on sizeof...
+fn readCollisionCache(self: *Self, cache_path: []const u8) ![]@import("components/Collisions.zig").ConvexHullShape {
+    const ConvexHullShape = @import("components/Collisions.zig").ConvexHullShape;
+
+    var file = std.fs.cwd().openFile(cache_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return error.CacheNotFound,
+        else => return err,
+    };
+    defer file.close();
+    var r = file.reader();
+
+    // Check magic number
+    if (try r.readInt(u32, .little) != COLLISION_CACHE_MAGIC) {
+        return error.InvalidCache;
+    }
+
+    const hull_count = try r.readInt(u32, .little);
+    const hulls = try self.allocator.alloc(ConvexHullShape, hull_count);
+
+    for (hulls) |*hull| {
+        hull.n_points = try r.readInt(u32, .little);
+        hull.n_triangles = try r.readInt(u32, .little);
+
+        // Read points
+        const points_len = try r.readInt(u32, .little);
+        hull.points = try self.allocator.alloc(f64, points_len);
+        for (hull.points) |*point| {
+            point.* = @bitCast(try r.readInt(u64, .little));
+        }
+
+        // Read triangles
+        const triangles_len = try r.readInt(u32, .little);
+        hull.triangles = try self.allocator.alloc(u32, triangles_len);
+        for (hull.triangles) |*triangle| {
+            triangle.* = try r.readInt(u32, .little);
+        }
+    }
+
+    return hulls;
+}
+
+pub fn debug(self: *Self) void {
+    std.debug.print("{any}", .{self});
+}

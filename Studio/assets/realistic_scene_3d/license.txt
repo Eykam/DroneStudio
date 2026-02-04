@@ -1,0 +1,11 @@
+Model Information:
+* title:	Realistic Scene 3D
+* source:	https://sketchfab.com/3d-models/realistic-scene-3d-197a9b4020c04995b0b881cbdeb9647e
+* author:	mortalityrexotable (https://sketchfab.com/mortalityrexotable)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Realistic Scene 3D" (https://sketchfab.com/3d-models/realistic-scene-3d-197a9b4020c04995b0b881cbdeb9647e) by mortalityrexotable (https://sketchfab.com/mortalityrexotable) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
