@@ -13,6 +13,51 @@ without touching chassis.py.
 from dataclasses import dataclass
 import os, json
 
+_STEP_CACHE = {}
+
+def cad_geometry(key, pos_m):
+    """Real B-rep for a component with step_path, placed at pos_m (meters).
+    Returns (shape_in_mm, I_self_kgm2 about part CoM, com_m); (None,None,None) if no CAD."""
+    c = LIBRARY[key.split("#")[0]]
+    if not c.step_path:
+        return None, None, None
+    import build123d as b
+    import numpy as np
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), c.step_path)
+    if path not in _STEP_CACHE:
+        brep = path + ".brep"
+        if os.path.exists(brep):
+            sh = b.import_brep(brep)
+        else:
+            sh = b.import_step(path)
+            try:
+                b.export_brep(sh, brep)
+            except Exception:
+                pass
+        _STEP_CACHE[path] = sh
+    src = _STEP_CACHE[path]
+    bb = src.bounding_box()
+    cx, cy = (bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2
+    sh = src.moved(b.Location((pos_m[0] * 1000 - cx, pos_m[1] * 1000 - cy,
+                               pos_m[2] * 1000 - bb.min.Z)))
+    m_kg = c.mass_g / 1000.0
+    rho_eff = m_kg / sh.volume          # kg/mm3 (datasheet mass over real volume)
+    I_mm5 = sh.matrix_of_inertia        # mm^5, about origin
+    I_org = np.array([[I_mm5[i][j] for j in range(3)] for i in range(3)]) * rho_eff  # kg*mm^2
+    ctr = sh.center()
+    r = np.array([ctr.X, ctr.Y, ctr.Z])  # mm
+    I_com = I_org - m_kg * ((r @ r) * np.eye(3) - np.outer(r, r))
+    return sh, I_com * 1e-6, r * 0.001
+
+def placed_cad_items():
+    """{placement_key: (shape_mm, I_self_kgm2, com_m)} for CAD-backed parts."""
+    out = {}
+    for key, pos in placement().items():
+        g = cad_geometry(key, pos)
+        if g[0] is not None:
+            out[key] = g
+    return out
+
 @dataclass
 class Component:
     name: str
@@ -42,7 +87,8 @@ LIBRARY = {
         "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/"),
     "pi_camera_3": Component(
         "Raspberry Pi Camera Module 3", 4.0, (0.025, 0.024, 0.012), "box", "nose",
-        "https://www.raspberrypi.com/products/camera-module-3/"),
+        "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
+        step_path="parts/Camera_module_3_std_model_simple.stp"),
     "mpu9250": Component(
         "MPU-9250 breakout (GY-9250)", 3.0, (0.025, 0.015, 0.003), "box", "stack",
         "estimate - generic GY-9250 module"),
