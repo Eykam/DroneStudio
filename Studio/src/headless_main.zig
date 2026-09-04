@@ -641,19 +641,22 @@ const World = struct {
     ///   waypoint progress(1) - idx/count in [0,1]; 0 with no waypoints.
     fn obsV3(self: *World) [26]f32 {
         const base = self.obsV2();
-        const pos = self.bodyPos();
         const q = self.bodyQuat();
         const fwd = Vec3.init(1, 0, 0).rotate_by_quaternion(q);
         const yaw = std.math.atan2(-fwd.z(), fwd.x());
         const extent = @max(self.scene.extent, 1.0);
         const wps = self.scene.waypoints;
-        var cur = self.scene.goal.sub(pos);
+        // v3.1: cur is a DELTA from the final goal (wp - goal), not an
+        // absolute offset - on scenes with no pending waypoints it is exactly
+        // zero, so a v2 warm-start with zero-padded weights is BIT-EXACT on
+        // T0-T2 and the frozen-trunk T3 learner (ppo_v35) cannot regress them.
+        var cur = Vec3.zero();
         var nxt = Vec3.zero();
         var prog: f32 = 0;
         if (wps.len > 0) {
             if (self.waypoint_idx < wps.len) {
                 const wp = wps[self.waypoint_idx];
-                cur = wp.sub(pos);
+                cur = wp.sub(self.scene.goal);
                 const after = if (self.waypoint_idx + 1 < wps.len) wps[self.waypoint_idx + 1] else self.scene.goal;
                 nxt = after.sub(wp);
                 prog = @as(f32, @floatFromInt(self.waypoint_idx)) / @as(f32, @floatFromInt(wps.len));
