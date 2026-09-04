@@ -31,6 +31,12 @@ export default function Dashboard() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { data, error } = useQuery({ queryKey: ["state"], queryFn: fetchState, refetchInterval: 10_000 });
+  const currQ = useQuery({
+    queryKey: ["curriculum-progress"],
+    queryFn: async () => (await (await fetch("/api/curriculum/progress", { credentials: "same-origin" })).json()) as any,
+    refetchInterval: 10_000,
+  });
+  const curr = currQ.data as any;
   const streamQ = useQuery({
     queryKey: ["stream-state"],
     queryFn: async () => (await (await fetch("/api/stream/state", { credentials: "same-origin" })).json()) as any,
@@ -186,6 +192,58 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="p-3 md:p-6">
+          <CardTitle className="text-base md:text-lg flex items-center gap-2">
+            Curriculum ladder
+            {curr?.status === "working" && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+              </span>
+            )}
+          </CardTitle>
+          <CardDescription className="text-xs md:text-sm">
+            {curr?.status === "working"
+              ? `running${curr.current_stage != null ? ` - stage goal ${JSON.stringify(curr.current_stage)}` : ""}${curr.note ? ` - ${curr.note}` : ""}`
+              : curr?.stages?.length
+                ? `idle - ${curr.stages.length} stage result${curr.stages.length === 1 ? "" : "s"} posted`
+                : "no curriculum runs posted yet"}
+          </CardDescription>
+        </CardHeader>
+        {!!curr?.stages?.length && (
+          <CardContent className="p-3 md:p-6 pt-0 md:pt-0">
+            <div className="max-h-[220px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Goal</TableHead><TableHead>Trainer</TableHead>
+                    <TableHead className="text-right">Success</TableHead>
+                    <TableHead className="text-right">Return</TableHead>
+                    <TableHead className="text-right">Steps</TableHead>
+                    <TableHead className="text-right">Budget</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...curr.stages].reverse().map((s: any, i: number) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-mono text-xs">{s.goal_m}m</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{String(s.trainer ?? "cem")}</TableCell>
+                      <TableCell className={`text-right font-mono ${s.success_rate > 0 ? "text-emerald-400" : ""}`}>
+                        {(s.success_rate * 100).toFixed(1)}%
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{(s.mean_return ?? 0).toFixed(1)}</TableCell>
+                      <TableCell className="text-right font-mono">{s.mean_steps != null ? s.mean_steps.toFixed(0) : "-"}</TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground">{String(s.budget ?? "-")}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        )}
+      </Card>
 
       <Card>
         <CardHeader className="p-3 md:p-6"><CardTitle className="text-base md:text-lg">Generations</CardTitle>

@@ -334,6 +334,44 @@ app.post("/api/cad/progress", async (c) => {
 
 app.get("/api/cad/progress", (c) => c.json(cadProgress));
 
+// Curriculum ladder state: the manual curriculum experiments (and later the
+// auto-ratchet runner) POST stage results here so the Research page reflects
+// the actual current training state, not just outer-loop generations.
+type CurriculumStage = {
+  goal_m: number; trainer: string; success_rate: number;
+  mean_return?: number; mean_steps?: number; wall_s?: number;
+  eval_episodes?: number; budget?: string; ts?: string;
+};
+let curriculum: { status: string; current_stage?: unknown; note?: string; stages: CurriculumStage[]; ts: string } =
+  { status: "idle", stages: [], ts: new Date().toISOString() };
+
+app.post("/api/curriculum/progress", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.status !== "string") {
+    return c.json({ error: "bad request: body must be an object with a status field" }, 400);
+  }
+  if (body.reset === true) curriculum.stages = [];
+  const sr = body.stage_result;
+  if (sr && typeof sr === "object" && typeof sr.goal_m === "number" && typeof sr.success_rate === "number") {
+    curriculum.stages.push({ ...sr, ts: new Date().toISOString() });
+  }
+  curriculum = {
+    ...curriculum,
+    status: body.status,
+    current_stage: body.current_stage ?? curriculum.current_stage,
+    note: typeof body.note === "string" ? body.note : curriculum.note,
+    ts: new Date().toISOString(),
+  };
+  return c.json({ ok: true, stages: curriculum.stages.length });
+});
+
+app.get("/api/curriculum/progress", (c) => c.json(curriculum));
+
 app.get("/api/stream/state", (c) => c.json({
   meta: streamState.meta,
   scene: streamState.scene,
