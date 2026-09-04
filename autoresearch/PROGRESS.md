@@ -55,6 +55,17 @@ Running log, newest last. All work on branch `auto-researcher`.
   debug.print spam in 500Hz paths; accel gating commented out; unguarded dt
   divisor; rate-sp clamp disabled) + 5-test sim verification plan.
 
+## 23:35-23:37 PDT - rate tuning on the real binary
+- headless binary: rate_step probe (constant setpoint, 500Hz telemetry) +
+  set_gains (runtime swap, no rebuild) (2eb77c3, 904e206).
+- rate_tuning.py: MEASURED firmware gains - roll/pitch rise 860ms, 0%
+  overshoot; yaw never reaches 3 rad/s in 1.5s (22% SS error). Assessment
+  finding 2 confirmed with measurements.
+- rate_tune_sweep.py: first sweep - sim-tuned candidates roll/pitch
+  (1.2, 0.05, 0.012) = 150ms rise / 0.14% overshoot (6x faster), yaw
+  (0.3, 0.02, 0.005) = 390ms rise. Rise floors at the 1.0 Nm torque limit.
+  Labeled SIM-TUNED ONLY, hardware validation required. Firmware untouched.
+
 ## Run 2 (in progress at 23:35)
 20 gens x 6 children, multi-elite loop, fully ChatGPT-driven. At gen 9:
 best succ 0.17, diversity recovered to 0.94 after stagnation restart.

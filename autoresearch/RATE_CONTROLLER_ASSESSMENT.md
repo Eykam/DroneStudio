@@ -77,6 +77,16 @@ in practice, but the safety bound should be explicit).
 
 ## Sim-based verification plan (now runnable)
 
+STATUS 2026-09-04: items 1 and 5 DONE on the real binary -
+- rate_tuning.py + rate_tuning_report.json (step response, D-kick probe):
+  firmware roll/pitch rise 860 ms, 0% overshoot, 1.16 s settling; yaw never
+  reaches the 3 rad/s setpoint in 1.5 s (22% SS error). Finding 2 CONFIRMED
+  with measurements: the gains are very soft for I=0.040.
+- rate_tune_sweep.py + rate_tune_sweep_report.json (first sweep):
+  sim-tuned candidates roll/pitch (1.2, 0.05, 0.012) -> 150 ms rise,
+  0.14% overshoot; yaw (0.3, 0.02, 0.005) -> 390 ms rise. SIM-TUNED ONLY.
+Items 2-4 remain queued.
+
 The headless binary (`zig build headless`, JSON-lines protocol, 500 Hz inner
 loop running the *actual* `RateController.step`) makes these cheap to run:
 
