@@ -1,0 +1,76 @@
+"""Tiny MLP navigation policy + CEM trainer (numpy only, CPU-scale).
+
+CEM (cross-entropy method) is the skeleton's inner-loop trainer: zero deps,
+robust at tiny scale, honest about what it is. Swap point for torch/PPO once
+the loop is proven (see README next-steps).
+"""
+import numpy as np
+
+class MLP:
+    def __init__(self, obs_dim, act_dim, hidden=32, seed=0):
+        rng = np.random.default_rng(seed)
+        self.shapes = [(obs_dim, hidden), (hidden,), (hidden, hidden), (hidden,), (hidden, act_dim), (act_dim,)]
+        self.obs_dim, self.act_dim = obs_dim, act_dim
+        self._init_random(rng)
+
+    def _init_random(self, rng):
+        self.W1 = rng.normal(0, 0.5, self.shapes[0]); self.b1 = np.zeros(self.shapes[1])
+        self.W2 = rng.normal(0, 0.5, self.shapes[2]); self.b2 = np.zeros(self.shapes[3])
+        self.W3 = rng.normal(0, 0.5, self.shapes[4]); self.b3 = np.zeros(self.shapes[5])
+
+    def act(self, obs):
+        h = np.tanh(obs @ self.W1 + self.b1)
+        h = np.tanh(h @ self.W2 + self.b2)
+        return np.tanh(h @ self.W3 + self.b3)
+
+    def get_flat(self):
+        return np.concatenate([p.ravel() for p in (self.W1, self.b1, self.W2, self.b2, self.W3, self.b3)])
+
+    def set_flat(self, flat):
+        out, i = [], 0
+        for shp in self.shapes:
+            n = int(np.prod(shp))
+            out.append(flat[i:i+n].reshape(shp))
+            i += n
+        self.W1, self.b1, self.W2, self.b2, self.W3, self.b3 = out
+
+    @classmethod
+    def param_count(cls, obs_dim, act_dim, hidden=32):
+        return obs_dim*hidden + hidden + hidden*hidden + hidden + hidden*act_dim + act_dim
+
+def cem_train(env_factory, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
+              episodes_per_eval=4, seed=0, verbose=False):
+    """Train MLP weights by CEM. env_factory(seed) -> env with reset/step."""
+    rng = np.random.default_rng(seed)
+    n = MLP.param_count(obs_dim, act_dim)
+    mean, std = np.zeros(n), np.ones(n) * 0.5
+    n_elite = max(2, int(pop * elite_frac))
+    policy = MLP(obs_dim, act_dim, seed=seed)
+    best_ret, best_vec = -np.inf, mean.copy()
+    for it in range(iters):
+        cands = mean + std * rng.normal(0, 1, (pop, n))
+        rets = []
+        for c in cands:
+            policy.set_flat(c)
+            rets.append(np.mean([_run_episode(env_factory, policy, seed=int(rng.integers(1 << 30)))
+                                 for _ in range(episodes_per_eval)]))
+        rets = np.array(rets)
+        elite = cands[np.argsort(rets)[-n_elite:]]
+        mean, std = elite.mean(axis=0), elite.std(axis=0) + 1e-3
+        if rets.max() > best_ret:
+            best_ret, best_vec = float(rets.max()), cands[int(rets.argmax())].copy()
+        if verbose:
+            print(f"  cem iter {it}: best={rets.max():.2f} mean={rets.mean():.2f}")
+    policy.set_flat(best_vec)
+    return policy, best_ret
+
+def _run_episode(env_factory, policy, seed):
+    env = env_factory(seed)
+    obs = env.reset()
+    total = 0.0
+    for _ in range(env.max_steps):
+        obs, r, done = env.step(policy.act(obs))
+        total += r
+        if done:
+            break
+    return total
