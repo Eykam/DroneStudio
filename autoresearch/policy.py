@@ -42,7 +42,10 @@ class MLP:
 
 def cem_train(env_factory, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
               episodes_per_eval=4, seed=0, verbose=False,
-              init_mean=None, init_std=None):
+              init_mean=None, init_std=None, fitness=None):
+    if fitness is not None:
+        global FITNESS_MODE
+        FITNESS_MODE = fitness
     """Train MLP weights by CEM. env_factory(seed) -> env with reset/step."""
     rng = np.random.default_rng(seed)
     n = MLP.param_count(obs_dim, act_dim)
@@ -68,16 +71,37 @@ def cem_train(env_factory, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
     policy.set_flat(best_vec)
     return policy, best_ret
 
+# Fitness shaping for TRAINING only (the env's raw reward stays the reporting
+# metric). "return": episode reward sum (original). "progress": fraction of
+# start-distance closed + success bonus - does not reward early termination,
+# which the raw return does (crash-fast beats hover-and-miss under -0.01/step).
+FITNESS_MODE = "return"
+
+def _episode_fitness(env, obs0, obs_end, total, succeeded):
+    if FITNESS_MODE == "progress":
+        import numpy as _np
+        d0 = float(_np.linalg.norm(obs0[0:3]))
+        d1 = float(_np.linalg.norm(obs_end[0:3]))
+        frac = (d0 - d1) / max(d0, 1e-9)
+        # charge-and-crash near the goal must not score like flying there
+        crash = 1.0 if getattr(env, "collided", False) and not succeeded else 0.0
+        return frac + (1.0 if succeeded else 0.0) - crash
+    return total
+
 def _run_episode(env_factory, policy, seed):
     env = env_factory(seed)
-    obs = env.reset()
-    total = 0.0
-    for _ in range(env.max_steps):
-        obs, r, done = env.step(policy.act(obs))
-        total += r
-        if done:
-            break
-    return total
+    try:
+        obs = env.reset()
+        obs0 = obs.copy()
+        total = 0.0
+        for _ in range(env.max_steps):
+            obs, r, done = env.step(policy.act(obs))
+            total += r
+            if done:
+                break
+        return _episode_fitness(env, obs0, obs, total, getattr(env, "succeeded", False))
+    finally:
+        env.close()  # reaps the sim child; without this every episode leaks a zombie
 
 
 # --- parallel rollouts -------------------------------------------------------
@@ -117,7 +141,10 @@ def default_jobs():
 
 def cem_train_parallel(spec, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
                        episodes_per_eval=4, seed=0, n_jobs=None, verbose=False,
-              init_mean=None, init_std=None):
+              init_mean=None, init_std=None, fitness=None):
+    if fitness is not None:
+        global FITNESS_MODE
+        FITNESS_MODE = fitness
     """cem_train with the population evaluated on a process pool.
     spec = (backend, dist_json, max_steps, dynamics); identical math/seed
     scheme to cem_train otherwise."""
