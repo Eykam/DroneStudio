@@ -45,3 +45,25 @@ too hot; candidates: lower lr, advantage/return normalization, value-loss
 clipping, or smaller epochs-per-rollout. Until that is stable, CEM stays the
 default inner-loop trainer; PPO needs a hyperparameter stabilization pass
 before the swap mandated in the steering note.
+
+## PPO stabilization attempt: LR sweep on g13v140 dist - 2026-09-04
+
+Same protocol as the comparison (backend=sim, eval seed 20000, 6 eps, 250
+steps, rollout 8 x 80 updates, hidden 128, seed 42). Script:
+autoresearch/ppo_lr_sweep.py, results autoresearch/ppo_lr_sweep.json.
+
+  lr 3e-5: eval -94.4 / -95.0 / -158.8 / -134.0 (updates 20-80) - never recovers
+  lr 1e-4: eval -144.0 / -16.5 / -24.0 / -23.0 - recovers to ~-20, plateaus
+  lr 3e-4 (from ppo_vs_cem.json): best -16.9 at update 20, then diverges to -203.5
+
+All three LRs share the same ceiling (best eval ~ -17) and 0/6 success.
+Step size is NOT the binding constraint: PPO simply does not learn this task
+at auto-researcher budgets (62k env steps, ~2k steps per update = very
+high-variance gradients on a sparse-success task). CEM reaches train return
++0.81 in 0.6s with 432 episodes total. At seconds-per-variant budgets,
+direct policy search dominates PPO by a wide margin.
+
+Decision: CEM remains the inner-loop trainer. Revisit PPO only with (a) a
+per-variant budget of 1M+ env steps, or (b) reward shaping / curriculum that
+densifies the success signal. Documented per the steering note so the PPO
+swap is an informed choice, not a default.

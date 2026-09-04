@@ -1,0 +1,64 @@
+{
+ "3e-05": {
+  "wall_s": 7.6,
+  "success_rate": null,
+  "eval_history": [
+   {
+    "update": 20,
+    "eval_mean": -94.35002666666666,
+    "eval_min": -254.727956,
+    "steps": 10540
+   },
+   {
+    "update": 40,
+    "eval_mean": -95.013626,
+    "eval_min": -181.434959,
+    "steps": 21290
+   },
+   {
+    "update": 60,
+    "eval_mean": -158.84272783333333,
+    "eval_min": -212.14132,
+    "steps": 31532
+   },
+   {
+    "update": 80,
+    "eval_mean": -133.97380750000002,
+    "eval_min": -180.09125900000004,
+    "steps": 41341
+   }
+  ],
+  "best_eval_mean": null
+ },
+ "0.0001": {
+  "wall_s": 6.8,
+  "success_rate": null,
+  "eval_history": [
+   {
+    "update": 20,
+    "eval_mean": -143.97162483333335,
+    "eval_min": -227.37381299999993,
+    "steps": 10909
+   },
+   {
+    "update": 40,
+    "eval_mean": -16.530314166666667,
+    "eval_min": -21.827959999999997,
+    "steps": 19535
+   },
+   {
+    "update": 60,
+    "eval_mean": -23.979365833333333,
+    "eval_min": -51.418189999999996,
+    "steps": 27274
+   },
+   {
+    "update": 80,
+    "eval_mean": -22.954162166666666,
+    "eval_min": -68.00881799999999,
+    "steps": 35132
+   }
+  ],
+  "best_eval_mean": null
+ }
+}
