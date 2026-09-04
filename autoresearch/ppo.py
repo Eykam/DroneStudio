@@ -268,10 +268,12 @@ def train_ppo(env_factory, obs_dim: int, act_dim: int,
                 # d(-min(s1,s2))/dlogp = -madv * [active branch]
                 active = np.where((s1 <= s2), 1.0, 0.0)
                 clip_active = (ratio >= 1 - cfg.clip) & (ratio <= 1 + cfg.clip)
-                coef = -madv * active * clip_active  # (B,)
+                coef = -madv * active * clip_active  # (B,) - d(-surrogate)/dlogp
                 dlogp_dmu = (ma - mu) / (std ** 2)   # (B,A)
-                dmu = dlogp_dmu * (-coef[:, None]) / len(mb)
-                dlogstd = (((ma - mu) ** 2 / (std ** 2)) - 1.0) * (-coef[:, None]) / len(mb)
+                # d(-surrogate)/dparams = d(-surrogate)/dlogp * dlogp/dparams (sign fixed:
+                # the original flipped mu and log_std to ascent, which anti-learned)
+                dmu = dlogp_dmu * (coef[:, None]) / len(mb)
+                dlogstd = (((ma - mu) ** 2 / (std ** 2)) - 1.0) * (coef[:, None]) / len(mb)
                 # entropy bonus: dH/dlog_std = 1 per dim -> subtract coef
                 dlogstd -= cfg.entropy_coef / len(mb)
 
