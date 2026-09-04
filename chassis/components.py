@@ -70,7 +70,7 @@ class Component:
 
 LIBRARY = {
     "motor": Component(
-        "EMAX Eco II 2207", 33.4, (0.0275, 0.0275, 0.0332), "cylinder-z", "motor_pad",
+        "AKK RS2205 2300KV", 28.8, (0.0275, 0.0275, 0.0332), "cylinder-z", "motor_pad",
         "https://www.mantisfpv.com.au/emax-eco-ii-series-2207-3-6s-1700-1900-2400kv/",
         step_path="parts/motor_2207.step"),  # GrabCAD generic 2207 (bbox 27.0x27.0x32.3mm, within 1.2mm of ECO II); no exact EMAX STEP exists - https://grabcad.com/library/2207-brushless-motor-1
     "prop": Component(
