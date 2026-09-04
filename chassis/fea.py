@@ -93,25 +93,39 @@ def run_ccx(job_base, ccx="ccx"):
     return r.returncode == 0 and os.path.exists(job_base + ".frd")
 
 def parse_frd(frd_path):
-    """max von Mises (MPa) and max |U| (mm) from a ccx .frd (text)."""
+    """max von Mises (MPa) and max |U| (mm) from a ccx .frd text file."""
     mode, max_vm, max_u = None, 0.0, 0.0
-    sxx=syy=szz=sxy=syz=sxz=None
     for line in open(frd_path):
-        if line.startswith("    1PSTEP"):
-            mode = None
-        elif "-4" in line[:13] and "STRESS" in line:
-            mode = "S"; cnt = 0
-        elif "-4" in line[:13] and "DISP" in line:
-            mode = "U"; cnt = 0
-        elif line.startswith(" -1") and mode == "S":
-            v = [float(line[13+i*12:25+i*12]) for i in range(6)]
-            sxx,syy,szz,sxy,syz,sxz = v
-        elif line.startswith(" -2") and mode == "S" and sxx is not None:
-            vm = math.sqrt(0.5*((sxx-syy)**2+(syy-szz)**2+(szz-sxx)**2)+3*(sxy**2+syz**2+sxz**2))
-            max_vm = max(max_vm, vm); sxx=None
-        elif line.startswith(" -1") and mode == "U":
-            v = [float(line[13+i*12:25+i*12]) for i in range(3)]
-            max_u = max(max_u, math.sqrt(sum(x*x for x in v)))
+        s = line.lstrip()
+        if s.startswith("-4"):
+            if "STRESS" in line:
+                mode = "S"
+            elif "DISP" in line:
+                mode = "U"
+            else:
+                mode = None
+        elif s.startswith("-1") and mode in ("S", "U"):
+            rest = s[2:]
+            body = rest[10:]  # skip 10-char node id; values are fixed 12-char fields
+            vals = []
+            for i in range(0, len(body), 12):
+                c = body[i:i+12].strip()
+                if c:
+                    try:
+                        vals.append(float(c))
+                    except ValueError:
+                        pass
+            if mode == "S" and len(vals) >= 6:
+                sxx, syy, szz, sxy, syz, sxz = vals[:6]
+                vm = math.sqrt(0.5*((sxx-syy)**2+(syy-szz)**2+(szz-sxx)**2)+3*(sxy**2+syz**2+sxz**2))
+                if vm > max_vm:
+                    max_vm = vm
+            elif mode == "U" and len(vals) >= 3:
+                u = math.sqrt(vals[0]**2 + vals[1]**2 + vals[2]**2)
+                if u > max_u:
+                    max_u = u
+        elif s.startswith("-2") and mode == "S":
+            pass  # stress fits on the -1 line; ignore continuations
     return max_vm, max_u
 
 def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="ccx"):
