@@ -1,4 +1,4 @@
-"""Candidate B: chamfered closed spars with short roots and continuous swept chines.
+"""Candidate A: chined monocoque keel and unified low stereo prow.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -256,13 +256,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
         (24.0, 57.0, cockpit_h, 43.0),
         (38.0, 26.0, 35.6, 16.0),
         (92.5, 26.0, 35.6, 16.0),
-        (97.0, 18.0, 30.0, 8.0),
+        (94.8, 18.0, 30.0, 8.0),
     ]
     # Hold the payload shoulders while pulling the belly chines inward.
     # A wider dorsal opening lowers unused canopy skin above the upright Pi;
     # the stack, battery, and rear fin retain their complete service envelopes.
     old_draft = draft
-    draft = 0.055 * p.body_fairing_draft_mm / 4.7
+    draft = 0.035 * p.body_fairing_draft_mm / 4.7
     stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                 for x, w, h, c in stations]
     shell_envelopes = []
@@ -273,13 +273,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # z + slope*y = shoulder*(1-slope*draft) + slope*breadth/2.
         # Offset their full 3D normals, including the longitudinal sweep. This
         # preserves the printable gauge through both tapered sides and roof folds.
-        side_offsets, roof_offsets = [], []
+        side_offsets, roof_offsets, chine_offsets = [], [], []
+        # The lower side is a 45-degree keel chine rather than a square skirt.
+        # Offset its complete 3D plane just like the upper side and canopy.
+        chine_height = 1.65
+        chine_inset = 1.65
+        chine_slope = chine_inset/chine_height-draft
         for a, z in zip(stations, stations[1:]):
             dx = z[0] - a[0]
             side_gradient = (z[1]-a[1])/(2*dx)
             roof_gradient = (1-slope*draft)*(z[2]-a[2])/dx + slope*side_gradient
             side_offsets.append(wall*math.sqrt(1+draft*draft+side_gradient**2))
             roof_offsets.append(wall*math.sqrt(1+slope*slope+roof_gradient**2))
+            chine_offsets.append(wall*math.sqrt(1+chine_slope**2+side_gradient**2))
 
         def offset_profile(values, offsets):
             """Miter adjacent offset planes, preserving gauge through each chine."""
@@ -304,6 +310,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
             return profile[-1][1]
 
         inner_sides = offset_profile([w/2 for _, w, _, _ in stations], side_offsets)
+        inner_chines = offset_profile(
+            [w/2-chine_inset for _, w, _, _ in stations], chine_offsets)
         inner_roofs = offset_profile(
             [(1-slope*draft)*h+slope*w/2 for _, w, h, _ in stations], roof_offsets)
         outer_roofs = [(x, h+slope*((w-c)/2-draft*h)) for x, w, h, c in stations]
@@ -322,18 +330,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 bottom = -0.2
             else:
                 side_constant, crown_half, bottom = width/2, crown/2, 0.0
-            belly_half = side_constant - draft*bottom
-            shoulder_half = side_constant - draft*shoulder
+            chine_constant = (interpolate(inner_chines, x) if inner
+                              else width/2-chine_inset)
+            chine_z = (side_constant-chine_constant)/(draft+chine_slope)
+            belly_half = chine_constant+chine_slope*bottom
+            chine_half = side_constant-draft*chine_z
+            shoulder_half = side_constant-draft*shoulder
             return b.Wire.make_polygon([
                 (x, -belly_half, bottom), (x, belly_half, bottom),
-                (x, shoulder_half, shoulder), (x, crown_half, roof),
-                (x, -crown_half, roof), (x, -shoulder_half, shoulder),
+                (x, chine_half, chine_z), (x, shoulder_half, shoulder),
+                (x, crown_half, roof), (x, -crown_half, roof),
+                (x, -shoulder_half, shoulder), (x, -chine_half, chine_z),
             ], close=True)
 
         outer_fairing = b.Solid.make_loft(
             [cabin_wire(s) for s in stations], ruled=True)
         # End bulkheads join both skins without closing the service openings.
-        inner_x = sorted({x for profile in (inner_sides, inner_roofs, outer_roofs)
+        inner_x = sorted({x for profile in (inner_sides, inner_chines, inner_roofs, outer_roofs)
                           for x, _ in profile
                           if inner_sides[0][0] <= x <= inner_sides[-1][0]})
         inner_fairing = b.Solid.make_loft(
@@ -350,11 +363,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # overlaps the spine, creating a continuous monocoque junction on the bed.
     # All camera service boxes clear the inner faces by 2 mm; the lens ports
     # below are the only forward openings.
+    # One shallow transverse prow replaces the two inward cheek skins.
+    # The upright Pi spine continues to the bed as an internal shear member;
+    # the camera bay stays accessible from its dorsal opening.
     cheek_stations = [
-        (62.5, 26.0, 14.0, 16.0),
-        (65.0, 35.0, 16.8, 27.0),
-        (93.5, 35.0, 16.8, 27.0),
-        (97.0, 26.0, 14.0, 16.0),
+        (62.5, 82.0, 14.0, 72.0),
+        (65.0, 91.0, 16.8, 83.0),
+        (93.5, 91.0, 16.8, 83.0),
+        (95.4, 87.0, 16.0, 79.0),
     ]
     cheek_stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
@@ -363,20 +379,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Hollow the joined nose once: shared voids remove doubled internal
     # partitions while the outer cheeks become one continuous faired shell.
     outer_hull, inner_hull = shell_envelopes[0]
-    for camera_y in (-28.0*sy, 28.0*sy):
-        outer_hull = outer_hull + b.Pos(0, camera_y, 0)*shell_envelopes[1][0]
-        inner_hull = inner_hull + b.Pos(0, camera_y, 0)*shell_envelopes[1][1]
-    body = body + (outer_hull-inner_hull)
+    outer_hull = outer_hull + shell_envelopes[1][0]
+    inner_hull = inner_hull + shell_envelopes[1][1]
+    body = body + (outer_hull-inner_hull) + fairing
     for camera_y in (-28.0*sy, 28.0*sy):
         # Short first-layer seat rails tie each cheek's end bulkheads together.
-        seat = b.Pos(79.75*sx, camera_y, 0) * b.extrude(
-            b.Rectangle(33.25*sx, p.payload_rail_width_mm).face(), wall)
+        seat = b.Pos(78.95*sx, camera_y, 0) * b.extrude(
+            b.Rectangle(31.65*sx, p.payload_rail_width_mm).face(), wall)
         body = body + seat
 
     # Two first-layer longerons support the recessed payloads, tie the end
     # bulkheads to all four arm chines, and leave underside service access.
     # They also carry battery jolt loads into the central mounting ring.
-    rail_len = p.center_plate_len_mm - wall
+    rail_len = stations[-1][0] - stations[0][0] - wall
     rail_x = (stations[0][0] + stations[-1][0])/2
     for rail_y in (-10.0*sy, 10.0*sy):
         rail = b.Pos(rail_x, rail_y, 0) * b.extrude(
@@ -386,7 +401,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # First-layer diagonal ties brace nose and tail against lateral sway.
     # Their triangular load paths replace shell thickening and sit below the
     # 2 mm service clearance of the recessed battery, Pi, GPS and cameras.
-    for root_x, end_x in ((-27.0, -144.0), (27.0, 96.0)):
+    for root_x, end_x in ((-27.0, -144.0), (27.0, 94.0)):
         for side in (-1, 1):
             ax, ay = root_x*sx, side*27.0*sy
             bx, by = end_x*sx, -side*11.0*sy
