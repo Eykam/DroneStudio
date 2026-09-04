@@ -710,7 +710,7 @@ pub fn main() !void {
                 world.dyn.motor_v2 = false;
                 world.dyn.m2_omega = .{ 0, 0, 0, 0 };
                 world.dyn.m2_hist_idx = 0;
-                world.dyn.m2_omega_max = 3560.0; // rad/s: RS2205-2300KV at ~14.8V loaded; kf is calibrated against this (MOTOR_V2.md)
+                world.dyn.m2_omega_max = 4046.0; // rad/s: 2300KV * 16.8V absolute no-load cap; the electrical equilibrium self-limits below this (~3500 at full charge)
                 world.dyn.m2_kd_over_kf = 0.015; // physical 5in prop torque/thrust ratio, m. NOTE: manifest drag_ratio=0.15 is non-physical for a 2205; mixer allocation still uses the manifest value
                 world.dyn.m2_ke = 0.004152; // V*s/rad = N*m/A = 60/(2*pi*2300) from RS2205 2300KV spec
                 world.dyn.m2_rw = 0.065; // RS2205-2300KV internal resistance spec, ohm (AKK clone of EMAX design)
@@ -720,7 +720,7 @@ pub fn main() !void {
                 world.dyn.m2_batt_cap_as = 4680.0; // charge, A*s (~1.3Ah, ASSUMPTION)
                 world.dyn.m2_soc = 1.0;
                 world.dyn.m2_esc_delay_ticks = 1; // DShot latency in 500Hz ticks (ESTIMATE)
-                world.dyn.m2_kf = world.dyn.motor_max_thrust / (world.dyn.m2_omega_max * world.dyn.m2_omega_max);
+                world.dyn.m2_kf = 7.9e-7; // N/(rad/s)^2, thrust-stand fit (oscarliang RS2205-2300KV HQ5045BN 4S); NOT derived from max_thrust so CAD thrust-cap changes don't recalibrate the prop
                 inline for (0..4) |i| world.dyn.m2_cmd_hist[i] = .{ 0, 0, 0, 0 };
             }
             const n = @min(m.name.len, world.dyn_name_buf.len);
