@@ -1,0 +1,49 @@
+{
+  "purpose": "step-response of his firmware RateController gains on the headless binary (Drone.zig inertia)",
+  "binary": "/workspace/zig-out/bin/dronestudio-headless",
+  "setpoint_rad_s": 3.0,
+  "ticks": 750,
+  "sample_every": 5,
+  "note": "SIM measurement vs simulated inertia - tuning candidates need hardware validation; NOT flight-ready claims",
+  "axes": {
+    "roll": {
+      "rise_time_s": 0.86,
+      "t10_s": 0.08,
+      "t90_s": 0.94,
+      "overshoot_pct": 0.0,
+      "settling_time_s": 1.16,
+      "steady_state_mean_rad_s": 2.9425,
+      "steady_state_err_rad_s": 0.0575,
+      "peak_rate_rad_s": 2.9599,
+      "mean_abs_torque_first_20ms_Nm": 0.11757,
+      "mean_abs_torque_steady_Nm": 0.01054,
+      "reached_setpoint": true
+    },
+    "pitch": {
+      "rise_time_s": 0.86,
+      "t10_s": 0.08,
+      "t90_s": 0.94,
+      "overshoot_pct": 0.0,
+      "settling_time_s": 1.16,
+      "steady_state_mean_rad_s": 2.9425,
+      "steady_state_err_rad_s": 0.0575,
+      "peak_rate_rad_s": 2.9599,
+      "mean_abs_torque_first_20ms_Nm": 0.11757,
+      "mean_abs_torque_steady_Nm": 0.01054,
+      "reached_setpoint": true
+    },
+    "yaw": {
+      "rise_time_s": null,
+      "t10_s": 0.14,
+      "t90_s": null,
+      "overshoot_pct": 0.0,
+      "settling_time_s": null,
+      "steady_state_mean_rad_s": 2.3415,
+      "steady_state_err_rad_s": 0.6585,
+      "peak_rate_rad_s": 2.3933,
+      "mean_abs_torque_first_20ms_Nm": 0.06058,
+      "mean_abs_torque_steady_Nm": 0.03562,
+      "reached_setpoint": false
+    }
+  }
+}

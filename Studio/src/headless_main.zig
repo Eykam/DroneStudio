@@ -100,6 +100,7 @@ const World = struct {
     collided: bool = false,
     succeeded: bool = false,
     done: bool = false,
+    last_torque: [3]f32 = .{ 0, 0, 0 }, // PID torque output, body frame (telemetry)
 
     fn init(alloc: std.mem.Allocator) !*World {
         _ = alloc;
@@ -217,6 +218,7 @@ const World = struct {
 
         const omega = self.bodyOmega();
         const torque_body = self.rate_ctrl.update(self.filtered_rates, omega, FAST_DT);
+        self.last_torque = torque_body;
 
         const q = self.bodyQuat();
         const thrust_world = Vec3.init(0, self.filtered_thrust, 0).rotate_by_quaternion(q);
@@ -410,6 +412,34 @@ pub fn main() !void {
             } else 0;
             world.reset(scene, seed);
             try writeObsReply(stdout, world, 0.0, false, false);
+        } else if (std.mem.eql(u8, cmd, "rate_step")) {
+            // Tuning probe (RATE_CONTROLLER_ASSESSMENT.md): hold a constant
+            // body-rate setpoint for `ticks` fast ticks at `thrust` (N) and
+            // stream [t, wx, wy, wz, tq_x, tq_y, tq_z] every `sample_every`.
+            // Runs the same fastStep path as episodes, so his input filters
+            // and PID are all in the loop. noise=0 recommended for clean reads.
+            const sp_v = root.object.get("setpoint") orelse continue;
+            const sp_arr = sp_v.array.items;
+            if (sp_arr.len != 3) continue;
+            var sp: [3]f32 = undefined;
+            for (sp_arr, 0..) |v, i| sp[i] = f32FromJson(v, 0);
+            const ticks: usize = if (root.object.get("ticks")) |t| @intFromFloat(f32FromJson(t, 500)) else 500;
+            const every: usize = if (root.object.get("sample_every")) |t| @max(1, @as(usize, @intFromFloat(f32FromJson(t, 5)))) else 5;
+            const thrust: f32 = if (root.object.get("thrust")) |t| f32FromJson(t, MASS * 9.81) else MASS * 9.81;
+            if (root.object.get("noise")) |n| world.scene.dynamics_noise = f32FromJson(n, 0);
+            try stdout.writeAll("{\"samples\":[");
+            var i: usize = 0;
+            while (i < ticks) : (i += 1) {
+                world.fastStep(sp, thrust);
+                if (i % every == 0) {
+                    const om = world.bodyOmega();
+                    const t = @as(f32, @floatFromInt(i)) * FAST_DT;
+                    if (i > 0) try stdout.writeAll(",");
+                    try stdout.print("[{d:.4},{d:.4},{d:.4},{d:.4},{d:.5},{d:.5},{d:.5}]", .{ t, om.x(), om.y(), om.z(), world.last_torque[0], world.last_torque[1], world.last_torque[2] });
+                }
+            }
+            try stdout.writeAll("],\"ok\":true}\n");
+            try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
             const arr = act_v.array.items;
