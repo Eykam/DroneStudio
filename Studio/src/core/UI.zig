@@ -326,7 +326,7 @@ fn createWindowsStructType(Windows: []const type) type {
         fields[i] = .{
             .name = @typeName(T),
             .type = *T,
-            .default_value = null,
+            .default_value_ptr = null,
             .is_comptime = false,
             .alignment = @alignOf(*T),
         };

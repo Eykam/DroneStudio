@@ -31,11 +31,11 @@ pub const RecorderSystem = struct {
 
     // mmap bookkeeping
     file: ?std.fs.File = null,
-    base_ptr: ?[]align(std.mem.page_size) u8 = null,
+    base_ptr: ?[]align(std.heap.pageSize()) u8 = null,
     map_len: usize = 0,
 
     play_file: ?std.fs.File = null,
-    play_map: ?[]align(std.mem.page_size) u8 = null,
+    play_map: ?[]align(std.heap.pageSize()) u8 = null,
     play_len: usize = 0,
 
     // sparse seek index
@@ -81,7 +81,7 @@ pub const RecorderSystem = struct {
         const pg = if (@hasDecl(std.os, "getPageSize"))
             std.os.getPageSize()
         else
-            std.mem.page_size;
+            std.heap.pageSize();
 
         self.map_len = ((est_bytes + pg - 1) / pg) * pg;
 

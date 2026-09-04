@@ -1179,7 +1179,7 @@ fn tessellate(
     try stack.append(.{ .bez = bezier, .t0 = 0.0, .t1 = 1.0 });
 
     while (stack.items.len > 0) {
-        const seg = stack.pop();
+        const seg = stack.pop().?;
         const bez = seg.bez;
 
         if (isFlatEnough(bez, flatness)) {

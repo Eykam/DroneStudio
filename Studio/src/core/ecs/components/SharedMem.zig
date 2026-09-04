@@ -39,7 +39,7 @@ fn getShmName(allocator: std.mem.Allocator) ![:0]const u8 {
     return allocator.dupeZ(u8, SHM_ENV); // Allocates & appends '\x00'.
 }
 
-fn initSharedMem(allocator: std.mem.Allocator) ![]align(std.mem.page_size) u8 {
+fn initSharedMem(allocator: std.mem.Allocator) ![]align(std.heap.pageSize()) u8 {
     const shm_name = try getShmName(allocator);
     defer allocator.free(shm_name);
 
@@ -71,7 +71,7 @@ pub const SharedMemSystem = struct {
     allocator: std.mem.Allocator,
     globals: *GlobalsComponent,
     viewports: *SparseSet(ViewportComponent),
-    mem_region: []align(std.mem.page_size) u8, // 16‑byte struct we mapped
+    mem_region: []align(std.heap.pageSize()) u8, // 16‑byte struct we mapped
     seq: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, globals: *GlobalsComponent, viewports: *SparseSet(ViewportComponent)) !Self {

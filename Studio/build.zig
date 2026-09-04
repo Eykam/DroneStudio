@@ -12,7 +12,7 @@ fn getOpenGLLib(target: std.Build.ResolvedTarget) []const u8 {
     return switch (target.result.os.tag) {
         .linux => "GL",
         .windows => "opengl32",
-        else => if (std.Target.isDarwin(target.result)) "OpenGL" else "",
+        else => if ((target.result.os.tag == .macos)) "OpenGL" else "",
     };
 }
 
@@ -159,6 +159,7 @@ fn configureDesktopLibs(
         },
         .linux => {
             exe.linkSystemLibrary("glfw");
+        exe.linkSystemLibrary("cudart");
             exe.linkSystemLibrary(getOpenGLLib(target));
             // Optional: Add X11 dependencies if needed
             exe.linkSystemLibrary("X11");
