@@ -17,22 +17,51 @@ def _backend(name):
     from env import StubNavEnv, make_stub_factory
     return StubNavEnv, make_stub_factory
 
+def _rollout_act_factory(trainer, trained, obs_dim, act_dim):
+    """Uniform act(obs) interface over the two trainer output types."""
+    if trainer == "ppo":
+        import numpy as _np
+        from ppo import MLP
+        actor = MLP(_np.random.default_rng(0), obs_dim, 128, act_dim)
+        actor.load({k.split(".", 1)[1]: v for k, v in trained.items() if k.startswith("actor.")})
+        mean, var = trained["norm_mean"], trained["norm_var"]
+        def act(obs):
+            nobs = _np.clip((obs - mean) / _np.sqrt(var + 1e-8), -10, 10)
+            mu, _ = actor.forward(nobs[None, :])
+            return _np.tanh(mu[0])
+        return act
+    return trained.act
+
+
 def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
                           cem_pop=8, train_episodes=4, eval_episodes=6,
-                          max_steps=200, verbose=False, backend="quad"):
+                          max_steps=200, verbose=False, backend="quad",
+                          trainer="cem", ppo_config=None):
     EnvCls, make_factory = _backend(backend)
     factory = make_factory(dist, max_steps=max_steps)
-    policy, train_ret = cem_train(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM,
-                                  iters=cem_iters, pop=cem_pop,
-                                  episodes_per_eval=train_episodes,
-                                  seed=train_seed, verbose=verbose)
+    if trainer == "ppo":
+        from ppo import train_ppo, PPOConfig
+        cfg = ppo_config or PPOConfig(seed=train_seed)
+        res = train_ppo(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM, config=cfg)
+        trained = {**{f"actor.{k}": v for k, v in res.best_params.get("actor", {}).items()},
+                   "log_std": res.best_params.get("log_std"),
+                   "norm_mean": res.best_params.get("norm_mean"),
+                   "norm_var": res.best_params.get("norm_var")}
+        train_ret = res.best_eval_mean
+        act = _rollout_act_factory("ppo", trained, EnvCls.OBS_DIM, EnvCls.ACT_DIM)
+    else:
+        policy, train_ret = cem_train(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM,
+                                      iters=cem_iters, pop=cem_pop,
+                                      episodes_per_eval=train_episodes,
+                                      seed=train_seed, verbose=verbose)
+        act = policy.act
     returns, successes, steps = [], [], []
     for i in range(eval_episodes):
         env = EnvCls(dist, seed=eval_seed + i, max_steps=max_steps)
         obs = env.reset()
         total = 0.0
         for _ in range(max_steps):
-            obs, r, done = env.step(policy.act(obs))
+            obs, r, done = env.step(act(obs))
             total += r
             if done:
                 break
@@ -45,4 +74,5 @@ def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
         "mean_steps": float(np.mean(steps)),
         "train_best_return": float(train_ret),
         "backend": backend,
+        "trainer": trainer,
     }
