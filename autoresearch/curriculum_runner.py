@@ -31,6 +31,21 @@ ITERS = int(os.environ.get("CURR_ITERS", "40"))
 POP = int(os.environ.get("CURR_POP", "64"))
 MAX_STEPS = 400
 
+def post_series(series, y, label=None):
+    if not (DASHBOARD and TOKEN):
+        return
+    try:
+        pt = {"y": float(y)}
+        if label:
+            pt["label"] = str(label)
+        req = urllib.request.Request(
+            DASHBOARD + "/api/series",
+            data=json.dumps({"series": series, "point": pt}).encode(),
+            headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10).read()
+    except Exception:
+        pass
+
 def post(payload):
     if not (DASHBOARD and TOKEN):
         return
@@ -102,6 +117,7 @@ def main():
                 break
         s, cand = best
         report["stages"].append({"goal_m": gd, "success": s})
+        post_series("curriculum_success", s, label=f"stage {gd:g}m")
         if s > 0:
             policy = cand
             publish_policy(policy)  # /watch flies this now
