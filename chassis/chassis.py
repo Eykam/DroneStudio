@@ -22,15 +22,15 @@ class ChassisParams:
     arm_crown_width_mm: float = 3.0     # narrow high-fiber facet on the closed arm shell
     arm_height_falloff: float = 0.55    # deep root, lean span; moment-shaped shell
     arm_tip_height_mm: float = 10.8     # faired nacelle depth at the motor load transfer
-    center_plate_len_mm: float = 277.0  # longitudinal payload hull, rear GPS to nose
-    center_plate_wid_mm: float = 66.0
+    center_plate_len_mm: float = 271.0  # shortened camera prow, rear avionics to nose
+    center_plate_wid_mm: float = 68.0
     top_plate_thickness_mm: float = 2.5
-    body_thickness_mm: float = 1.30     # structural skin; roofs use normal offsets
-    arm_rib_thickness_mm: float = 1.30  # closed arm shell wall
+    body_thickness_mm: float = 1.25     # structural skin; all faces use normal offsets
+    arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
     arm_rib_root_mm: float = 12.0
-    body_fairing_height_mm: float = 56.0 # raised cockpit over the uninterrupted roots
-    body_fairing_draft_mm: float = 0.8
+    body_fairing_height_mm: float = 54.0 # lowered stack canopy over uninterrupted roots
+    body_fairing_draft_mm: float = 5.4  # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
     body_roof_top_len_mm: float = 86.0
     body_roof_top_wid_mm: float = 46.0
@@ -47,7 +47,7 @@ class ChassisParams:
     motor_center_hole_dia_mm: float = 9.0
     stack_spacing_mm: float = 30.5      # standard FC/ESC stack
     stack_hole_dia_mm: float = 3.2
-    stack_standoff_dia_mm: float = 6.4   # 1.6 mm annular wall around each M3 bore
+    stack_standoff_dia_mm: float = 6.0   # 1.4 mm annular wall around each M3 bore
     stack_standoff_height_mm: float = 32.0
     camera_aperture_dia_mm: float = 10.0
     fillet_radius_mm: float = 2.0
@@ -240,43 +240,45 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # electronics cutouts and recovering stiffness with a thick belly plate.
     wall = p.body_thickness_mm
     slope = p.body_roof_slope
-    sx = p.center_plate_len_mm / 277.0
-    sy = p.center_plate_wid_mm / 66.0
+    draft = p.body_fairing_draft_mm / p.body_fairing_height_mm
+    sx = p.center_plate_len_mm / 271.0
+    sy = p.center_plate_wid_mm / 68.0
     cockpit_h = p.body_fairing_height_mm
 
-    # x, breadth, shoulder height, dorsal crown breadth (mm). A close-fitting
-    # battery spine flows into the full-width arm-root cockpit, then pinches
-    # around the upright Pi before flaring into low stereo-camera cheeks.
-    # The narrow forward ridge retains headroom for the Pi while dropping the
-    # outer nose shoulders to camera height: stiffness comes from these folded
-    # chines, rather than carrying the old tall, broad payload sidewalls.
+    # x, belly breadth, shoulder height, dorsal crown breadth (mm). The
+    # sidewalls lean inward with height: broad first-layer chines still collect
+    # the arm loads, while the upper body wraps closely around the payloads.
+    # GPS and IMU share the aft avionics pod; moving the IMU off the stack lets
+    # its canopy drop without clipping either board's service envelope. The
+    # battery remains recessed and accessible through the dorsal opening.
     stations = [
         (-145.0, 26.0, 15.0, 12.0),
         (-141.0, 30.0, 17.0, 14.0),
-        (-116.0, 46.0, 41.0, 38.0),
-        (-45.0, 46.0, 41.0, 38.0),
-        (-33.0, 56.0, 42.0, 46.0),
-        (-24.0, 60.0, cockpit_h, 46.0),
-        (24.0, 60.0, cockpit_h, 46.0),
-        (38.0, 26.0, 36.0, 12.0),
-        (77.0, 26.0, 36.0, 12.0),
-        (89.0, 66.0, 18.0, 30.0),
-        (93.0, 66.0, 18.0, 30.0),
-        (117.0, 66.0, 18.0, 46.0),
-        (128.0, 40.0, 16.0, 16.0),
-        (132.0, 26.0, 15.0, 12.0),
+        (-116.0, 52.0, 41.5, 43.5),
+        (-45.0, 52.0, 41.5, 43.5),
+        (-33.0, 56.0, 42.0, 40.0),
+        (-24.0, 60.0, cockpit_h, 44.0),
+        (24.0, 60.0, cockpit_h, 44.0),
+        (38.0, 26.0, 37.0, 10.0),
+        (77.0, 26.0, 37.0, 10.0),
+        (89.0, 68.0, 18.0, 26.0),
+        (93.0, 68.0, 18.0, 26.0),
+        (117.0, 68.0, 18.0, 46.0),
+        (123.0, 44.0, 17.0, 20.0),
+        (126.0, 26.0, 15.0, 12.0),
     ]
     stations = [(x*sx, w*sy, h, c*sy) for x, w, h, c in stations]
 
-    # A change in breadth or height tilts the skin along X as well as Y.
-    # Account for both slopes in the normal offset: a nominal Y-only
-    # offset would leave sub-millimetre walls at the swept nose and shoulders.
+    # Each side plane is y + draft*z = breadth/2; each roof plane is
+    # z + slope*y = shoulder*(1-slope*draft) + slope*breadth/2.
+    # Offset their full 3D normals, including the longitudinal sweep. This
+    # preserves the printable gauge through both tapered sides and roof folds.
     side_offsets, roof_offsets = [], []
     for a, z in zip(stations, stations[1:]):
         dx = z[0] - a[0]
         side_gradient = (z[1]-a[1])/(2*dx)
-        roof_gradient = (z[2]-a[2])/dx + slope*side_gradient
-        side_offsets.append(wall*math.hypot(1.0, side_gradient))
+        roof_gradient = (1-slope*draft)*(z[2]-a[2])/dx + slope*side_gradient
+        side_offsets.append(wall*math.sqrt(1+draft*draft+side_gradient**2))
         roof_offsets.append(wall*math.sqrt(1+slope*slope+roof_gradient**2))
 
     def offset_profile(values, offsets):
@@ -302,27 +304,30 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return profile[-1][1]
 
     inner_sides = offset_profile([w/2 for _, w, _, _ in stations], side_offsets)
-    inner_roofs = offset_profile([h+slope*w/2 for _, w, h, _ in stations], roof_offsets)
-    outer_roofs = [(x, h+slope*(w-c)/2) for x, w, h, c in stations]
+    inner_roofs = offset_profile(
+        [(1-slope*draft)*h+slope*w/2 for _, w, h, _ in stations], roof_offsets)
+    outer_roofs = [(x, h+slope*((w-c)/2-draft*h)) for x, w, h, c in stations]
 
     def cabin_wire(station, inner=False):
         x, width, shoulder, crown = station
-        roof = shoulder + slope*(width-crown)/2
+        roof = shoulder + slope*((width-crown)/2-draft*shoulder)
         if inner:
-            half = interpolate(inner_sides, x)
+            side_constant = interpolate(inner_sides, x)
             roof_constant = interpolate(inner_roofs, x)
             # Offset the pitched surface along its normal, then extend it
             # through the crown: an open service hatch, with no broad bridge.
-            shoulder = roof_constant - slope*half
+            shoulder = (roof_constant - slope*side_constant)/(1-slope*draft)
             roof = interpolate(outer_roofs, x) + 0.5
             crown_half = (roof_constant-roof)/slope
             bottom = -0.2
         else:
-            half, crown_half, bottom = width/2, crown/2, 0.0
+            side_constant, crown_half, bottom = width/2, crown/2, 0.0
+        belly_half = side_constant - draft*bottom
+        shoulder_half = side_constant - draft*shoulder
         return b.Wire.make_polygon([
-            (x, -half, bottom), (x, half, bottom),
-            (x, half, shoulder), (x, crown_half, roof),
-            (x, -crown_half, roof), (x, -half, shoulder),
+            (x, -belly_half, bottom), (x, belly_half, bottom),
+            (x, shoulder_half, shoulder), (x, crown_half, roof),
+            (x, -crown_half, roof), (x, -shoulder_half, shoulder),
         ], close=True)
 
     outer_fairing = b.Solid.make_loft(
@@ -334,7 +339,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     inner_fairing = b.Solid.make_loft(
         [cabin_wire((x, 0, 0, 0), inner=True) for x in inner_x], ruled=True)
     body = body + (outer_fairing - inner_fairing)
-    roof_z = max(h + slope*(w-c)/2 for _, w, h, c in stations)
+    roof_z = max(z for _, z in outer_roofs)
 
     # Two first-layer longerons support the recessed payloads, tie the end
     # bulkheads to all four arm chines, and leave underside service access.
@@ -349,7 +354,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # First-layer diagonal ties brace nose and tail against lateral sway.
     # Their triangular load paths replace shell thickening and sit below the
     # 2 mm service clearance of the recessed battery, Pi, GPS and cameras.
-    for root_x, end_x in ((-27.0, -144.0), (27.0, 131.0)):
+    for root_x, end_x in ((-27.0, -144.0), (27.0, 125.0)):
         for side in (-1, 1):
             ax, ay = root_x*sx, side*27.0*sy
             bx, by = end_x*sx, -side*11.0*sy
