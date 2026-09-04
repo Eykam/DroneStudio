@@ -119,14 +119,14 @@ def _slim_glb(glb_path):
     primitive PER FACE (50k draw calls -> orbit lag). gltfpack welds, merges
     primitives, simplifies (error-bounded), quantizes (KHR_mesh_quantization,
     natively supported by three.js/babylon - no decoder needed). No meshopt
-    compression (-cc): the viewer has no decoder wired yet."""
+    compression (-cc): dashboard drei useGLTF wires MeshoptDecoder by default (verified 2026-09-04)."""
     import shutil as _sh, subprocess as _sp, os as _os
     gp = _sh.which("gltfpack")
     if not gp:
         return
     tmp = glb_path + ".slim"
     try:
-        r = _sp.run([gp, "-i", glb_path, "-o", tmp, "-si", "0.7", "-kn"],
+        r = _sp.run([gp, "-i", glb_path, "-o", tmp, "-si", "0.7", "-kn", "-cc"],
                     capture_output=True, timeout=300)
         if r.returncode == 0 and _os.path.exists(tmp) and _os.path.getsize(tmp) > 1000:
             _os.replace(tmp, glb_path)
