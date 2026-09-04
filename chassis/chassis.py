@@ -13,18 +13,20 @@ import build123d as b
 @dataclass
 class ChassisParams:
     arm_length_mm: float = 150.0        # sim motor_arm_length (center to motor axis)
-    arm_width_mm: float = 14.0
-    arm_thickness_mm: float = 23.0      # maximum T-beam depth at the loaded root
-    arm_root_width_mm: float = 22.0
+    arm_width_mm: float = 8.2
+    arm_thickness_mm: float = 26.5      # maximum T-beam depth at the loaded root
+    arm_root_width_mm: float = 14.0
     center_plate_len_mm: float = 90.0
     center_plate_wid_mm: float = 46.0
     top_plate_thickness_mm: float = 2.5
-    body_thickness_mm: float = 1.4      # margin above the 1.2 mm printable minimum
-    arm_rib_thickness_mm: float = 1.4
+    body_thickness_mm: float = 1.3      # margin above the 1.2 mm printable minimum
+    arm_rib_thickness_mm: float = 1.3
     arm_rib_offset_mm: float = 3.3      # twin ribs clear holes on arm centerline
     arm_rib_root_mm: float = 12.0
     motor_pad_thickness_mm: float = 5.0
-    motor_pad_dia_mm: float = 26.0
+    motor_pad_dia_mm: float = 28.7      # boss-to-boss envelope, not a solid disk
+    motor_boss_wall_mm: float = 1.4
+    motor_spoke_width_mm: float = 3.2
     motor_hole_spacing_mm: float = 16.0 # 16x16 M3 pattern (22xx/23xx motors)
     motor_hole_dia_mm: float = 3.2
     motor_center_hole_dia_mm: float = 9.0
@@ -57,12 +59,34 @@ def build_chassis(p: ChassisParams) -> b.Part:
         prof = b.Polyline((0, -p.arm_root_width_mm/2), (L, -p.arm_width_mm/2),
                           (L, p.arm_width_mm/2), (0, p.arm_root_width_mm/2), close=True)
         arm = b.extrude(b.make_face(prof), p.body_thickness_mm)
-        pad = b.extrude(b.Circle(p.motor_pad_dia_mm/2).face(), p.motor_pad_thickness_mm)
+        # A cruciform motor mount follows the four bolt load paths instead of
+        # carrying a mostly unstressed solid disk.  Circular bosses retain a
+        # full printable wall around both the shaft bore and every M3 hole.
+        bolt_radius = p.motor_hole_spacing_mm / math.sqrt(2.0)
+        bolt_boss_radius = p.motor_hole_dia_mm / 2 + p.motor_boss_wall_mm
+        center_boss_radius = p.motor_center_hole_dia_mm / 2 + p.motor_boss_wall_mm
+        spoke_length = 2 * (bolt_radius + bolt_boss_radius)
+        pad = b.extrude(
+            b.Rectangle(spoke_length, p.motor_spoke_width_mm).face(),
+            p.motor_pad_thickness_mm,
+        )
+        pad = pad + b.extrude(
+            b.Rectangle(p.motor_spoke_width_mm, spoke_length).face(),
+            p.motor_pad_thickness_mm,
+        )
+        pad = pad + b.extrude(
+            b.Circle(center_boss_radius).face(), p.motor_pad_thickness_mm
+        )
+        for bx, by in ((bolt_radius, 0), (-bolt_radius, 0),
+                       (0, bolt_radius), (0, -bolt_radius)):
+            pad = pad + b.Pos(bx, by, 0) * b.extrude(
+                b.Circle(bolt_boss_radius).face(), p.motor_pad_thickness_mm
+            )
         pad = pad.locate(b.Pos(L, 0, 0))
 
         # A small overlap with the pad avoids transferring thrust through only
         # the thin lower flange at the arm-to-motor junction.
-        rib_end = L - p.motor_pad_dia_mm / 2 + 2.0
+        rib_end = L - bolt_radius
         piece = arm + pad
         for off in (-p.arm_rib_offset_mm, p.arm_rib_offset_mm):
             # Bending moment falls toward the motor, so taper web depth roughly
