@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { fetchState, logout, type ArchiveRecord } from "@/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { FlaskConical, LogOut, Box, Play } from "lucide-react";
+import { FlaskConical, LogOut, Box, Play, CircuitBoard  } from "lucide-react";
 
 const MUTATOR_META: Record<string, { label: string; cls: string }> = {
   codex: { label: "ChatGPT", cls: "text-emerald-400" },
@@ -134,6 +134,9 @@ export default function Dashboard() {
           </Link>
           <Link to="/cad">
             <Button variant="ghost" size="sm"><Box className="h-4 w-4" /> <span className="hidden sm:inline">CAD</span></Button>
+          </Link>
+          <Link to="/ee">
+            <Button variant="ghost" size="sm"><CircuitBoard className="h-4 w-4" /> <span className="hidden sm:inline">EE</span></Button>
           </Link>
           <Button variant="ghost" size="sm"
             onClick={async () => { await logout(); await qc.invalidateQueries({ queryKey: ["me"] }); nav("/login"); }}>

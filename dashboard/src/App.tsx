@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 
 const Cad = lazy(() => import("./pages/Cad"));
+const Ee = lazy(() => import("./pages/Ee"));
 const Watch = lazy(() => import("./pages/Watch"));
 
 export default function App() {
@@ -26,6 +27,9 @@ export default function App() {
           : <Navigate to="/login" />} />
       <Route path="/cad" element={me.data
         ? <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Loading CAD viewer...</div>}><Cad /></Suspense>
+        : <Navigate to="/login" />} />
+      <Route path="/ee" element={me.data
+        ? <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Loading EE viewer...</div>}><Ee /></Suspense>
         : <Navigate to="/login" />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

@@ -586,6 +586,191 @@ app.post("/api/series", async (c) => {
 
 app.get("/api/series", (c) => c.json(seriesStore));
 
+
+// --- EE researcher: versioned board designs --------------------------------
+// Box3's eeloop publishes candidates here: versioned schematics + layouts,
+// every layout pinned to the netlist of its schematic version, SVG/GLB
+// renders for the viewer, gate verdicts and scores. Bearer-token ingest,
+// session-authed reads. History is append-only: a version, once published,
+// is never rewritten (a re-publish of the same version is a conflict).
+type EeVersion = {
+  version: number;
+  created_at: string;
+  candidate_id: string;
+  netlist_sha: string;          // the pin: layout belongs to this schematic's netlist
+  gates: { gate: string; pass: boolean }[];
+  score: number | null;
+  adopted: boolean;
+  notes?: string;
+  files: Record<string, string>; // kind -> stored filename
+};
+type EeBoard = { id: string; name: string; created_at: string; versions: EeVersion[] };
+
+const EE_DIR = `${DATA_DIR}/ee`;
+const EE_FILE = `${DATA_DIR}/ee.json`;
+const EE_EXT: Record<string, string> = {
+  sch: ".kicad_sch", pcb: ".kicad_pcb", net: ".net",
+  glb: ".glb", sch_svg: ".sch.svg", pcb_svg: ".pcb.svg",
+};
+const EE_CAP: Record<string, number> = {
+  sch: 16 * 1024 * 1024, pcb: 32 * 1024 * 1024, net: 8 * 1024 * 1024,
+  glb: 64 * 1024 * 1024, sch_svg: 16 * 1024 * 1024, pcb_svg: 16 * 1024 * 1024,
+};
+
+async function loadEe(): Promise<EeBoard[]> {
+  try {
+    const f = Bun.file(EE_FILE);
+    if (await f.exists()) return await f.json();
+  } catch {}
+  return [];
+}
+async function saveEe(boards: EeBoard[]) {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = EE_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify(boards));
+  await fs.rename(tmp, EE_FILE);
+}
+
+app.post("/api/ee/publish", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let form: any;
+  try { form = await c.req.parseBody(); } catch { return c.json({ error: "expected multipart/form-data" }, 400); }
+  let meta: any;
+  try { meta = JSON.parse(String(form["meta"] || "{}")); } catch { return c.json({ error: "bad JSON in 'meta' field" }, 400); }
+  const boardId = String(meta.board_id || "");
+  if (!/^ee-[a-z0-9-]{1,60}$/.test(boardId)) {
+    return c.json({ error: "meta.board_id must match ^ee-[a-z0-9-]{1,60}$" }, 400);
+  }
+  const version = Number(meta.version);
+  if (!Number.isInteger(version) || version < 1) return c.json({ error: "meta.version must be an integer >= 1" }, 400);
+  const netlistSha = String(meta.netlist_sha || "");
+  if (!/^[a-f0-9]{16,64}$/.test(netlistSha)) return c.json({ error: "meta.netlist_sha required (hex) - the layout/schematic pin" }, 400);
+  const candidateId = String(meta.candidate_id || "");
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(candidateId)) return c.json({ error: "meta.candidate_id required" }, 400);
+  const gates = Array.isArray(meta.gates)
+    ? meta.gates.filter((g: any) => g && typeof g.gate === "string").map((g: any) => ({ gate: String(g.gate), pass: !!g.pass }))
+    : [];
+  const score = typeof meta.score === "number" ? meta.score : null;
+  const adopted = meta.adopted === true;
+  const notes = typeof meta.notes === "string" ? meta.notes.slice(0, 2000) : undefined;
+
+  const files: Record<string, File> = {};
+  for (const kind of Object.keys(EE_EXT)) {
+    const f = form[kind];
+    if (f instanceof File) {
+      if (f.size > EE_CAP[kind]) return c.json({ error: `${kind} over size cap` }, 400);
+      files[kind] = f;
+    }
+  }
+  if (!files["sch"] || !files["net"]) {
+    return c.json({ error: "a version requires at least the schematic (sch) and its netlist (net) - the layout pin is meaningless without them" }, 400);
+  }
+
+  const boards = await loadEe();
+  let board = boards.find((b) => b.id === boardId);
+  if (board && board.versions.some((v) => v.version === version)) {
+    return c.json({ error: `version ${version} already published for ${boardId} - versions are immutable, bump the version` }, 409);
+  }
+  if (board && version <= Math.max(...board.versions.map((v) => v.version))) {
+    return c.json({ error: "version must increase monotonically" }, 400);
+  }
+  const fs = await import("node:fs/promises");
+  const dir = `${EE_DIR}/${boardId}/v${version}`;
+  await fs.mkdir(dir, { recursive: true });
+  const stored: Record<string, string> = {};
+  for (const [kind, f] of Object.entries(files)) {
+    const name = `${kind}${EE_EXT[kind]}`;
+    await Bun.write(`${dir}/${name}`, f);
+    stored[kind] = name;
+  }
+  const rec: EeVersion = {
+    version, created_at: new Date().toISOString(), candidate_id: candidateId,
+    netlist_sha: netlistSha, gates, score, adopted, notes, files: stored,
+  };
+  if (!board) {
+    board = { id: boardId, name: typeof meta.name === "string" ? meta.name.slice(0, 120) : boardId,
+              created_at: rec.created_at, versions: [] };
+    boards.push(board);
+  }
+  board.versions.push(rec);
+  await saveEe(boards);
+  return c.json({ ok: true, board: boardId, version });
+});
+
+const eeAuthed = async (c: any, next: any) => {
+  if (!(await checkSession(getCookie(c, "ds_session")))) return c.json({ error: "unauthorized" }, 401);
+  await next();
+};
+app.use("/api/ee/boards", eeAuthed);
+app.use("/api/ee/boards/:id/versions/:v/file", eeAuthed);
+app.use("/api/ee/boards/:id/diff", eeAuthed);
+
+app.get("/api/ee/boards", async (c) => {
+  return c.json({ boards: await loadEe() });
+});
+
+app.get("/api/ee/boards/:id/versions/:v/file", async (c) => {
+  const id = safeId(c.req.param("id"));
+  const v = Number(c.req.param("v"));
+  const kind = String(c.req.query("kind") || "");
+  if (!id || !Number.isInteger(v) || !(kind in EE_EXT)) return c.json({ error: "bad request" }, 400);
+  const boards = await loadEe();
+  const ver = boards.find((b) => b.id === id)?.versions.find((x) => x.version === v);
+  const name = ver?.files[kind];
+  if (!name) return c.json({ error: "not found" }, 404);
+  const f = Bun.file(`${EE_DIR}/${id}/v${v}/${name}`);
+  if (!(await f.exists())) return c.json({ error: "artifact missing" }, 404);
+  const mime = kind === "glb" ? "model/gltf-binary"
+    : kind.endsWith("svg") ? "image/svg+xml"
+    : "application/octet-stream";
+  return new Response(f, { headers: { "content-type": mime } });
+});
+
+// Structural diff between two versions' netlists: added/removed components
+// and nets. The KiCad netlist is XML: <comp ref="J1">...<value>Conn</value>,
+// <net code="1" name="3V3">. Regex extraction is deliberate - a full XML
+// parser for two tags is overkill here.
+function netlistParts(text: string): { comps: Map<string, string>; nets: Set<string> } {
+  const comps = new Map<string, string>();
+  for (const m of text.matchAll(/<comp ref="([^"]+)"[\s\S]*?<value>([^<]*)<\/value>/g)) {
+    comps.set(m[1], m[2]);
+  }
+  const nets = new Set<string>();
+  for (const m of text.matchAll(/<net code="\d+" name="([^"]+)"/g)) {
+    if (!m[1].startsWith("Net-(")) nets.add(m[1]); // skip anonymous nets
+  }
+  return { comps, nets };
+}
+
+app.get("/api/ee/boards/:id/diff", async (c) => {
+  const id = safeId(c.req.param("id"));
+  const from = Number(c.req.query("from")), to = Number(c.req.query("to"));
+  if (!id || !Number.isInteger(from) || !Number.isInteger(to)) return c.json({ error: "bad request" }, 400);
+  const board = (await loadEe()).find((b) => b.id === id);
+  if (!board) return c.json({ error: "not found" }, 404);
+  const read = async (v: number) => {
+    const name = board.versions.find((x) => x.version === v)?.files["net"];
+    if (!name) return null;
+    const f = Bun.file(`${EE_DIR}/${id}/v${v}/${name}`);
+    return (await f.exists()) ? await f.text() : null;
+  };
+  const [a, b] = [await read(from), await read(to)];
+  if (a === null || b === null) return c.json({ error: "netlist missing for one of the versions" }, 404);
+  const pa = netlistParts(a), pb = netlistParts(b);
+  const added_comps = [...pb.comps.entries()].filter(([r]) => !pa.comps.has(r)).map(([ref, val]) => ({ ref, value: val }));
+  const removed_comps = [...pa.comps.entries()].filter(([r]) => !pb.comps.has(r)).map(([ref, val]) => ({ ref, value: val }));
+  const changed_comps = [...pb.comps.entries()].filter(([r, v]) => pa.comps.has(r) && pa.comps.get(r) !== v).map(([ref, val]) => ({ ref, from: pa.comps.get(ref), to: val }));
+  return c.json({
+    from, to, added_comps, removed_comps, changed_comps,
+    added_nets: [...pb.nets].filter((n) => !pa.nets.has(n)),
+    removed_nets: [...pa.nets].filter((n) => !pb.nets.has(n)),
+  });
+});
+
 app.use("/*", serveStatic({ root: "./dist" }));
 app.get("*", serveStatic({ root: "./dist", path: "index.html" })); // SPA fallback
 
