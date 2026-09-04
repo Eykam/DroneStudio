@@ -18,6 +18,7 @@ import numpy as np
 from policy import MLP as BCMlp
 from ppo import MLP, Adam, GaussianPolicy
 from scenario_sampler import sample_spec, sample_tier, tier_dist, heldout_cells_tiered
+from env_sim import make_sim_factory
 from eval_scenarios import post_series
 from parallel_rollout import parallel_episodes
 

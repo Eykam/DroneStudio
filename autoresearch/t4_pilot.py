@@ -4,10 +4,15 @@ User decision 2026-09-04: fresh HID-64 full bootstrap, one unified policy,
 whole chain (pilot -> BC -> DAgger -> PPO) at the new width on tiered
 scenes + obs v3. This collects the demo set.
 
-teacher_act (t3_pilot) steers at obs[0:3]+obs[19:22] = current target -
-identical math on every tier because obs v3.1 zeroes the wp delta when no
-waypoints are pending. Successful episodes only (mixed-quality lesson from
-earlier BC rounds). T3 uses curriculum phases A/B only (C/D teach dying).
+Teacher = diverse_bc.pilot_act3 (the scenario-aware champion-era teacher:
+goto + hover-hold braking + two-phase land + potential-field obstacle
+avoidance) adapted for obs v3.1 (current target = obs[0:3]+obs[19:22],
+waypoint delta zeroes out on T0-T2) and the v14 fixture hover throttle
+(-0.756, from t3_pilot; pilot_act3's -0.778 was the 11N/motor fixture).
+Scenario + success radius come from the spec, not the obs one-hot.
+
+Successful episodes only (mixed-quality lesson from earlier BC rounds).
+T3 uses curriculum phases A/B only (C/D teach dying).
 
 Output: /workspace/t4_demos.npz (X, A, meta).
 """
@@ -17,9 +22,50 @@ os.environ["AUTORESEARCH_OBS_V3"] = "1"
 import numpy as np
 from scenario_sampler import sample_spec, tier_dist
 from env_sim import make_sim_factory
-from t3_pilot import teacher_act, t3_dist, PHASES
+from t3_pilot import t3_dist, PHASES
 
 MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json"
+
+def teacher_act(obs, ext, scenario, radius):
+    rel = (obs[0:3] + obs[19:22]) * ext   # current-target rel, meters
+    vel = obs[3:6] * 10.0                 # world vel, m/s (obs = v/10)
+    gb = obs[6:9]
+    vmax = 2.0
+    dist_xz = float(np.hypot(rel[0], rel[2]))
+    alt = -float(rel[1])                  # land pads sit at ground level
+    land_descend = (scenario == "land" and alt <= 1.4
+                    and dist_xz <= max(1.0, 2.0 * radius))
+    if scenario == "land" and not land_descend:
+        rel = rel + np.array([0.0, 1.2, 0.0])   # phase 1: above the pad
+        vmax = min(vmax, 1.2)
+    v_des = np.clip(0.5 * rel, -vmax, vmax)
+    if scenario == "hover_hold" and np.linalg.norm(rel) < 2.0 * radius:
+        v_des = np.clip(0.4 * rel, -0.25, 0.25)  # brake and hold
+    if land_descend:
+        v_des = np.array([np.clip(0.6 * rel[0], -0.3, 0.3), 0.0,
+                          np.clip(0.6 * rel[2], -0.3, 0.3)])
+    # damping: 0.5 far, 1.0 near (half-damping limit-cycles at the target)
+    damp = 0.5 if float(np.linalg.norm(rel)) > 3.0 else 1.0
+    a_des = np.clip(1.2 * (v_des - damp * vel), -2.0, 2.0)
+    dvec = obs[12:15] * ext               # nearest-obstacle vector
+    d = float(np.linalg.norm(dvec))
+    if 1e-3 < d < 3.5 and not land_descend:   # pad corridor stays clear
+        a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
+    a_des = np.clip(a_des, -3.0, 3.0)
+    gx_des = np.clip(a_des[0] / 9.81, -0.30, 0.30)
+    gz_des = np.clip(a_des[2] / 9.81, -0.30, 0.30)
+    rates = obs[9:12]                     # obs scale (/10), as the v1/v3 pilots used
+    kp, kd = 0.4, 0.6                     # v14-proven pair (t3_pilot); kd=1.0 was the 11N fixture
+    act0 = kp * (gz_des - gb[2]) - kd * rates[0]
+    act2 = -kp * (gx_des - gb[0]) - kd * rates[2]
+    if land_descend:
+        vy_des = -0.4
+    elif scenario == "hover_hold":
+        vy_des = np.clip(0.8 * rel[1], -0.8, 0.8)
+    else:
+        vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
+    thr = -0.756 + 0.3 * (vy_des - vel[1])
+    return np.clip(np.array([act0, 0.0, act2, thr]), -1, 1)
 
 def run_one(seed, dist, spec, max_steps):
     ext = float(dist.scene_extent)
@@ -28,7 +74,7 @@ def run_one(seed, dist, spec, max_steps):
     obs = env.reset()
     traj = []
     for _ in range(max_steps):
-        a = teacher_act(obs, ext)
+        a = teacher_act(obs, ext, spec["scenario"], float(spec["success_radius"]))
         traj.append((obs.copy(), a.copy()))
         obs, r, done = env.step(a)
         if done: break
@@ -43,7 +89,7 @@ def main():
         for sc in ("goto", "hover_hold", "land"):
             ks = 0
             for j in range(48):
-                seed = 80000 + tier * 10000 + hash(sc) % 1000 * 3 + j
+                seed = 80000 + tier * 10000 + j
                 dist = tier_dist(seed, tier)
                 spec = sample_spec(seed, force_scenario=sc)
                 if sc != "goto":
