@@ -53,7 +53,7 @@ def run_generation():
         failures = json.dumps([c for c in pm["evaluator"] if not c["passed"]], indent=2)
     hist = "; ".join(f"{h['variant']}={h['score']:.3f} ({h.get('summary','')[:60]})" for h in st["history"][-8:]) or "none yet"
     prompt = PROMPT_TEMPLATE.format(best_variant=parent, best_score=st["best_score"], failures=failures, history=hist)
-    progress.set_stage("editing", f"gen {gen}: codex mutating {parent} -> {variant}", design_id=f"cad-chassis-{variant}")
+    progress.set_stage("codex editing", f"gen {gen}: codex mutating {parent} -> {variant}", design_id=variant)
     print(f"[gen {gen}] asking Codex for mutation of {parent}...", flush=True)
     r = subprocess.run(["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
                        capture_output=True, text=True, cwd=HERE, timeout=1800)

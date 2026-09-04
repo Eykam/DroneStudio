@@ -8,10 +8,11 @@ import export_manifest as em
 import snapshot as sn
 
 def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
-    progress.set_stage("building", f"{variant_id}: generating geometry")
+    progress.set_stage("building", f"{variant_id}: generating geometry", design_id=variant_id)
     part = build_chassis(params)
     import build123d as b
     b.export_stl(part, out_base + ".stl")
+    progress.set_stage("rendering", f"{variant_id}: exporting STEP/GLB/manifest")
     em.export(params, out_base)  # STEP/GLB/manifest first: FEA consumes the STEP
     m = trimesh.load(out_base + ".stl", force='mesh')
     checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m)]
@@ -24,7 +25,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     progress.set_stage("evaluating", f"{variant_id}: geometry checks")
     fea_result = None
     if os.environ.get("RUN_FEA") == "1":
-        progress.set_stage("fea", f"{variant_id}: gmsh + CalculiX hover-max/crash")
+        progress.set_stage("FEA", f"{variant_id}: gmsh + CalculiX hover-max/crash")
         import fea
         fea_result = fea.evaluate_fea(out_base + ".step", params.motor_positions(), params.stack_spacing_mm,
                                       out_base + "_fea")
