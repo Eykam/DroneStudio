@@ -39,7 +39,8 @@ def _rollout_act_factory(trainer, trained, obs_dim, act_dim):
 def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
                           cem_pop=8, train_episodes=4, eval_episodes=6,
                           max_steps=200, verbose=False, backend="quad",
-                          trainer="cem", ppo_config=None, dynamics=None):
+                          trainer="cem", ppo_config=None, dynamics=None,
+                          n_jobs=None):
     EnvCls, make_factory = _backend(backend)
     if backend == "sim" and dynamics:
         factory = make_factory(dist, max_steps=max_steps, dynamics=dynamics)
@@ -56,10 +57,21 @@ def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
         train_ret = res.best_eval_mean
         act = _rollout_act_factory("ppo", trained, EnvCls.OBS_DIM, EnvCls.ACT_DIM)
     else:
-        policy, train_ret = cem_train(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM,
-                                      iters=cem_iters, pop=cem_pop,
-                                      episodes_per_eval=train_episodes,
-                                      seed=train_seed, verbose=verbose)
+        import os as _os
+        jobs = n_jobs if n_jobs is not None else int(_os.environ.get("AUTORESEARCH_JOBS", "1"))
+        if jobs > 1:
+            from policy import cem_train_parallel
+            spec = (backend, dist.to_json(), max_steps, dynamics)
+            policy, train_ret = cem_train_parallel(
+                spec, EnvCls.OBS_DIM, EnvCls.ACT_DIM,
+                iters=cem_iters, pop=cem_pop,
+                episodes_per_eval=train_episodes,
+                seed=train_seed, n_jobs=jobs, verbose=verbose)
+        else:
+            policy, train_ret = cem_train(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM,
+                                          iters=cem_iters, pop=cem_pop,
+                                          episodes_per_eval=train_episodes,
+                                          seed=train_seed, verbose=verbose)
         act = policy.act
     returns, successes, steps = [], [], []
     for i in range(eval_episodes):

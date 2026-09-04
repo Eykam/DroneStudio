@@ -36,7 +36,7 @@ def run(generations=1, children=2, seed=0, budget=None, verbose=True,
         archive_path="archive.jsonl", base=None, elite_k=2,
         novelty_weight=0.05, stagnation_limit=3, backend=None,
         dynamics=None,
-        trainer="cem", ppo_config=None):
+        trainer="cem", ppo_config=None, n_jobs=None):
     budget = budget or {}
     rng = np.random.default_rng(seed)
     archive = Archive(archive_path)
@@ -74,7 +74,7 @@ def run(generations=1, children=2, seed=0, budget=None, verbose=True,
                 eval_episodes=budget.get("eval_episodes", 6),
                 max_steps=budget.get("max_steps", 200),
                 verbose=False, backend=backend or _default_backend(),
-                trainer=trainer, ppo_config=ppo_config, dynamics=dynamics)
+                trainer=trainer, ppo_config=ppo_config, dynamics=dynamics, n_jobs=n_jobs)
             nov = archive.novelty(dist)
             rec = archive.add(gen, parent_id, dist, metrics, mut, novelty=nov)
             sel_score = metrics["success_rate"] + novelty_weight * nov

@@ -19,18 +19,20 @@ def main():
     p.add_argument("--report", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "generations_report.json"))
     p.add_argument("--dynamics", default=None, help="manifest path for sim backend (default: abstract)")
     p.add_argument("--archive", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive.jsonl"))
+    p.add_argument("--jobs", type=int, default=None, help="parallel rollout workers (default 1=sequential)")
     a = p.parse_args()
     budget = dict(cem_iters=3, cem_pop=8, train_episodes=3, eval_episodes=5, max_steps=200) if a.quick \
         else dict(cem_iters=4, cem_pop=10, train_episodes=4, eval_episodes=6, max_steps=250)
     t0 = time.time()
     best = run(generations=a.generations, children=a.children, seed=a.seed,
                budget=budget, dynamics=a.dynamics,
-               archive_path=a.archive)
+               archive_path=a.archive, n_jobs=a.jobs)
     report = {
         "elapsed_s": round(time.time() - t0, 1),
         "generations": a.generations, "children": a.children, "seed": a.seed,
         "budget": budget, "best": best, "llm_spend": spend_status(),
         "dynamics": a.dynamics or "abstract",
+        "jobs": a.jobs or 1,
         "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     with open(a.report, "w") as f:
