@@ -114,26 +114,6 @@ def export(p: ChassisParams, out_base: str):
     _slim_glb(out_base + ".glb")
 
 
-def _slim_glb(glb_path):
-    """Post-process the assembly GLB for the /cad viewer: build123d writes one
-    primitive PER FACE (50k draw calls -> orbit lag). gltfpack welds, merges
-    primitives, simplifies (error-bounded), quantizes (KHR_mesh_quantization,
-    natively supported by three.js/babylon - no decoder needed). No meshopt
-    compression (-cc): dashboard drei useGLTF wires MeshoptDecoder by default (verified 2026-09-04)."""
-    import shutil as _sh, subprocess as _sp, os as _os
-    gp = _sh.which("gltfpack")
-    if not gp:
-        return
-    tmp = glb_path + ".slim"
-    try:
-        r = _sp.run([gp, "-i", glb_path, "-o", tmp, "-si", "0.7", "-kn", "-cc"],
-                    capture_output=True, timeout=300)
-        if r.returncode == 0 and _os.path.exists(tmp) and _os.path.getsize(tmp) > 1000:
-            _os.replace(tmp, glb_path)
-        elif _os.path.exists(tmp):
-            _os.remove(tmp)
-    except Exception:
-        pass  # raw GLB stays if slimming fails
     M, com, I_tot, items = compose_dynamics(part, p)
     z_top_m = p.body_thickness_mm * 0.001
     motors = []
@@ -189,3 +169,26 @@ if __name__ == "__main__":
     print("total_mass_kg", d["total_mass_kg"], "com", d["com_m"])
     print("inertia_about_com", d["inertia_about_com_kgm2"])
     print("aero", m["aero"]["projected_area_m2"])
+
+
+
+def _slim_glb(glb_path):
+    """Post-process the assembly GLB for the /cad viewer: build123d writes one
+    primitive PER FACE (50k draw calls -> orbit lag). gltfpack welds, merges
+    primitives, simplifies (error-bounded), quantizes (KHR_mesh_quantization,
+    natively supported by three.js/babylon - no decoder needed). No meshopt
+    compression (-cc): dashboard drei useGLTF wires MeshoptDecoder by default (verified 2026-09-04)."""
+    import shutil as _sh, subprocess as _sp, os as _os
+    gp = _sh.which("gltfpack")
+    if not gp:
+        return
+    tmp = glb_path + ".slim"
+    try:
+        r = _sp.run([gp, "-i", glb_path, "-o", tmp, "-si", "0.7", "-kn", "-cc"],
+                    capture_output=True, timeout=300)
+        if r.returncode == 0 and _os.path.exists(tmp) and _os.path.getsize(tmp) > 1000:
+            _os.replace(tmp, glb_path)
+        elif _os.path.exists(tmp):
+            _os.remove(tmp)
+    except Exception:
+        pass  # raw GLB stays if slimming fails
