@@ -36,10 +36,10 @@ export default function Login() {
             <div className="space-y-2">
               <Label htmlFor="pw">Password</Label>
               <Input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)}
-                     autoFocus autoComplete="current-password" />
+                     className="h-11 text-base" autoFocus autoComplete="current-password" />
             </div>
             {err && <p className="text-sm text-red-400">{err}</p>}
-            <Button type="submit" className="w-full" disabled={busy || !pw}>
+            <Button type="submit" className="w-full h-11 text-base" disabled={busy || !pw}>
               {busy ? "Signing in..." : "Sign in"}
             </Button>
           </form>
