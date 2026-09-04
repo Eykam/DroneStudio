@@ -14,19 +14,19 @@
     "yield_mpa": 50
   },
   "dynamics": {
-    "total_mass_kg": 0.546724,
+    "total_mass_kg": 0.514324,
     "com_m": [
-      0.00439,
-      0.0,
-      0.0239
+      0.001186,
+      -0.000642,
+      0.021158
     ],
     "inertia_about_com_kgm2": {
-      "ixx": 0.002107156037770332,
-      "iyy": 0.002273495551772632,
-      "izz": 0.0038808115778958966,
-      "ixy": 2.198590799521128e-19,
-      "ixz": 1.895908657895754e-05,
-      "iyz": 4.0250957977835386e-20
+      "ixx": 0.002133222478097594,
+      "iyy": 0.0022044913214616024,
+      "izz": 0.003942529671877721,
+      "ixy": 9.508612249905311e-06,
+      "ixz": 6.246412658763128e-06,
+      "iyz": -3.682157667855425e-06
     },
     "composition": [
       {
@@ -40,7 +40,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.032,
+        "mass_kg": 0.0334,
         "com_m": [
           0.106066,
           0.106066,
@@ -49,7 +49,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.032,
+        "mass_kg": 0.0334,
         "com_m": [
           -0.106066,
           0.106066,
@@ -58,7 +58,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.032,
+        "mass_kg": 0.0334,
         "com_m": [
           -0.106066,
           -0.106066,
@@ -67,7 +67,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.032,
+        "mass_kg": 0.0334,
         "com_m": [
           0.106066,
           -0.106066,
@@ -75,34 +75,73 @@
         ]
       },
       {
-        "name": "fc_esc_stack",
+        "name": "30.5mm FC+ESC stack (BLHELI_S, his hardware per repo assets/Drone/drone_esc_mount_30mm.stl)",
         "mass_kg": 0.09,
         "com_m": [
           0.0,
           0.0,
-          0.021
-        ]
+          0.016
+        ],
+        "source": "estimate - replace with his actual stack datasheet",
+        "mount": "stack"
       },
       {
-        "name": "battery_4s_1300",
+        "name": "4S 1300mAh LiPo (Tattu-class)",
         "mass_kg": 0.18,
         "com_m": [
           0.0,
           0.0,
-          0.051
-        ]
+          0.045
+        ],
+        "source": "estimate - replace with his actual battery datasheet",
+        "mount": "deck"
       },
       {
-        "name": "stereo_camera_pair",
-        "mass_kg": 0.06,
+        "name": "Raspberry Pi Zero 2W",
+        "mass_kg": 0.011,
         "com_m": [
-          0.04,
+          0.03,
+          -0.03,
+          0.01
+        ],
+        "source": "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/",
+        "mount": "nose"
+      },
+      {
+        "name": "Raspberry Pi Camera Module 3",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.035,
+          -0.03,
+          0.012
+        ],
+        "source": "https://www.raspberrypi.com/products/camera-module-3/",
+        "mount": "nose"
+      },
+      {
+        "name": "Raspberry Pi Camera Module 3",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.035,
+          0.03,
+          0.012
+        ],
+        "source": "https://www.raspberrypi.com/products/camera-module-3/",
+        "mount": "nose"
+      },
+      {
+        "name": "MPU-9250 breakout (GY-9250)",
+        "mass_kg": 0.003,
+        "com_m": [
           0.0,
-          0.016
-        ]
+          0.0,
+          0.022
+        ],
+        "source": "estimate - generic GY-9250 module",
+        "mount": "stack"
       }
     ],
-    "note": "fully composed rigid body: frame + 4 motors + payload. Sim should use these directly."
+    "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly."
   },
   "inertial": {
     "frame_mass_kg": 0.088724,
@@ -148,7 +187,7 @@
         1
       ],
       "direction": "cw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0334,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
@@ -167,7 +206,7 @@
         1
       ],
       "direction": "ccw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0334,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
@@ -186,7 +225,7 @@
         1
       ],
       "direction": "cw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0334,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
@@ -205,7 +244,7 @@
         1
       ],
       "direction": "ccw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0334,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,

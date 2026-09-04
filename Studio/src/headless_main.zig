@@ -62,6 +62,13 @@ const Dynamics = struct {
     motor_max_thrust: f32 = 10.0,
     aero_area: [3]f32 = .{ 0, 0, 0 }, // body axes, m^2; all-zero = no drag
     aero_cd: f32 = 1.1,
+    // Real motor model (manifest mode): 4 motors at manifest positions,
+    // mixed from collective thrust + PID torque, first-order lag, ktau yaw.
+    motor_mode: bool = false,
+    motor_pos: [4][3]f32 = undefined, // sim body frame (+Y up)
+    motor_yaw_sign: [4]f32 = undefined, // -1 cw, +1 ccw (his prop_drag_signs)
+    mix_inv: [4][4]f32 = undefined, // maps [T, taux, tauy, tauz] -> motor thrusts
+    motor_lag_state: [4]f32 = .{ 0, 0, 0, 0 },
 };
 const GROUND_Y: f32 = 0.05;
 
@@ -99,6 +106,35 @@ fn f32FromJson(v: std.json.Value, default: f32) f32 {
         .integer => |n| @floatFromInt(n),
         else => default,
     };
+}
+
+/// 4x4 inverse via Gauss-Jordan with partial pivoting (mixing matrix is
+/// well-conditioned for any physical quad layout).
+fn invert4(A: [4][4]f64) [4][4]f32 {
+    var aug: [4][8]f64 = undefined;
+    for (0..4) |i| {
+        for (0..4) |j| aug[i][j] = A[i][j];
+        for (0..4) |j| aug[i][4 + j] = if (i == j) 1.0 else 0.0;
+    }
+    for (0..4) |col| {
+        var piv = col;
+        for (col + 1..4) |r| {
+            if (@abs(aug[r][col]) > @abs(aug[piv][col])) piv = r;
+        }
+        if (piv != col) std.mem.swap([8]f64, &aug[col], &aug[piv]);
+        const d = aug[col][col];
+        for (0..8) |j| aug[col][j] /= d;
+        for (0..4) |r| {
+            if (r == col) continue;
+            const fctr = aug[r][col];
+            for (0..8) |j| aug[r][j] -= fctr * aug[col][j];
+        }
+    }
+    var out: [4][4]f32 = undefined;
+    for (0..4) |i| for (0..4) |j| {
+        out[i][j] = @floatCast(aug[i][4 + j]);
+    };
+    return out;
 }
 
 const World = struct {
@@ -199,6 +235,7 @@ const World = struct {
         self.rate_ctrl.reset();
         self.filtered_rates = .{ 0, 0, 0 };
         self.filtered_thrust = 0;
+        self.dyn.motor_lag_state = .{ 0, 0, 0, 0 };
         self.steps = 0;
         self.collided = false;
         self.succeeded = false;
@@ -239,10 +276,45 @@ const World = struct {
         self.last_torque = torque_body;
 
         const q = self.bodyQuat();
-        const thrust_world = Vec3.init(0, self.filtered_thrust, 0).rotate_by_quaternion(q);
-        const torque_world = Vec3.from_array(torque_body).rotate_by_quaternion(q);
-
-        var f = [3]f32{ thrust_world.x(), thrust_world.y(), thrust_world.z() };
+        var f: [3]f32 = undefined;
+        var tq: [3]f32 = undefined;
+        if (self.dyn.motor_mode) {
+            // Real motor model: mix collective thrust + PID torque to 4 motor
+            // thrusts via the manifest geometry (precomputed inverse), clamp
+            // per his applySaturation, lag per his updateMotorLag, then
+            // reconstruct force/torque from the lagged motor states.
+            const d = &self.dyn;
+            const cmd = [4]f32{ self.filtered_thrust, torque_body[0], torque_body[1], torque_body[2] };
+            var t: [4]f32 = undefined;
+            inline for (0..4) |i| {
+                t[i] = d.mix_inv[i][0] * cmd[0] + d.mix_inv[i][1] * cmd[1] + d.mix_inv[i][2] * cmd[2] + d.mix_inv[i][3] * cmd[3];
+            }
+            const avg = (t[0] + t[1] + t[2] + t[3]) / 4.0;
+            const min_t = @max(0.1, avg * 0.1); // his dynamic minimum
+            var total: f32 = 0;
+            var torque_b = [3]f32{ 0, 0, 0 };
+            inline for (0..4) |i| {
+                const tc = std.math.clamp(t[i], min_t, d.motor_max_thrust);
+                const lag_alpha = FAST_DT / (d.motor_lag_s + FAST_DT);
+                d.motor_lag_state[i] += lag_alpha * (tc - d.motor_lag_state[i]);
+                const ti = d.motor_lag_state[i];
+                total += ti;
+                const mp = d.motor_pos[i];
+                // force = ti * +Y at mp; torque_arm = mp x (ti*Y) = ti*(-mp.z, 0, mp.x)
+                torque_b[0] += ti * -mp[2];
+                torque_b[2] += ti * mp[0];
+                torque_b[1] += ti * d.motor_drag_ratio * d.motor_yaw_sign[i]; // ktau yaw
+            }
+            const thrust_w = Vec3.init(0, total, 0).rotate_by_quaternion(q);
+            const torque_w = Vec3.from_array(torque_b).rotate_by_quaternion(q);
+            f = .{ thrust_w.x(), thrust_w.y(), thrust_w.z() };
+            tq = .{ torque_w.x(), torque_w.y(), torque_w.z() };
+        } else {
+            const thrust_world = Vec3.init(0, self.filtered_thrust, 0).rotate_by_quaternion(q);
+            const torque_world = Vec3.from_array(torque_body).rotate_by_quaternion(q);
+            f = .{ thrust_world.x(), thrust_world.y(), thrust_world.z() };
+            tq = .{ torque_world.x(), torque_world.y(), torque_world.z() };
+        }
         // Manifest aero: flat-plate drag per body axis, assembled in the
         // world frame from body-axis directions (no quaternion inverse).
         const aa = self.dyn.aero_area;
@@ -264,7 +336,6 @@ const World = struct {
             f[1] += drag.y();
             f[2] += drag.z();
         }
-        var tq = [3]f32{ torque_world.x(), torque_world.y(), torque_world.z() };
         bullet.cbtBodyApplyCentralForce(self.body, &f);
         bullet.cbtBodyApplyTorque(self.body, &tq);
         _ = bullet.cbtWorldStepSimulation(self.world, FAST_DT, 1, FAST_DT);
@@ -509,7 +580,7 @@ pub fn main() !void {
             const path_v = root.object.get("path") orelse continue;
             if (path_v != .string) continue;
             if (std.mem.eql(u8, path_v.string, "abstract")) {
-                world.dyn = .{};
+                world.dyn = .{}; // motor_mode resets to false here too
                 const inertia = [3]f32{ IXX, IYY, IZZ };
                 bullet.cbtBodySetMassProps(world.body, MASS, &inertia);
                 try stdout.writeAll("{\"ok\":true,\"dynamics\":\"abstract\"}\n");
@@ -534,6 +605,26 @@ pub fn main() !void {
             if (m.aero) |ae| {
                 world.dyn.aero_area = .{ @floatCast(ae.projected_area_m2.y), @floatCast(ae.projected_area_m2.z), @floatCast(ae.projected_area_m2.x) };
                 world.dyn.aero_cd = @floatCast(ae.cd_flat_plate_estimate);
+            }
+            // Motor model: solve the 4x4 mixing system once (motors are fixed
+            // per design). Rows: [sum=T, tau_x, tau_y(ktau yaw), tau_z].
+            // CAD -> sim body map: sim = (-cad.y, cad.z, -cad.x).
+            if (m.motors.len == 4) {
+                var A: [4][4]f64 = undefined;
+                for (m.motors, 0..) |mo, i| {
+                    const px = -mo.position_m[1];
+                    const py = mo.position_m[2];
+                    const pz = -mo.position_m[0];
+                    world.dyn.motor_pos[i] = .{ @floatCast(px), @floatCast(py), @floatCast(pz) };
+                    const s: f64 = if (std.mem.eql(u8, mo.direction, "cw")) 1.0 else -1.0; // sim +Y up = -z_NED: flipped vs his NED signs
+                    world.dyn.motor_yaw_sign[i] = @floatCast(s);
+                    A[0][i] = 1.0;
+                    A[1][i] = -pz; // torque about body x
+                    A[2][i] = s * mo.drag_ratio; // yaw (ktau), about body y (up)
+                    A[3][i] = px; // torque about body z
+                }
+                world.dyn.mix_inv = invert4(A);
+                world.dyn.motor_mode = true;
             }
             const n = @min(m.name.len, world.dyn_name_buf.len);
             @memcpy(world.dyn_name_buf[0..n], m.name[0..n]);
