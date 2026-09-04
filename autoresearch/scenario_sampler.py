@@ -25,6 +25,14 @@ MAX_TOUCHDOWN_VS = 0.5
 HELDOUT_BASE = {"goto": 77000, "hover_hold": 88000, "land": 99000}
 HELDOUT_N = 16
 
+# Harder-scenes difficulty axis (user directive 2026-09-04). Phase 1 ships
+# T0-T2; T3 (waypoint slalom, 120-180 deg turns) waits on obs v3 because the
+# policy obs carries only the NEAREST obstacle vector - dense scenes are
+# partially observable, so per-tier numbers must not be read as regressions.
+TIERS = (0, 1, 2)
+TIER_MIX = (0.5, 0.3, 0.2)   # Phase 1 renormalization of the approved 40/30/20/10
+HELDOUT_TIER_STRIDE = 1000
+
 
 def _rng(seed):
     # scenario stream must not shift when scene sampling changes
@@ -55,3 +63,37 @@ def sample_spec(seed, force_scenario=None):
 def heldout_cells():
     """{scenario: [seeds]} fixed held-out blocks for comparable evals."""
     return {s: [HELDOUT_BASE[s] + i for i in range(HELDOUT_N)] for s in SCENARIOS}
+
+
+def sample_tier(seed):
+    """Deterministic difficulty tier per episode seed (own stream)."""
+    rng = np.random.default_rng(np.uint64(seed) ^ np.uint64(0x7E12))
+    return int(rng.choice(len(TIERS), p=TIER_MIX))
+
+
+def tier_dist(seed, tier, base_rng=None):
+    """SceneDistribution for a tier. T0 = today's open field; T1 = dense
+    clutter; T2 = gap-walls (corridor_width 2.0 triggers the generator)."""
+    from scene_schema import SceneDistribution
+    r = base_rng or np.random.default_rng(np.uint64(seed) ^ np.uint64(0xD1A9))
+    gd = float(r.uniform(2.0, 25.0))
+    if tier == 2:
+        gd = max(gd, 10.0)  # need leg room for walls
+    return SceneDistribution(
+        obstacle_density=(float(r.choice([0.0, 0.05, 0.1, 0.2])) if tier == 0
+                          else float(r.uniform(0.25, 0.40)) if tier == 1
+                          else float(r.choice([0.05, 0.1]))),
+        corridor_width=4.0 if tier < 2 else 2.0,
+        obstacle_size_mean=2.0 if tier < 1 else float(r.uniform(2.0, 3.0)),
+        scene_extent=max(10.0, gd * 2), goal_distance=gd,
+        light_direction_entropy=0.3, texture_variety=0.0, dynamics_noise=0.0)
+
+
+def heldout_cells_tiered():
+    """{(scenario, tier): [seeds]} fixed held-out blocks per difficulty tier.
+    Tier cells live at base + 1000*tier; tier 0 == heldout_cells()."""
+    out = {}
+    for s, base in HELDOUT_BASE.items():
+        for t in TIERS:
+            out[(s, t)] = [base + HELDOUT_TIER_STRIDE * t + i for i in range(HELDOUT_N)]
+    return out

@@ -99,8 +99,35 @@ class QuadNavEnv:
                                   max(n_obs, 1)))
         keep = (np.linalg.norm(centers - self.spawn, axis=1) > 4) & \
                (np.linalg.norm(centers - self.goal, axis=1) > 4)
-        self.obs_centers = centers[keep]
-        self.obs_radii = np.maximum(sizes[keep] / 2, 0.25)
+        centers, sizes = centers[keep], sizes[keep]
+        # gap-walls (harder-scenes T2): corridor_width <= 2.5 requests K barriers
+        # crossing the spawn->goal leg, each a wall of spheres with one gap of
+        # width corridor_width at a random lateral offset - forces lateral
+        # quick-turn flight through narrow gaps instead of a straight line.
+        if d.corridor_width <= 2.5:
+            leg = self.goal - self.spawn
+            leg_h = np.array([leg[0], 0.0, leg[2]])
+            L = np.linalg.norm(leg_h)
+            if L > 6:
+                wd = leg_h / L                      # along-track unit
+                pd = np.array([-wd[2], 0.0, wd[0]])  # lateral unit
+                K = int(min(4, max(1, L // 8)))
+                gap_w = max(d.corridor_width, 1.2)
+                half = min(10.0, ext / 2)
+                for i in range(K):
+                    c = self.spawn + leg_h * ((i + 1) / (K + 1))
+                    gap_off = float(rng.uniform(-half * 0.5, half * 0.5))
+                    offs = np.arange(-half, half, 1.0)
+                    pass_gap = np.abs(offs - gap_off) > gap_w / 2
+                    wc = c[None, :] + (offs[pass_gap, None]) * pd[None, :]
+                    wc[:, 1] = np.abs(rng.normal(1.5, 0.4, len(wc)))  # low band
+                    far = (np.linalg.norm(wc - self.spawn, axis=1) > 3) & \
+                          (np.linalg.norm(wc - self.goal, axis=1) > 3)
+                    wc = wc[far]
+                    centers = np.vstack([centers, wc]) if len(centers) else wc
+                    sizes = np.concatenate([sizes, np.full(len(wc), 1.2)])
+        self.obs_centers = centers
+        self.obs_radii = np.maximum(sizes / 2, 0.25)
 
     def reset(self):
         self.pos = self.spawn.copy()
