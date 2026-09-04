@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PPO vs CEM on identical footing: same distribution, same held-out eval
 episodes, wall-clock accounted. Answers the question the night queue cares
-about: does first-order training beat zeroth-order on QuadNavEnv at box
+about: does first-order training beat zeroth-order on the nav env at box
 scale?
 
 Usage: python compare_trainers.py [--quick] [--report PATH]
@@ -10,14 +10,15 @@ import sys, os, json, time, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from scene_schema import SceneDistribution
-from env_quad import QuadNavEnv, make_quad_factory
+from evaluator import _backend
+from outer_loop import _default_backend
 from policy import cem_train
 from ppo import train_ppo, PPOConfig, MLP
 
-def eval_policy_act(act, dist, eval_seed, episodes, max_steps):
+def eval_policy_act(act, dist, eval_seed, episodes, max_steps, EnvCls):
     rets, succs = [], []
     for i in range(episodes):
-        env = QuadNavEnv(dist, seed=eval_seed + i, max_steps=max_steps)
+        env = EnvCls(dist, seed=eval_seed + i, max_steps=max_steps)
         obs = env.reset()
         total = 0.0
         for _ in range(max_steps):
@@ -32,23 +33,32 @@ def eval_policy_act(act, dist, eval_seed, episodes, max_steps):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--quick", action="store_true")
+    p.add_argument("--backend", default=None, help="sim|quad (default: sim if the headless binary exists, else quad)")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--dist-json", default=None,
+                   help="path to JSON with SceneDistribution fields (e.g. a best-variant params dict); overrides the default distribution")
     p.add_argument("--report", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "ppo_vs_cem.json"))
     a = p.parse_args()
 
-    dist = SceneDistribution()
+    if a.dist_json:
+        with open(a.dist_json) as f:
+            dist = SceneDistribution.from_json(f.read())
+    else:
+        dist = SceneDistribution()
     max_steps = 200 if a.quick else 250
     eval_eps = 4 if a.quick else 6
-    factory = make_quad_factory(dist, max_steps=max_steps)
+    backend = a.backend or _default_backend()
+    EnvCls, make_factory = _backend(backend)
+    factory = make_factory(dist, max_steps=max_steps)
 
     # --- CEM
     t0 = time.time()
     cem_iters, cem_pop = (2, 8) if a.quick else (6, 12)
-    cem_policy, cem_train_ret = cem_train(factory, QuadNavEnv.OBS_DIM, QuadNavEnv.ACT_DIM,
+    cem_policy, cem_train_ret = cem_train(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM,
                                           iters=cem_iters, pop=cem_pop, episodes_per_eval=3,
                                           seed=a.seed)
     cem_wall = time.time() - t0
-    cem_eval = eval_policy_act(cem_policy.act, dist, 20_000, eval_eps, max_steps)
+    cem_eval = eval_policy_act(cem_policy.act, dist, 20_000, eval_eps, max_steps, EnvCls)
 
     # --- PPO
     t0 = time.time()
@@ -57,20 +67,21 @@ def main():
                     hidden=64 if a.quick else 128,
                     eval_every=5 if a.quick else 20,
                     eval_episodes=eval_eps, seed=a.seed)
-    res = train_ppo(factory, QuadNavEnv.OBS_DIM, QuadNavEnv.ACT_DIM, config=cfg,
+    res = train_ppo(factory, EnvCls.OBS_DIM, EnvCls.ACT_DIM, config=cfg,
                     progress_cb=lambda u, em, b: print(f"  ppo update {u}: eval={em:.2f} best={b:.2f}", flush=True))
     ppo_wall = time.time() - t0
     bp = res.best_params
-    actor = MLP(np.random.default_rng(0), QuadNavEnv.OBS_DIM, cfg.hidden, QuadNavEnv.ACT_DIM)
+    actor = MLP(np.random.default_rng(0), EnvCls.OBS_DIM, cfg.hidden, EnvCls.ACT_DIM)
     actor.load(bp["actor"])
     mean, var = bp["norm_mean"], bp["norm_var"]
     def ppo_act(obs):
         nobs = np.clip((obs - mean) / np.sqrt(var + 1e-8), -10, 10)
         mu, _ = actor.forward(nobs[None, :])
         return np.tanh(mu[0])
-    ppo_eval = eval_policy_act(ppo_act, dist, 20_000, eval_eps, max_steps)
+    ppo_eval = eval_policy_act(ppo_act, dist, 20_000, eval_eps, max_steps, EnvCls)
 
     report = {
+        "backend": backend,
         "distribution": json.loads(dist.to_json()),
         "eval_protocol": {"eval_seed": 20_000, "episodes": eval_eps, "max_steps": max_steps},
         "cem": {"iters": cem_iters, "pop": cem_pop, "wall_s": round(cem_wall, 1),
