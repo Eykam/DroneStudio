@@ -20,3 +20,4 @@ PiSetup.zig
 PiTransfer.zig
 VideoStream.zig
 CLAUDE.md
+chassis/snapshots/cadtest*/
