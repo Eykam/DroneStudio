@@ -86,9 +86,41 @@ def run_generation():
                                     failures=failures, history=hist, base_variant=base)
     progress.set_stage("codex editing", f"gen {gen}: codex drafting 3 candidates from {parent}", design_id=f"cad-chassis-{base}")
     print(f"[gen {gen}] asking Codex for 3 candidate mutations of {parent}...", flush=True)
+    codex_cmd = ["codex", "exec", "-m", "gpt-6-astra", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt]
     try:
-        r = subprocess.run(["codex", "exec", "-m", "gpt-6-astra", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
-                           capture_output=True, text=True, cwd=HERE, timeout=3600)
+        # Popen + poll instead of blocking run(): adds a stall watchdog. Two live
+        # hangs showed the same signature - codex finishes tool work (candidates
+        # written + validated), then the model response never arrives and the
+        # process sits silent for 40+ minutes. Treat 20 min without any file
+        # activity in /tmp/candidates or the repo top level as a hang: kill and
+        # take the timeout path (which salvages written candidates).
+        proc = subprocess.Popen(codex_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=HERE)
+        hard_deadline = time.time() + 3600
+        gen_start = time.time()
+        while proc.poll() is None:
+            now = time.time()
+            if now > hard_deadline:
+                kill_codex(); proc.wait()
+                raise subprocess.TimeoutExpired(codex_cmd, 3600)
+            latest = gen_start  # a session that never writes runs to the hard timeout
+            for root, _, files in os.walk("/tmp/candidates"):
+                for fn in files:
+                    try:
+                        latest = max(latest, os.path.getmtime(os.path.join(root, fn)))
+                    except OSError:
+                        pass
+            for fn in os.listdir(HERE):
+                if fn.endswith((".py", ".json")):
+                    try:
+                        latest = max(latest, os.path.getmtime(os.path.join(HERE, fn)))
+                    except OSError:
+                        pass
+            if now - latest > 1200:
+                print(f"[gen {gen}] codex stalled: no file activity for 20 min; killing session", flush=True)
+                kill_codex(); proc.wait()
+                raise subprocess.TimeoutExpired(codex_cmd, 3600)
+            time.sleep(30)
+        r = subprocess.CompletedProcess(codex_cmd, proc.returncode, *proc.communicate())
     except subprocess.TimeoutExpired:
         kill_codex()  # subprocess only kills the direct child; node orphans linger
         salvaged = [p for p in (f"/tmp/candidates/{base}{L}.py" for L in LETTERS) if os.path.exists(p)]
