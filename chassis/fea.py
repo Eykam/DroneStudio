@@ -27,6 +27,9 @@ RHO_T_PER_MM3 = 1.24e-9  # PETG, tonne/mm^3 (N-mm-s consistent)
 ANISO_VERTICAL = 0.55    # FFF Z-layer strength fraction vs in-plane
 ANISO_SHEAR = 0.8
 MIN_FIRST_MODE_HZ = 120.0  # first elastic mode floor (control-band margin)
+BUCKLE_MIN_FACTOR = 2.0   # first buckling eigenvalue must exceed 2x the crash preload
+PETG_ENDURANCE_MPA = 10.0  # ~0.2x yield, 1e7-cycle endurance for FFF PETG
+FATIGUE_RIPPLE = 0.3      # cruise thrust ripple as fraction of hover_max stress
 N_MODES = 8
 
 def mesh_step(step_path, inp_path, mesh_size=2.5):
@@ -171,6 +174,50 @@ def build_freq_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm):
         f.write(chr(10).join(out) + chr(10))
     return job_name + ".inp"
 
+def build_buckle_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, preload_scale=3.0):
+    """Linear buckling: static preload step (crash-scale thrust) then *BUCKLE.
+    Eigenvalue = load multiplier at which thin sections buckle."""
+    out, nfix, loads = _emit_base(inp_path, motor_positions_mm, stack_spacing_mm)
+    out.append("*STEP")
+    out.append("*STATIC")
+    out.append("*CLOAD")
+    for mi, sel in enumerate(loads):
+        n = max(len(sel), 1)
+        per = MAX_THRUST_N * preload_scale
+        for nid in sel:
+            out.append("%d,3,%.6f" % (nid, per / n))
+    out.append("*END STEP")
+    out.append("*STEP,BUCKLE")
+    out.append("*BUCKLE")
+    out.append("2")
+    out.append("*NODE FILE")
+    out.append("U")
+    out.append("*END STEP")
+    with open(job_name + ".inp", "w") as f:
+        f.write(chr(10).join(out) + chr(10))
+    return job_name + ".inp"
+
+def parse_buckle_factors(dat_path):
+    """Buckling load factors from ccx .dat: first numeric column of eigen rows."""
+    import re
+    factors = []
+    row = re.compile(r"^\s*(\d+)\s+(\S+)\s+\S*\s*$")
+    in_buckle = False
+    for line in open(dat_path):
+        if "BUCKLING" in line.upper() or "EIGENVALUE" in line.upper():
+            in_buckle = True
+            continue
+        if in_buckle:
+            m = row.match(line)
+            if m:
+                try:
+                    factors.append(float(m.group(2)))
+                except ValueError:
+                    pass
+            elif line.strip() and not line.startswith(" "):
+                in_buckle = False
+    return factors
+
 def run_ccx(job_base, ccx="ccx"):
     r = subprocess.run([ccx, "-i", job_base], capture_output=True, text=True, timeout=1800)
     return r.returncode == 0 and os.path.exists(job_base + ".frd")
@@ -283,5 +330,27 @@ def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="
                         "passed": bool(freqs) and f1 >= MIN_FIRST_MODE_HZ}
     else:
         out["modal"] = {"passed": False, "error": "ccx failed"}
+    # buckling screen under crash-scale compression
+    job = os.path.join(workdir, "buckle")
+    build_buckle_job(inp, job, motor_positions_mm, stack_spacing_mm)
+    if run_ccx(job, ccx):
+        factors = parse_buckle_factors(job + ".dat")
+        f1 = factors[0] if factors else 0.0
+        out["buckling"] = {"load_factors": [round(f,2) for f in factors],
+                           "first_factor": round(f1,2), "min_factor": BUCKLE_MIN_FACTOR,
+                           "passed": bool(factors) and f1 >= BUCKLE_MIN_FACTOR}
+    else:
+        out["buckling"] = {"passed": False, "error": "ccx failed"}
+    # fatigue screen: arm-root stress amplitude at cruise vs PETG endurance limit.
+    # Screening assumption: oscillatory thrust ripple at cruise ~0.3x hover_max stress.
+    hvm = out.get("hover_max", {}).get("max_von_mises_mpa")
+    if hvm is not None:
+        amp = FATIGUE_RIPPLE * hvm
+        out["fatigue"] = {"stress_amplitude_mpa": round(amp,1),
+                          "endurance_limit_mpa": PETG_ENDURANCE_MPA,
+                          "assumption": "cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)",
+                          "passed": amp < PETG_ENDURANCE_MPA}
+    else:
+        out["fatigue"] = {"passed": False, "error": "no hover_max stress"}
     out["passed"] = all(v.get("passed") for v in out.values())
     return out
