@@ -90,11 +90,18 @@ function Rig({ mode, frameRef, extent }: { mode: CamMode; frameRef: React.Mutabl
   return null;
 }
 
-export default function WatchScene3D({ sceneRef, frameRef, trail3dRef, mode }:
+// adopted design ids look like cad-chassis-v16-g15; pick the highest (v, g)
+function designVersion(id: string): [number, number] | null {
+  const m = /cad-chassis-v(\d+)-g(\d+)/.exec(id);
+  return m ? [Number(m[1]), Number(m[2])] : null;
+}
+
+export default function WatchScene3D({ sceneRef, frameRef, trail3dRef, mode, onPick }:
   { sceneRef: React.MutableRefObject<Scene | null>;
     frameRef: React.MutableRefObject<Frame | null>;
     trail3dRef: React.MutableRefObject<[number, number, number][]>;
-    mode: CamMode }) {
+    mode: CamMode;
+    onPick?: (designId: string) => void }) {
   const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const droneVisible = useRef(true);
   droneVisible.current = mode !== "fpv";
@@ -104,10 +111,16 @@ export default function WatchScene3D({ sceneRef, frameRef, trail3dRef, mode }:
         const r = await fetch("/api/cad/designs", { credentials: "same-origin" });
         const d = await r.json();
         const designs = (d.designs || []).filter((x: any) => x.glb_bytes > 0);
-        // prefer the design the current sim manifest was built from (chassis_v1), else latest
-        const v1 = designs.find((x: any) => /v1/.test(x.id));
-        const pick = v1 || designs[designs.length - 1];
-        if (pick) setGlbUrl(`/api/cad/designs/${pick.id}/glb`);
+        // latest adopted design (highest cad-chassis-v<N>-g<M>), else most recent
+        const tagged = designs
+          .map((x: any) => ({ x, v: designVersion(String(x.id)) }))
+          .filter((t: any) => t.v !== null)
+          .sort((a: any, b: any) => (a.v[0] - b.v[0]) || (a.v[1] - b.v[1]));
+        const pick = tagged.length ? tagged[tagged.length - 1].x : designs[designs.length - 1];
+        if (pick) {
+          setGlbUrl(`/api/cad/designs/${pick.id}/glb`);
+          onPick?.(String(pick.id));
+        }
       } catch { /* fallback cone */ }
     })();
   }, []);

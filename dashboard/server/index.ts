@@ -200,6 +200,10 @@ app.post("/api/cad/designs", async (c) => {
   try { meta = JSON.parse(String(form["meta"] || "{}")); } catch { return c.json({ error: "bad JSON in 'meta' field" }, 400); }
   const id = safeId(String(meta.id || ""));
   if (!id) return c.json({ error: "meta.id required (A-Za-z0-9._-, max 80)" }, 400);
+  // Gate auto-publish to adopted-design ids; test/debug runs must not land here.
+  if (!/^cad-chassis-v\d+-g\d+$/.test(id)) {
+    return c.json({ error: "id must match cad-chassis-v<N>-g<M> (test/debug artifacts are not publishable)" }, 400);
+  }
   const designs = await loadDesigns();
   const existing = designs.findIndex((d) => d.id === id);
   const rec: CadDesign = {
@@ -225,6 +229,25 @@ app.post("/api/cad/designs", async (c) => {
   return c.json({ ok: true, id, glb_bytes: file.size });
 });
 
+
+app.delete("/api/cad/designs/:id", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const id = safeId(c.req.param("id"));
+  if (!id) return c.json({ error: "bad id" }, 400);
+  const designs = await loadDesigns();
+  const next = designs.filter((d) => d.id !== id);
+  if (next.length === designs.length) return c.json({ error: "not found" }, 404);
+  await saveDesigns(next);
+  try {
+    const fs = await import("node:fs/promises");
+    await fs.unlink(`${CAD_DIR}/${id}.glb`);
+  } catch {}
+  return c.json({ ok: true, id });
+});
+
 const cadAuthed = async (c: any, next: any) => {
   if (!(await checkSession(getCookie(c, "ds_session")))) return c.json({ error: "unauthorized" }, 401);
   await next();
@@ -245,7 +268,66 @@ app.get("/api/cad/designs/:id/glb", async (c) => {
   if (!id) return c.json({ error: "bad id" }, 400);
   const f = Bun.file(`${CAD_DIR}/${id}.glb`);
   if (!(await f.exists())) return c.json({ error: "not found" }, 404);
-  return new Response(f, { headers: { "content-type": "model/gltf-binary", "cache-control": "no-store" } });
+  // Design ids are unique per adopted design, so responses are cacheable.
+  const raw = new Uint8Array(await f.arrayBuffer());
+  const headers: Record<string, string> = {
+    "content-type": "model/gltf-binary",
+    "cache-control": "public, max-age=86400, immutable",
+    vary: "accept-encoding",
+  };
+  const ae = c.req.header("accept-encoding") || "";
+  const zlib = await import("node:zlib");
+  if (/\bbr\b/.test(ae)) {
+    headers["content-encoding"] = "br";
+    return new Response(zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 6 } }), { headers });
+  }
+  if (/\bgzip\b/.test(ae)) {
+    headers["content-encoding"] = "gzip";
+    return new Response(zlib.gzipSync(raw, { level: 6 }), { headers });
+  }
+  return new Response(raw, { headers });
+});
+
+
+// --- training status (live policy / candidate / training now / queue) ------
+// The research box POSTs a free-form status doc; the Research page renders it
+// as the top "model status" panel. Persisted so redeploys do not lose it.
+type TrainingStatus = Record<string, unknown>;
+const TRAINING_FILE = `${DATA_DIR}/training_status.json`;
+
+async function loadTrainingStatus(): Promise<TrainingStatus> {
+  try {
+    const f = Bun.file(TRAINING_FILE);
+    if (await f.exists()) return await f.json();
+  } catch {}
+  return { status: "idle" };
+}
+
+async function saveTrainingStatus(s: TrainingStatus) {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = TRAINING_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify(s));
+  await fs.rename(tmp, TRAINING_FILE);
+}
+
+app.post("/api/training/status", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json({ error: "bad request: body must be a JSON object" }, 400);
+  }
+  await saveTrainingStatus({ ...body, updated_at: new Date().toISOString() });
+  return c.json({ ok: true });
+});
+
+app.get("/api/training/status", async (c) => {
+  if (!(await checkSession(getCookie(c, "ds_session")))) return c.json({ error: "unauthorized" }, 401);
+  return c.json(await loadTrainingStatus());
 });
 
 // --- authed reads ---------------------------------------------------------------
