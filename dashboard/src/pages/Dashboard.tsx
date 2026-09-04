@@ -53,9 +53,9 @@ export default function Dashboard() {
     <div className="min-h-screen p-3 md:p-8 max-w-6xl mx-auto space-y-4 md:space-y-6">
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h1 className="text-lg md:text-2xl font-bold tracking-tight flex items-center gap-2">
+          <h1 className="text-base md:text-2xl font-bold tracking-tight flex items-center gap-2">
             <FlaskConical className="h-5 w-5 md:h-6 md:w-6 text-primary shrink-0" />
-            <span className="truncate">DroneStudio Auto-Researcher</span>
+            <span>DroneStudio Auto-Researcher</span>
           </h1>
           <p className="text-xs md:text-sm text-muted-foreground mt-1">
             Live loop state - auto-refresh 10s - updated {updated}
@@ -116,10 +116,10 @@ export default function Dashboard() {
           <CardContent className="p-3 md:p-6 pt-0 md:pt-0 h-52 md:h-64">
             {chart.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chart} margin={{ top: 5, right: 8, bottom: 5, left: -14 }}>
+                <LineChart data={chart} margin={{ top: 5, right: 8, bottom: 5, left: -6 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 33% 17%)" />
                   <XAxis dataKey="gen" stroke="hsl(215 20% 65%)" fontSize={11} tickMargin={4} />
-                  <YAxis stroke="hsl(215 20% 65%)" fontSize={10} unit="%" domain={[0, 100]} width={38} />
+                  <YAxis stroke="hsl(215 20% 65%)" fontSize={10} unit="%" domain={[0, 100]} width={46} />
                   <Tooltip contentStyle={{ background: "hsl(222 47% 9%)", border: "1px solid hsl(217 33% 17%)", borderRadius: 8, fontSize: 13 }}
                            labelStyle={{ color: "hsl(210 40% 96%)" }} />
                   <Line type="monotone" dataKey="success" stroke="hsl(217 91% 60%)" strokeWidth={2.5} dot={{ r: 3.5 }} />
