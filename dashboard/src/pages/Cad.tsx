@@ -21,16 +21,33 @@ function lineageOf(d: CadDesign, all: CadDesign[]): CadDesign[] {
 
 function MetricGrid({ title, obj }: { title: string; obj: Record<string, unknown> | undefined }) {
   if (!obj || !Object.keys(obj).length) return null;
+  // Flatten one level of nested objects (FEA hover_max/crash blocks) and
+  // format values compactly - long arrays/strings must never blow out
+  // mobile width.
+  const rows: [string, unknown][] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [sk, sv] of Object.entries(v as Record<string, unknown>)) rows.push([`${k} ${sk}`, sv]);
+    } else {
+      rows.push([k, v]);
+    }
+  }
+  const fmt = (v: unknown): string => {
+    if (typeof v === "number") return Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.001) ? v.toExponential(3) : String(Math.round(v * 10000) / 10000);
+    if (typeof v === "boolean") return String(v);
+    if (Array.isArray(v)) return v.length > 4 ? `[${v.slice(0, 4).join(",")} +${v.length - 4}]` : `[${v.join(",")}]`;
+    if (v && typeof v === "object") return "{...}";
+    const s = String(v);
+    return s.length > 42 ? s.slice(0, 42) + "…" : s;
+  };
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{title}</div>
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs md:text-sm">
-        {Object.entries(obj).map(([k, v]) => (
-          <div key={k} className="flex justify-between gap-2">
-            <dt className="text-muted-foreground truncate" title={k}>{k.replace(/_/g, " ")}</dt>
-            <dd className="font-mono text-right">
-              {typeof v === "number" ? v.toPrecision(4) : typeof v === "object" ? JSON.stringify(v) : String(v)}
-            </dd>
+      <dl className="grid grid-cols-1 gap-y-1 text-xs md:text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-2 min-w-0">
+            <dt className="text-muted-foreground truncate shrink" title={k}>{k.replace(/_/g, " ")}</dt>
+            <dd className="font-mono text-right break-all max-w-[58%]" title={typeof v === "object" ? JSON.stringify(v) : String(v)}>{fmt(v)}</dd>
           </div>
         ))}
       </dl>
