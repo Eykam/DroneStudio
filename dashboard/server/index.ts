@@ -457,8 +457,24 @@ app.get("/api/curriculum/progress", (c) => c.json(curriculum));
 // Named time series for training curves (curriculum success over time,
 // BC/DAgger loss over time, ...). Producers POST one point at a time;
 // the Research page main chart toggles between these and generations.
-const seriesStore: Record<string, { t: string; y: number; label?: string }[]> = {};
+type SeriesPoint = { t: string; y: number; label?: string };
+const SERIES_FILE = `${DATA_DIR}/series.json`;
+const seriesStore: Record<string, SeriesPoint[]> = await (async () => {
+  try {
+    const f = Bun.file(SERIES_FILE);
+    if (await f.exists()) return await f.json();
+  } catch {}
+  return {};
+})();
 const SERIES_CAP = 1000;
+
+async function saveSeries() {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = SERIES_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify(seriesStore));
+  await fs.rename(tmp, SERIES_FILE);
+}
 
 app.post("/api/series", async (c) => {
   const auth = c.req.header("authorization") || "";
@@ -473,9 +489,11 @@ app.post("/api/series", async (c) => {
   }
   if (body.reset === true) seriesStore[body.series] = [];
   const arr = (seriesStore[body.series] ||= []);
-  arr.push({ t: new Date().toISOString(), y: body.point.y,
+  arr.push({ t: typeof body.point.t === "string" ? body.point.t : new Date().toISOString(),
+             y: body.point.y,
              label: typeof body.point.label === "string" ? body.point.label : undefined });
   if (arr.length > SERIES_CAP) arr.splice(0, arr.length - SERIES_CAP);
+  await saveSeries();
   return c.json({ ok: true, n: arr.length });
 });
 
