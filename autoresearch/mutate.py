@@ -27,6 +27,43 @@ def heuristic_mutants(base: SceneDistribution, k: int, seed: int, sigma=0.15):
         out.append(SceneDistribution.from_vector(vec))
     return out
 
+# --- API spend guard -------------------------------------------------------
+# Hard cap on outer-loop LLM spend, default $10. Persists across runs in a
+# state file next to the archive. Over cap -> heuristic mutator, always.
+SPEND_CAP_USD = float(os.environ.get("AUTORESEARCH_LLM_SPEND_CAP_USD", "10"))
+SPEND_FILE = os.environ.get("AUTORESEARCH_SPEND_FILE",
+                            os.path.join(os.path.dirname(os.path.abspath(__file__)), ".llm_spend.json"))
+
+# USD per 1M tokens (input, output); extend as providers/models are added.
+PRICE_TABLE = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-5": (1.25, 10.00),
+    "gpt-5-mini": (0.25, 2.00),
+}
+
+def _spend_state():
+    try:
+        with open(SPEND_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"usd": 0.0, "calls": 0}
+
+def _record_spend(model, usage):
+    pin, pout = PRICE_TABLE.get(model, (2.50, 10.00))  # assume pricey when unknown
+    cost = (usage.get("prompt_tokens", 0) * pin + usage.get("completion_tokens", 0) * pout) / 1e6
+    st = _spend_state()
+    st["usd"] = round(st["usd"] + cost, 6)
+    st["calls"] += 1
+    with open(SPEND_FILE, "w") as f:
+        json.dump(st, f)
+    return st
+
+def spend_status():
+    st = _spend_state()
+    return {"spent_usd": st["usd"], "cap_usd": SPEND_CAP_USD, "calls": st["calls"],
+            "over_cap": st["usd"] >= SPEND_CAP_USD}
+
 def llm_mutants(base: SceneDistribution, k: int, seed: int, archive_summary: str):
     key = os.environ.get("AUTORESEARCH_LLM_API_KEY")
     if not key:
@@ -40,6 +77,8 @@ def llm_mutants(base: SceneDistribution, k: int, seed: int, archive_summary: str
         "objects with exactly these keys: %s. Base distribution: %s. "
         "Archive so far: %s. Reply with JSON only."
         % (k, ", ".join(SceneDistribution.names()), base.to_json(), archive_summary))
+    if _spend_state()["usd"] >= SPEND_CAP_USD:
+        raise RuntimeError(f"LLM spend cap reached (${SPEND_CAP_USD}); staying heuristic")
     req = urllib.request.Request(
         base_url.rstrip("/") + "/chat/completions",
         data=json.dumps({
@@ -50,6 +89,7 @@ def llm_mutants(base: SceneDistribution, k: int, seed: int, archive_summary: str
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
         body = json.loads(r.read())
+    _record_spend(model, body.get("usage", {}))
     text = body["choices"][0]["message"]["content"]
     start, end = text.find("["), text.rfind("]")
     variants = json.loads(text[start:end + 1])
