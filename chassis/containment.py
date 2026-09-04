@@ -24,8 +24,10 @@ def component_bbox_mm(key, pos):
 
 def check_containment(part, clear_mm=CLEAR_MM):
     """(name, passed, detail, penalty) in the evaluate.py check contract."""
+    from components import component_shape
     fbb = part.bounding_box()
     worst, fails = 0.0, []
+    embeds = []
     for key, pos in placement().items():
         c, bb = component_bbox_mm(key, pos)
         poke = max(fbb.min.X - (bb.min.X - clear_mm),
@@ -38,7 +40,21 @@ def check_containment(part, clear_mm=CLEAR_MM):
             worst = poke
         if poke > 0:
             fails.append("%s(%s)+%.1fmm" % (key, c.name.split("(")[0].strip()[:20], poke))
-    ok = not fails
-    detail = "all components inside frame envelope + %.0fmm clearance" % clear_mm if ok \
-             else "PROTRUDE: " + ", ".join(fails)
+        # interpenetration: component solid must not be buried in frame material
+        # (closing the z=0.002-into-the-floor exploit found 2026-09-04)
+        sh = component_shape(key, pos)
+        if sh is not None:
+            try:
+                inter_vol = part.intersect(sh).volume
+                if inter_vol > 1.0:  # mm^3, beyond touch tolerance
+                    embeds.append("%s(%.0fmm3 buried)" % (key, inter_vol))
+            except Exception:
+                pass
+    ok = not fails and not embeds
+    if ok:
+        detail = "all components inside frame envelope + %.0fmm clearance, none embedded" % clear_mm
+    else:
+        parts = (["PROTRUDE: " + ", ".join(fails)] if fails else []) + \
+                (["EMBEDDED: " + ", ".join(embeds)] if embeds else [])
+        detail = " | ".join(parts)
     return ("containment", ok, detail, 0.0 if ok else 0.6)

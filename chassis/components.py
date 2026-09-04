@@ -49,6 +49,54 @@ def cad_geometry(key, pos_m):
     I_com = I_org - m_kg * ((r @ r) * np.eye(3) - np.outer(r, r))
     return sh, I_com * 1e-6, r * 0.001
 
+
+def primitive_geometry(key, pos_m):
+    """Primitive solid for a component WITHOUT manufacturer CAD (battery, stack,
+    mpu9250) so it appears in the assembly GLB and containment checks."""
+    c = LIBRARY[key.split("#")[0]]
+    if c.step_path:
+        return None
+    import build123d as b
+    dx, dy, dz = (d * 1000 for d in c.dims_m)
+    cx, cy, z0 = pos_m[0] * 1000, pos_m[1] * 1000, pos_m[2] * 1000
+    if c.shape == "cylinder-z":
+        sh = b.Cylinder(radius=dx / 2, height=dz)
+    else:
+        sh = b.Box(dx, dy, dz)
+    # Box/Cylinder are centered at origin; placement z = component bottom
+    return sh.moved(b.Location((cx, cy, z0 + dz / 2)))
+
+
+def component_shape(key, pos):
+    """CAD shape when available, else primitive."""
+    sh, _, _ = cad_geometry(key, pos)
+    return sh if sh is not None else primitive_geometry(key, pos)
+
+
+def assembly_shapes():
+    """One shape per placed component (CAD or primitive) for the assembly GLB."""
+    out = []
+    for key, pos in placement().items():
+        sh = component_shape(key, pos)
+        if sh is not None:
+            out.append(sh)
+    return out
+
+
+PROP_PLANE_ABOVE_MOTOR_MOUNT_MM = 34.0  # motor bell top + shaft clearance
+
+def prop_shapes(motor_positions_mm, motor_mount_z_mm):
+    """Rotor disc + hub per motor pad, at the prop plane."""
+    import build123d as b
+    r = LIBRARY["prop"].dims_m[0] * 1000 / 2
+    z = motor_mount_z_mm + PROP_PLANE_ABOVE_MOTOR_MOUNT_MM
+    out = []
+    for mx, my in motor_positions_mm:
+        out.append(b.Cylinder(radius=4, height=6).moved(b.Location((mx, my, z - 3))))
+        out.append(b.Cylinder(radius=r, height=1.5).moved(b.Location((mx, my, z + 4.5))))
+    return out
+
+
 def placed_cad_items():
     """{placement_key: (shape_mm, I_self_kgm2, com_m)} for CAD-backed parts."""
     out = {}
@@ -74,8 +122,8 @@ LIBRARY = {
         "https://www.mantisfpv.com.au/emax-eco-ii-series-2207-3-6s-1700-1900-2400kv/",
         step_path="parts/motor_2207.step"),  # GrabCAD generic 2207 (bbox 27.0x27.0x32.3mm, within 1.2mm of ECO II); no exact EMAX STEP exists - https://grabcad.com/library/2207-brushless-motor-1
     "prop": Component(
-        "Gemfan Hurricane 51466 V2", 4.2, (0.1318, 0.1318, 0.0068), "cylinder-z", "motor_pad",
-        "https://www.gemfanhobby.com/hurricane-51466-v2-pc-3-blade.html"),
+        "5x4.5 3-blade prop (5045-class, AKK RS2205 recommended)", 4.0, (0.127, 0.127, 0.006), "cylinder-z", "motor_pad",
+        "5045-class per AKK RS2205 2300KV specs (user motor 2026-09-04); specific prop model TBD"),
     "fc_esc_stack": Component(
         "30.5mm FC+ESC stack (BLHELI_S, his hardware per repo assets/Drone/drone_esc_mount_30mm.stl)",
         90.0, (0.036, 0.036, 0.020), "box", "stack",

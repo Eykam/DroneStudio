@@ -36,6 +36,14 @@ def compose_dynamics(part, p: ChassisParams):
         pos = np.array([mx*0.001, my*0.001, p.body_thickness_mm*0.001])
         items.append({"name": "motor", "mass_kg": MOTOR_MASS_KG, "com": pos,
                       "I_self": _solid_inertia_box(MOTOR_MASS_KG, 0.028, 0.028, 0.030)})
+    prop = LIBRARY["prop"]
+    r_p, h_p = prop.dims_m[0] / 2, prop.dims_m[2]
+    m_p = prop.mass_g / 1000.0
+    I_prop = np.diag([m_p*(3*r_p*r_p+h_p*h_p)/12]*2 + [m_p*r_p*r_p/2])
+    z_prop = (p.body_thickness_mm + 34.0) * 0.001
+    for (mx, my) in p.motor_positions():
+        items.append({"name": "prop", "mass_kg": m_p, "com": np.array([mx*0.001, my*0.001, z_prop]),
+                      "I_self": I_prop})
     cad_items = placed_cad_items()
     for it in placed_items():
         if it["shape"] == "cylinder-z":
@@ -88,7 +96,8 @@ def export(p: ChassisParams, out_base: str):
     # STEP before GLB: the gltf writer on a big Compound leaves OCC unable to
     # write STEP afterwards (export_step "Failed to write STEP file").
     b.export_step(part, out_base + ".step")
-    cad_shapes = [sh for (sh, _, _) in placed_cad_items().values()]
+    from components import assembly_shapes, prop_shapes, PROP_PLANE_ABOVE_MOTOR_MOUNT_MM
+    cad_shapes = assembly_shapes()  # every placed component, CAD or primitive
     # motors: 4x CAD at parametric motor positions (not in placement map)
     if LIBRARY["motor"].step_path:
         from components import cad_geometry
@@ -96,6 +105,8 @@ def export(p: ChassisParams, out_base: str):
             g, _, _ = cad_geometry("motor#%d" % i, [mx * 0.001, my * 0.001, p.body_thickness_mm * 0.001])
             if g is not None:
                 cad_shapes.append(g)
+    # rotor discs + hubs at the prop plane
+    cad_shapes += prop_shapes(p.motor_positions(), p.body_thickness_mm)
     if cad_shapes:
         b.export_gltf(b.Compound(children=[part] + cad_shapes), out_base + ".glb", binary=True, linear_deflection=0.1, angular_deflection=0.5)
     else:
