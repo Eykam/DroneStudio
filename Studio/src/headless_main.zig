@@ -947,6 +947,28 @@ pub fn main() !void {
         } else if (std.mem.eql(u8, cmd, "motor_v2")) {
             const on_v = root.object.get("on") orelse continue;
             world.dyn.motor_v2 = (on_v == .bool and on_v.bool);
+            // Yaw allocation must match the ACTIVE physics (2026-09-04 yaw
+            // fix): the m2 path applies drag torque kd*omega^2 with
+            // kd_over_kf = 0.015, while the lag-model path applies
+            // ti*drag_ratio (manifest 0.15). Allocating yaw with the
+            // manifest ratio under m2 commanded a ~10x thrust split per
+            // unit yaw torque; the slow motors pinned at the min-thrust
+            // clamp, corrupting roll/pitch allocation whenever collective
+            // or attitude was modulated on top - the long-standing
+            // "sustained yaw destabilizes the quad" issue. Rebuild mix_inv
+            // with the yaw ratio of the ACTIVE model. Zero-yaw flight is
+            // bit-exact either way (tq_y = 0 contributes nothing).
+            if (world.dyn.motor_mode) {
+                const yr: f64 = if (world.dyn.motor_v2) world.dyn.m2_kd_over_kf else world.dyn.motor_drag_ratio;
+                var A: [4][4]f64 = undefined;
+                for (0..4) |i| {
+                    A[0][i] = 1.0;
+                    A[1][i] = -@as(f64, world.dyn.motor_pos[i][2]);
+                    A[2][i] = @as(f64, world.dyn.motor_yaw_sign[i]) * yr;
+                    A[3][i] = @as(f64, world.dyn.motor_pos[i][0]);
+                }
+                world.dyn.mix_inv = invert4(A);
+            }
             try stdout.print("{{\"ok\":true,\"motor_v2\":{}}}\n", .{world.dyn.motor_v2});
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "obs_v2")) {
