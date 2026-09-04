@@ -137,7 +137,11 @@ def _rollout_eval_candidate(task):
     return float(np.mean([_run_episode(_WORKER["factory"], policy, seed=s) for s in seeds]))
 
 def default_jobs():
-    return min(16, os.cpu_count() or 1)
+    # Benchmarked on the 48-core Railway box (bench_parallel, 480 real
+    # Zig-sim episodes, 10m/d0.1): 12w=82.7 eps/s, 24w=129.8, 32w=153.4,
+    # 48w=180.7. 32 keeps ~85% of peak throughput and leaves cores for the
+    # trainer + streamer; override with N_JOBS.
+    return min(int(os.environ.get("N_JOBS", "32")), os.cpu_count() or 1)
 
 def cem_train_parallel(spec, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
                        episodes_per_eval=4, seed=0, n_jobs=None, verbose=False,
