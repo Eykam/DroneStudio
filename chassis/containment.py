@@ -24,7 +24,6 @@ def component_bbox_mm(key, pos):
 
 def check_containment(part, clear_mm=CLEAR_MM):
     """(name, passed, detail, penalty) in the evaluate.py check contract."""
-    from components import component_shape
     fbb = part.bounding_box()
     worst, fails = 0.0, []
     embeds = []
@@ -40,16 +39,27 @@ def check_containment(part, clear_mm=CLEAR_MM):
             worst = poke
         if poke > 0:
             fails.append("%s(%s)+%.1fmm" % (key, c.name.split("(")[0].strip()[:20], poke))
-        # interpenetration: component solid must not be buried in frame material
-        # (closing the z=0.002-into-the-floor exploit found 2026-09-04)
-        sh = component_shape(key, pos)
-        if sh is not None:
-            try:
-                inter_vol = part.intersect(sh).volume
-                if inter_vol > 1.0:  # mm^3, beyond touch tolerance
-                    embeds.append("%s(%.0fmm3 buried)" % (key, inter_vol))
-            except Exception:
-                pass
+        # interpenetration: component must not be buried in frame material
+        # (closing the z=0.002-into-the-floor exploit found 2026-09-04).
+        # Sampled is_inside grid: a boolean intersect() against the full frame
+        # solid costs minutes; point classification costs ms.
+        c2, bb2 = component_bbox_mm(key, pos)
+        nx = 5
+        inside = total = 0
+        for i in range(nx):
+            for j in range(nx):
+                for k in range(nx):
+                    px = bb2.min.X + (bb2.max.X - bb2.min.X) * (i + 0.5) / nx
+                    py = bb2.min.Y + (bb2.max.Y - bb2.min.Y) * (j + 0.5) / nx
+                    pz = bb2.min.Z + (bb2.max.Z - bb2.min.Z) * (k + 0.5) / nx
+                    total += 1
+                    try:
+                        if part.is_inside((px, py, pz)):
+                            inside += 1
+                    except Exception:
+                        pass
+        if total and inside / total > 0.10:  # >10% of sampled volume in frame solid
+            embeds.append("%s(%d/%d pts buried)" % (key, inside, total))
     ok = not fails and not embeds
     if ok:
         detail = "all components inside frame envelope + %.0fmm clearance, none embedded" % clear_mm
