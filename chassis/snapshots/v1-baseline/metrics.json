@@ -1,0 +1,131 @@
+{
+  "id": "cad-chassis-v1-baseline",
+  "kind": "cad.chassis.snapshot",
+  "created_at": "2026-09-04T07:03:37.869389+00:00",
+  "variant": {
+    "id": "v1-baseline",
+    "parent_id": null,
+    "generation": 0,
+    "params": {
+      "arm_length_mm": 150.0,
+      "arm_width_mm": 14.0,
+      "arm_thickness_mm": 5.0,
+      "arm_root_width_mm": 22.0,
+      "center_plate_len_mm": 90.0,
+      "center_plate_wid_mm": 46.0,
+      "top_plate_thickness_mm": 2.5,
+      "body_thickness_mm": 6.0,
+      "motor_pad_dia_mm": 26.0,
+      "motor_hole_spacing_mm": 16.0,
+      "motor_hole_dia_mm": 3.2,
+      "motor_center_hole_dia_mm": 9.0,
+      "stack_spacing_mm": 30.5,
+      "stack_hole_dia_mm": 3.2,
+      "stack_standoff_dia_mm": 6.0,
+      "fillet_radius_mm": 2.0,
+      "prop_dia_mm": 127.0,
+      "prop_clearance_mm": 10.0
+    },
+    "git_commit": "f4392fde93b9c9539921129b3add7f0b3d19aa5d"
+  },
+  "score": 0.5,
+  "evaluator": [
+    {
+      "name": "watertight",
+      "passed": true,
+      "detail": "watertight=True"
+    },
+    {
+      "name": "single_body",
+      "passed": true,
+      "detail": "1 bodies"
+    },
+    {
+      "name": "overhang",
+      "passed": true,
+      "detail": "1.27% of surface overhangs > 45.0deg (415 mm^2)"
+    },
+    {
+      "name": "wall_thickness",
+      "passed": true,
+      "detail": "0.00% of samples below 1.2 mm wall"
+    },
+    {
+      "name": "prop_clearance",
+      "passed": true,
+      "detail": "212 mm vs 137 mm needed"
+    },
+    {
+      "name": "hover_margin",
+      "passed": true,
+      "detail": "hover at 13% max thrust"
+    },
+    {
+      "name": "fea",
+      "passed": false,
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 7.5, \"max_disp_mm\": 6.63, \"limit_mpa\": 30.0, \"passed\": false, \"fix_nodes\": 319, \"load_nodes\": [407, 393, 398, 405]}, \"crash\": {\"max_von_mises_mpa\": 22.6, \"max_disp_mm\": 19.89, \"limit_mpa\": 30.0, \"passed\": false, \"fix_nodes\": 319, \"load_nodes\": [407, 393, 398, 405]}, \"passed\": false}"
+    }
+  ],
+  "mass": {
+    "frame_mass_g": 88.7,
+    "all_up_mass_kg": 0.547,
+    "com_mm": [
+      0.0,
+      -0.0,
+      3.03
+    ],
+    "inertia_kgm2": [
+      [
+        0.00211486,
+        -0.0,
+        -0.0
+      ],
+      [
+        -0.0,
+        0.00211486,
+        -0.0
+      ],
+      [
+        -0.0,
+        -0.0,
+        0.00446019
+      ]
+    ],
+    "hover_thrust_frac": 0.134
+  },
+  "fea": {
+    "hover_max": {
+      "max_von_mises_mpa": 7.5,
+      "max_disp_mm": 6.63,
+      "limit_mpa": 30.0,
+      "passed": false,
+      "fix_nodes": 319,
+      "load_nodes": [
+        407,
+        393,
+        398,
+        405
+      ]
+    },
+    "crash": {
+      "max_von_mises_mpa": 22.6,
+      "max_disp_mm": 19.89,
+      "limit_mpa": 30.0,
+      "passed": false,
+      "fix_nodes": 319,
+      "load_nodes": [
+        407,
+        393,
+        398,
+        405
+      ]
+    },
+    "passed": false
+  },
+  "artifacts": {
+    "glb": "snapshots/v1-baseline/chassis.glb",
+    "step": "snapshots/v1-baseline/chassis.step",
+    "manifest": "snapshots/v1-baseline/manifest.json",
+    "metrics": "snapshots/v1-baseline/metrics.json"
+  }
+}
