@@ -101,3 +101,37 @@ does not improve on the pre-restart best by at least `plateau_min_improvement`
 (default 0.02), the run stops instead of restarting again. The fixed generation
 count remains an upper bound, not a target. Logged as "plateau stop" with the
 gen number, pre-restart best, and current best.
+
+## Demo diversity, DAgger, and trajectory collapse (2026-09-04)
+
+User observation: the first BC policy flew one beeline style and only
+succeeded when the spawn matched it. Correct - the seed demos were 24
+obstacle-free episodes from a single P-controller teacher at one speed.
+
+What we tried, in order:
+
+1. More of the same (fixed demos, varied speed profiles): REGRESSED
+   (2m 75% -> 42%). Mixed speed profiles make the obs->action mapping
+   multimodal - same obs, different throttle depending on the teacher's
+   chosen speed - and BC averages the modes into mush. Lesson: any teacher
+   choice not observable from obs must be held constant across demos.
+2. Diverse scenes + obstacle-avoiding teacher (potential field on the
+   nearest-obstacle obs channel): also regressed on clean evals. Avoidance
+   wiggle demos diluted the clean-flight prior.
+3. DAgger (student rolls out on diverse scenes - goals 2-15m, densities
+   0-0.2 - and the teacher labels the states the student actually visits;
+   aggregate, retrain): WORKED. After 4 iterations: 2m 95.8%, 5m 79.2%
+   (also 79.2% WITH obstacles at density 0.1), vs the original BC's
+   75/21/4. 10m still 0% - student rarely survives to long-horizon states,
+   so the teacher never labels them; expected to lift as the ladder
+   warm-chains upward.
+
+Conclusion on record: demo DIVERSITY of states visited matters more than
+demo count, and the fix for trajectory collapse is labeling the student's
+own state distribution (DAgger), not more teacher-only episodes. Teacher
+was the classical scripted pilot (rate-PID cascade + potential-field
+avoidance); no sim/binary changes.
+
+Artifacts: autoresearch/diverse_bc.py, autoresearch/dagger.py (box
+/workspace), teacher autoresearch/scripted_pilot.py, best policy
+/workspace/bc_flat.json (hot-reloaded by the /watch streamer).

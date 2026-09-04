@@ -1,0 +1,129 @@
+"""Diverse demo collection -> BC -> publish if better on reference evals.
+
+Teacher: scripted_pilot.pilot_act with per-episode speed jitter + potential-
+field obstacle avoidance (nearest-obstacle vector from obs[12:15], /20 scale,
+points at obstacle CENTER; radii ~0.5-2.5m so repulsion starts at 3.5m).
+
+Diversity: goals 2/5/10/15m, obstacle densities 0/0.05/0.1/0.2, fresh scene
+seeds (azimuth/altitude/goal geometry vary per episode), speed profiles
+(vmax 1.0-2.5 m/s). Keep successful trajectories only.
+"""
+import sys, json, time
+sys.path.insert(0, "/workspace")
+sys.path.insert(0, "/workspace/DroneStudio/autoresearch")
+import numpy as np
+from scene_schema import SceneDistribution
+from env_sim import make_sim_factory
+from policy import MLP
+import scripted_pilot
+
+MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json"
+
+def pilot_act2(obs, vmax):
+    rel = obs[0:3] * 10.0
+    vel = obs[3:6]
+    gb = obs[6:9]
+    v_des = np.clip(0.5 * rel, -vmax, vmax)
+    a_des = np.clip(1.2 * (v_des - vel), -2.0, 2.0)
+    # obstacle repulsion (potential field on nearest-obstacle center)
+    dvec = obs[12:15] * 20.0
+    d = float(np.linalg.norm(dvec))
+    if 1e-3 < d < 3.5:
+        a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
+    a_des = np.clip(a_des, -3.0, 3.0)
+    gx_des = np.clip(a_des[0] / 9.81, -0.20, 0.20)
+    gz_des = np.clip(a_des[2] / 9.81, -0.20, 0.20)
+    rates = obs[9:12]
+    kp, kd = 0.4, 0.6
+    act0 = kp * (gz_des - gb[2]) - kd * rates[0]
+    act2 = -kp * (gx_des - gb[0]) - kd * rates[2]
+    vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
+    thr = -0.6 + 0.15 * (vy_des - vel[1])
+    return np.clip(np.array([act0, 0.0, act2, thr]), -1, 1)
+
+def collect(target_eps=48, max_attempts=400):
+    rng = np.random.default_rng(7)
+    X, Y, kept, attempts = [], [], 0, 0
+    stats = {"succ_by_density": {}}
+    while kept < target_eps and attempts < max_attempts:
+        gd = float(rng.choice([2, 5, 10, 15]))
+        dens = float(rng.choice([0.0, 0.05, 0.1, 0.2]))
+        vmax = 1.5
+        seed = int(rng.integers(1, 1 << 30))
+        dist = SceneDistribution(obstacle_density=dens, corridor_width=4.0,
+            scene_extent=max(10.0, gd * 2), goal_distance=gd, light_direction_entropy=0.3,
+            texture_variety=0.0, dynamics_noise=0.0)
+        env = make_sim_factory(dist, max_steps=400, dynamics=MANIFEST)(seed)
+        attempts += 1
+        obs = env.reset()
+        traj = []
+        for _ in range(400):
+            a = pilot_act2(obs, vmax)
+            traj.append((obs.copy(), a.copy()))
+            obs, r, done = env.step(a)
+            if done:
+                break
+        ok = bool(env.succeeded)
+        key = str(dens)
+        s, n = stats["succ_by_density"].get(key, (0, 0))
+        stats["succ_by_density"][key] = (s + int(ok), n + 1)
+        if ok:
+            kept += 1
+            for o, a in traj:
+                X.append(o); Y.append(a)
+        env.close()
+        if attempts % 40 == 0:
+            print(f"attempts {attempts}: kept {kept}, by density {stats['succ_by_density']}", flush=True)
+    return np.array(X), np.clip(np.array(Y), -0.95, 0.95), kept, attempts, stats
+
+def bc_train(X, Y, iters=2000):
+    net = MLP(15, 4, seed=0)
+    W = [net.W1, net.b1, net.W2, net.b2, net.W3, net.b3]
+    m = [np.zeros_like(w) for w in W]; v = [np.zeros_like(w) for w in W]
+    lr, b1, b2, eps = 3e-3, 0.9, 0.999, 1e-8
+    for t in range(1, iters + 1):
+        h1 = np.tanh(X @ W[0] + W[1]); h2 = np.tanh(h1 @ W[2] + W[3]); out = np.tanh(h2 @ W[4] + W[5])
+        err = out - Y
+        d = 2 * err / err.size * (1 - out ** 2)
+        gW3 = h2.T @ d; gb3 = d.sum(0)
+        d2 = (d @ W[4].T) * (1 - h2 ** 2)
+        gW2 = h1.T @ d2; gb2 = d2.sum(0)
+        d1 = (d2 @ W[2].T) * (1 - h1 ** 2)
+        gW1 = X.T @ d1; gb1 = d1.sum(0)
+        for j, g in enumerate((gW1, gb1, gW2, gb2, gW3, gb3)):
+            m[j] = b1 * m[j] + (1 - b1) * g; v[j] = b2 * v[j] + (1 - b2) * g * g
+            W[j] -= lr * (m[j] / (1 - b1 ** t)) / (np.sqrt(v[j] / (1 - b2 ** t)) + eps)
+        if t % 1000 == 0:
+            print(f"bc iter {t}: loss {float(np.mean(err**2)):.5f}", flush=True)
+    net.W1, net.b1, net.W2, net.b2, net.W3, net.b3 = W
+    return net
+
+def eval_net(net, gd, dens, n=24, seed0=77000):
+    dist = SceneDistribution(obstacle_density=dens, corridor_width=4.0,
+        scene_extent=max(10.0, gd * 2), goal_distance=gd, light_direction_entropy=0.3,
+        texture_variety=0.0, dynamics_noise=0.0)
+    factory = make_sim_factory(dist, max_steps=400, dynamics=MANIFEST)
+    succ, lens = [], []
+    for i in range(n):
+        env = factory(seed0 + i)
+        obs = env.reset()
+        for _ in range(400):
+            obs, r, done = env.step(net.act(obs))
+            if done:
+                break
+        succ.append(bool(env.succeeded)); lens.append(env.steps)
+        env.close()
+    return float(np.mean(succ)), float(np.mean(lens))
+
+if __name__ == "__main__":
+    X, Y, kept, attempts, stats = collect()
+    print("COLLECT_DONE", json.dumps({"samples": len(X), "eps": kept, "attempts": attempts, "by_density": stats["succ_by_density"]}), flush=True)
+    np.savez("/workspace/demo_diverse.npz", X=X, Y=Y)
+    net = bc_train(X, Y)
+    results = {}
+    for gd, dens in ((2, 0.0), (5, 0.0), (10, 0.0), (5, 0.1), (10, 0.1), (15, 0.0)):
+        s, l = eval_net(net, float(gd), float(dens))
+        results[f"{gd}m_d{dens}"] = {"success": s, "steps": round(l, 1)}
+        print("BC_DIVERSE_RESULT", gd, dens, json.dumps(results[f"{gd}m_d{dens}"]), flush=True)
+    json.dump(net.get_flat().tolist(), open("/workspace/bc_flat_diverse2.json", "w"))
+    json.dump(results, open("/workspace/bc_diverse_results.json", "w"), indent=2)
