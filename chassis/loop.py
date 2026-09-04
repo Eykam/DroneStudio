@@ -29,6 +29,17 @@ Your job: edit chassis.py and optionally placement.json (component placement) to
 After editing, verify the model still builds: run `python3 -c "from chassis import ChassisParams, build_chassis; p=ChassisParams(); part=build_chassis(p); print(round(part.volume,1))"`.
 End by printing one line: MUTATION_SUMMARY <one sentence describing what you changed>."""
 
+def kill_codex():
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                if b"codex" in f.read():
+                    os.kill(int(pid), 9)
+        except Exception:
+            pass
+
 def sh(cmd, **kw):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=HERE, **kw)
 
@@ -57,8 +68,14 @@ def run_generation():
     prompt = PROMPT_TEMPLATE.format(best_variant=parent, best_score=st["best_score"], failures=failures, history=hist)
     progress.set_stage("codex editing", f"gen {gen}: codex mutating {parent} -> {variant}", design_id=f"cad-chassis-{variant}")
     print(f"[gen {gen}] asking Codex for mutation of {parent}...", flush=True)
-    r = subprocess.run(["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
-                       capture_output=True, text=True, cwd=HERE, timeout=1800)
+    try:
+        r = subprocess.run(["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
+                           capture_output=True, text=True, cwd=HERE, timeout=3600)
+    except subprocess.TimeoutExpired:
+        kill_codex()  # subprocess only kills the direct child; node orphans linger
+        print(f"[gen {gen}] codex timed out after 3600s; skipping generation", flush=True)
+        progress.set_stage("codex timeout", f"gen {gen}: codex timed out, skipping", design_id=f"cad-chassis-{variant}")
+        return None
     summary = ""
     if os.path.exists("/tmp/codex_last.md"):
         for line in open("/tmp/codex_last.md"):
