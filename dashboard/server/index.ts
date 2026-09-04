@@ -611,10 +611,16 @@ const EE_FILE = `${DATA_DIR}/ee.json`;
 const EE_EXT: Record<string, string> = {
   sch: ".kicad_sch", pcb: ".kicad_pcb", net: ".net",
   glb: ".glb", sch_svg: ".sch.svg", pcb_svg: ".pcb.svg",
+  // per-layer board artwork (board diff substrate, user ask 2026-09-04)
+  pcb_fcu: ".F_Cu.svg", pcb_bcu: ".B_Cu.svg",
+  pcb_fsilk: ".F_Silkscreen.svg", pcb_fab: ".F_Fab.svg",
+  fp: ".footprints.json",  // footprint table: ref/value/x/y/rot/side per version
 };
 const EE_CAP: Record<string, number> = {
   sch: 16 * 1024 * 1024, pcb: 32 * 1024 * 1024, net: 8 * 1024 * 1024,
   glb: 64 * 1024 * 1024, sch_svg: 16 * 1024 * 1024, pcb_svg: 16 * 1024 * 1024,
+  pcb_fcu: 16 * 1024 * 1024, pcb_bcu: 16 * 1024 * 1024,
+  pcb_fsilk: 16 * 1024 * 1024, pcb_fab: 16 * 1024 * 1024, fp: 4 * 1024 * 1024,
 };
 
 async function loadEe(): Promise<EeBoard[]> {
@@ -758,16 +764,54 @@ app.get("/api/ee/boards/:id/diff", async (c) => {
     const f = Bun.file(`${EE_DIR}/${id}/v${v}/${name}`);
     return (await f.exists()) ? await f.text() : null;
   };
+  const readFp = async (v: number) => {
+    const name = board.versions.find((x) => x.version === v)?.files["fp"];
+    if (!name) return null;
+    const f = Bun.file(`${EE_DIR}/${id}/v${v}/${name}`);
+    return (await f.exists()) ? await f.json() : null;
+  };
   const [a, b] = [await read(from), await read(to)];
   if (a === null || b === null) return c.json({ error: "netlist missing for one of the versions" }, 404);
   const pa = netlistParts(a), pb = netlistParts(b);
   const added_comps = [...pb.comps.entries()].filter(([r]) => !pa.comps.has(r)).map(([ref, val]) => ({ ref, value: val }));
   const removed_comps = [...pa.comps.entries()].filter(([r]) => !pb.comps.has(r)).map(([ref, val]) => ({ ref, value: val }));
   const changed_comps = [...pb.comps.entries()].filter(([r, v]) => pa.comps.has(r) && pa.comps.get(r) !== v).map(([ref, val]) => ({ ref, from: pa.comps.get(ref), to: val }));
+  // footprint diff (board-level: placement/rotation/side, not just netlist)
+  let fp_diff: any = null;
+  const [fa, fb] = [await readFp(from), await readFp(to)];
+  if (Array.isArray(fa) && Array.isArray(fb)) {
+    const mapA = new Map(fa.map((f: any) => [f.ref, f]));
+    const mapB = new Map(fb.map((f: any) => [f.ref, f]));
+    const fp_added = fb.filter((f: any) => !mapA.has(f.ref))
+      .map((f: any) => ({ ref: f.ref, value: f.value, x: f.x, y: f.y, side: f.side }));
+    const fp_removed = fa.filter((f: any) => !mapB.has(f.ref))
+      .map((f: any) => ({ ref: f.ref, value: f.value }));
+    const fp_moved: any[] = [];
+    const fp_rotated: any[] = [];
+    const fp_flipped: any[] = [];
+    for (const f of fb) {
+      const o: any = mapA.get((f as any).ref);
+      if (!o) continue;
+      const dx = Math.abs((f as any).x - o.x), dy = Math.abs((f as any).y - o.y);
+      if (dx > 0.05 || dy > 0.05)
+        fp_moved.push({ ref: (f as any).ref, from: { x: o.x, y: o.y }, to: { x: (f as any).x, y: (f as any).y } });
+      const drot = Math.abs((((f as any).rot - o.rot) % 360 + 540) % 360 - 180);
+      if (drot > 0.5) fp_rotated.push({ ref: (f as any).ref, from: o.rot, to: (f as any).rot });
+      if ((f as any).side !== o.side) fp_flipped.push({ ref: (f as any).ref, from: o.side, to: (f as any).side });
+    }
+    fp_diff = { fp_added, fp_removed, fp_moved, fp_rotated, fp_flipped };
+  }
+  // which copper/artwork layers both versions have (for the overlay UI)
+  const layers = ["pcb_fcu", "pcb_bcu", "pcb_fsilk", "pcb_fab"].filter((k) => {
+    const va = board.versions.find((x) => x.version === from);
+    const vb = board.versions.find((x) => x.version === to);
+    return va?.files[k] && vb?.files[k];
+  });
   return c.json({
     from, to, added_comps, removed_comps, changed_comps,
     added_nets: [...pb.nets].filter((n) => !pa.nets.has(n)),
     removed_nets: [...pa.nets].filter((n) => !pb.nets.has(n)),
+    fp_diff, layers,
   });
 });
 
