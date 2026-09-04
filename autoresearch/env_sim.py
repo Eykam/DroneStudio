@@ -85,6 +85,7 @@ class SimBinaryEnv(QuadNavEnv):
         a = np.clip(np.asarray(action, dtype=np.float64), -1, 1)
         resp = self._call({"cmd": "step", "action": [float(x) for x in a]})
         info = resp.get("info", {})
+        self.last_info = info
         self.steps = int(info.get("steps", self.steps + 1))
         self.collided = bool(info.get("collided", False))
         self._succeeded_sim = bool(info.get("succeeded", False))
@@ -120,8 +121,9 @@ class SimBinaryEnv(QuadNavEnv):
             pass
 
 
-def make_sim_factory(distribution, max_steps=200, binary=BINARY, dynamics=None):
+def make_sim_factory(distribution, max_steps=200, binary=BINARY, dynamics=None,
+                     scenario_spec=None):
     def factory(seed):
         return SimBinaryEnv(distribution, seed=seed, max_steps=max_steps, binary=binary,
-                            dynamics=dynamics)
+                            dynamics=dynamics, scenario_spec=scenario_spec)
     return factory

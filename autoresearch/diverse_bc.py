@@ -42,6 +42,63 @@ def pilot_act2(obs, vmax, ext=10.0):
     vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
     thr = -0.6 + 0.15 * (vy_des - vel[1])
     return np.clip(np.array([act0, 0.0, act2, thr]), -1, 1)
+
+def pilot_act3(obs, vmax, ext=10.0):
+    """19-dim (obs v2) scenario-aware teacher.
+
+    obs v2 vectors are yaw-frame, where this controller's implicit yaw=0
+    world<->body mapping (same math as pilot_act2) is exact at any heading.
+    Scenario from one-hot dims 15:18, success radius from dim 18 (x extent).
+    """
+    rel = obs[0:3] * ext           # yaw-frame rel goal, m
+    vel = obs[3:6] * 10.0          # yaw-frame vel, m/s (y component = world)
+    gb = obs[6:9]
+    scenario = ("goto", "hover_hold", "land")[int(np.argmax(obs[15:18]))]
+    radius = max(0.05, float(obs[18]) * ext)
+
+    dist_xz = float(np.hypot(rel[0], rel[2]))
+    alt = -float(rel[1])           # land pads sit at ground level
+    land_descend = (scenario == "land" and alt <= 1.4
+                    and dist_xz <= max(1.0, 2.0 * radius))
+
+    if scenario == "land" and not land_descend:
+        rel = rel + np.array([0.0, 1.2, 0.0])  # phase 1: above the pad
+        vmax = min(vmax, 1.2)
+    v_des = np.clip(0.5 * rel, -vmax, vmax)
+    if scenario == "hover_hold" and np.linalg.norm(rel) < 2.0 * radius:
+        v_des = np.clip(0.4 * rel, -0.25, 0.25)  # brake and hold
+    if land_descend:
+        v_des = np.array([np.clip(0.6 * rel[0], -0.3, 0.3), 0.0,
+                          np.clip(0.6 * rel[2], -0.3, 0.3)])
+
+    # damping: 0.5 far (fast legs, swept for goto), 1.0 near (precision:
+    # half-damping limit-cycles around the target and never enters a tight
+    # radius, let alone holds one)
+    damp = 0.5 if float(np.linalg.norm(rel)) > 3.0 else 1.0
+    a_des = np.clip(1.2 * (v_des - damp * vel), -2.0, 2.0)
+    dvec = obs[12:15] * ext
+    d = float(np.linalg.norm(dvec))
+    if 1e-3 < d < 3.5 and not land_descend:  # pad corridor stays clear
+        a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
+    a_des = np.clip(a_des, -3.0, 3.0)
+    gx_des = np.clip(a_des[0] / 9.81, -0.30, 0.30)
+    gz_des = np.clip(a_des[2] / 9.81, -0.30, 0.30)
+    rates = obs[9:12]
+    kp, kd = 0.4, 1.0
+    act0 = kp * (gz_des - gb[2]) - kd * rates[0]
+    act2 = -kp * (gx_des - gb[0]) - kd * rates[2]
+    if land_descend:
+        vy_des = -0.4
+    elif scenario == "hover_hold":
+        vy_des = np.clip(0.8 * rel[1], -0.8, 0.8)
+    else:
+        vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
+    # hover throttle is ~-0.778 under the 11N/motor fixture (validated by
+    # the land touchdown tests); the old -0.6 baseline + 0.15 gain settles
+    # at vy_des + 1.19 m/s and never descends to a pad
+    thr = -0.778 + 0.3 * (vy_des - vel[1])
+    return np.clip(np.array([act0, 0.0, act2, thr]), -1, 1)
+
 def collect(target_eps=48, max_attempts=400):
     rng = np.random.default_rng(7)
     X, Y, kept, attempts = [], [], 0, 0
@@ -77,8 +134,8 @@ def collect(target_eps=48, max_attempts=400):
             print(f"attempts {attempts}: kept {kept}, by density {stats['succ_by_density']}", flush=True)
     return np.array(X), np.clip(np.array(Y), -0.95, 0.95), kept, attempts, stats
 
-def bc_train(X, Y, iters=2000):
-    net = MLP(15, 4, seed=0)
+def bc_train(X, Y, iters=2000, obs_dim=15):
+    net = MLP(obs_dim, 4, seed=0)
     W = [net.W1, net.b1, net.W2, net.b2, net.W3, net.b3]
     m = [np.zeros_like(w) for w in W]; v = [np.zeros_like(w) for w in W]
     lr, b1, b2, eps = 3e-3, 0.9, 0.999, 1e-8

@@ -40,6 +40,20 @@ class MLP:
     def param_count(cls, obs_dim, act_dim, hidden=32):
         return obs_dim*hidden + hidden + hidden*hidden + hidden + hidden*act_dim + act_dim
 
+def widen_input(net, new_obs_dim):
+    """net2wider: copy a trained MLP into one with a larger input dim.
+    New W1 columns are zero-init, so behavior is preserved exactly at init
+    regardless of the new features' values."""
+    assert new_obs_dim > net.obs_dim
+    hidden = net.W1.shape[1]
+    wide = MLP(new_obs_dim, net.act_dim, hidden=hidden, seed=0)
+    wide.W1 = np.zeros((new_obs_dim, hidden))
+    wide.W1[:net.obs_dim] = net.W1
+    wide.b1 = net.b1.copy(); wide.W2 = net.W2.copy(); wide.b2 = net.b2.copy()
+    wide.W3 = net.W3.copy(); wide.b3 = net.b3.copy()
+    return wide
+
+
 def cem_train(env_factory, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
               episodes_per_eval=4, seed=0, verbose=False,
               init_mean=None, init_std=None, fitness=None):
