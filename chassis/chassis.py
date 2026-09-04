@@ -1,4 +1,4 @@
-"""Candidate B: deep shoulder spars with narrow closed sections and rounded root chines.
+"""Candidate A: low coaming monocoque with a shared stereo nose and slender belly.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -31,7 +31,7 @@ class ChassisParams:
     arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
     arm_rib_root_mm: float = 16.0
-    body_fairing_height_mm: float = 47.0 # stack canopy follows the recessed mounting ring
+    body_fairing_height_mm: float = 46.5 # stack canopy follows the recessed mounting ring
     body_fairing_draft_mm: float = 4.7   # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
     body_roof_top_len_mm: float = 86.0
@@ -262,20 +262,27 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # above; all transitions preserve the payloads' 2 mm service envelopes.
     stations = [
         (-145.0, 26.0, 15.0, 12.0),
-        (-141.0, 31.0, 20.0, 18.0),
-        (-120.0, 31.0, 20.0, 18.0),
+        (-141.0, 31.0, 18.5, 18.0),
+        (-120.0, 31.0, 18.5, 18.0),
         (-114.0, 52.0, 41.5, 43.5),
         (-105.0, 50.2, 41.5, 41.7),
         (-56.0, 50.2, 41.5, 41.7),
         (-45.0, 52.0, 41.5, 43.5),
         (-33.0, 56.0, 42.0, 40.0),
-        (-24.0, 57.0, cockpit_h, 40.0),
-        (24.0, 57.0, cockpit_h, 40.0),
-        (38.0, 26.0, 37.0, 10.0),
-        (92.5, 26.0, 37.0, 10.0),
+        (-24.0, 57.0, cockpit_h, 43.0),
+        (24.0, 57.0, cockpit_h, 43.0),
+        (38.0, 26.0, 35.6, 16.0),
+        (92.5, 26.0, 35.6, 16.0),
         (97.0, 18.0, 30.0, 8.0),
     ]
-    stations = [(x*sx, w*sy, h, c*sy) for x, w, h, c in stations]
+    # Hold the payload shoulders while pulling the belly chines inward.
+    # A wider dorsal opening lowers unused canopy skin above the upright Pi;
+    # the stack, battery, and rear fin retain their complete service envelopes.
+    old_draft = draft
+    draft = 0.055 * p.body_fairing_draft_mm / 4.7
+    stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
+                for x, w, h, c in stations]
+    shell_envelopes = []
 
     def cabin_shell(stations):
         """Mitered, normal-gauge shell with bottom and dorsal service access."""
@@ -348,10 +355,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
                           if inner_sides[0][0] <= x <= inner_sides[-1][0]})
         inner_fairing = b.Solid.make_loft(
             [cabin_wire((x, 0, 0, 0), inner=True) for x in inner_x], ruled=True)
+        shell_envelopes.append((outer_fairing, inner_fairing))
         return outer_fairing - inner_fairing, max(z for _, z in outer_roofs)
 
     fairing, roof_z = cabin_shell(stations)
-    body = body + fairing
+    # The shared outer hull is assembled below before any cavity is cut.
 
     # Low camera cheeks flank the tall Pi spine. Each recessed pocket has its
     # own pitched coaming, so the wide stereo nose no longer needs a tall full-
@@ -361,16 +369,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # below are the only forward openings.
     cheek_stations = [
         (62.5, 26.0, 14.0, 16.0),
-        (65.0, 35.0, 18.2, 29.0),
-        (93.5, 35.0, 18.2, 29.0),
+        (65.0, 35.0, 16.8, 27.0),
+        (93.5, 35.0, 16.8, 27.0),
         (97.0, 26.0, 14.0, 16.0),
     ]
-    cheek_stations = [(x*sx, w*sy, h, c*sy)
+    cheek_stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
     cheek, cheek_roof = cabin_shell(cheek_stations)
     roof_z = max(roof_z, cheek_roof)
+    # Hollow the joined nose once: shared voids remove doubled internal
+    # partitions while the outer cheeks become one continuous faired shell.
+    outer_hull, inner_hull = shell_envelopes[0]
     for camera_y in (-28.0*sy, 28.0*sy):
-        body = body + b.Pos(0, camera_y, 0) * cheek
+        outer_hull = outer_hull + b.Pos(0, camera_y, 0)*shell_envelopes[1][0]
+        inner_hull = inner_hull + b.Pos(0, camera_y, 0)*shell_envelopes[1][1]
+    body = body + (outer_hull-inner_hull)
+    for camera_y in (-28.0*sy, 28.0*sy):
         # Short first-layer seat rails tie each cheek's end bulkheads together.
         seat = b.Pos(79.75*sx, camera_y, 0) * b.extrude(
             b.Rectangle(33.25*sx, p.payload_rail_width_mm).face(), wall)
