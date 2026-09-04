@@ -201,8 +201,8 @@ app.post("/api/cad/designs", async (c) => {
   const id = safeId(String(meta.id || ""));
   if (!id) return c.json({ error: "meta.id required (A-Za-z0-9._-, max 80)" }, 400);
   // Gate auto-publish to adopted-design ids; test/debug runs must not land here.
-  if (!/^cad-chassis-v\d+-g\d+$/.test(id)) {
-    return c.json({ error: "id must match cad-chassis-v<N>-g<M> (test/debug artifacts are not publishable)" }, 400);
+  if (!/^cad-chassis-v\d+-g\d+[a-c]?$/.test(id)) {
+    return c.json({ error: "id must match cad-chassis-v<N>-g<M>[a-c] (test/debug artifacts are not publishable)" }, 400);
   }
   const designs = await loadDesigns();
   const existing = designs.findIndex((d) => d.id === id);

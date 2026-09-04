@@ -91,9 +91,9 @@ function Rig({ mode, frameRef, extent }: { mode: CamMode; frameRef: React.Mutabl
 }
 
 // adopted design ids look like cad-chassis-v16-g15; pick the highest (v, g)
-function designVersion(id: string): [number, number] | null {
-  const m = /cad-chassis-v(\d+)-g(\d+)/.exec(id);
-  return m ? [Number(m[1]), Number(m[2])] : null;
+function designVersion(id: string): [number, number, number] | null {
+  const m = /cad-chassis-v(\d+)-g(\d+)([a-c])?/.exec(id);
+  return m ? [Number(m[1]), Number(m[2]), m[3] ? m[3].charCodeAt(0) - 96 : 0] : null;
 }
 
 export default function WatchScene3D({ sceneRef, frameRef, trail3dRef, mode, onPick }:
@@ -115,7 +115,7 @@ export default function WatchScene3D({ sceneRef, frameRef, trail3dRef, mode, onP
         const tagged = designs
           .map((x: any) => ({ x, v: designVersion(String(x.id)) }))
           .filter((t: any) => t.v !== null)
-          .sort((a: any, b: any) => (a.v[0] - b.v[0]) || (a.v[1] - b.v[1]));
+          .sort((a: any, b: any) => (a.v[0] - b.v[0]) || (a.v[1] - b.v[1]) || (a.v[2] - b.v[2]));
         const pick = tagged.length ? tagged[tagged.length - 1].x : designs[designs.length - 1];
         if (pick) {
           setGlbUrl(`/api/cad/designs/${pick.id}/glb`);
