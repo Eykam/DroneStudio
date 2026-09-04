@@ -1,4 +1,6 @@
-"""Parametric 5-inch quad chassis (quad-X), build123d.
+"""Candidate B: deep shoulder spars with narrow closed sections and rounded root chines.
+
+Parametric 5-inch quad chassis (quad-X), build123d.
 
 Constraints from DroneStudio sim (Studio/src/core/ecs/components/FlightController.zig):
   - quad-X, motor_arm_length 0.15 m (center -> motor axis)
@@ -28,7 +30,7 @@ class ChassisParams:
     body_thickness_mm: float = 1.25     # structural skin; all faces use normal offsets
     arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
-    arm_rib_root_mm: float = 12.0
+    arm_rib_root_mm: float = 16.0
     body_fairing_height_mm: float = 47.0 # stack canopy follows the recessed mounting ring
     body_fairing_draft_mm: float = 4.7   # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
@@ -50,7 +52,7 @@ class ChassisParams:
     stack_standoff_dia_mm: float = 6.0   # 1.4 mm annular wall around each M3 bore
     stack_standoff_height_mm: float = 24.5
     camera_aperture_dia_mm: float = 10.0
-    fillet_radius_mm: float = 2.0
+    fillet_radius_mm: float = 4.0
     prop_dia_mm: float = 127.0          # 5 inch
     prop_clearance_mm: float = 10.0     # min tip-to-tip margin between adjacent props
 
@@ -140,30 +142,29 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outline = b.fillet(outline.vertices(), p.fillet_radius_mm)
         arm = b.extrude(b.make_face(outline), p.body_thickness_mm)
 
-        # Loft a hollow structural skin in six bending-moment stations.  The
-        # tall root and rapidly falling depth retain the bending economy, while
-        # a narrow dorsal facet turns the old peaked tube into a more efficient
-        # faired box.  Pitched cavity ceilings remain self-supporting.
-        span = profile_end - x0
+        # Hollow six-sided spars put depth just beyond the stack ring, where
+        # the cantilever begins. A slimmer outer span replaces the old broad
+        # shallow tube; its roof descends continuously into the motor fairing.
+        # The terminal depth never dips below the nacelle, removing a notch.
+        span = profile_end-x0
+        spar_stations = [
+            (0.00, 15.5, 22.0),
+            (0.08, 15.5, 24.0),
+            (0.20, 15.0, 24.2),
+            (0.40, 12.8, 20.2),
+            (0.60, 10.5, 15.8),
+            (0.80, 9.2, 11.8),
+            (0.92, 9.2, 10.8),
+            (1.00, 9.2, 10.8),
+        ]
         tube_sections = []
-        for frac in (0.0, 0.25, 0.50, 0.75, 0.90, 1.0):
-            x = x0 + frac * span
-            width = p.arm_shell_root_width_mm + (
-                p.arm_width_mm - p.arm_shell_root_width_mm
-            ) * frac ** 1.7
-            roof_normal = math.hypot(p.arm_roof_slope, 1.0)
-            min_tip_height = (
-                p.arm_roof_slope * (width - p.arm_crown_width_mm)/2
-                + p.arm_rib_thickness_mm * (1 + roof_normal - p.arm_roof_slope)
-                + 0.15
-            )
-            profile_tip_height = max(p.motor_pad_thickness_mm,
-                                     min_tip_height)
-            height = profile_tip_height + (
-                p.arm_thickness_mm - profile_tip_height
-            ) * max(0.0, 1.0 - frac) ** p.arm_height_falloff
+        for frac, nominal_width, nominal_height in spar_stations:
+            x = x0+frac*span
+            width = nominal_width*p.arm_shell_root_width_mm/16.2
+            width = max(p.arm_width_mm, width)
+            height = nominal_height*p.arm_thickness_mm/24.5
             if frac == 1.0:
-                height = max(height, p.arm_tip_height_mm)
+                width, height = p.arm_width_mm, p.arm_tip_height_mm
             tube_sections.append((x, sweep_center(x), width, height))
         tip_height = tube_sections[-1][3]
         outer = b.Solid.make_loft(
