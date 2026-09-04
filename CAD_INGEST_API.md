@@ -110,7 +110,9 @@ a live "working on ..." banner. Same bearer token as /api/cad/designs.
 Body (JSON), all fields optional but send at least status + design_id:
   {
     "status": "working" | "idle",
-    "design_id": "v5-g4",           // revision currently being worked
+    "design_id": "cad-chassis-v5-g4",  // id of the design record being worked
+                                    // (same id form used in /api/cad/designs:
+                                    // cad-chassis-<rev>, e.g. cad-chassis-v5-g4)
     "stage": "codex editing" | "building" | "evaluating" | "FEA" | "rendering",
     "detail": "free text, one line" // e.g. "freecad build attempt 2/3"
   }
