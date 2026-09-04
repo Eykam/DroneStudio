@@ -14,7 +14,9 @@ PROMPT_TEMPLATE = """You are the mutation brain of an auto-researcher optimizing
 
 Context:
 - chassis.py in this directory holds the parametric model (build123d). ChassisParams + build_chassis(p) -> Part MUST keep their signatures.
-- evaluate.py scores candidates: watertight, single body, FDM overhang, wall thickness, prop clearance, hover margin, and FEA (gmsh+CalculiX: hover-max and crash load cases; pass needs max von Mises < 30 MPa AND arm-tip displacement < 5 mm).
+- evaluate.py scores candidates: watertight, single body, FDM overhang, wall thickness, prop clearance, hover margin, CONTAINMENT, and FEA.
+- CONTAINMENT (hard gate): every placed component (stack, battery, Pi, cameras, GPS, IMU) must sit FULLY INSIDE the frame envelope plus 2mm service clearance. Current designs FAIL this - the stack pokes ~11mm above the deck, battery ~55mm, Pi ~16mm, GPS ~27mm. The frame must grow an enclosed fuselage/deck cavity tall enough to swallow them (target interior Z >= 40mm over the deck area) OR recess bays; components.py placement() says where they sit (placement.json may be edited to move them - x/y/z in meters, z = component bottom). Enclose like DJI/Avata: battery and stack INSIDE the body, GPS in a rear fin/perch cavity, camera behind the nose shell with only the lens aperture forward.
+- FEA (gmsh+CalculiX, all must pass): hover_max (4x 17.27N up), crash (3x), torsion (diagonal pairs +/-1.5x yaw torque), modal (first eigenmode >= 120 Hz). Directional allowables (FFF anisotropy): vertical-load cases 0.6*0.55*yield = 16.5 MPa, torsion 0.6*0.8*yield = 24 MPa; arm-tip displacement < 5 mm.
 - The sim contract (DroneStudio): quad-X, motor arm length 0.15 m, 17.27 N/motor max (EMAX ECO II 2207 2400KV on 4S). Do NOT change arm_length_mm or motor hole pattern; the sim depends on them. Everything else is fair game: arm cross-section, ribs, fillets, plate shapes, cutouts, material distribution.
 - DESIGN LANGUAGE: read INSPIRATION.md in this directory first. The user wants the chassis to move beyond flat-plate freestyle frames toward DJI/Anduril-style form factors - faired enclosed body, swept/tapered arms with filleted roots, closed arm sections, recessed battery bay - while staying single-body, printable, and serviceable.
 - Print process: FDM, PETG (rho 1240 kg/m3, E 2.1 GPa, yield 50 MPa), no supports, flat on the plate.
@@ -23,7 +25,7 @@ Current best: variant {best_variant}, score {best_score:.3f}
 Its evaluation failures: {failures}
 History of tried mutations and scores: {history}
 
-Your job: edit chassis.py (and ONLY chassis.py) to make the chassis pass ALL checks with the lowest frame mass. Stiffness is the binding constraint: add ribs/depth/taper rather than uniform thickness where you can. Push the DESIGN LANGUAGE too: each generation should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md (faired shell, tapered swept arms, closed sections, recessed bays) - incremental but real steps, never just a parameter nudge. Keep it printable (no support-requiring overhangs, walls >= 1.2 mm).
+Your job: edit chassis.py and optionally placement.json (component placement) to make the chassis pass ALL checks with the lowest frame mass. Stiffness is the binding constraint: add ribs/depth/taper rather than uniform thickness where you can. Push the DESIGN LANGUAGE too: each generation should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md (faired shell, tapered swept arms, closed sections, recessed bays) - incremental but real steps, never just a parameter nudge. Keep it printable (no support-requiring overhangs, walls >= 1.2 mm).
 After editing, verify the model still builds: run `python3 -c "from chassis import ChassisParams, build_chassis; p=ChassisParams(); part=build_chassis(p); print(round(part.volume,1))"`.
 End by printing one line: MUTATION_SUMMARY <one sentence describing what you changed>."""
 
