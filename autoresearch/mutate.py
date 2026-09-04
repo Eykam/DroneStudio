@@ -1,14 +1,30 @@
 """Mutation operators over scene distributions + the LLM mutator interface.
 
-LLM access is env-var configured and OPTIONAL. With no key, the heuristic
-mutator runs the loop; with a key, the outer loop asks the model to propose
-variants grounded in the archive. Keys never touch the repo - environment only.
+LLM access is env-var configured and OPTIONAL. With no key and no Codex auth,
+the heuristic mutator runs the loop; otherwise the outer loop asks the model
+to propose variants grounded in the archive. Keys never touch the repo.
 
-  AUTORESEARCH_LLM_API_KEY   - enables the LLM mutator when set
+Backend selection (AUTORESEARCH_LLM_BACKEND):
+  auto      - codex if the Codex CLI is authenticated, else OpenAI-compatible
+              API if a key is set, else heuristic (default)
+  codex     - Codex CLI only (ChatGPT subscription; no per-call billing)
+  openai    - OpenAI-compatible HTTP API only (per-token billing, capped)
+  heuristic - no LLM
+
+  AUTORESEARCH_LLM_API_KEY   - enables the OpenAI-compatible mutator when set
   AUTORESEARCH_LLM_BASE_URL  - OpenAI-compatible endpoint (default api.openai.com)
   AUTORESEARCH_LLM_MODEL     - model name (default gpt-4o-mini)
+
+Codex backend (runs against a ChatGPT subscription, not metered API):
+  AUTORESEARCH_CODEX_BIN            - codex binary path (default /workspace/bin/codex)
+  CODEX_HOME                        - codex config/auth dir (default /workspace/codex-home)
+  AUTORESEARCH_CODEX_MODEL          - optional model override (codex -m)
+  AUTORESEARCH_CODEX_MIN_INTERVAL_S - min seconds between calls (default 45)
+  AUTORESEARCH_CODEX_MAX_CALLS      - per-state-file call budget (default 100)
+Throttling exists because subscription rate limits are tuned for interactive
+use; when the throttle blocks a call the loop falls back, never queues.
 """
-import os, json, urllib.request
+import os, json, time, subprocess, urllib.request
 import numpy as np
 from scene_schema import SceneDistribution
 
@@ -95,11 +111,93 @@ def llm_mutants(base: SceneDistribution, k: int, seed: int, archive_summary: str
     variants = json.loads(text[start:end + 1])
     return [SceneDistribution.from_json(json.dumps(v)) for v in variants[:k]]
 
+# --- Codex CLI backend (ChatGPT subscription) ------------------------------
+CODEX_BIN = os.environ.get("AUTORESEARCH_CODEX_BIN", "/workspace/bin/codex")
+CODEX_HOME_DIR = os.environ.get("CODEX_HOME", "/workspace/codex-home")
+CODEX_MODEL = os.environ.get("AUTORESEARCH_CODEX_MODEL", "")
+CODEX_MIN_INTERVAL_S = float(os.environ.get("AUTORESEARCH_CODEX_MIN_INTERVAL_S", "45"))
+CODEX_MAX_CALLS = int(os.environ.get("AUTORESEARCH_CODEX_MAX_CALLS", "100"))
+CODEX_STATE_FILE = os.environ.get(
+    "AUTORESEARCH_CODEX_STATE_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".codex_usage.json"))
+
+def codex_available():
+    return (os.path.exists(CODEX_BIN)
+            and os.path.exists(os.path.join(CODEX_HOME_DIR, "auth.json")))
+
+def _codex_state():
+    try:
+        with open(CODEX_STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"calls": 0, "last_ts": 0.0}
+
+def _record_codex_call():
+    st = _codex_state()
+    st["calls"] += 1
+    st["last_ts"] = time.time()
+    with open(CODEX_STATE_FILE, "w") as f:
+        json.dump(st, f)
+
+def codex_status():
+    st = _codex_state()
+    return {"available": codex_available(), "calls": st["calls"],
+            "max_calls": CODEX_MAX_CALLS,
+            "min_interval_s": CODEX_MIN_INTERVAL_S,
+            "seconds_since_last": round(time.time() - st["last_ts"], 1) if st["last_ts"] else None}
+
+def codex_mutants(base: SceneDistribution, k: int, seed: int, archive_summary: str):
+    if not codex_available():
+        raise RuntimeError("codex CLI not authenticated (no auth.json)")
+    st = _codex_state()
+    if st["calls"] >= CODEX_MAX_CALLS:
+        raise RuntimeError(f"codex call budget exhausted ({CODEX_MAX_CALLS})")
+    since = time.time() - st["last_ts"] if st["last_ts"] else 1e18
+    if since < CODEX_MIN_INTERVAL_S:
+        raise RuntimeError(f"codex throttle: {CODEX_MIN_INTERVAL_S - since:.0f}s until next allowed call")
+    prompt = (
+        "You are the outer loop of an auto-researcher that optimizes a drone "
+        "simulator's procedural scene distribution to train better navigation "
+        "policies. Do not use tools, do not read or write files, do not run "
+        "commands - just answer with JSON. Propose %d mutated scene "
+        "distributions as a JSON array of objects with exactly these keys: %s. "
+        "Respect these numeric bounds: %s. Base distribution: %s. "
+        "Archive so far: %s. Your final message must be the JSON array only, "
+        "no markdown fences, no commentary."
+        % (k, ", ".join(SceneDistribution.names()),
+           json.dumps(SceneDistribution.BOUNDS), base.to_json(), archive_summary))
+    out_file = CODEX_STATE_FILE + ".last_message"
+    cmd = [CODEX_BIN, "exec", "--sandbox", "read-only", "--skip-git-repo-check",
+           "--ephemeral", "--color", "never", "--ignore-user-config",
+           "-o", out_file, "-"]
+    if CODEX_MODEL:
+        cmd[2:2] = ["-m", CODEX_MODEL]
+    env = dict(os.environ, CODEX_HOME=CODEX_HOME_DIR)
+    proc = subprocess.run(cmd, input=prompt.encode(), capture_output=True,
+                          timeout=600, env=env)
+    _record_codex_call()
+    if proc.returncode != 0:
+        raise RuntimeError("codex exec failed: " + proc.stderr.decode()[-400:])
+    with open(out_file) as f:
+        text = f.read().strip()
+    start, end = text.find("["), text.rfind("]")
+    variants = json.loads(text[start:end + 1])
+    return [SceneDistribution.from_json(json.dumps(v)) for v in variants[:k]]
+
 def mutate(base: SceneDistribution, k: int, seed: int, archive_summary: str = ""):
-    """Outer-loop mutation entry point: LLM when configured, heuristic otherwise."""
-    if os.environ.get("AUTORESEARCH_LLM_API_KEY"):
-        try:
-            return llm_mutants(base, k, seed, archive_summary), "llm"
-        except Exception as e:
-            print(f"llm mutator failed ({e}); falling back to heuristic")
+    """Outer-loop mutation entry point: configured backend, heuristic fallback."""
+    backend = os.environ.get("AUTORESEARCH_LLM_BACKEND", "auto").lower()
+    order = {"auto": ["codex", "openai"], "codex": ["codex"],
+             "openai": ["openai"], "heuristic": []}.get(backend, ["codex", "openai"])
+    for b in order:
+        if b == "codex" and codex_available():
+            try:
+                return codex_mutants(base, k, seed, archive_summary), "codex"
+            except Exception as e:
+                print(f"codex mutator failed ({e}); trying next backend")
+        if b == "openai" and os.environ.get("AUTORESEARCH_LLM_API_KEY"):
+            try:
+                return llm_mutants(base, k, seed, archive_summary), "llm"
+            except Exception as e:
+                print(f"llm mutator failed ({e}); falling back to heuristic")
     return heuristic_mutants(base, k, seed), "heuristic"
