@@ -111,6 +111,29 @@ def export(p: ChassisParams, out_base: str):
         b.export_gltf(b.Compound(children=[part] + cad_shapes), out_base + ".glb", binary=True, linear_deflection=0.1, angular_deflection=0.5)
     else:
         b.export_gltf(part, out_base + ".glb", binary=True)  # mm -> m on write
+    _slim_glb(out_base + ".glb")
+
+
+def _slim_glb(glb_path):
+    """Post-process the assembly GLB for the /cad viewer: build123d writes one
+    primitive PER FACE (50k draw calls -> orbit lag). gltfpack welds, merges
+    primitives, simplifies (error-bounded), quantizes (KHR_mesh_quantization,
+    natively supported by three.js/babylon - no decoder needed). No meshopt
+    compression (-cc): the viewer has no decoder wired yet."""
+    import shutil as _sh, subprocess as _sp, os as _os
+    gp = _sh.which("gltfpack")
+    if not gp:
+        return
+    tmp = glb_path + ".slim"
+    try:
+        r = _sp.run([gp, "-i", glb_path, "-o", tmp, "-si", "0.7", "-kn"],
+                    capture_output=True, timeout=300)
+        if r.returncode == 0 and _os.path.exists(tmp) and _os.path.getsize(tmp) > 1000:
+            _os.replace(tmp, glb_path)
+        elif _os.path.exists(tmp):
+            _os.remove(tmp)
+    except Exception:
+        pass  # raw GLB stays if slimming fails
     M, com, I_tot, items = compose_dynamics(part, p)
     z_top_m = p.body_thickness_mm * 0.001
     motors = []
