@@ -66,7 +66,9 @@ class StreamingEnv(SimBinaryEnv):
 
 def status(state, dist_id):
     post({"type": "status", "status": state, "mode": "watch",
-          "dist_id": dist_id, "dynamics": os.path.basename(DYNAMICS)})
+          "dist_id": dist_id, "dynamics": os.path.basename(DYNAMICS),
+          "policy": os.path.basename(POLICY_FLAT) if POLICY_FLAT else "archive-best",
+          "policy_obs": os.environ.get("STREAM_POLICY_OBS", "")})
 
 
 def main():
