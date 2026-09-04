@@ -1,0 +1,48 @@
+{
+  "elapsed_s": 2634.9,
+  "generations": 20,
+  "children": 6,
+  "seed": 7,
+  "budget": {
+    "cem_iters": 4,
+    "cem_pop": 10,
+    "train_episodes": 4,
+    "eval_episodes": 6,
+    "max_steps": 250
+  },
+  "best": {
+    "id": "g13v140",
+    "parent": "g12v129",
+    "generation": 13,
+    "params": {
+      "obstacle_density": 0.018,
+      "obstacle_size_mean": 0.75,
+      "obstacle_size_spread": 0.08,
+      "corridor_width": 10.0,
+      "scene_extent": 22.0,
+      "goal_distance": 5.0,
+      "light_intensity": 0.92,
+      "light_direction_entropy": 0.35,
+      "texture_variety": 0.55,
+      "dynamics_noise": 0.0
+    },
+    "metrics": {
+      "success_rate": 0.3333333333333333,
+      "mean_return": -0.8103588506655477,
+      "mean_steps": 30.666666666666668,
+      "train_best_return": 3.7952603483202756,
+      "backend": "quad",
+      "trainer": "cem"
+    },
+    "mutator": "none",
+    "ts": "2026-09-04T06:40:32Z",
+    "novelty": 0.0
+  },
+  "llm_spend": {
+    "spent_usd": 0.0,
+    "cap_usd": 10.0,
+    "calls": 0,
+    "over_cap": false
+  },
+  "finished_at": "2026-09-04T06:52:11Z"
+}
