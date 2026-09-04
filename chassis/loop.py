@@ -91,9 +91,18 @@ def run_generation():
                            capture_output=True, text=True, cwd=HERE, timeout=3600)
     except subprocess.TimeoutExpired:
         kill_codex()  # subprocess only kills the direct child; node orphans linger
-        print(f"[gen {gen}] codex timed out after 3600s; skipping generation", flush=True)
-        progress.set_stage("codex timeout", f"gen {gen}: codex timed out, skipping", design_id=f"cad-chassis-{base}")
-        return None
+        salvaged = [p for p in (f"/tmp/candidates/{base}{L}.py" for L in LETTERS) if os.path.exists(p)]
+        if salvaged:
+            # codex hung AFTER writing candidates (seen live: 40+ min no file activity) -
+            # evaluate what it left rather than burning the whole generation.
+            print(f"[gen {gen}] codex timed out after 3600s; salvaging {len(salvaged)} written candidates", flush=True)
+            progress.set_stage("codex timeout", f"gen {gen}: codex timed out, salvaging {len(salvaged)} candidates", design_id=f"cad-chassis-{base}")
+            summaries = {}
+            r = subprocess.run(["true"], capture_output=True, text=True)  # rc 0: fall through to evaluation
+        else:
+            print(f"[gen {gen}] codex timed out after 3600s; skipping generation", flush=True)
+            progress.set_stage("codex timeout", f"gen {gen}: codex timed out, skipping", design_id=f"cad-chassis-{base}")
+            return None
     summaries = {}
     if os.path.exists("/tmp/codex_last.md"):
         for line in open("/tmp/codex_last.md"):
