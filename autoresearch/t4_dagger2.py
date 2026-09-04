@@ -109,7 +109,7 @@ def train(params, X, A, Xa, Aa, epochs, rng):
 def main():
     rng = np.random.default_rng(23)
     t0 = time.time()
-    params0 = flat_to_full(json.load(open("/workspace/t4_dag2_r6.json")))
+    params0 = flat_to_full(json.load(open("/workspace/t4_dag_r6.json")))
     d = np.load("/workspace/t4_demos.npz", allow_pickle=True)
     Xall, Aall = d["X"], d["A"]
     sel = rng.permutation(len(Xall))[:len(Xall) // 4]
