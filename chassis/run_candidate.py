@@ -3,10 +3,12 @@ import sys, os, json, dataclasses
 import trimesh
 from chassis import ChassisParams, build_chassis
 import evaluate as ev
+import progress
 import export_manifest as em
 import snapshot as sn
 
 def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
+    progress.set_stage("building", f"{variant_id}: generating geometry")
     part = build_chassis(params)
     import build123d as b
     b.export_stl(part, out_base + ".stl")
@@ -19,8 +21,10 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     hover_ok = props["hover_thrust_frac"] < 0.65
     checks.append(("hover_margin", hover_ok, f"hover at {props['hover_thrust_frac']*100:.0f}% max thrust", 0.0 if hover_ok else 0.4))
     score = ev.score(checks)
+    progress.set_stage("evaluating", f"{variant_id}: geometry checks")
     fea_result = None
     if os.environ.get("RUN_FEA") == "1":
+        progress.set_stage("fea", f"{variant_id}: gmsh + CalculiX hover-max/crash")
         import fea
         fea_result = fea.evaluate_fea(out_base + ".step", params.motor_positions(), params.stack_spacing_mm,
                                       out_base + "_fea")

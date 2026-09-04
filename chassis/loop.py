@@ -4,6 +4,7 @@ One invocation = one generation (designed to be driven by a cron/supervisor or r
 State: loop_state.json in this dir (best variant, score, history).
 """
 import os, sys, json, subprocess, shutil, dataclasses, time
+import progress
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(HERE, "loop_state.json")
@@ -52,6 +53,7 @@ def run_generation():
         failures = json.dumps([c for c in pm["evaluator"] if not c["passed"]], indent=2)
     hist = "; ".join(f"{h['variant']}={h['score']:.3f} ({h.get('summary','')[:60]})" for h in st["history"][-8:]) or "none yet"
     prompt = PROMPT_TEMPLATE.format(best_variant=parent, best_score=st["best_score"], failures=failures, history=hist)
+    progress.set_stage("editing", f"gen {gen}: codex mutating {parent} -> {variant}", design_id=f"cad-chassis-{variant}")
     print(f"[gen {gen}] asking Codex for mutation of {parent}...", flush=True)
     r = subprocess.run(["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
                        capture_output=True, text=True, cwd=HERE, timeout=1800)
@@ -64,6 +66,7 @@ def run_generation():
         print(f"[gen {gen}] codex failed: {r.stderr[-300:]}", flush=True)
         return None
     # evaluate candidate
+    progress.set_stage("evaluating", f"gen {gen}: building + evaluating {variant}")
     r2 = subprocess.run([sys.executable, "run_candidate.py", "--variant", variant, "--parent", parent, "--gen", str(gen)],
                         capture_output=True, text=True, cwd=HERE, env={**os.environ, "RUN_FEA": "1"}, timeout=1800)
     print(r2.stdout[-800:], flush=True)
@@ -102,6 +105,8 @@ def run_generation():
     return score
 
 if __name__ == "__main__":
+    progress.start_heartbeat()
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     for _ in range(n):
         run_generation()
+    progress.idle(f"batch done: best {load_state()['best_variant']}")
