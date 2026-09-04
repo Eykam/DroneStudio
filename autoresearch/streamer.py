@@ -9,14 +9,14 @@ Env: DASHBOARD_URL, INGEST_TOKEN (same contract as dashboard_poster.py),
 STREAM_DYNAMICS (manifest path), STREAM_REPORT (generations report to pick
 the best dist from), STREAM_FPS, STREAM_RETRAIN_EPS.
 """
-import os, sys, json, time, urllib.request, traceback
+import os, json, sys, json, time, urllib.request, traceback
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from scene_schema import SceneDistribution
 from env_sim import SimBinaryEnv, make_sim_factory
-from policy import cem_train
+from policy import cem_train, MLP
 
 DASH = os.environ.get("DASHBOARD_URL", "").rstrip("/")
 TOKEN = os.environ.get("INGEST_TOKEN", "")
@@ -24,6 +24,7 @@ DYNAMICS = os.environ.get("STREAM_DYNAMICS", os.path.join(HERE, "fixtures", "cha
 REPORT = os.environ.get("STREAM_REPORT", os.path.join(HERE, "generations_report2.json"))
 FPS = float(os.environ.get("STREAM_FPS", "20"))
 RETRAIN_EPS = int(os.environ.get("STREAM_RETRAIN_EPS", "8"))
+POLICY_FLAT = os.environ.get("STREAM_POLICY_FLAT", "")  # flat-vector json: fly this policy, hot-reload on mtime change
 MAX_STEPS = 200
 
 
@@ -73,9 +74,22 @@ def main():
     dist_id, dist = best_dist()
     status("training", dist_id)
     factory = make_sim_factory(dist, max_steps=MAX_STEPS, dynamics=DYNAMICS)
-    policy, train_ret = cem_train(factory, SimBinaryEnv.OBS_DIM, SimBinaryEnv.ACT_DIM,
-                                  iters=2, pop=8, episodes_per_eval=3, seed=42)
-    print(f"trained on {dist_id}: ret={train_ret:.2f}", flush=True)
+    policy_mtime = [None]
+    def load_policy(force_seed):
+        if POLICY_FLAT and os.path.exists(POLICY_FLAT):
+            mt = os.path.getmtime(POLICY_FLAT)
+            if mt != policy_mtime[0]:
+                pol = MLP(SimBinaryEnv.OBS_DIM, SimBinaryEnv.ACT_DIM)
+                pol.set_flat(np.array(json.load(open(POLICY_FLAT)), dtype=np.float64))
+                policy_mtime[0] = mt
+                print(f"loaded policy from {POLICY_FLAT}", flush=True)
+                return pol
+            return None
+        pol, train_ret = cem_train(factory, SimBinaryEnv.OBS_DIM, SimBinaryEnv.ACT_DIM,
+                                   iters=2, pop=8, episodes_per_eval=3, seed=42 + force_seed)
+        print(f"trained on {dist_id}: ret={train_ret:.2f}", flush=True)
+        return pol
+    policy = load_policy(0)
     while True:
         ep += 1
         ep_id = f"w{ep:05d}"
@@ -113,12 +127,16 @@ def main():
             env.close()
         if ep % RETRAIN_EPS == 0:
             try:
-                dist_id, dist = best_dist()
-                status("retraining", dist_id)
-                factory = make_sim_factory(dist, max_steps=MAX_STEPS, dynamics=DYNAMICS)
-                policy, train_ret = cem_train(factory, SimBinaryEnv.OBS_DIM, SimBinaryEnv.ACT_DIM,
-                                              iters=2, pop=8, episodes_per_eval=3, seed=42 + ep)
-                print(f"retrained on {dist_id}: ret={train_ret:.2f}", flush=True)
+                if POLICY_FLAT:
+                    newp = load_policy(ep)
+                    if newp is not None:
+                        policy = newp
+                        print("policy hot-reloaded", flush=True)
+                else:
+                    dist_id, dist = best_dist()
+                    status("retraining", dist_id)
+                    factory = make_sim_factory(dist, max_steps=MAX_STEPS, dynamics=DYNAMICS)
+                    policy = load_policy(ep) or policy
             except Exception:
                 traceback.print_exc()
 
