@@ -86,8 +86,13 @@ def run_generation():
         return None
     # evaluate candidate
     progress.set_stage("evaluating", f"gen {gen}: building + evaluating {variant}")
-    r2 = subprocess.run([sys.executable, "run_candidate.py", "--variant", variant, "--parent", parent, "--gen", str(gen)],
-                        capture_output=True, text=True, cwd=HERE, env={**os.environ, "RUN_FEA": "1"}, timeout=1800)
+    try:
+        r2 = subprocess.run([sys.executable, "-u", "run_candidate.py", "--variant", variant, "--parent", parent, "--gen", str(gen)],
+                            capture_output=True, text=True, cwd=HERE, env={**os.environ, "RUN_FEA": "1"}, timeout=1800)
+    except subprocess.TimeoutExpired:
+        print(f"[gen {gen}] evaluation timed out after 1800s; rolling back", flush=True)
+        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
+        return None
     print(r2.stdout[-800:], flush=True)
     score = None
     for line in r2.stdout.splitlines():
