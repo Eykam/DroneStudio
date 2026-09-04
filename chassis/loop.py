@@ -69,7 +69,7 @@ def run_generation():
     progress.set_stage("codex editing", f"gen {gen}: codex mutating {parent} -> {variant}", design_id=f"cad-chassis-{variant}")
     print(f"[gen {gen}] asking Codex for mutation of {parent}...", flush=True)
     try:
-        r = subprocess.run(["codex", "exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
+        r = subprocess.run(["codex", "exec", "-m", "gpt-6-astra", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
                            capture_output=True, text=True, cwd=HERE, timeout=3600)
     except subprocess.TimeoutExpired:
         kill_codex()  # subprocess only kills the direct child; node orphans linger
