@@ -19,8 +19,8 @@ class ChassisParams:
     arm_shell_root_width_mm: float = 16.2
     arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
     arm_roof_slope: float = 1.15        # >1 gives a support-free (>45 deg) inner roof
-    arm_crown_width_mm: float = 3.0     # narrow high-fiber facet on the closed arm shell
-    arm_height_falloff: float = 0.55    # deep root, lean span; moment-shaped shell
+    arm_crown_width_mm: float = 3.6     # broader bending flange; <2.5 mm inner bridge
+    arm_height_falloff: float = 0.68    # retain root depth, shed low-moment span skin
     arm_tip_height_mm: float = 10.8     # faired nacelle depth at the motor load transfer
     center_plate_len_mm: float = 271.0  # shortened camera prow, rear avionics to nose
     center_plate_wid_mm: float = 68.0
@@ -212,20 +212,26 @@ def build_chassis(p: ChassisParams) -> b.Part:
             )
         pad = pad.locate(b.Pos(L, 0, 0))
 
-        # A short solid nacelle insert begins inside the hollow tip, closes its
-        # cavity before the inboard bolt, and fans into the shaft boss.  It
-        # removes the shell-end stress concentration with far less material
-        # than deepening the whole motor plate.
+        # A descending nacelle fairing closes the tube at full depth through
+        # the inboard bolt, then sheds height toward the shaft boss.  Its roof
+        # follows the falling bending moment instead of carrying a solid,
+        # full-height block all the way across the motor center.  The belly
+        # stays on the plate, and the four bolt locations remain unchanged.
         bridge_start = rib_end - 2*p.arm_rib_thickness_mm
         bridge_center = sweep_center(bridge_start)
-        bridge = b.Polyline(
-            (bridge_start, bridge_center - p.arm_width_mm/2),
-            (L, -center_boss_radius),
-            (L, center_boss_radius),
-            (bridge_start, bridge_center + p.arm_width_mm/2),
-            close=True,
-        )
-        pad = pad + b.extrude(b.make_face(bridge), tip_height)
+        nacelle_sections = []
+        for x, height in ((bridge_start, tip_height),
+                          (rib_end, tip_height),
+                          (L, p.motor_pad_thickness_mm)):
+            frac = (x - bridge_start)/(L - bridge_start)
+            center = bridge_center*(1-frac)
+            half_width = p.arm_width_mm/2*(1-frac) + center_boss_radius*frac
+            nacelle_sections.append(b.Wire.make_polygon([
+                (x, center-half_width, 0), (x, center+half_width, 0),
+                (x, center+half_width, height),
+                (x, center-half_width, height),
+            ], close=True))
+        pad = pad + b.Solid.make_loft(nacelle_sections, ruled=True)
 
         piece = arm + pad
         piece = piece.rotate(b.Axis.Z, ang)
@@ -251,10 +257,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # GPS and IMU share the aft avionics pod; moving the IMU off the stack lets
     # its canopy drop without clipping either board's service envelope. The
     # battery remains recessed and accessible through the dorsal opening.
+    # Its shallow waist removes broad parallel flanks, then flares back into
+    # the rear pod and arm roots; the inner walls still clear the 35 mm pack
+    # by more than 2 mm per side at its upper service envelope.
     stations = [
         (-145.0, 26.0, 15.0, 12.0),
         (-141.0, 30.0, 17.0, 14.0),
         (-116.0, 52.0, 41.5, 43.5),
+        (-105.0, 50.2, 41.5, 41.7),
+        (-56.0, 50.2, 41.5, 41.7),
         (-45.0, 52.0, 41.5, 43.5),
         (-33.0, 56.0, 42.0, 40.0),
         (-24.0, 60.0, cockpit_h, 44.0),
