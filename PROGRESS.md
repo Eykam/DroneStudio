@@ -67,3 +67,29 @@ Decision: CEM remains the inner-loop trainer. Revisit PPO only with (a) a
 per-variant budget of 1M+ env steps, or (b) reward shaping / curriculum that
 densifies the success signal. Documented per the steering note so the PPO
 swap is an informed choice, not a default.
+
+## Manifest dynamics validation - 2026-09-04
+
+- Evaluator/env_sim now carry a dynamics profile end to end (set_dynamics on
+  process spawn; eval loop fixed to use the factory - it was bypassing it,
+  so evals silently ran abstract). Run records now include dynamics.
+- Rate PID re-tuned against the real airframe (rate_tune_manifest.py):
+  the real inertia is ~20x smaller, so the loop is far more responsive -
+  roll/z channels kp 0.1 (vs 1.2 abstract), vertical (pitch channel, ktau
+  authority only) kp 0.5. All axes: rise 0.1s, overshoot <1%, SS err <0.015.
+  SIM-TUNED ONLY, hardware re-validation required. Axis labeling caveat:
+  PID "pitch" drives the vertical axis, "yaw" a horizontal one - inherited
+  from the headless +Y-up convention; gains now match physics, labels do
+  not (documented in rate_tune_manifest.py).
+- Comparative smoke (g13v140 dist, cem 3x8, 3 train eps): abstract -5.87 /
+  manifest -9.34 mean eval return, both 0/6 at smoke budget - dynamics
+  measurably change the learning problem, as expected.
+
+## Manifest-dynamics validation run (2026-09-04)
+- 5-gen x 3-child outer loop on the sim backend with the CAD chassis manifest:
+  machinery healthy (selection, novelty, elites, restart), but success_rate 0.00
+  across all 20 variants vs 33.3% best on the abstract quad backend (run 2).
+  See autoresearch/manifest_run_analysis.md.
+- Watch channel live: streamer.py flies the best policy on the manifest airframe
+  and streams telemetry to the dashboard /watch page (SSE + 2D canvas + per-episode
+  metric graphs: time-in-air, RMS jerk, off-ideal-path residual).

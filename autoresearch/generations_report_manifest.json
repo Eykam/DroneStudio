@@ -1,0 +1,50 @@
+{
+  "elapsed_s": 437.3,
+  "generations": 5,
+  "children": 3,
+  "seed": 11,
+  "budget": {
+    "cem_iters": 4,
+    "cem_pop": 10,
+    "train_episodes": 4,
+    "eval_episodes": 6,
+    "max_steps": 250
+  },
+  "best": {
+    "id": "g1v5",
+    "parent": "g0v0",
+    "generation": 1,
+    "params": {
+      "obstacle_density": 0.42,
+      "obstacle_size_mean": 2.4,
+      "obstacle_size_spread": 0.65,
+      "corridor_width": 3.2,
+      "scene_extent": 48.0,
+      "goal_distance": 32.0,
+      "light_intensity": 0.7,
+      "light_direction_entropy": 0.45,
+      "texture_variety": 0.62,
+      "dynamics_noise": 0.09
+    },
+    "metrics": {
+      "success_rate": 0.0,
+      "mean_return": 6.752496,
+      "mean_steps": 22.5,
+      "train_best_return": 9.270740250000001,
+      "backend": "sim",
+      "trainer": "cem",
+      "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json"
+    },
+    "mutator": "none",
+    "ts": "2026-09-04T07:42:26Z",
+    "novelty": 0.0
+  },
+  "llm_spend": {
+    "spent_usd": 0.0,
+    "cap_usd": 10.0,
+    "calls": 0,
+    "over_cap": false
+  },
+  "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json",
+  "finished_at": "2026-09-04T07:47:46Z"
+}
