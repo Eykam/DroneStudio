@@ -65,7 +65,8 @@ const Dynamics = struct {
     // Real motor model (manifest mode): 4 motors at manifest positions,
     // mixed from collective thrust + PID torque, first-order lag, ktau yaw.
     motor_mode: bool = false,
-    motor_pos: [4][3]f32 = undefined, // sim body frame (+Y up)
+    com: [3]f32 = .{ 0, 0, 0 }, // center of mass, sim body frame (+Y up)
+    motor_pos: [4][3]f32 = undefined, // sim body frame (+Y up), RELATIVE TO COM
     motor_yaw_sign: [4]f32 = undefined, // -1 cw, +1 ccw (his prop_drag_signs)
     mix_inv: [4][4]f32 = undefined, // maps [T, taux, tauy, tauz] -> motor thrusts
     motor_lag_state: [4]f32 = .{ 0, 0, 0, 0 },
@@ -820,12 +821,17 @@ pub fn main() !void {
             // Motor model: solve the 4x4 mixing system once (motors are fixed
             // per design). Rows: [sum=T, tau_x, tau_y(ktau yaw), tau_z].
             // CAD -> sim body map: sim = (-cad.y, cad.z, -cad.x).
+            // CoM offset (max-fidelity directive): torques must be taken
+            // about the true com, so motor lever arms are position - com.
+            const com_cad = m.comM();
+            const com_sim = [3]f64{ -com_cad[1], com_cad[2], -com_cad[0] };
+            world.dyn.com = .{ @floatCast(com_sim[0]), @floatCast(com_sim[1]), @floatCast(com_sim[2]) };
             if (m.motors.len == 4) {
                 var A: [4][4]f64 = undefined;
                 for (m.motors, 0..) |mo, i| {
-                    const px = -mo.position_m[1];
-                    const py = mo.position_m[2];
-                    const pz = -mo.position_m[0];
+                    const px = -mo.position_m[1] - com_sim[0];
+                    const py = mo.position_m[2] - com_sim[1];
+                    const pz = -mo.position_m[0] - com_sim[2];
                     world.dyn.motor_pos[i] = .{ @floatCast(px), @floatCast(py), @floatCast(pz) };
                     const s: f64 = if (std.mem.eql(u8, mo.direction, "cw")) 1.0 else -1.0; // sim +Y up = -z_NED: flipped vs his NED signs
                     world.dyn.motor_yaw_sign[i] = @floatCast(s);
@@ -860,7 +866,7 @@ pub fn main() !void {
             bullet.cbtBodySetMassProps(world.body, world.dyn.mass, &world.dyn.inertia);
             const cross_max = @max(@abs(I.ixy), @max(@abs(I.ixz), @abs(I.iyz)));
             const diag_min = @min(I.ixx, @min(I.iyy, I.izz));
-            try stdout.print("{{\"ok\":true,\"dynamics\":\"{s}\",\"mass\":{d:.4},\"inertia\":[{d:.6},{d:.6},{d:.6}],\"cross_term_ratio\":{d:.4}}}\n", .{ m.name, world.dyn.mass, world.dyn.inertia[0], world.dyn.inertia[1], world.dyn.inertia[2], cross_max / diag_min });
+            try stdout.print("{{\"ok\":true,\"dynamics\":\"{s}\",\"mass\":{d:.4},\"inertia\":[{d:.6},{d:.6},{d:.6}],\"cross_term_ratio\":{d:.4},\"com\":[{d:.5},{d:.5},{d:.5}]}}\n", .{ m.name, world.dyn.mass, world.dyn.inertia[0], world.dyn.inertia[1], world.dyn.inertia[2], cross_max / diag_min, world.dyn.com[0], world.dyn.com[1], world.dyn.com[2] });
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "motor_v2")) {
             const on_v = root.object.get("on") orelse continue;

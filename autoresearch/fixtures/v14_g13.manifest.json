@@ -236,10 +236,10 @@
       "direction": "cw",
       "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
-      "max_thrust_n": 17.27,
+      "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
       "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     },
@@ -258,10 +258,10 @@
       "direction": "ccw",
       "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
-      "max_thrust_n": 17.27,
+      "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
       "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     },
@@ -280,10 +280,10 @@
       "direction": "cw",
       "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
-      "max_thrust_n": 17.27,
+      "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
       "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     },
@@ -302,10 +302,10 @@
       "direction": "ccw",
       "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
-      "max_thrust_n": 17.27,
+      "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
       "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     }
@@ -322,5 +322,8 @@
     "pattern_mm": 30.5,
     "hole_dia_mm": 3.2,
     "z_bottom_m": 0.00125
-  }
+  },
+  "notes": [
+    "autoresearch: max_thrust_n 17.27->11.0 and kv 2400->2300 rebased to the adjudicated RS2205 calibration (chassis_v1 fixture); CAD snapshot v14-g13 carried stale values, upstream fix routed via parent"
+  ]
 }

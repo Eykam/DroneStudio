@@ -87,3 +87,17 @@ Completion -> report commit + PPO-vs-CEM on best variant (armed wake).
   heading and the policy gets working nav regardless of yaw.
 - Parity: bit-identical consumed trajectories vs the previous binary
   under goto defaults. Land/hover/obs_v2 functionally validated.
+
+## 2026-09-04 com offset + v14 thrust rebase
+
+- headless_main.zig: set_dynamics now loads the manifest com and offsets
+  motor lever arms (position - com) so mix torques are about the true com
+  (Bullet already integrates the body frame as the com frame). Abstract
+  profile unchanged (com=0); goto-default trajectories bit-identical.
+- v14_g13.fixture: CAD snapshot carried STALE per-motor max_thrust_n=17.27
+  / kv=2400 (the old pre-adjudication numbers) - rebased to 11.0 / 2300
+  per the RS2205 bench calibration; upstream CAD fix routed via parent.
+  Found via non-monotonic open-loop thrust probes (hover "froze" mid-air
+  because 0.0765 x 69.1N accidentally equals the v14 weight).
+- Teacher re-validated under v14-g13 + com + 11N: 1.0/1.0/1.0 (held-out,
+  n=16); land touchdown mean 0.46 m/s (limit 0.5).
