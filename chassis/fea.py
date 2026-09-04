@@ -75,7 +75,7 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_s
             for i in range(0, len(ids), 12):
                 f.write(",".join(str(x) for x in ids[i:i+12]) + "\n")
         # element set: all
-        f.write("*ELSET,ELSET=EALL,GEN\n1,%d\n" % sum(len(c.data) for c in m.cells))
+        f.write("")  # ELSET=EALL already on every *ELEMENT block
         f.write("*MATERIAL,NAME=PETG\n*ELASTIC\n%.1f,%.3f\n" % (E_MPA, NU))
         f.write("*SOLID SECTION,ELSET=EALL,MATERIAL=PETG\n")
         f.write("*BOUNDARY\nNFIX,1,3,0.0\n")
