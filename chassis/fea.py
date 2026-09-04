@@ -17,6 +17,8 @@ Node sets are built from coordinates (robust to gmsh surface-id churn).
 """
 import os, math, subprocess, numpy as np
 
+EXTRA_NSETS = {}  # populated by _emit_base (e.g. NBATT)
+
 E_MPA, NU, YIELD_MPA = 2100.0, 0.36, 50.0
 MAX_THRUST_N = 17.27  # EMAX ECO II 2207 2400KV on 4S, datasheet 1760 g
 TIP_DISP_LIMIT_MM = 5.0
@@ -79,6 +81,21 @@ def _emit_base(inp_path, motor_positions_mm, stack_spacing_mm):
     nset("NFIX", np.where(fix)[0] + 1)
     for mi, sel in enumerate(loads):
         nset("NLOAD%d" % (mi+1), sel + 1)
+    # battery-tray node set for ejection-load case (from component placement)
+    global EXTRA_NSETS
+    EXTRA_NSETS = {}
+    try:
+        from components import placement
+        bp = placement().get("battery")
+        if bp:
+            bx, by, bz = bp[0]*1000, bp[1]*1000, bp[2]*1000
+            sel = np.where((np.abs(pts[:,0]-bx) < 40.0) & (np.abs(pts[:,1]-by) < 25.0)
+                           & (pts[:,2] > bz - 20.0) & (pts[:,2] < bz + 5.0))[0]
+            if len(sel) > 0:
+                nset("NBATT", sel + 1)
+                EXTRA_NSETS["NBATT"] = list(sel + 1)
+    except Exception:
+        pass
     out.append("*MATERIAL,NAME=PETG")
     out.append("*ELASTIC")
     out.append("%.1f,%.3f" % (E_MPA, NU))
@@ -89,8 +106,10 @@ def _emit_base(inp_path, motor_positions_mm, stack_spacing_mm):
     out.append("NFIX,1,3,0.0")
     return out, int(fix.sum()), [list(s + 1) for s in loads]
 
-def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, motor_scales):
-    """Static job; motor_scales = signed per-motor multiplier of MAX_THRUST_N (dir 3)."""
+def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, motor_scales,
+              extra_loads=()):
+    """Static job; motor_scales = signed per-motor multiplier of MAX_THRUST_N (dir 3).
+    extra_loads = [(nset_name, direction(1|2|3), total_N)] for non-motor loads."""
     out, nfix, loads = _emit_base(inp_path, motor_positions_mm, stack_spacing_mm)
     out.append("*STEP")
     out.append("*STATIC")
@@ -100,6 +119,18 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, motor_sc
         per = MAX_THRUST_N * motor_scales[mi]
         for nid in sel:
             out.append("%d,3,%.6f" % (nid, per / n))
+    import meshio as _m
+    _pts = None
+    for (ns_name, direction, total) in extra_loads:
+        if _pts is None:
+            _pts = _m.read(inp_path).points
+        # nset by name: NBATT is built in _emit_base_extra
+        ids = EXTRA_NSETS.get(ns_name)
+        if ids is None or len(ids) == 0:
+            continue
+        n = len(ids)
+        for nid in ids:
+            out.append("%d,%d,%.6f" % (nid, direction, total / n))
     out.append("*NODE FILE")
     out.append("U")
     out.append("*EL FILE")
@@ -108,6 +139,25 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, motor_sc
     with open(job_name + ".inp", "w") as f:
         f.write(chr(10).join(out) + chr(10))
     return job_name + ".inp", nfix, [len(s) for s in loads]
+
+def _build_lateral_motor_case(inp_path, job_name, motor_positions_mm, stack_spacing_mm,
+                              motor_idx, force_n, direction=1):
+    out, nfix, loads = _emit_base(inp_path, motor_positions_mm, stack_spacing_mm)
+    out.append("*STEP")
+    out.append("*STATIC")
+    out.append("*CLOAD")
+    sel = loads[motor_idx]
+    n = max(len(sel), 1)
+    for nid in sel:
+        out.append("%d,%d,%.6f" % (nid, direction, force_n / n))
+    out.append("*NODE FILE")
+    out.append("U")
+    out.append("*EL FILE")
+    out.append("S")
+    out.append("*END STEP")
+    with open(job_name + ".inp", "w") as f:
+        f.write(chr(10).join(out) + chr(10))
+    return job_name + ".inp"
 
 def build_freq_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm):
     out, nfix, loads = _emit_base(inp_path, motor_positions_mm, stack_spacing_mm)
@@ -181,12 +231,17 @@ def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="
     inp = os.path.join(workdir, "mesh.inp")
     mesh_step(step_path, inp)
     out = {}
-    cases = (("hover_max", [1.0]*4, ANISO_VERTICAL),
-             ("crash", [3.0]*4, ANISO_VERTICAL),
-             ("torsion", [1.5, -1.5, 1.5, -1.5], ANISO_SHEAR))
-    for name, scales, aniso in cases:
+    # real failure modes, not just paper cases:
+    # hover_max/crash/torsion as before; cartwheel = lateral arm-snap (side impact
+    # on one motor pad, in-plane); pullout = single pad full-throttle (mount boss);
+    # battery_eject = 30g forward jolt at the battery tray (0.18 kg pack).
+    cases = (("hover_max", [1.0]*4, ANISO_VERTICAL, ()),
+             ("crash", [3.0]*4, ANISO_VERTICAL, ()),
+             ("torsion", [1.5, -1.5, 1.5, -1.5], ANISO_SHEAR, ()),
+             ("pullout", [1.0, 0.0, 0.0, 0.0], ANISO_VERTICAL, ()))
+    for name, scales, aniso, extra in cases:
         job = os.path.join(workdir, name)
-        build_job(inp, job, motor_positions_mm, stack_spacing_mm, scales)
+        build_job(inp, job, motor_positions_mm, stack_spacing_mm, scales, extra)
         limit = STRESS_FOS * YIELD_MPA * aniso
         if run_ccx(job, ccx):
             vm, u = parse_frd(job + ".frd")
@@ -195,6 +250,28 @@ def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="
                          "limit_mpa": round(limit,1), "passed": ok}
         else:
             out[name] = {"passed": False, "error": "ccx failed"}
+    # cartwheel: lateral (dir 1) side impact on motor pad 1, 2x max thrust
+    job = os.path.join(workdir, "cartwheel")
+    _build_lateral_motor_case(inp, job, motor_positions_mm, stack_spacing_mm,
+                              motor_idx=0, force_n=2.0 * MAX_THRUST_N)
+    if run_ccx(job, ccx):
+        vm, u = parse_frd(job + ".frd")
+        lim = STRESS_FOS * YIELD_MPA  # in-plane: no anisotropy derate
+        out["cartwheel"] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
+                            "limit_mpa": round(lim,1), "passed": vm < lim and u < TIP_DISP_LIMIT_MM}
+    else:
+        out["cartwheel"] = {"passed": False, "error": "ccx failed"}
+    # battery ejection: 30g x 0.18 kg forward (dir 1) at the tray
+    job = os.path.join(workdir, "battery_eject")
+    build_job(inp, job, motor_positions_mm, stack_spacing_mm, [0.0]*4,
+              extra_loads=[("NBATT", 1, 30.0 * 9.81 * 0.18)])
+    if run_ccx(job, ccx):
+        vm, u = parse_frd(job + ".frd")
+        lim = STRESS_FOS * YIELD_MPA
+        out["battery_eject"] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
+                                "limit_mpa": round(lim,1), "passed": vm < lim and u < TIP_DISP_LIMIT_MM}
+    else:
+        out["battery_eject"] = {"passed": False, "error": "ccx failed"}
     job = os.path.join(workdir, "modal")
     build_freq_job(inp, job, motor_positions_mm, stack_spacing_mm)
     if run_ccx(job, ccx):
