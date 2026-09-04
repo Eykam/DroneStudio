@@ -19,6 +19,24 @@ INTERVAL = float(os.environ.get("POST_INTERVAL_S", "30"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARCHIVE = os.path.join(HERE, "archive.jsonl")
 
+def _current_generation():
+    """Latest 'gen N' line in the newest genrun log (last 8KB tail scan)."""
+    import re
+    logs = sorted(glob.glob("/workspace/genrun*.log"),
+                  key=os.path.getmtime, reverse=True)
+    if not logs:
+        return None
+    try:
+        with open(logs[0], "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 8192))
+            tail = f.read().decode(errors="replace")
+        gens = re.findall(r"gen (\d+)", tail)
+        return int(gens[-1]) if gens else None
+    except Exception:
+        return None
+
 def run_status():
     """Detect a live runner via /proc cmdline scan (no ps dependency)."""
     for pid in filter(str.isdigit, os.listdir("/proc")):
@@ -26,7 +44,9 @@ def run_status():
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 cmd = f.read().decode(errors="replace").replace("\0", " ")
             if "run_generations.py" in cmd or "compare_trainers.py" in cmd:
-                return {"status": "running", "pid": int(pid), "detail": cmd.strip()[-160:]}
+                return {"status": "running", "pid": int(pid),
+                        "generations": _current_generation(),
+                        "detail": cmd.strip()[-160:]}
         except Exception:
             continue
     return {"status": "idle"}
