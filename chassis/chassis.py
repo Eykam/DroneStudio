@@ -14,9 +14,9 @@ import build123d as b
 class ChassisParams:
     arm_length_mm: float = 150.0        # sim motor_arm_length (center to motor axis)
     arm_width_mm: float = 9.2
-    arm_thickness_mm: float = 32.0      # maximum closed-section depth at the loaded root
+    arm_thickness_mm: float = 31.0      # closed-section depth, balanced against side impact
     arm_root_width_mm: float = 14.0     # broad root chine flows into the cabin shell
-    arm_shell_root_width_mm: float = 15.6
+    arm_shell_root_width_mm: float = 16.2
     arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
     arm_roof_slope: float = 1.15        # >1 gives a support-free (>45 deg) inner roof
     arm_crown_width_mm: float = 3.0     # narrow high-fiber facet on the closed arm shell
@@ -26,7 +26,7 @@ class ChassisParams:
     center_plate_wid_mm: float = 66.0
     top_plate_thickness_mm: float = 2.5
     body_thickness_mm: float = 1.30     # structural skin; roofs use normal offsets
-    arm_rib_thickness_mm: float = 1.40  # closed arm shell wall
+    arm_rib_thickness_mm: float = 1.30  # closed arm shell wall
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
     arm_rib_root_mm: float = 12.0
     body_fairing_height_mm: float = 56.0 # raised cockpit over the uninterrupted roots
@@ -47,7 +47,7 @@ class ChassisParams:
     motor_center_hole_dia_mm: float = 9.0
     stack_spacing_mm: float = 30.5      # standard FC/ESC stack
     stack_hole_dia_mm: float = 3.2
-    stack_standoff_dia_mm: float = 9.0
+    stack_standoff_dia_mm: float = 6.4   # 1.6 mm annular wall around each M3 bore
     stack_standoff_height_mm: float = 32.0
     camera_aperture_dia_mm: float = 10.0
     fillet_radius_mm: float = 2.0
@@ -72,7 +72,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
 
     def section_wire(x, center, width, height, inner=False):
         """Support-free crowned arm section in the local YZ plane."""
-        wall = p.arm_rib_thickness_mm
+        # Reinforce only the root, fading the inner wall back to span gauge.
+        # The outer chine remains continuous through the fuselage junction.
+        root_blend = max(0.0, min(1.0, (75.0 - x) / 30.0))
+        wall = p.arm_rib_thickness_mm + 0.20 * root_blend
         slope = p.arm_roof_slope
         roof_normal = math.hypot(slope, 1.0)
         crown = min(p.arm_crown_width_mm, width - 2.5 * wall)
@@ -147,7 +150,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             x = x0 + frac * span
             width = p.arm_shell_root_width_mm + (
                 p.arm_width_mm - p.arm_shell_root_width_mm
-            ) * frac
+            ) * frac ** 1.7
             roof_normal = math.hypot(p.arm_roof_slope, 1.0)
             min_tip_height = (
                 p.arm_roof_slope * (width - p.arm_crown_width_mm)/2
@@ -241,19 +244,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
     sy = p.center_plate_wid_mm / 66.0
     cockpit_h = p.body_fairing_height_mm
 
-    # x, breadth, shoulder height, dorsal crown breadth (mm). The aft fin,
-    # battery well, raised cockpit and low stereo nose form one continuous
-    # shell; the changing shoulder line fairs them into the swept arms.
+    # x, breadth, shoulder height, dorsal crown breadth (mm). A close-fitting
+    # battery spine flows into the full-width arm-root cockpit, then pinches
+    # around the upright Pi before flaring into low stereo-camera cheeks.
+    # The narrow forward ridge retains headroom for the Pi while dropping the
+    # outer nose shoulders to camera height: stiffness comes from these folded
+    # chines, rather than carrying the old tall, broad payload sidewalls.
     stations = [
         (-145.0, 26.0, 15.0, 12.0),
         (-141.0, 30.0, 17.0, 14.0),
-        (-112.0, 54.0, 42.0, 46.0),
+        (-116.0, 46.0, 41.0, 38.0),
+        (-45.0, 46.0, 41.0, 38.0),
         (-33.0, 56.0, 42.0, 46.0),
         (-24.0, 60.0, cockpit_h, 46.0),
         (24.0, 60.0, cockpit_h, 46.0),
-        (34.0, 50.0, 37.0, 32.0),
-        (79.0, 50.0, 37.0, 32.0),
-        (89.0, 66.0, 37.0, 46.0),
+        (38.0, 26.0, 36.0, 12.0),
+        (77.0, 26.0, 36.0, 12.0),
+        (89.0, 66.0, 18.0, 30.0),
+        (93.0, 66.0, 18.0, 30.0),
         (117.0, 66.0, 18.0, 46.0),
         (128.0, 40.0, 16.0, 16.0),
         (132.0, 26.0, 15.0, 12.0),
