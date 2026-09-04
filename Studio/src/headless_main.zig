@@ -108,6 +108,9 @@ const Scene = struct {
     hold_s: f32 = 4.0, // hover_hold: seconds inside radius to succeed
     max_touchdown_vs: f32 = 0.5, // land: max |vertical speed| at touchdown, m/s
     shaping_v2: bool = false, // small smooth-flight penalty, all scenarios
+    // T3 (harder-scenes Phase 2): ordered waypoints to pass through (goto
+    // only) before the final goal. Empty = today's behavior.
+    waypoints: []Vec3 = &.{},
 };
 
 fn vecFromJson(v: std.json.Value) !Vec3 {
@@ -182,6 +185,8 @@ const World = struct {
     succeeded: bool = false,
     done: bool = false,
     obs_v2: bool = false, // 19-dim yaw-relative obs (default off: 15-dim v1)
+    obs_v3: bool = false, // 26-dim: v2 layout + T3 waypoint channels (supersedes v2 when on)
+    waypoint_idx: usize = 0, // T3: next waypoint to pass
     hold_steps: u32 = 0, // hover_hold consecutive in-radius policy steps
     last_torque: [3]f32 = .{ 0, 0, 0 }, // PID torque output, body frame (telemetry)
 
@@ -269,6 +274,7 @@ const World = struct {
         self.dyn.m2_soc = 1.0;
         self.steps = 0;
         self.hold_steps = 0;
+        self.waypoint_idx = 0;
         self.collided = false;
         self.succeeded = false;
         self.done = false;
@@ -284,7 +290,7 @@ const World = struct {
         bullet.cbtBodySetLinearVelocity(self.body, &zero);
         bullet.cbtBodySetAngularVelocity(self.body, &zero);
         bullet.cbtBodySetActivationState(self.body, bullet.CBT_ACTIVE_TAG);
-        self.prev_dist = scene.goal.sub(scene.spawn).length();
+        self.prev_dist = (if (scene.waypoints.len > 0) scene.waypoints[0] else scene.goal).sub(scene.spawn).length();
     }
 
     /// One fast (500 Hz) step: input filter -> his RateController PID ->
@@ -441,10 +447,22 @@ const World = struct {
         self.steps += 1;
 
         const pos = self.bodyPos();
-        const dist = self.scene.goal.sub(pos).length();
         const scenario = self.scene.scenario;
+        // T3 waypoints (goto only): progress is measured against the current
+        // waypoint until all are passed, then against the final goal. Passing
+        // a waypoint pays the same +10 as goal entry and rebases prev_dist so
+        // the target switch never reads as a progress penalty.
+        const wp_pending = scenario == .goto and self.waypoint_idx < self.scene.waypoints.len;
+        const target = if (wp_pending) self.scene.waypoints[self.waypoint_idx] else self.scene.goal;
+        const dist = target.sub(pos).length();
         var reward = (self.prev_dist - dist) - 0.01;
         self.prev_dist = dist;
+        if (wp_pending and dist < self.scene.success_radius) {
+            reward += 10.0;
+            self.waypoint_idx += 1;
+            const nt = if (self.waypoint_idx < self.scene.waypoints.len) self.scene.waypoints[self.waypoint_idx] else self.scene.goal;
+            self.prev_dist = nt.sub(pos).length();
+        }
         if (self.scene.shaping_v2) {
             reward -= 0.005 * self.bodyOmega().length() / 10.0;
         }
@@ -497,7 +515,7 @@ const World = struct {
         }
         // in-air radius entry succeeds only for goto (land succeeds at
         // touchdown, hover_hold on completing the hold)
-        if (!self.done and scenario == .goto and dist < self.scene.success_radius) {
+        if (!self.done and scenario == .goto and !wp_pending and dist < self.scene.success_radius) {
             reward += 10.0;
             self.succeeded = true;
             self.done = true;
@@ -612,10 +630,57 @@ const World = struct {
             self.scene.success_radius / extent,
         };
     }
+
+    /// Observation v3: 26 floats. The first 19 are exactly obsV2 (same
+    /// order, same scales) so v2 policies warm-start with zero-padded input
+    /// columns; appended are the T3 waypoint channels:
+    ///   current-target rel(3) yaw-frame /extent - the next waypoint, or the
+    ///     final goal once all waypoints are passed (equals rel_goal then);
+    ///   next-hop rel(3) yaw-frame /extent - from the current waypoint to the
+    ///     one after it (or to the final goal); zeros with no waypoints;
+    ///   waypoint progress(1) - idx/count in [0,1]; 0 with no waypoints.
+    fn obsV3(self: *World) [26]f32 {
+        const base = self.obsV2();
+        const pos = self.bodyPos();
+        const q = self.bodyQuat();
+        const fwd = Vec3.init(1, 0, 0).rotate_by_quaternion(q);
+        const yaw = std.math.atan2(-fwd.z(), fwd.x());
+        const extent = @max(self.scene.extent, 1.0);
+        const wps = self.scene.waypoints;
+        var cur = self.scene.goal.sub(pos);
+        var nxt = Vec3.zero();
+        var prog: f32 = 0;
+        if (wps.len > 0) {
+            if (self.waypoint_idx < wps.len) {
+                const wp = wps[self.waypoint_idx];
+                cur = wp.sub(pos);
+                const after = if (self.waypoint_idx + 1 < wps.len) wps[self.waypoint_idx + 1] else self.scene.goal;
+                nxt = after.sub(wp);
+                prog = @as(f32, @floatFromInt(self.waypoint_idx)) / @as(f32, @floatFromInt(wps.len));
+            } else {
+                prog = 1.0;
+            }
+        }
+        const cur_f = yawFrame(cur, yaw).scale(1.0 / extent);
+        const nxt_f = yawFrame(nxt, yaw).scale(1.0 / extent);
+        return .{
+            base[0],  base[1],  base[2],  base[3],  base[4],  base[5],
+            base[6],  base[7],  base[8],  base[9],  base[10], base[11],
+            base[12], base[13], base[14], base[15], base[16], base[17],
+            base[18],
+            cur_f.x(), cur_f.y(), cur_f.z(),
+            nxt_f.x(), nxt_f.y(), nxt_f.z(),
+            prog,
+        };
+    }
 };
 
 fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info: bool) !void {
-    if (w.obs_v2) {
+    if (w.obs_v3) {
+        const o = w.obsV3();
+        try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
+        for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
+    } else if (w.obs_v2) {
         const o = w.obsV2();
         try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
         for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
@@ -631,8 +696,8 @@ fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info:
         const v3 = w.bodyVel();
         // telemetry powers the dashboard live stream (streamer reads
         // info.pos/quat/vel per policy step)
-        try writer.print(",\"info\":{{\"collided\":{},\"succeeded\":{},\"steps\":{d},\"hold_steps\":{d},\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.4},{d:.4},{d:.4},{d:.4}],\"vel\":[{d:.4},{d:.4},{d:.4}]}}", .{
-            w.collided, w.succeeded, w.steps, w.hold_steps,
+        try writer.print(",\"info\":{{\"collided\":{},\"succeeded\":{},\"steps\":{d},\"hold_steps\":{d},\"wp\":{d},\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.4},{d:.4},{d:.4},{d:.4}],\"vel\":[{d:.4},{d:.4},{d:.4}]}}", .{
+            w.collided, w.succeeded, w.steps, w.hold_steps, w.waypoint_idx,
             p3.x(), p3.y(), p3.z(),
             q4.data[0], q4.data[1], q4.data[2], q4.data[3],
             v3.x(), v3.y(), v3.z(),
@@ -711,9 +776,9 @@ pub fn main() !void {
                     if (std.mem.eql(u8, sc.string, "land")) scene.scenario = .land;
                 }
             }
+            _ = scene_arena.reset(.retain_capacity);
             if (scene_v.object.get("obstacles")) |obs_v| {
                 const arr = obs_v.array;
-                _ = scene_arena.reset(.retain_capacity);
                 var list = try scene_arena.allocator().alloc(Obstacle, arr.items.len);
                 for (arr.items, 0..) |item, i| {
                     const oarr = item.array.items;
@@ -726,6 +791,14 @@ pub fn main() !void {
                     };
                 }
                 scene.obstacles = list;
+            }
+            if (scene_v.object.get("waypoints")) |wps_v| {
+                const arr = wps_v.array;
+                const wlist = try scene_arena.allocator().alloc(Vec3, arr.items.len);
+                for (arr.items, 0..) |item, i| {
+                    wlist[i] = try vecFromJson(item);
+                }
+                scene.waypoints = wlist;
             }
             const seed: u64 = if (root.object.get("seed")) |s| switch (s) {
                 .integer => |n| @intCast(n),
@@ -877,6 +950,11 @@ pub fn main() !void {
             const on_v = root.object.get("on") orelse continue;
             world.obs_v2 = (on_v == .bool and on_v.bool);
             try stdout.print("{{\"ok\":true,\"obs_v2\":{}}}\n", .{world.obs_v2});
+            try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "obs_v3")) {
+            const on_v = root.object.get("on") orelse continue;
+            world.obs_v3 = (on_v == .bool and on_v.bool);
+            try stdout.print("{{\"ok\":true,\"obs_v3\":{}}}\n", .{world.obs_v3});
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
