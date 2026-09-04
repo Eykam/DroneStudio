@@ -9,7 +9,7 @@ import progress
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(HERE, "loop_state.json")
 ARCHIVE = os.path.join(HERE, "archive.jsonl")
-LETTERS = ("a", "b", "c")  # candidates per generation
+LETTERS = ("a", "b")  # candidates per generation (dropped 3->2: shorter astra sessions, hang mitigation)
 
 PROMPT_TEMPLATE = """You are the mutation brain of an auto-researcher optimizing a 3D-printed 5-inch FPV quad chassis.
 
@@ -26,21 +26,19 @@ Current best: variant {best_variant}, score {best_score:.3f}
 Its evaluation failures: {failures}
 History of tried mutations and scores: {history}
 
-Your job: propose THREE DISTINCT candidate mutations of the current design, each aimed at passing ALL checks with the lowest frame mass. Stiffness is the binding constraint: add ribs/depth/taper rather than uniform thickness where you can. Keep every candidate printable (no support-requiring overhangs, walls >= 1.2 mm).
+Your job: propose TWO DISTINCT candidate mutations of the current design, each aimed at passing ALL checks with the lowest frame mass. Stiffness is the binding constraint: add ribs/depth/taper rather than uniform thickness where you can. Keep every candidate printable (no support-requiring overhangs, walls >= 1.2 mm).
 Write each candidate as a COMPLETE drop-in replacement of chassis.py (same interface: ChassisParams dataclass with the same constructor, build_chassis(p) -> Part) at these exact paths:
   /tmp/candidates/{base_variant}a.py
   /tmp/candidates/{base_variant}b.py
-  /tmp/candidates/{base_variant}c.py
 Do NOT edit chassis.py itself - treat it as the read-only reference implementation of the current best. Read it first.
-The three candidates must take genuinely different design directions (e.g. one reworks the fuselage/shell strategy, one reworks arm sections/roots, one attacks mass distribution via bays and cutouts) - NOT three parameter nudges of one idea. Each should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md - incremental but real steps.
+The two candidates must take genuinely different design directions (e.g. one reworks the fuselage/shell strategy, the other reworks arm sections/roots or mass distribution) - NOT two parameter nudges of one idea. Each should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md - incremental but real steps.
 placement.json may be edited to move components (the edit is shared by all three candidates; x/y/z in meters, z = component bottom).
-Verify EACH candidate builds before finishing. For each file F in /tmp/candidates/{base_variant}a.py /tmp/candidates/{base_variant}b.py /tmp/candidates/{base_variant}c.py run:
+Verify EACH candidate builds before finishing. For each file F in /tmp/candidates/{base_variant}a.py /tmp/candidates/{base_variant}b.py run:
   python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(sys.argv[1],sys.argv[2]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); p=m.ChassisParams(); part=m.build_chassis(p); print(round(part.volume,1))" F F
 (a file named e.g. v18-g17a.py is not importable as a module name - the importlib form above is required)
-End by printing three lines:
+End by printing two lines:
 MUTATION_SUMMARY_A <one sentence describing candidate a>
-MUTATION_SUMMARY_B <one sentence describing candidate b>
-MUTATION_SUMMARY_C <one sentence describing candidate c>"""
+MUTATION_SUMMARY_B <one sentence describing candidate b>"""
 
 def kill_codex():
     for pid in os.listdir("/proc"):
@@ -84,8 +82,8 @@ def run_generation():
             os.remove(p)
     prompt = PROMPT_TEMPLATE.format(best_variant=parent, best_score=st["best_score"],
                                     failures=failures, history=hist, base_variant=base)
-    progress.set_stage("codex editing", f"gen {gen}: codex drafting 3 candidates from {parent}", design_id=f"cad-chassis-{base}")
-    print(f"[gen {gen}] asking Codex for 3 candidate mutations of {parent}...", flush=True)
+    progress.set_stage("codex editing", f"gen {gen}: codex drafting 2 candidates from {parent}", design_id=f"cad-chassis-{base}")
+    print(f"[gen {gen}] asking Codex for 2 candidate mutations of {parent}...", flush=True)
     codex_cmd = ["codex", "exec", "-m", "gpt-6-astra", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt]
     try:
         # Popen + poll instead of blocking run(): adds a stall watchdog. Two live
