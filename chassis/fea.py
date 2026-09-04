@@ -274,6 +274,12 @@ def parse_freqs(dat_path):
     return freqs
 
 def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="ccx"):
+    """Parallel FEA: build every ccx job up front, run them concurrently.
+
+    Each ccx job is a single-threaded subprocess with its own job files, so a
+    thread pool of subprocesses saturates idle cores; results are identical to
+    the serial version (same jobs, same parsers)."""
+    from concurrent.futures import ThreadPoolExecutor
     os.makedirs(workdir, exist_ok=True)
     inp = os.path.join(workdir, "mesh.inp")
     mesh_step(step_path, inp)
@@ -286,42 +292,40 @@ def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="
              ("crash", [3.0]*4, ANISO_VERTICAL, ()),
              ("torsion", [1.5, -1.5, 1.5, -1.5], ANISO_SHEAR, ()),
              ("pullout", [1.0, 0.0, 0.0, 0.0], ANISO_VERTICAL, ()))
+    jobs = {}  # name -> (job_base, limit_mpa)
     for name, scales, aniso, extra in cases:
         job = os.path.join(workdir, name)
         build_job(inp, job, motor_positions_mm, stack_spacing_mm, scales, extra)
-        limit = STRESS_FOS * YIELD_MPA * aniso
-        if run_ccx(job, ccx):
-            vm, u = parse_frd(job + ".frd")
-            ok = vm < limit and u < TIP_DISP_LIMIT_MM
-            out[name] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
-                         "limit_mpa": round(limit,1), "passed": ok}
-        else:
-            out[name] = {"passed": False, "error": "ccx failed"}
+        jobs[name] = (job, STRESS_FOS * YIELD_MPA * aniso)
     # cartwheel: lateral (dir 1) side impact on motor pad 1, 2x max thrust
     job = os.path.join(workdir, "cartwheel")
     _build_lateral_motor_case(inp, job, motor_positions_mm, stack_spacing_mm,
                               motor_idx=0, force_n=2.0 * MAX_THRUST_N)
-    if run_ccx(job, ccx):
-        vm, u = parse_frd(job + ".frd")
-        lim = STRESS_FOS * YIELD_MPA  # in-plane: no anisotropy derate
-        out["cartwheel"] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
-                            "limit_mpa": round(lim,1), "passed": vm < lim and u < TIP_DISP_LIMIT_MM}
-    else:
-        out["cartwheel"] = {"passed": False, "error": "ccx failed"}
+    jobs["cartwheel"] = (job, STRESS_FOS * YIELD_MPA)  # in-plane: no aniso derate
     # battery ejection: 30g x 0.18 kg forward (dir 1) at the tray
     job = os.path.join(workdir, "battery_eject")
     build_job(inp, job, motor_positions_mm, stack_spacing_mm, [0.0]*4,
               extra_loads=[("NBATT", 1, 30.0 * 9.81 * 0.18)])
-    if run_ccx(job, ccx):
-        vm, u = parse_frd(job + ".frd")
-        lim = STRESS_FOS * YIELD_MPA
-        out["battery_eject"] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
-                                "limit_mpa": round(lim,1), "passed": vm < lim and u < TIP_DISP_LIMIT_MM}
-    else:
-        out["battery_eject"] = {"passed": False, "error": "ccx failed"}
+    jobs["battery_eject"] = (job, STRESS_FOS * YIELD_MPA)
+    build_freq_job(inp, os.path.join(workdir, "modal"), motor_positions_mm, stack_spacing_mm)
+    build_buckle_job(inp, os.path.join(workdir, "buckle"), motor_positions_mm, stack_spacing_mm)
+
+    names = list(jobs) + ["modal", "buckle"]
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        for name, ok in pool.map(lambda n: (n, run_ccx(os.path.join(workdir, n), ccx)), names):
+            results[name] = ok
+
+    for name, (job, limit) in jobs.items():
+        if results.get(name):
+            vm, u = parse_frd(job + ".frd")
+            out[name] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
+                         "limit_mpa": round(limit,1),
+                         "passed": vm < limit and u < TIP_DISP_LIMIT_MM}
+        else:
+            out[name] = {"passed": False, "error": "ccx failed"}
     job = os.path.join(workdir, "modal")
-    build_freq_job(inp, job, motor_positions_mm, stack_spacing_mm)
-    if run_ccx(job, ccx):
+    if results.get("modal"):
         freqs = parse_freqs(job + ".dat")
         f1 = freqs[0] if freqs else 0.0
         out["modal"] = {"modes_hz": [round(f,1) for f in freqs],
@@ -330,10 +334,8 @@ def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="
                         "passed": bool(freqs) and f1 >= MIN_FIRST_MODE_HZ}
     else:
         out["modal"] = {"passed": False, "error": "ccx failed"}
-    # buckling screen under crash-scale compression
     job = os.path.join(workdir, "buckle")
-    build_buckle_job(inp, job, motor_positions_mm, stack_spacing_mm)
-    if run_ccx(job, ccx):
+    if results.get("buckle"):
         factors = parse_buckle_factors(job + ".dat")
         f1 = factors[0] if factors else 0.0
         out["buckling"] = {"load_factors": [round(f,2) for f in factors],
