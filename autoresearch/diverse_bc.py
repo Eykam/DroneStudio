@@ -134,8 +134,10 @@ def collect(target_eps=48, max_attempts=400):
             print(f"attempts {attempts}: kept {kept}, by density {stats['succ_by_density']}", flush=True)
     return np.array(X), np.clip(np.array(Y), -0.95, 0.95), kept, attempts, stats
 
-def bc_train(X, Y, iters=2000, obs_dim=15):
+def bc_train(X, Y, iters=2000, obs_dim=15, init_flat=None):
     net = MLP(obs_dim, 4, seed=0)
+    if init_flat is not None:
+        net.set_flat(np.array(init_flat, dtype=np.float64))
     W = [net.W1, net.b1, net.W2, net.b2, net.W3, net.b3]
     m = [np.zeros_like(w) for w in W]; v = [np.zeros_like(w) for w in W]
     lr, b1, b2, eps = 3e-3, 0.9, 0.999, 1e-8
