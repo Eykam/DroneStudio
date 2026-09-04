@@ -53,9 +53,12 @@
       ],
       "direction": "cw",
       "mass_kg": 0.032,
-      "max_thrust_n": 10.0,
+      "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     },
     {
       "id": 2,
@@ -71,9 +74,12 @@
       ],
       "direction": "ccw",
       "mass_kg": 0.032,
-      "max_thrust_n": 10.0,
+      "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     },
     {
       "id": 3,
@@ -89,9 +95,12 @@
       ],
       "direction": "cw",
       "mass_kg": 0.032,
-      "max_thrust_n": 10.0,
+      "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     },
     {
       "id": 4,
@@ -107,9 +116,12 @@
       ],
       "direction": "ccw",
       "mass_kg": 0.032,
-      "max_thrust_n": 10.0,
+      "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
     }
   ],
   "imu": {
