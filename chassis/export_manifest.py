@@ -182,7 +182,7 @@ def _slim_glb(glb_path):
     gp = _sh.which("gltfpack")
     if not gp:
         return
-    tmp = glb_path + ".slim"
+    tmp = glb_path + ".tmp.glb"  # gltfpack requires a .glb/.gltf output extension
     try:
         r = _sp.run([gp, "-i", glb_path, "-o", tmp, "-si", "0.7", "-kn", "-cc"],
                     capture_output=True, timeout=300)
