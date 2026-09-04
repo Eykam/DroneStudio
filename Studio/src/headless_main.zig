@@ -322,34 +322,29 @@ const World = struct {
                 const kd = kf * d.m2_kd_over_kf;
                 const v_oc = 12.0 + 4.8 * d.m2_soc; // 4S: 12.0 empty .. 16.8 full
                 var i_total: f32 = 0;
-                // two-half-step solve so sag sees this tick's current
-                var currents: [4]f32 = undefined;
+                var ocmds: [4]f32 = undefined;
                 inline for (0..4) |i| {
                     const tc = std.math.clamp(t[i], min_t, d.motor_max_thrust);
                     var oc = @sqrt(tc / kf);
                     // ESC latency: push through the delay queue
                     d.m2_cmd_hist[i][d.m2_hist_idx % 4] = oc;
                     oc = d.m2_cmd_hist[i][(d.m2_hist_idx + 4 - d.m2_esc_delay_ticks) % 4];
-                    currents[i] = oc; // stash cmd temporarily
+                    ocmds[i] = @min(oc, d.m2_omega_max);
                 }
                 d.m2_hist_idx += 1;
+                // pass 1: currents at unsagged bus, to size this tick's sag
+                var currents: [4]f32 = undefined;
                 inline for (0..4) |i| {
-                    const omega_cmd = @min(currents[i], d.m2_omega_max);
-                    const duty = omega_cmd / d.m2_omega_max;
-                    const v_batt = v_oc; // first pass: sag applied below
-                    var cur = (duty * v_batt - d.m2_ke * d.m2_omega[i]) / d.m2_rw;
-                    cur = std.math.clamp(cur, 0.0, d.m2_imax);
-                    currents[i] = cur;
-                    i_total += cur;
+                    const duty = @min(1.0, (d.m2_ke * ocmds[i] + d.m2_rw * kd * ocmds[i] * ocmds[i] / d.m2_ke) / v_oc);
+                    currents[i] = std.math.clamp((duty * v_oc - d.m2_ke * d.m2_omega[i]) / d.m2_rw, 0.0, d.m2_imax);
+                    i_total += currents[i];
                 }
                 const v_batt = @max(9.0, v_oc - i_total * d.m2_batt_r_int);
                 inline for (0..4) |i| {
-                    const omega_cmd = @min(@sqrt(std.math.clamp(t[i], min_t, d.motor_max_thrust) / kf), d.m2_omega_max);
-                    _ = omega_cmd;
-                    var cur = currents[i];
-                    // recompute with sagged bus
-                    const duty = @min(1.0, @sqrt(std.math.clamp(t[i], min_t, d.motor_max_thrust) / kf) / d.m2_omega_max);
-                    cur = std.math.clamp((duty * v_batt - d.m2_ke * d.m2_omega[i]) / d.m2_rw, 0.0, d.m2_imax);
+                    // RPM-governor feedforward duty at the sagged bus;
+                    // saturation + current limit give the true equilibrium
+                    const duty = @min(1.0, (d.m2_ke * ocmds[i] + d.m2_rw * kd * ocmds[i] * ocmds[i] / d.m2_ke) / v_batt);
+                    const cur = std.math.clamp((duty * v_batt - d.m2_ke * d.m2_omega[i]) / d.m2_rw, 0.0, d.m2_imax);
                     const tau_m = d.m2_ke * cur;
                     const dw = (tau_m - kd * d.m2_omega[i] * d.m2_omega[i]) / d.m2_jr;
                     d.m2_omega[i] = @max(0.0, d.m2_omega[i] + dw * FAST_DT);
@@ -715,12 +710,12 @@ pub fn main() !void {
                 world.dyn.motor_v2 = false;
                 world.dyn.m2_omega = .{ 0, 0, 0, 0 };
                 world.dyn.m2_hist_idx = 0;
-                world.dyn.m2_omega_max = 3560.0; // rad/s, ~2300KV * 14.8V (ESTIMATE)
-                world.dyn.m2_kd_over_kf = 0.015; // drag/thrust ratio, m (typical 5in prop)
-                world.dyn.m2_ke = 0.00416; // V*s/rad = N*m/A, from omega_max at nom voltage
-                world.dyn.m2_rw = 0.06; // winding resistance, ohm (ESTIMATE)
+                world.dyn.m2_omega_max = 3560.0; // rad/s: RS2205-2300KV at ~14.8V loaded; kf is calibrated against this (MOTOR_V2.md)
+                world.dyn.m2_kd_over_kf = 0.015; // physical 5in prop torque/thrust ratio, m. NOTE: manifest drag_ratio=0.15 is non-physical for a 2205; mixer allocation still uses the manifest value
+                world.dyn.m2_ke = 0.004152; // V*s/rad = N*m/A = 60/(2*pi*2300) from RS2205 2300KV spec
+                world.dyn.m2_rw = 0.065; // RS2205-2300KV internal resistance spec, ohm (AKK clone of EMAX design)
                 world.dyn.m2_jr = 9.0e-6; // rotor+prop inertia, kg*m^2 (ESTIMATE)
-                world.dyn.m2_imax = 40.0; // ESC per-motor current limit, A (ESTIMATE)
+                world.dyn.m2_imax = 30.0; // A; thrust-stand peak 28.6A (HQ5045BN 4S), ESC assumed 30A class
                 world.dyn.m2_batt_r_int = 0.024; // 4S pack internal resistance, ohm (ESTIMATE)
                 world.dyn.m2_batt_cap_as = 4680.0; // charge, A*s (~1.3Ah, ASSUMPTION)
                 world.dyn.m2_soc = 1.0;
