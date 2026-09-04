@@ -71,7 +71,8 @@ class Component:
 LIBRARY = {
     "motor": Component(
         "EMAX Eco II 2207", 33.4, (0.0275, 0.0275, 0.0332), "cylinder-z", "motor_pad",
-        "https://www.mantisfpv.com.au/emax-eco-ii-series-2207-3-6s-1700-1900-2400kv/"),
+        "https://www.mantisfpv.com.au/emax-eco-ii-series-2207-3-6s-1700-1900-2400kv/",
+        step_path="parts/motor_2207.step"),  # GrabCAD generic 2207 (bbox 27.0x27.0x32.3mm, within 1.2mm of ECO II); no exact EMAX STEP exists - https://grabcad.com/library/2207-brushless-motor-1
     "prop": Component(
         "Gemfan Hurricane 51466 V2", 4.2, (0.1318, 0.1318, 0.0068), "cylinder-z", "motor_pad",
         "https://www.gemfanhobby.com/hurricane-51466-v2-pc-3-blade.html"),
@@ -84,11 +85,16 @@ LIBRARY = {
         "user-confirmed 4S build 2026-09-04; capacity/mass still Tattu-class estimate until he names the battery model"),
     "pi_zero_2w": Component(
         "Raspberry Pi Zero 2W", 11.0, (0.065, 0.030, 0.005), "box", "nose",
-        "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/"),
+        "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/",
+        step_path="parts/pizero2w.step"),  # GrabCAD community w/ 40-pin header, bbox 65.8x30.6x11.5mm - https://grabcad.com/library/raspberry-pi-zero-2-w-with-40-pin-male-connector-1
     "pi_camera_3": Component(
         "Raspberry Pi Camera Module 3", 4.0, (0.025, 0.024, 0.012), "box", "nose",
         "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
         step_path="parts/Camera_module_3_std_model_simple.stp"),
+    "gps": Component(
+        "Beitian BN-220 GPS", 10.8, (0.022, 0.020, 0.007), "box", "deck",
+        "https://grabcad.com/library/gps-beitian-bn-220-1 (bbox 22.0x20.0x6.9mm vs 22x20x6mm spec); mass from vendor listings, verify when he names his GPS",
+        step_path="parts/gps_bn220.step"),
     "mpu9250": Component(
         "MPU-9250 breakout (GY-9250)", 3.0, (0.025, 0.015, 0.003), "box", "stack",
         "estimate - generic GY-9250 module"),
@@ -104,6 +110,7 @@ DEFAULT_PLACEMENT = {
     "pi_camera_3#left": [0.035, -0.030, 0.012],
     "pi_camera_3#right": [0.035, 0.030, 0.012],
     "mpu9250": [0.0, 0.0, 0.022],
+    "gps": [-0.045, 0.0, 0.045],  # rear deck, typical FPV GPS perch
 }
 
 def placement():
