@@ -24,7 +24,10 @@ from the CAD B-rep (exact) plus an explicit payload model.
 - `dynamics` - the composed rigid body the sim uses AS-IS:
   - `total_mass_kg`: frame + 4 motors + payload (stack, battery, cameras)
   - `com_m`: center of mass, meters, in the GLB frame
-  - `inertia_about_com_kgm2`: FULL 3x3 tensor about the CoM (ixx..iyz)
+  - `inertia_about_com_kgm2`: FULL 3x3 tensor about the CoM (ixx..iyz).
+    AXES ARE IN THE GLB FRAME (+X forward, +Z up) - same frame as com_m and
+    the geometry. Any frame conversion (e.g. to the sim's Y-up OpenGL side)
+    happens in the loader, never in this file.
   - `composition[]`: per-part mass/CoM breakdown (frame, motors, payload items)
 - `aero`:
   - `projected_area_m2 {x,y,z}`: cross-section per body axis (for drag)
