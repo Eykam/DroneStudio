@@ -41,11 +41,13 @@ class MLP:
         return obs_dim*hidden + hidden + hidden*hidden + hidden + hidden*act_dim + act_dim
 
 def cem_train(env_factory, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
-              episodes_per_eval=4, seed=0, verbose=False):
+              episodes_per_eval=4, seed=0, verbose=False,
+              init_mean=None, init_std=None):
     """Train MLP weights by CEM. env_factory(seed) -> env with reset/step."""
     rng = np.random.default_rng(seed)
     n = MLP.param_count(obs_dim, act_dim)
-    mean, std = np.zeros(n), np.ones(n) * 0.5
+    mean = np.array(init_mean, dtype=np.float64) if init_mean is not None else np.zeros(n)
+    std = np.full(n, float(init_std)) if init_std is not None else np.ones(n) * 0.5
     n_elite = max(2, int(pop * elite_frac))
     policy = MLP(obs_dim, act_dim, seed=seed)
     best_ret, best_vec = -np.inf, mean.copy()
@@ -114,14 +116,16 @@ def default_jobs():
     return min(16, os.cpu_count() or 1)
 
 def cem_train_parallel(spec, obs_dim, act_dim, iters=3, pop=8, elite_frac=0.375,
-                       episodes_per_eval=4, seed=0, n_jobs=None, verbose=False):
+                       episodes_per_eval=4, seed=0, n_jobs=None, verbose=False,
+              init_mean=None, init_std=None):
     """cem_train with the population evaluated on a process pool.
     spec = (backend, dist_json, max_steps, dynamics); identical math/seed
     scheme to cem_train otherwise."""
     n_jobs = n_jobs or default_jobs()
     rng = np.random.default_rng(seed)
     n = MLP.param_count(obs_dim, act_dim)
-    mean, std = np.zeros(n), np.ones(n) * 0.5
+    mean = np.array(init_mean, dtype=np.float64) if init_mean is not None else np.zeros(n)
+    std = np.full(n, float(init_std)) if init_std is not None else np.ones(n) * 0.5
     n_elite = max(2, int(pop * elite_frac))
     policy = MLP(obs_dim, act_dim, seed=seed)
     best_ret, best_vec = -np.inf, mean.copy()
