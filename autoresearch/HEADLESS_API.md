@@ -1,8 +1,25 @@
-# Milestone 1: Headless Episode API (design proposal - review before refactor)
+# Milestone 1: Headless Episode API
 
-Status: PROPOSAL. Written 2026-09-03 by the auto-researcher task. Nothing in
-Studio/ has been refactored toward this yet; the only sim-side change so far
-is the GLSL 460 -> 450 compat patch.
+Status: IMPLEMENTED + PARITY-VERIFIED (2026-09-04, commit c79ea5e).
+Proposed 2026-09-03, built and verified the same night per his mandate:
+"we should definitely 100% be using the zig binary."
+
+Verification (autoresearch/parity_report.json): identical scene + identical
+action sequence through QuadNavEnv (numpy) and this binary:
+max position divergence 3.1e-5 m over a 61-step episode, velocity divergence
+~5e-6 m/s, episode returns match to 5 decimals. Verdict: track.
+Smoke: autoresearch/sim_smoke.json (full CEM train+eval path on backend="sim").
+
+Design calls made (delegated authority, rationale in commit c79ea5e):
+1. Collider: analytic sphere r=0.3 for the drone (exact QuadNavEnv parity;
+   the GLTF convex hull stays with the renderer path). Obstacles are
+   analytic spheres.
+2. Scenes: procedural, sampled Python-side, passed concrete on reset -
+   parity lives in the dynamics, not the RNG.
+3. Loop rates: 500 Hz fast loop / 20 Hz policy, matching QuadNavEnv.
+4. Actuation v1: PID torque + collective thrust applied directly to the
+   body. The motor mixer + motor-lag path is the v1.1 fidelity upgrade,
+   deferred until its free parameters are verified against his hardware.
 
 ## Why
 
