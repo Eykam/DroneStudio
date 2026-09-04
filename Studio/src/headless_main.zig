@@ -28,6 +28,7 @@
 const std = @import("std");
 const Math = @import("core/Math.zig");
 const FC = @import("core/ecs/components/FlightController.zig");
+const CM = @import("core/ChassisManifest.zig");
 
 const bullet = @cImport({
     @cInclude("cbullet.h");
@@ -48,6 +49,20 @@ const IYY: f32 = 0.040;
 const IZZ: f32 = 0.047;
 const DRONE_RADIUS: f32 = 0.3;
 const GOAL_RADIUS: f32 = 2.0;
+
+/// Dynamics profile: `abstract` (default, QuadNavEnv-parity values) or
+/// manifest-driven (dronestudio.chassis/1.1 via set_dynamics).
+const Dynamics = struct {
+    mass: f32 = MASS,
+    inertia: [3]f32 = .{ IXX, IYY, IZZ },
+    max_thrust: f32 = MAX_THRUST, // total, N
+    arm_length: f32 = 0.15,
+    motor_lag_s: f32 = 0.04,
+    motor_drag_ratio: f32 = 0.15,
+    motor_max_thrust: f32 = 10.0,
+    aero_area: [3]f32 = .{ 0, 0, 0 }, // body axes, m^2; all-zero = no drag
+    aero_cd: f32 = 1.1,
+};
 const GROUND_Y: f32 = 0.05;
 
 const Obstacle = struct { center: Vec3, radius: f32 };
@@ -91,6 +106,9 @@ const World = struct {
     body: bullet.CbtBodyHandle,
     shape: bullet.CbtShapeHandle,
     rate_ctrl: FC.RateController,
+    dyn: Dynamics = .{},
+    dyn_name_buf: [80]u8 = undefined,
+    dyn_name_len: usize = 0,
     filtered_rates: [3]f32 = .{ 0, 0, 0 },
     filtered_thrust: f32 = 0.0,
     rng: std.Random.Xoshiro256,
@@ -225,6 +243,27 @@ const World = struct {
         const torque_world = Vec3.from_array(torque_body).rotate_by_quaternion(q);
 
         var f = [3]f32{ thrust_world.x(), thrust_world.y(), thrust_world.z() };
+        // Manifest aero: flat-plate drag per body axis, assembled in the
+        // world frame from body-axis directions (no quaternion inverse).
+        const aa = self.dyn.aero_area;
+        if (aa[0] > 0 or aa[1] > 0 or aa[2] > 0) {
+            const v = self.bodyVel();
+            const axes = [3]Vec3{
+                Vec3.init(1, 0, 0).rotate_by_quaternion(q),
+                Vec3.init(0, 1, 0).rotate_by_quaternion(q),
+                Vec3.init(0, 0, 1).rotate_by_quaternion(q),
+            };
+            const rho: f32 = 1.225;
+            var drag = Vec3.init(0, 0, 0);
+            inline for (0..3) |i| {
+                const vi = Vec3.dot(v, axes[i]);
+                const k = 0.5 * rho * self.dyn.aero_cd * aa[i];
+                drag = drag.sub(axes[i].scale(k * vi * @abs(vi)));
+            }
+            f[0] += drag.x();
+            f[1] += drag.y();
+            f[2] += drag.z();
+        }
         var tq = [3]f32{ torque_world.x(), torque_world.y(), torque_world.z() };
         bullet.cbtBodyApplyCentralForce(self.body, &f);
         bullet.cbtBodyApplyTorque(self.body, &tq);
@@ -239,7 +278,7 @@ const World = struct {
             std.math.clamp(action[1], -1.0, 1.0) * MAX_RATES[1],
             std.math.clamp(action[2], -1.0, 1.0) * MAX_RATES[2],
         };
-        const thrust_cmd = (std.math.clamp(action[3], -1.0, 1.0) + 1.0) / 2.0 * MAX_THRUST;
+        const thrust_cmd = (std.math.clamp(action[3], -1.0, 1.0) + 1.0) / 2.0 * self.dyn.max_thrust;
         for (0..FAST_PER_POLICY) |_| {
             if (self.done) break;
             self.fastStep(desired, thrust_cmd);
@@ -447,7 +486,7 @@ pub fn main() !void {
             for (sp_arr, 0..) |v, i| sp[i] = f32FromJson(v, 0);
             const ticks: usize = if (root.object.get("ticks")) |t| @intFromFloat(f32FromJson(t, 500)) else 500;
             const every: usize = if (root.object.get("sample_every")) |t| @max(1, @as(usize, @intFromFloat(f32FromJson(t, 5)))) else 5;
-            const thrust: f32 = if (root.object.get("thrust")) |t| f32FromJson(t, MASS * 9.81) else MASS * 9.81;
+            const thrust: f32 = if (root.object.get("thrust")) |t| f32FromJson(t, world.dyn.mass * 9.81) else world.dyn.mass * 9.81;
             if (root.object.get("noise")) |n| world.scene.dynamics_noise = f32FromJson(n, 0);
             try stdout.writeAll("{\"samples\":[");
             var i: usize = 0;
@@ -461,6 +500,48 @@ pub fn main() !void {
                 }
             }
             try stdout.writeAll("],\"ok\":true}\n");
+            try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "set_dynamics")) {
+            // Manifest-driven dynamics (dronestudio.chassis/1.1). CAD frame is
+            // +X fwd / +Z up; sim body is +Y up. Diagonal remap (proper
+            // rotation): sim.x = cad.y, sim.y = cad.z, sim.z = cad.x.
+            // "abstract" restores the built-in QuadNavEnv-parity profile.
+            const path_v = root.object.get("path") orelse continue;
+            if (path_v != .string) continue;
+            if (std.mem.eql(u8, path_v.string, "abstract")) {
+                world.dyn = .{};
+                const inertia = [3]f32{ IXX, IYY, IZZ };
+                bullet.cbtBodySetMassProps(world.body, MASS, &inertia);
+                try stdout.writeAll("{\"ok\":true,\"dynamics\":\"abstract\"}\n");
+                try stdout_buf.flush();
+                continue;
+            }
+            var mparsed = CM.ChassisManifest.load(a, path_v.string) catch {
+                try stdout.writeAll("{\"ok\":false,\"error\":\"manifest load failed\"}\n");
+                try stdout_buf.flush();
+                continue;
+            };
+            defer mparsed.deinit();
+            const m = &mparsed.value;
+            const I = m.dynamics.inertia_about_com_kgm2;
+            world.dyn.mass = m.totalMassKg();
+            world.dyn.inertia = .{ @floatCast(I.iyy), @floatCast(I.izz), @floatCast(I.ixx) };
+            world.dyn.max_thrust = m.maxThrustPerMotorN() * 4.0;
+            world.dyn.arm_length = m.armLengthM();
+            world.dyn.motor_lag_s = m.motorTimeConstantS();
+            world.dyn.motor_drag_ratio = m.motorDragRatio();
+            world.dyn.motor_max_thrust = m.maxThrustPerMotorN();
+            if (m.aero) |ae| {
+                world.dyn.aero_area = .{ @floatCast(ae.projected_area_m2.y), @floatCast(ae.projected_area_m2.z), @floatCast(ae.projected_area_m2.x) };
+                world.dyn.aero_cd = @floatCast(ae.cd_flat_plate_estimate);
+            }
+            const n = @min(m.name.len, world.dyn_name_buf.len);
+            @memcpy(world.dyn_name_buf[0..n], m.name[0..n]);
+            world.dyn_name_len = n;
+            bullet.cbtBodySetMassProps(world.body, world.dyn.mass, &world.dyn.inertia);
+            const cross_max = @max(@abs(I.ixy), @max(@abs(I.ixz), @abs(I.iyz)));
+            const diag_min = @min(I.ixx, @min(I.iyy, I.izz));
+            try stdout.print("{{\"ok\":true,\"dynamics\":\"{s}\",\"mass\":{d:.4},\"inertia\":[{d:.6},{d:.6},{d:.6}],\"cross_term_ratio\":{d:.4}}}\n", .{ m.name, world.dyn.mass, world.dyn.inertia[0], world.dyn.inertia[1], world.dyn.inertia[2], cross_max / diag_min });
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;

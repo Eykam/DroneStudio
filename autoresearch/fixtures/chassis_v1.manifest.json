@@ -1,0 +1,228 @@
+{
+  "schema": "dronestudio.chassis/1.1",
+  "name": "chassis_v1",
+  "geometry": {
+    "file": "chassis_v1.glb",
+    "units": "meters",
+    "forward": "+X",
+    "up": "+Z"
+  },
+  "material": {
+    "name": "PETG",
+    "density_kg_m3": 1240,
+    "e_mpa": 2100,
+    "yield_mpa": 50
+  },
+  "dynamics": {
+    "total_mass_kg": 0.546724,
+    "com_m": [
+      0.00439,
+      0.0,
+      0.0239
+    ],
+    "inertia_about_com_kgm2": {
+      "ixx": 0.002107156037770332,
+      "iyy": 0.002273495551772632,
+      "izz": 0.0038808115778958966,
+      "ixy": 2.198590799521128e-19,
+      "ixz": 1.895908657895754e-05,
+      "iyz": 4.0250957977835386e-20
+    },
+    "composition": [
+      {
+        "name": "frame",
+        "mass_kg": 0.088724,
+        "com_m": [
+          0.0,
+          0.0,
+          0.003026
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.032,
+        "com_m": [
+          0.106066,
+          0.106066,
+          0.006
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.032,
+        "com_m": [
+          -0.106066,
+          0.106066,
+          0.006
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.032,
+        "com_m": [
+          -0.106066,
+          -0.106066,
+          0.006
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.032,
+        "com_m": [
+          0.106066,
+          -0.106066,
+          0.006
+        ]
+      },
+      {
+        "name": "fc_esc_stack",
+        "mass_kg": 0.09,
+        "com_m": [
+          0.0,
+          0.0,
+          0.021
+        ]
+      },
+      {
+        "name": "battery_4s_1300",
+        "mass_kg": 0.18,
+        "com_m": [
+          0.0,
+          0.0,
+          0.051
+        ]
+      },
+      {
+        "name": "stereo_camera_pair",
+        "mass_kg": 0.06,
+        "com_m": [
+          0.04,
+          0.0,
+          0.016
+        ]
+      }
+    ],
+    "note": "fully composed rigid body: frame + 4 motors + payload. Sim should use these directly."
+  },
+  "inertial": {
+    "frame_mass_kg": 0.088724,
+    "frame_com_m": [
+      0.0,
+      0.0,
+      0.003026
+    ],
+    "frame_inertia_kgm2_about_origin": {
+      "ixx": 0.00037791947587972153,
+      "iyy": 0.00037791947587972164,
+      "izz": 0.0007553067305602637,
+      "ixy": 1.9821069145109508e-19,
+      "ixz": 1.751407139062381e-22,
+      "iyz": -4.0177523458715255e-21
+    }
+  },
+  "aero": {
+    "projected_area_m2": {
+      "x": 0.002899,
+      "y": 0.002899,
+      "z": 0.012132
+    },
+    "cd_flat_plate_estimate": 1.1,
+    "note": "linear drag ~ 0.5*rho_air*cd*area*v^2 per axis; rho_air=1.225"
+  },
+  "collision": {
+    "type": "convex_hull",
+    "fallback": "vhacd",
+    "max_hulls": 8
+  },
+  "motors": [
+    {
+      "id": 1,
+      "position_m": [
+        0.106066,
+        0.106066,
+        0.006
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.032,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    },
+    {
+      "id": 2,
+      "position_m": [
+        -0.106066,
+        0.106066,
+        0.006
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.032,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    },
+    {
+      "id": 3,
+      "position_m": [
+        -0.106066,
+        -0.106066,
+        0.006
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.032,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    },
+    {
+      "id": 4,
+      "position_m": [
+        0.106066,
+        -0.106066,
+        0.006
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.032,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    }
+  ],
+  "imu": {
+    "position_m": [
+      0,
+      0,
+      0.006
+    ],
+    "note": "IMU sits on the FC stack"
+  },
+  "stack": {
+    "pattern_mm": 30.5,
+    "hole_dia_mm": 3.2,
+    "z_bottom_m": 0.006
+  }
+}
