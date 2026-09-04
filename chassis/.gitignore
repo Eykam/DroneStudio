@@ -15,3 +15,5 @@ chassis_v*.stl
 chassis_v*.step
 chassis_v*.glb
 chassis_v*.manifest.json
+archive.jsonl
+loop_state.json
