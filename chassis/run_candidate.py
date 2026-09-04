@@ -10,6 +10,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     part = build_chassis(params)
     import build123d as b
     b.export_stl(part, out_base + ".stl")
+    em.export(params, out_base)  # STEP/GLB/manifest first: FEA consumes the STEP
     m = trimesh.load(out_base + ".stl", force='mesh')
     checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m)]
     ok_c, adj, need = params.check_prop_clearance()
@@ -25,7 +26,6 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
                                       out_base + "_fea")
         checks.append(("fea", fea_result["passed"], json.dumps(fea_result), 0.0 if fea_result["passed"] else 0.5))
         score = ev.score(checks)
-    em.export(params, out_base)
     rec = sn.make_record(variant_id, parent_id, generation, dataclasses.asdict(params), checks, score, props)
     rec["fea"] = fea_result
     d = sn.save_snapshot(rec, out_base)
