@@ -35,5 +35,14 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     return rec
 
 if __name__ == "__main__":
-    rec = run("v1-baseline", None, 0, ChassisParams(), os.path.join(os.getcwd(), "chassis_v1"))
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--variant", default="v1-baseline")
+    ap.add_argument("--parent", default=None)
+    ap.add_argument("--gen", type=int, default=0)
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+    out = args.out or os.path.join(os.getcwd(), args.variant)
+    rec = run(args.variant, args.parent, args.gen, ChassisParams(), out)
     sn.post_records([rec])
+    print("RESULT_JSON " + json.dumps({"variant": args.variant, "score": rec["score"], "parent": args.parent}))
