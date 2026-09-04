@@ -101,3 +101,20 @@ curl -X POST "$DASHBOARD_URL/api/cad/designs" \
 - Units: meters preferred, Y-up. The viewer auto-centers; be consistent
   across designs so lineage comparisons make sense.
 - Self-contained GLB only.
+
+## Work-in-progress signal: POST /api/cad/progress
+
+The CAD research loop should POST its current stage so the /cad page can show
+a live "working on ..." banner. Same bearer token as /api/cad/designs.
+
+Body (JSON), all fields optional but send at least status + design_id:
+  {
+    "status": "working" | "idle",
+    "design_id": "v5-g4",           // revision currently being worked
+    "stage": "codex editing" | "building" | "evaluating" | "FEA" | "rendering",
+    "detail": "free text, one line" // e.g. "freecad build attempt 2/3"
+  }
+
+POST on every stage transition (and at least every ~60s while a stage runs
+long). The banner hides automatically when the last POST is older than 120s
+or when status="idle". Response: {"ok": true}.
