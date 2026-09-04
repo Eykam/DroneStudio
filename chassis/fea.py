@@ -22,8 +22,15 @@ def mesh_step(step_path, inp_path, mesh_size=2.5):
     gmsh.option.setNumber("Mesh.MeshSizeMin", mesh_size * 0.5)
     gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_size)
     gmsh.model.mesh.generate(3)
-    gmsh.write(inp_path)  # Abaqus/CalculiX format
+    gmsh.write(inp_path.replace(".inp", ".msh"))
     gmsh.finalize()
+    # keep tetra only, write a clean abaqus/ccx mesh via meshio
+    import meshio
+    m = meshio.read(inp_path.replace(".inp", ".msh"))
+    tets = [c for c in m.cells if c.type == "tetra"]
+    if not tets:
+        raise RuntimeError("no tetra elements in mesh")
+    meshio.Mesh(m.points, tets).write(inp_path, file_format="abaqus")
     return inp_path
 
 def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_scale=1.0):
@@ -74,10 +81,11 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_s
         f.write("*BOUNDARY\nNFIX,1,3,0.0\n")
         f.write("*STEP\n*STATIC\n")
         per = MAX_THRUST_N * thrust_scale
+        f.write("*CLOAD\n")
         for mi, sel in enumerate(loads):
             n = max(len(sel), 1)
             for nid in (sel + 1):
-                f.write("*CLOAD\n%d,3,%.6f\n" % (nid, per / n))
+                f.write("%d,3,%.6f\n" % (nid, per / n))
         f.write("*NODE FILE\nU\n*EL FILE\nS\n*END STEP\n")
     return job_name + ".inp", int(fix.sum()), [int(len(s)) for s in loads]
 
