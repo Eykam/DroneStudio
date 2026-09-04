@@ -1,0 +1,127 @@
+{
+  "schema": "dronestudio.chassis/1",
+  "name": "v4-g3",
+  "geometry": {
+    "file": "v4-g3.glb",
+    "units": "meters",
+    "forward": "+X",
+    "up": "+Z"
+  },
+  "material": {
+    "name": "PETG",
+    "density_kg_m3": 1240
+  },
+  "inertial": {
+    "frame_mass_kg": 0.055267,
+    "frame_com_m": [
+      -0.0,
+      -0.0,
+      0.005514
+    ],
+    "frame_inertia_kgm2": {
+      "ixx": 0.0002471477175506149,
+      "iyy": 0.00024714771755061525,
+      "izz": 0.0004907350714214925,
+      "ixy": -9.08660585992038e-19,
+      "ixz": -1.0877566228759134e-20,
+      "iyz": -5.739187571711801e-21
+    },
+    "motor_inertia_add_kgm2": {
+      "ixx": 0.0014399999999999994,
+      "iyy": 0.0014399999999999994,
+      "izz": 0.002879999999999999
+    },
+    "note": "sim should compose frame_inertia + motor_inertia_add + payload (battery/stack/cameras) point masses"
+  },
+  "collision": {
+    "type": "convex_hull",
+    "fallback": "vhacd",
+    "max_hulls": 8
+  },
+  "motors": [
+    {
+      "id": 1,
+      "position_m": [
+        0.106066,
+        0.106066,
+        0.0014
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.032,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    },
+    {
+      "id": 2,
+      "position_m": [
+        -0.106066,
+        0.106066,
+        0.0014
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.032,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    },
+    {
+      "id": 3,
+      "position_m": [
+        -0.106066,
+        -0.106066,
+        0.0014
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.032,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    },
+    {
+      "id": 4,
+      "position_m": [
+        0.106066,
+        -0.106066,
+        0.0014
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.032,
+      "max_thrust_n": 10.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15
+    }
+  ],
+  "imu": {
+    "position_m": [
+      0,
+      0,
+      0.0014
+    ]
+  },
+  "stack": {
+    "pattern_mm": 30.5,
+    "hole_dia_mm": 3.2,
+    "z_bottom_m": 0.0014
+  }
+}

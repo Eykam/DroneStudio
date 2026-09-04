@@ -1,0 +1,135 @@
+{
+  "id": "cad-chassis-v4-g3",
+  "kind": "cad.chassis.snapshot",
+  "created_at": "2026-09-04T07:23:56.304242+00:00",
+  "variant": {
+    "id": "v4-g3",
+    "parent_id": "v1-baseline",
+    "generation": 3,
+    "params": {
+      "arm_length_mm": 150.0,
+      "arm_width_mm": 14.0,
+      "arm_thickness_mm": 23.0,
+      "arm_root_width_mm": 22.0,
+      "center_plate_len_mm": 90.0,
+      "center_plate_wid_mm": 46.0,
+      "top_plate_thickness_mm": 2.5,
+      "body_thickness_mm": 1.4,
+      "arm_rib_thickness_mm": 1.4,
+      "arm_rib_offset_mm": 3.3,
+      "arm_rib_root_mm": 12.0,
+      "motor_pad_thickness_mm": 5.0,
+      "motor_pad_dia_mm": 26.0,
+      "motor_hole_spacing_mm": 16.0,
+      "motor_hole_dia_mm": 3.2,
+      "motor_center_hole_dia_mm": 9.0,
+      "stack_spacing_mm": 30.5,
+      "stack_hole_dia_mm": 3.2,
+      "stack_standoff_dia_mm": 6.0,
+      "fillet_radius_mm": 2.0,
+      "prop_dia_mm": 127.0,
+      "prop_clearance_mm": 10.0
+    },
+    "git_commit": "bb7f08ade20a77d7d75e182a8b99638e9a6a8cf8"
+  },
+  "score": 1.0,
+  "evaluator": [
+    {
+      "name": "watertight",
+      "passed": true,
+      "detail": "watertight=True"
+    },
+    {
+      "name": "single_body",
+      "passed": true,
+      "detail": "1 bodies"
+    },
+    {
+      "name": "overhang",
+      "passed": true,
+      "detail": "0.00% of surface overhangs > 45.0deg (0 mm^2)"
+    },
+    {
+      "name": "wall_thickness",
+      "passed": true,
+      "detail": "0.00% of samples below 1.2 mm wall"
+    },
+    {
+      "name": "prop_clearance",
+      "passed": true,
+      "detail": "212 mm vs 137 mm needed"
+    },
+    {
+      "name": "hover_margin",
+      "passed": true,
+      "detail": "hover at 13% max thrust"
+    },
+    {
+      "name": "fea",
+      "passed": true,
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 4.8, \"max_disp_mm\": 1.59, \"limit_mpa\": 30.0, \"passed\": true, \"fix_nodes\": 435, \"load_nodes\": [419, 414, 415, 414]}, \"crash\": {\"max_von_mises_mpa\": 14.3, \"max_disp_mm\": 4.77, \"limit_mpa\": 30.0, \"passed\": true, \"fix_nodes\": 435, \"load_nodes\": [419, 414, 415, 414]}, \"passed\": true}"
+    }
+  ],
+  "mass": {
+    "frame_mass_g": 55.3,
+    "all_up_mass_kg": 0.513,
+    "com_mm": [
+      -0.0,
+      0.0,
+      5.51
+    ],
+    "inertia_kgm2": [
+      [
+        0.00198411,
+        0.0,
+        -0.0
+      ],
+      [
+        0.0,
+        0.00198411,
+        0.0
+      ],
+      [
+        -0.0,
+        0.0,
+        0.00419566
+      ]
+    ],
+    "hover_thrust_frac": 0.126
+  },
+  "fea": {
+    "hover_max": {
+      "max_von_mises_mpa": 4.8,
+      "max_disp_mm": 1.59,
+      "limit_mpa": 30.0,
+      "passed": true,
+      "fix_nodes": 435,
+      "load_nodes": [
+        419,
+        414,
+        415,
+        414
+      ]
+    },
+    "crash": {
+      "max_von_mises_mpa": 14.3,
+      "max_disp_mm": 4.77,
+      "limit_mpa": 30.0,
+      "passed": true,
+      "fix_nodes": 435,
+      "load_nodes": [
+        419,
+        414,
+        415,
+        414
+      ]
+    },
+    "passed": true
+  },
+  "artifacts": {
+    "glb": "snapshots/v4-g3/chassis.glb",
+    "step": "snapshots/v4-g3/chassis.step",
+    "manifest": "snapshots/v4-g3/manifest.json",
+    "metrics": "snapshots/v4-g3/metrics.json"
+  }
+}
