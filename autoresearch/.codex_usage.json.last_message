@@ -1,0 +1,38 @@
+[
+  {
+    "obstacle_density": 0.07,
+    "obstacle_size_mean": 1.35,
+    "obstacle_size_spread": 0.22,
+    "corridor_width": 6.9,
+    "scene_extent": 46.0,
+    "goal_distance": 17.0,
+    "light_intensity": 0.67,
+    "light_direction_entropy": 0.68,
+    "texture_variety": 0.82,
+    "dynamics_noise": 0.02
+  },
+  {
+    "obstacle_density": 0.12,
+    "obstacle_size_mean": 1.55,
+    "obstacle_size_spread": 0.18,
+    "corridor_width": 5.8,
+    "scene_extent": 52.0,
+    "goal_distance": 20.0,
+    "light_intensity": 0.62,
+    "light_direction_entropy": 0.55,
+    "texture_variety": 0.9,
+    "dynamics_noise": 0.032
+  },
+  {
+    "obstacle_density": 0.045,
+    "obstacle_size_mean": 1.15,
+    "obstacle_size_spread": 0.28,
+    "corridor_width": 7.6,
+    "scene_extent": 38.0,
+    "goal_distance": 13.0,
+    "light_intensity": 0.74,
+    "light_direction_entropy": 0.82,
+    "texture_variety": 0.68,
+    "dynamics_noise": 0.01
+  }
+]

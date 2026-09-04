@@ -1,0 +1,300 @@
+{
+  "purpose": "rate-loop gain sweep vs manifest airframe (chassis_v1, motor model + aero) - SIM-TUNED ONLY",
+  "dynamics": "chassis_v1 manifest, 0.5143 kg, I=[0.00220,0.00394,0.00213] sim-frame, EMAX params",
+  "setpoint_rad_s": 3.0,
+  "axis0_roll_channel": [
+    {
+      "rise_time_s": 0.13,
+      "t10_s": 0.04,
+      "t90_s": 0.17,
+      "overshoot_pct": 0.7,
+      "settling_time_s": 0.18,
+      "steady_state_mean_rad_s": 3.0122,
+      "steady_state_err_rad_s": -0.0122,
+      "peak_rate_rad_s": 3.021,
+      "mean_abs_torque_first_20ms_Nm": 0.07176,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.05,
+        "ki": 0.005,
+        "kd": 0.001
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.03,
+      "t90_s": 0.13,
+      "overshoot_pct": 0.23,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0065,
+      "steady_state_err_rad_s": -0.0065,
+      "peak_rate_rad_s": 3.007,
+      "mean_abs_torque_first_20ms_Nm": 0.12702,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.1,
+        "ki": 0.01,
+        "kd": 0.002
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.13,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0037,
+      "steady_state_err_rad_s": -0.0037,
+      "peak_rate_rad_s": 3.004,
+      "mean_abs_torque_first_20ms_Nm": 0.20855,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.2,
+        "ki": 0.02,
+        "kd": 0.004
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.08,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0022,
+      "steady_state_err_rad_s": -0.0022,
+      "peak_rate_rad_s": 3.0024,
+      "mean_abs_torque_first_20ms_Nm": 0.30068,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.4,
+        "ki": 0.04,
+        "kd": 0.008
+      }
+    },
+    {
+      "rise_time_s": 0.11,
+      "t10_s": 0.01,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.04,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0012,
+      "steady_state_err_rad_s": -0.0012,
+      "peak_rate_rad_s": 3.0013,
+      "mean_abs_torque_first_20ms_Nm": 0.38965,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.8,
+        "ki": 0.08,
+        "kd": 0.016
+      }
+    }
+  ],
+  "axis1_vertical_pitch_channel": [
+    {
+      "rise_time_s": 0.09,
+      "t10_s": 0.02,
+      "t90_s": 0.11,
+      "overshoot_pct": 0.05,
+      "settling_time_s": 0.15,
+      "steady_state_mean_rad_s": 3.0015,
+      "steady_state_err_rad_s": -0.0015,
+      "peak_rate_rad_s": 3.0016,
+      "mean_abs_torque_first_20ms_Nm": 0.40583,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.5,
+        "ki": 0.025,
+        "kd": 0.005
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.08,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0013,
+      "steady_state_err_rad_s": -0.0013,
+      "peak_rate_rad_s": 3.0025,
+      "mean_abs_torque_first_20ms_Nm": 0.58178,
+      "mean_abs_torque_steady_Nm": 0.00049,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 1.0,
+        "ki": 0.05,
+        "kd": 0.01
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.02,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0006,
+      "steady_state_err_rad_s": -0.0006,
+      "peak_rate_rad_s": 3.0006,
+      "mean_abs_torque_first_20ms_Nm": 0.66057,
+      "mean_abs_torque_steady_Nm": 1e-05,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 2.0,
+        "ki": 0.1,
+        "kd": 0.02
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.02,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0006,
+      "steady_state_err_rad_s": -0.0006,
+      "peak_rate_rad_s": 3.0007,
+      "mean_abs_torque_first_20ms_Nm": 0.79666,
+      "mean_abs_torque_steady_Nm": 0.0001,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 4.0,
+        "ki": 0.2,
+        "kd": 0.04
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.13,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0014,
+      "steady_state_err_rad_s": -0.0014,
+      "peak_rate_rad_s": 3.0039,
+      "mean_abs_torque_first_20ms_Nm": 0.81122,
+      "mean_abs_torque_steady_Nm": 0.00789,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 8.0,
+        "ki": 0.4,
+        "kd": 0.08
+      }
+    }
+  ],
+  "axis2_yaw_channel": [
+    {
+      "rise_time_s": 0.13,
+      "t10_s": 0.04,
+      "t90_s": 0.17,
+      "overshoot_pct": 0.66,
+      "settling_time_s": 0.18,
+      "steady_state_mean_rad_s": 3.0118,
+      "steady_state_err_rad_s": -0.0118,
+      "peak_rate_rad_s": 3.0199,
+      "mean_abs_torque_first_20ms_Nm": 0.07139,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.05,
+        "ki": 0.005,
+        "kd": 0.001
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.03,
+      "t90_s": 0.13,
+      "overshoot_pct": 0.23,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0063,
+      "steady_state_err_rad_s": -0.0063,
+      "peak_rate_rad_s": 3.0068,
+      "mean_abs_torque_first_20ms_Nm": 0.12587,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.1,
+        "ki": 0.01,
+        "kd": 0.002
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.13,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0036,
+      "steady_state_err_rad_s": -0.0036,
+      "peak_rate_rad_s": 3.0039,
+      "mean_abs_torque_first_20ms_Nm": 0.20543,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.2,
+        "ki": 0.02,
+        "kd": 0.004
+      }
+    },
+    {
+      "rise_time_s": 0.1,
+      "t10_s": 0.02,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.08,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0021,
+      "steady_state_err_rad_s": -0.0021,
+      "peak_rate_rad_s": 3.0023,
+      "mean_abs_torque_first_20ms_Nm": 0.29423,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.4,
+        "ki": 0.04,
+        "kd": 0.008
+      }
+    },
+    {
+      "rise_time_s": 0.11,
+      "t10_s": 0.01,
+      "t90_s": 0.12,
+      "overshoot_pct": 0.04,
+      "settling_time_s": 0.14,
+      "steady_state_mean_rad_s": 3.0012,
+      "steady_state_err_rad_s": -0.0012,
+      "peak_rate_rad_s": 3.0013,
+      "mean_abs_torque_first_20ms_Nm": 0.38102,
+      "mean_abs_torque_steady_Nm": 0.0,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.8,
+        "ki": 0.08,
+        "kd": 0.016
+      }
+    }
+  ],
+  "candidates": {
+    "roll_axis0": {
+      "kp": 0.1,
+      "ki": 0.01,
+      "kd": 0.002
+    },
+    "pitch_axis1_VERTICAL": {
+      "kp": 0.5,
+      "ki": 0.025,
+      "kd": 0.005
+    },
+    "yaw_axis2": {
+      "kp": 0.1,
+      "ki": 0.01,
+      "kd": 0.002
+    },
+    "note": "pitch channel drives the VERTICAL axis (weak ktau authority) - its gains are intentionally much higher",
+    "warning": "SIM-TUNED against chassis_v1 manifest dynamics. NOT flight-ready. Validate on hardware."
+  }
+}

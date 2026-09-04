@@ -39,9 +39,12 @@ def _rollout_act_factory(trainer, trained, obs_dim, act_dim):
 def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
                           cem_pop=8, train_episodes=4, eval_episodes=6,
                           max_steps=200, verbose=False, backend="quad",
-                          trainer="cem", ppo_config=None):
+                          trainer="cem", ppo_config=None, dynamics=None):
     EnvCls, make_factory = _backend(backend)
-    factory = make_factory(dist, max_steps=max_steps)
+    if backend == "sim" and dynamics:
+        factory = make_factory(dist, max_steps=max_steps, dynamics=dynamics)
+    else:
+        factory = make_factory(dist, max_steps=max_steps)
     if trainer == "ppo":
         from ppo import train_ppo, PPOConfig
         cfg = ppo_config or PPOConfig(seed=train_seed)
@@ -60,7 +63,7 @@ def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
         act = policy.act
     returns, successes, steps = [], [], []
     for i in range(eval_episodes):
-        env = EnvCls(dist, seed=eval_seed + i, max_steps=max_steps)
+        env = factory(eval_seed + i)  # factory carries dynamics/max_steps
         obs = env.reset()
         total = 0.0
         for _ in range(max_steps):
@@ -78,4 +81,5 @@ def evaluate_distribution(dist, train_seed=0, eval_seed=10_000, cem_iters=3,
         "train_best_return": float(train_ret),
         "backend": backend,
         "trainer": trainer,
+        "dynamics": dynamics or "abstract",
     }

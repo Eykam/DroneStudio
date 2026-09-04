@@ -19,10 +19,11 @@ BINARY = os.environ.get(
 
 
 class SimBinaryEnv(QuadNavEnv):
-    def __init__(self, distribution, seed=0, max_steps=200, binary=BINARY):
+    def __init__(self, distribution, seed=0, max_steps=200, binary=BINARY, dynamics=None):
         super().__init__(distribution, seed=seed, max_steps=max_steps)
         self.seed = seed
         self.binary = binary
+        self.dynamics = dynamics  # manifest path, "abstract", or None
         self.proc = None
 
     def _ensure_proc(self):
@@ -30,6 +31,8 @@ class SimBinaryEnv(QuadNavEnv):
             self.proc = subprocess.Popen(
                 [self.binary], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 text=True, bufsize=1)
+            if self.dynamics:
+                self._call({"cmd": "set_dynamics", "path": self.dynamics})
             self._call({"cmd": "ping"})
 
     def _call(self, msg):
@@ -93,7 +96,8 @@ class SimBinaryEnv(QuadNavEnv):
             pass
 
 
-def make_sim_factory(distribution, max_steps=200, binary=BINARY):
+def make_sim_factory(distribution, max_steps=200, binary=BINARY, dynamics=None):
     def factory(seed):
-        return SimBinaryEnv(distribution, seed=seed, max_steps=max_steps, binary=binary)
+        return SimBinaryEnv(distribution, seed=seed, max_steps=max_steps, binary=binary,
+                            dynamics=dynamics)
     return factory
