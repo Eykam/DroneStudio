@@ -25,12 +25,13 @@ MAX_TOUCHDOWN_VS = 0.5
 HELDOUT_BASE = {"goto": 77000, "hover_hold": 88000, "land": 99000}
 HELDOUT_N = 16
 
-# Harder-scenes difficulty axis (user directive 2026-09-04). Phase 1 ships
-# T0-T2; T3 (waypoint slalom, 120-180 deg turns) waits on obs v3 because the
-# policy obs carries only the NEAREST obstacle vector - dense scenes are
-# partially observable, so per-tier numbers must not be read as regressions.
-TIERS = (0, 1, 2)
-TIER_MIX = (0.5, 0.3, 0.2)   # Phase 1 renormalization of the approved 40/30/20/10
+# Harder-scenes difficulty axis (user directive 2026-09-04). Phase 1 shipped
+# T0-T2; Phase 2 adds T3 (waypoint slalom, alternating 0.25-0.45 leg-length
+# lateral offsets force 120-180 deg turns) on obs v3 (26-dim). Dense scenes
+# remain partially observable (nearest-obstacle vector only), so per-tier
+# numbers must not be read as regressions.
+TIERS = (0, 1, 2, 3)
+TIER_MIX = (0.4, 0.3, 0.2, 0.1)   # approved 40/30/20/10; T3 needs obs v3 (26-dim)
 HELDOUT_TIER_STRIDE = 1000
 
 
@@ -79,13 +80,17 @@ def tier_dist(seed, tier, base_rng=None):
     gd = float(r.uniform(2.0, 25.0))
     if tier == 2:
         gd = max(gd, 10.0)  # need leg room for walls
+    if tier == 3:
+        gd = max(gd, 12.0)  # need leg room for the slalom
     return SceneDistribution(
-        obstacle_density=(float(r.choice([0.0, 0.05, 0.1, 0.2])) if tier == 0
+        obstacle_density=(float(r.uniform(0.05, 0.15)) if tier == 3 else
+                          float(r.choice([0.0, 0.05, 0.1, 0.2])) if tier == 0
                           else float(r.uniform(0.25, 0.40)) if tier == 1
                           else float(r.choice([0.05, 0.1]))),
         corridor_width=4.0 if tier < 2 else 2.0,
         obstacle_size_mean=2.0 if tier < 1 else float(r.uniform(2.0, 3.0)),
         scene_extent=max(10.0, gd * 2), goal_distance=gd,
+        n_waypoints=(float(r.integers(2, 5)) if tier == 3 else 0.0),
         light_direction_entropy=0.3, texture_variety=0.0, dynamics_noise=0.0)
 
 

@@ -39,7 +39,9 @@ class SimBinaryEnv(QuadNavEnv):
                 self._call({"cmd": "set_dynamics", "path": self.dynamics})
             if os.environ.get("AUTORESEARCH_MOTOR_V2"):
                 self._call({"cmd": "motor_v2", "on": True})
-            if os.environ.get("AUTORESEARCH_OBS_V2"):
+            if os.environ.get("AUTORESEARCH_OBS_V3"):
+                self._call({"cmd": "obs_v3", "on": True})
+            elif os.environ.get("AUTORESEARCH_OBS_V2"):
                 self._call({"cmd": "obs_v2", "on": True})
             self._call({"cmd": "ping"})
 
@@ -66,6 +68,8 @@ class SimBinaryEnv(QuadNavEnv):
             "max_steps": int(self.max_steps),
             "dynamics_noise": float(self.dist.dynamics_noise),
         }
+        if len(getattr(self, "waypoints", [])):
+            scene["waypoints"] = [[float(x) for x in wp] for wp in self.waypoints]
         if self.scenario_spec:
             scene.update({k: (float(v) if isinstance(v, (int, float)) else v)
                           for k, v in self.scenario_spec.items()})
