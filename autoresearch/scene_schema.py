@@ -21,6 +21,7 @@ class SceneDistribution:
     texture_variety: float = 0.5        # 0..1, procedural material diversity
     dynamics_noise: float = 0.05        # 0..0.5, actuation disturbance std
     n_waypoints: float = 0.0            # T3: 0=off, else int count of slalom waypoints
+    waypoint_lat: float = 0.35          # T3 lateral offset as a fraction of leg length (curriculum knob: 0.05 ~ on the beeline, 0.35+ forces 120-180 deg turns)
 
     BOUNDS = {
         "obstacle_density": (0.0, 1.0),
@@ -34,6 +35,7 @@ class SceneDistribution:
         "texture_variety": (0.0, 1.0),
         "dynamics_noise": (0.0, 0.5),
         "n_waypoints": (0.0, 6.0),
+        "waypoint_lat": (0.0, 0.6),
     }
 
     def to_vector(self):

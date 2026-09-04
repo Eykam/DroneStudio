@@ -141,7 +141,7 @@ class QuadNavEnv:
                 wd = leg_h / L
                 pd = np.array([-wd[2], 0.0, wd[0]])
                 fr = (np.arange(K) + 1) / (K + 1)
-                lat = rng.uniform(0.25, 0.45, K) * L * np.where(np.arange(K) % 2 == 0, 1.0, -1.0)
+                lat = rng.uniform(0.5, 1.0, K) * d.waypoint_lat * L * np.where(np.arange(K) % 2 == 0, 1.0, -1.0)
                 alt = rng.uniform(1.0, 6.0, K)
                 wps = self.spawn[None, :] + leg_h[None, :] * fr[:, None]
                 wps = wps + pd[None, :] * lat[:, None]
