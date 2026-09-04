@@ -14,7 +14,7 @@ import build123d as b
 class ChassisParams:
     arm_length_mm: float = 150.0        # sim motor_arm_length (center to motor axis)
     arm_width_mm: float = 9.2
-    arm_thickness_mm: float = 26.5      # closed-section root stays 2 mm below the recessed stack
+    arm_thickness_mm: float = 24.5      # closed-section root stays 2 mm below the recessed stack
     arm_root_width_mm: float = 14.0     # broad root chine flows into the cabin shell
     arm_shell_root_width_mm: float = 16.2
     arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
@@ -29,8 +29,8 @@ class ChassisParams:
     arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
     arm_rib_root_mm: float = 12.0
-    body_fairing_height_mm: float = 49.0 # stack canopy follows the recessed mounting ring
-    body_fairing_draft_mm: float = 4.9   # inward side inset at the stack shoulder
+    body_fairing_height_mm: float = 47.0 # stack canopy follows the recessed mounting ring
+    body_fairing_draft_mm: float = 4.7   # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
     body_roof_top_len_mm: float = 86.0
     body_roof_top_wid_mm: float = 46.0
@@ -48,7 +48,7 @@ class ChassisParams:
     stack_spacing_mm: float = 30.5      # standard FC/ESC stack
     stack_hole_dia_mm: float = 3.2
     stack_standoff_dia_mm: float = 6.0   # 1.4 mm annular wall around each M3 bore
-    stack_standoff_height_mm: float = 26.5
+    stack_standoff_height_mm: float = 24.5
     camera_aperture_dia_mm: float = 10.0
     fillet_radius_mm: float = 2.0
     prop_dia_mm: float = 127.0          # 5 inch
@@ -254,16 +254,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # x, belly breadth, shoulder height, dorsal crown breadth (mm). The
     # sidewalls lean inward with height: broad first-layer chines still collect
     # the arm loads, while the upper body wraps closely around the payloads.
-    # GPS and IMU share the aft avionics pod; the central canopy follows the
-    # lower stack ring while maintaining its 2 mm service envelope. The
-    # battery remains recessed and accessible through the dorsal opening.
-    # Its shallow waist removes broad parallel flanks, then flares back into
-    # the rear pod and arm roots; the inner walls still clear the 35 mm pack
-    # by more than 2 mm per side at its upper service envelope.
+    # The low GPS/IMU tail follows the avionics envelope before a short swept
+    # shoulder rises into the battery well. This removes the old tall wedge
+    # above the rear electronics and gives the battery a defined aft coaming.
+    # The lowered stack canopy and recessed battery remain accessible from
+    # above; all transitions preserve the payloads' 2 mm service envelopes.
     stations = [
         (-145.0, 26.0, 15.0, 12.0),
-        (-141.0, 30.0, 17.0, 14.0),
-        (-116.0, 52.0, 41.5, 43.5),
+        (-141.0, 31.0, 20.0, 18.0),
+        (-120.0, 31.0, 20.0, 18.0),
+        (-114.0, 52.0, 41.5, 43.5),
         (-105.0, 50.2, 41.5, 41.7),
         (-56.0, 50.2, 41.5, 41.7),
         (-45.0, 52.0, 41.5, 43.5),
