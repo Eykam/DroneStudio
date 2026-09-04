@@ -16,9 +16,10 @@ class ChassisParams:
     arm_width_mm: float = 8.2
     arm_thickness_mm: float = 27.0      # maximum closed-section depth at the loaded root
     arm_root_width_mm: float = 14.0
-    arm_shell_root_width_mm: float = 8.2
-    arm_sweep_mm: float = 2.0           # chiral plan-view bow; motor axes stay fixed
+    arm_shell_root_width_mm: float = 11.0
+    arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
     arm_roof_slope: float = 1.15        # >1 gives a support-free (>45 deg) inner roof
+    arm_height_falloff: float = 0.58    # deep root, lean span; moment-shaped shell
     center_plate_len_mm: float = 90.0
     center_plate_wid_mm: float = 46.0
     top_plate_thickness_mm: float = 2.5
@@ -135,7 +136,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             tip_height = max(p.motor_pad_thickness_mm, min_tip_height)
             height = tip_height + (
                 p.arm_thickness_mm - tip_height
-            ) * math.sqrt(max(0.0, 1.0 - frac))
+            ) * max(0.0, 1.0 - frac) ** p.arm_height_falloff
             tube_sections.append((x, sweep_center(x), width, height))
         outer = b.Solid.make_loft(
             [section_wire(*section) for section in tube_sections], ruled=True
@@ -145,6 +146,33 @@ def build_chassis(p: ChassisParams) -> b.Part:
             ruled=True,
         )
         arm = arm + (outer - cavity)
+
+        # Close the high-shear motor end of the monocoque with one perimeter-
+        # thickness diaphragm.  The span remains hollow and root-accessible for
+        # wiring, while eliminating the open-shell notch that concentrated crash
+        # stress where the arm flows into the motor nacelle.
+        cap_x = rib_end - p.arm_rib_thickness_mm
+        cap_frac = (cap_x - x0) / span
+        cap_width = p.arm_shell_root_width_mm + (
+            p.arm_width_mm - p.arm_shell_root_width_mm
+        ) * cap_frac
+        cap_min_height = (
+            p.arm_roof_slope * cap_width/2
+            + p.arm_rib_thickness_mm * (
+                1 + math.hypot(p.arm_roof_slope, 1.0) - p.arm_roof_slope
+            )
+            + 0.15
+        )
+        cap_tip_height = max(p.motor_pad_thickness_mm, cap_min_height)
+        cap_height = cap_tip_height + (
+            p.arm_thickness_mm - cap_tip_height
+        ) * max(0.0, 1.0 - cap_frac) ** p.arm_height_falloff
+        end_diaphragm = b.Solid.make_loft([
+            section_wire(cap_x, sweep_center(cap_x), cap_width, cap_height),
+            section_wire(rib_end, sweep_center(rib_end),
+                         p.arm_width_mm, tip_height),
+        ], ruled=True)
+        arm = arm + end_diaphragm
 
         # A cruciform motor mount follows the four bolt load paths instead of
         # carrying a mostly unstressed solid disk.  Circular bosses retain a
