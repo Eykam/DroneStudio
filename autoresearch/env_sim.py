@@ -19,11 +19,15 @@ BINARY = os.environ.get(
 
 
 class SimBinaryEnv(QuadNavEnv):
-    def __init__(self, distribution, seed=0, max_steps=200, binary=BINARY, dynamics=None):
+    def __init__(self, distribution, seed=0, max_steps=200, binary=BINARY, dynamics=None,
+                 scenario_spec=None):
         super().__init__(distribution, seed=seed, max_steps=max_steps)
         self.seed = seed
         self.binary = binary
         self.dynamics = dynamics  # manifest path, "abstract", or None
+        # scenario sampler spec: {"scenario","success_radius",...} or None
+        # (None = old goto behavior with the 2.0m const)
+        self.scenario_spec = scenario_spec
         self.proc = None
 
     def _ensure_proc(self):
@@ -35,6 +39,8 @@ class SimBinaryEnv(QuadNavEnv):
                 self._call({"cmd": "set_dynamics", "path": self.dynamics})
             if os.environ.get("AUTORESEARCH_MOTOR_V2"):
                 self._call({"cmd": "motor_v2", "on": True})
+            if os.environ.get("AUTORESEARCH_OBS_V2"):
+                self._call({"cmd": "obs_v2", "on": True})
             self._call({"cmd": "ping"})
 
     def _call(self, msg):
@@ -60,6 +66,13 @@ class SimBinaryEnv(QuadNavEnv):
             "max_steps": int(self.max_steps),
             "dynamics_noise": float(self.dist.dynamics_noise),
         }
+        if self.scenario_spec:
+            scene.update({k: (float(v) if isinstance(v, (int, float)) else v)
+                          for k, v in self.scenario_spec.items()})
+            if self.scenario_spec.get("scenario") == "land":
+                # pad at the goal point, altitude forced to ground level
+                scene["goal"][1] = 0.0
+                self.goal = np.array(scene["goal"], dtype=np.float64)
         resp = self._call({"cmd": "reset", "seed": int(self.seed), "scene": scene})
         # mirror bookkeeping used by env_quad.succeeded
         self.pos = self.spawn.copy()
