@@ -16,27 +16,27 @@ class ChassisParams:
     arm_width_mm: float = 9.2
     arm_thickness_mm: float = 32.0      # maximum closed-section depth at the loaded root
     arm_root_width_mm: float = 14.0     # broad root chine flows into the cabin shell
-    arm_shell_root_width_mm: float = 13.6
+    arm_shell_root_width_mm: float = 15.6
     arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
     arm_roof_slope: float = 1.15        # >1 gives a support-free (>45 deg) inner roof
     arm_crown_width_mm: float = 3.0     # narrow high-fiber facet on the closed arm shell
     arm_height_falloff: float = 0.55    # deep root, lean span; moment-shaped shell
     arm_tip_height_mm: float = 10.8     # faired nacelle depth at the motor load transfer
-    center_plate_len_mm: float = 120.0
-    center_plate_wid_mm: float = 86.0
+    center_plate_len_mm: float = 277.0  # longitudinal payload hull, rear GPS to nose
+    center_plate_wid_mm: float = 66.0
     top_plate_thickness_mm: float = 2.5
-    body_thickness_mm: float = 1.60     # four printable perimeters for the fuselage skin
+    body_thickness_mm: float = 1.30     # structural skin; roofs use normal offsets
     arm_rib_thickness_mm: float = 1.40  # closed arm shell wall
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
     arm_rib_root_mm: float = 12.0
-    body_fairing_height_mm: float = 43.0
+    body_fairing_height_mm: float = 56.0 # raised cockpit over the uninterrupted roots
     body_fairing_draft_mm: float = 0.8
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
     body_roof_top_len_mm: float = 86.0
     body_roof_top_wid_mm: float = 46.0
     body_hatch_len_mm: float = 80.0     # dorsal battery/avionics service opening
     body_hatch_wid_mm: float = 40.0
-    payload_rail_width_mm: float = 2.4
+    payload_rail_width_mm: float = 1.4
     body_corner_radius_mm: float = 12.0
     motor_pad_thickness_mm: float = 4.6
     motor_pad_dia_mm: float = 28.7      # boss-to-boss envelope, not a solid disk
@@ -48,7 +48,7 @@ class ChassisParams:
     stack_spacing_mm: float = 30.5      # standard FC/ESC stack
     stack_hole_dia_mm: float = 3.2
     stack_standoff_dia_mm: float = 9.0
-    stack_standoff_height_mm: float = 10.0
+    stack_standoff_height_mm: float = 32.0
     camera_aperture_dia_mm: float = 10.0
     fillet_radius_mm: float = 2.0
     prop_dia_mm: float = 127.0          # 5 inch
@@ -230,103 +230,150 @@ def build_chassis(p: ChassisParams) -> b.Part:
     body = arms[0]
     for a in arms[1:]:
         body = body + a
-    # A tall structural-skin fuselage replaces the vestigial deck coaming.  The
-    # battery, computer and stack are packed side-by-side below its shoulder;
-    # the compound-pitched roof closes around a dorsal service hatch.  Thus the
-    # payload is inside the airframe rather than strapped to a top plate, while
-    # every downward-facing cavity facet remains steeper than 45 degrees.
-    fair_h = p.body_fairing_height_mm
-    draft = p.body_fairing_draft_mm
+    # A longitudinal monocoque gives each payload a real, disjoint cavity.
+    # The low battery well sits BETWEEN the rear arms, the stack clears their
+    # crowned junction, and the upright Pi occupies the narrow forward bay.
+    # Keeping the deep arm roots intact is cheaper than weakening them with
+    # electronics cutouts and recovering stiffness with a thick belly plate.
     wall = p.body_thickness_mm
+    slope = p.body_roof_slope
+    sx = p.center_plate_len_mm / 277.0
+    sy = p.center_plate_wid_mm / 66.0
+    cockpit_h = p.body_fairing_height_mm
 
-    def faired_wire(length, width, radius, z):
-        """A filleted, fore-aft faired fuselage perimeter."""
-        hl, hw = length/2, width/2
-        points = [
-            (hl, 0, z),
-            (0.96*hl, 0.55*hw, z),
-            (0.82*hl, 0.90*hw, z),
-            (0.62*hl, hw, z),
-            (-0.62*hl, hw, z),
-            (-0.82*hl, 0.90*hw, z),
-            (-0.96*hl, 0.55*hw, z),
-            (-hl, 0, z),
-            (-0.96*hl, -0.55*hw, z),
-            (-0.82*hl, -0.90*hw, z),
-            (-0.62*hl, -hw, z),
-            (0.62*hl, -hw, z),
-            (0.82*hl, -0.90*hw, z),
-            (0.96*hl, -0.55*hw, z),
-        ]
-        wire = b.Polyline(*points, close=True)
-        corner = min(0.4*radius, 0.11*width)
-        return b.fillet(wire.vertices(), corner)
+    # x, breadth, shoulder height, dorsal crown breadth (mm). The aft fin,
+    # battery well, raised cockpit and low stereo nose form one continuous
+    # shell; the changing shoulder line fairs them into the swept arms.
+    stations = [
+        (-145.0, 26.0, 15.0, 12.0),
+        (-141.0, 30.0, 17.0, 14.0),
+        (-112.0, 54.0, 42.0, 46.0),
+        (-33.0, 56.0, 42.0, 46.0),
+        (-24.0, 60.0, cockpit_h, 46.0),
+        (24.0, 60.0, cockpit_h, 46.0),
+        (34.0, 50.0, 37.0, 32.0),
+        (79.0, 50.0, 37.0, 32.0),
+        (89.0, 66.0, 37.0, 46.0),
+        (117.0, 66.0, 18.0, 46.0),
+        (128.0, 40.0, 16.0, 16.0),
+        (132.0, 26.0, 15.0, 12.0),
+    ]
+    stations = [(x*sx, w*sy, h, c*sy) for x, w, h, c in stations]
 
-    shoulder_len = p.center_plate_len_mm - 2*draft
-    shoulder_wid = p.center_plate_wid_mm - 2*draft
-    roof_run = max(
-        (shoulder_len - p.body_roof_top_len_mm) / 2,
-        (shoulder_wid - p.body_roof_top_wid_mm) / 2,
-    )
-    roof_z = fair_h + p.body_roof_slope * roof_run
-    outer_fairing = b.Solid.make_loft([
-        faired_wire(p.center_plate_len_mm, p.center_plate_wid_mm,
-                    p.body_corner_radius_mm, 0),
-        faired_wire(shoulder_len, shoulder_wid,
-                    p.body_corner_radius_mm - draft, fair_h),
-        faired_wire(p.body_roof_top_len_mm, p.body_roof_top_wid_mm,
-                    p.body_corner_radius_mm - 2*draft, roof_z),
-    ], ruled=True)
-    # The inner loft pierces both the underside and crown.  This makes a true
-    # hollow monocoque with a large dorsal hatch rather than a mass-heavy floor
-    # or an unprintable horizontal cavity ceiling.
-    inner_shoulder_z = fair_h - wall/2
-    inner_fairing = b.Solid.make_loft([
-        faired_wire(p.center_plate_len_mm - 2*wall,
-                    p.center_plate_wid_mm - 2*wall,
-                    p.body_corner_radius_mm - wall, -0.2),
-        faired_wire(p.center_plate_len_mm - 2*(draft + wall),
-                    p.center_plate_wid_mm - 2*(draft + wall),
-                    p.body_corner_radius_mm - draft - wall,
-                    inner_shoulder_z),
-        faired_wire(p.body_hatch_len_mm, p.body_hatch_wid_mm,
-                    p.body_corner_radius_mm - 2*wall, roof_z + 1.0),
-    ], ruled=True)
+    # A change in breadth or height tilts the skin along X as well as Y.
+    # Account for both slopes in the normal offset: a nominal Y-only
+    # offset would leave sub-millimetre walls at the swept nose and shoulders.
+    side_offsets, roof_offsets = [], []
+    for a, z in zip(stations, stations[1:]):
+        dx = z[0] - a[0]
+        side_gradient = (z[1]-a[1])/(2*dx)
+        roof_gradient = (z[2]-a[2])/dx + slope*side_gradient
+        side_offsets.append(wall*math.hypot(1.0, side_gradient))
+        roof_offsets.append(wall*math.sqrt(1+slope*slope+roof_gradient**2))
+
+    def offset_profile(values, offsets):
+        """Miter adjacent offset planes, preserving gauge through each chine."""
+        lines = []
+        for i, offset in enumerate(offsets):
+            x0, x1 = stations[i][0], stations[i+1][0]
+            gradient = (values[i+1]-values[i])/(x1-x0)
+            lines.append((gradient, values[i]-gradient*x0-offset))
+        joints = [stations[0][0] + wall]
+        for i, (a, z) in enumerate(zip(lines, lines[1:]), 1):
+            x = ((z[1]-a[1])/(a[0]-z[0])
+                 if abs(a[0]-z[0]) > 1e-9 else stations[i][0])
+            joints.append(x)
+        joints.append(stations[-1][0] - wall)
+        return [(x, lines[min(i, len(lines)-1)][0]*x
+                 + lines[min(i, len(lines)-1)][1]) for i, x in enumerate(joints)]
+
+    def interpolate(profile, x):
+        for a, z in zip(profile, profile[1:]):
+            if x <= z[0]:
+                return a[1] + (z[1]-a[1])*(x-a[0])/(z[0]-a[0])
+        return profile[-1][1]
+
+    inner_sides = offset_profile([w/2 for _, w, _, _ in stations], side_offsets)
+    inner_roofs = offset_profile([h+slope*w/2 for _, w, h, _ in stations], roof_offsets)
+    outer_roofs = [(x, h+slope*(w-c)/2) for x, w, h, c in stations]
+
+    def cabin_wire(station, inner=False):
+        x, width, shoulder, crown = station
+        roof = shoulder + slope*(width-crown)/2
+        if inner:
+            half = interpolate(inner_sides, x)
+            roof_constant = interpolate(inner_roofs, x)
+            # Offset the pitched surface along its normal, then extend it
+            # through the crown: an open service hatch, with no broad bridge.
+            shoulder = roof_constant - slope*half
+            roof = interpolate(outer_roofs, x) + 0.5
+            crown_half = (roof_constant-roof)/slope
+            bottom = -0.2
+        else:
+            half, crown_half, bottom = width/2, crown/2, 0.0
+        return b.Wire.make_polygon([
+            (x, -half, bottom), (x, half, bottom),
+            (x, half, shoulder), (x, crown_half, roof),
+            (x, -crown_half, roof), (x, -half, shoulder),
+        ], close=True)
+
+    outer_fairing = b.Solid.make_loft(
+        [cabin_wire(s) for s in stations], ruled=True)
+    # End bulkheads join both skins without closing the service openings.
+    inner_x = sorted({x for profile in (inner_sides, inner_roofs, outer_roofs)
+                      for x, _ in profile
+                      if inner_sides[0][0] <= x <= inner_sides[-1][0]})
+    inner_fairing = b.Solid.make_loft(
+        [cabin_wire((x, 0, 0, 0), inner=True) for x in inner_x], ruled=True)
     body = body + (outer_fairing - inner_fairing)
+    roof_z = max(h + slope*(w-c)/2 for _, w, h, c in stations)
 
-    # Sparse first-layer rails support and capture the two side-by-side payload
-    # lanes.  Each rail crosses a pair of arm chines, distributing battery-jolt
-    # load without paying the mass of a full 120 x 86 mm belly plate.
-    rail_len = 86.0
-    rail_x = -10.0
-    for rail_y in (-31.0, -19.0, -7.0, 8.0, 20.0, 32.0):
+    # Two first-layer longerons support the recessed payloads, tie the end
+    # bulkheads to all four arm chines, and leave underside service access.
+    # They also carry battery jolt loads into the central mounting ring.
+    rail_len = p.center_plate_len_mm - wall
+    rail_x = (stations[0][0] + stations[-1][0])/2
+    for rail_y in (-10.0*sy, 10.0*sy):
         rail = b.Pos(rail_x, rail_y, 0) * b.extrude(
-            b.Rectangle(rail_len, p.payload_rail_width_mm).face(), wall
-        )
+            b.Rectangle(rail_len, p.payload_rail_width_mm).face(), wall)
         body = body + rail
-    nose_rail = b.Pos(40.0, 0, 0) * b.extrude(
-        b.Rectangle(p.payload_rail_width_mm, 82.0).face(), wall
-    )
-    body = body + nose_rail
 
-    # Annular stack hard-points fill the hollow arm locally around the FEA
-    # fixture/mount holes.  Their depth spreads peak root stress into the shell
-    # instead of thickening the entire center deck.
+    # First-layer diagonal ties brace nose and tail against lateral sway.
+    # Their triangular load paths replace shell thickening and sit below the
+    # 2 mm service clearance of the recessed battery, Pi, GPS and cameras.
+    for root_x, end_x in ((-27.0, -144.0), (27.0, 131.0)):
+        for side in (-1, 1):
+            ax, ay = root_x*sx, side*27.0*sy
+            bx, by = end_x*sx, -side*11.0*sy
+            length = math.hypot(bx-ax, by-ay)
+            ox = -(by-ay)/length * p.payload_rail_width_mm/2
+            oy = (bx-ax)/length * p.payload_rail_width_mm/2
+            tie = b.Wire.make_polygon([
+                (ax+ox, ay+oy, 0), (bx+ox, by+oy, 0),
+                (bx-ox, by-oy, 0), (ax-ox, ay-oy, 0),
+            ], close=True)
+            body = body + b.Solid.extrude(b.Face(tie), (0, 0, wall))
+
+    # Full-depth annular stack pylons transfer load into the existing crowned
+    # arms. The PCB sits 2 mm above them, entirely clear of structural skin.
     sh = p.stack_spacing_mm / 2
     for dx, dy in ((sh, sh), (-sh, sh), (-sh, -sh), (sh, -sh)):
         boss = b.Pos(dx, dy, p.stack_standoff_height_mm/2) * b.Cylinder(
-            p.stack_standoff_dia_mm/2, p.stack_standoff_height_mm
-        )
+            p.stack_standoff_dia_mm/2, p.stack_standoff_height_mm)
         body = body + boss
 
-    # Twin forward apertures leave only the lenses exposed; the camera PCBs sit
-    # aft of the nose skin.  Horizontal holes are small enough to bridge and do
-    # not compromise the continuous roof hoop around the service hatch.
-    for camera_y in (-24.0, 24.0):
-        aperture = b.Pos(54.0, camera_y, 9.0) * b.Cylinder(
-            p.camera_aperture_dia_mm/2, 20.0
-        ).rotate(b.Axis.Y, 90)
-        body = body - aperture
+    # Teardrop lens ports have a 45-degree roof, so the nose needs no support.
+    # Only the sight lines pierce the shell; both camera boards remain inside.
+    aperture_r = p.camera_aperture_dia_mm/2
+    for camera_y in (-16.0*sy, 16.0*sy):
+        port = b.Wire.make_polygon([
+            (115.0*sx, camera_y-aperture_r, 9.0),
+            (115.0*sx, camera_y-aperture_r, 9.0-aperture_r),
+            (115.0*sx, camera_y+aperture_r, 9.0-aperture_r),
+            (115.0*sx, camera_y+aperture_r, 9.0),
+            (115.0*sx, camera_y, 9.0+aperture_r),
+        ], close=True)
+        body = body - b.Solid.extrude(b.Face(port), (20.0*sx, 0, 0))
 
     # motor bolt holes (16x16 M3) + center bore, through each pad
     cut_height = max(roof_z, p.arm_thickness_mm,
@@ -335,13 +382,29 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for (mx, my) in p.motor_positions():
         hs = p.motor_hole_spacing_mm / 2
         for dx, dy in ((hs, hs), (-hs, hs), (-hs, -hs), (hs, -hs)):
-            holes.append(b.Pos(mx+dx, my+dy, -1) * b.Cylinder(p.motor_hole_dia_mm/2, cut_height))
-        holes.append(b.Pos(mx, my, -1) * b.Cylinder(p.motor_center_hole_dia_mm/2, cut_height))
+            holes.append(b.Pos(mx+dx, my+dy, -1) * b.Cylinder(
+                p.motor_hole_dia_mm/2, cut_height,
+                align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN)))
+        holes.append(b.Pos(mx, my, -1) * b.Cylinder(
+            p.motor_center_hole_dia_mm/2, cut_height,
+            align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN)))
     # stack holes (30.5 mm square) in hub
     for dx, dy in ((sh, sh), (-sh, sh), (-sh, -sh), (sh, -sh)):
-        holes.append(b.Pos(dx, dy, -1) * b.Cylinder(p.stack_hole_dia_mm/2, cut_height))
+        holes.append(b.Pos(dx, dy, -1) * b.Cylinder(
+            p.stack_hole_dia_mm/2, cut_height,
+            align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN)))
     for h in holes:
         body = body - h
+
+    # Wiring/drain throats open every arm cavity through its first-layer skin.
+    # The structural shell remains continuous above each small vertical port;
+    # enclosed air pockets no longer create separate internal STL surfaces.
+    for mx, my in p.motor_positions():
+        x = 45.0
+        throat = b.Pos(x, sweep_center(x), -0.2) * b.Cylinder(
+            1.6, p.arm_rib_thickness_mm + 0.6,
+            align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN))
+        body = body - throat.rotate(b.Axis.Z, math.degrees(math.atan2(my, mx)))
     return b.Part(body.wrapped)
 
 if __name__ == "__main__":
