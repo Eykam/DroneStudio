@@ -36,7 +36,7 @@ LIBRARY = {
         "estimate - replace with his actual stack datasheet"),
     "battery": Component(
         "4S 1300mAh LiPo (Tattu-class)", 180.0, (0.075, 0.035, 0.035), "box", "deck",
-        "estimate - replace with his actual battery datasheet"),
+        "user-confirmed 4S build 2026-09-04; capacity/mass still Tattu-class estimate until he names the battery model"),
     "pi_zero_2w": Component(
         "Raspberry Pi Zero 2W", 11.0, (0.065, 0.030, 0.005), "box", "nose",
         "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/"),

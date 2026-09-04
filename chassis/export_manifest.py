@@ -11,7 +11,11 @@ import build123d as b
 from chassis import ChassisParams, build_chassis
 
 RHO_PETG = 1240e-9  # kg/mm^3
-MOTOR = {"max_thrust_n": 10.0, "time_constant_s": 0.04, "drag_ratio": 0.15}  # sim FlightController defaults
+# Real motor params: EMAX ECO II 2207 2400KV on 4S (user-confirmed 4S build).
+# Max thrust 1760g/motor per EMAX datasheet (robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/).
+# time_constant/drag_ratio remain sim FlightController defaults until bench-measured.
+MOTOR = {"max_thrust_n": 17.27, "time_constant_s": 0.04, "drag_ratio": 0.15,
+         "kv": 2400, "cells": 4, "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"}
 MOTOR_DIRS = ["cw", "ccw", "cw", "ccw"]  # sim quad-X order M1..M4
 from components import LIBRARY, placed_items
 MOTOR_MASS_KG = LIBRARY["motor"].mass_g / 1000.0  # 33.4 g EMAX Eco II 2207
