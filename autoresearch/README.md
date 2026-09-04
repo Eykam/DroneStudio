@@ -17,7 +17,14 @@ scene_schema.py the distribution: obstacle density/size, corridor width,
 evaluator.py    THE source of truth: variant score = held-out success rate of
                 a policy trained from scratch under that variant
 policy.py       tiny MLP (10->32->32->2) + CEM trainer (numpy, CPU-scale)
-env.py          StubNavEnv (analytic placeholder dynamics) | SimBinaryEnv
+env.py          StubNavEnv (analytic placeholder, kept for A/B)
+env_quad.py     QuadNavEnv (DEFAULT): 3D quadrotor on DroneStudio's own flight
+                model - his mass/inertia (Drone.zig), his rate-PID gains and
+                thrust/rate filters (FlightController.zig), thrust along body
+                +Y with torque plant (PhysicsThread.zig). Policy emits desired
+                body rates + collective thrust at 20 Hz; his PID tracks them
+                at 500 Hz - the same classical-fast-loop + learned-nav-policy
+                split the full system will use.
 archive.py      JSONL variant archive - the loop's memory + audit trail
 run_e2e.py      single-cycle end-to-end test (this is the CI gate)
 ```
@@ -33,9 +40,10 @@ run_e2e.py      single-cycle end-to-end test (this is the CI gate)
 PROVES: the loop machinery closes - mutation, training, held-out evaluation,
 archive writes, and elite selection all execute to budget on CPU, and metrics
 are sane.
-DOES NOT PROVE: sim fidelity (stub dynamics, not DroneStudio physics), RL
-quality (CEM, not PPO), LLM outer loop (heuristic without an API key),
-VIO/fast-loop integration.
+DOES NOT PROVE: rendering/vision (no pixels - obs are state-based),
+sim-exact dynamics (quad env replicates his flight model in numpy with
+semi-implicit Euler, not Bullet), RL quality (CEM, not PPO), LLM outer loop
+(heuristic without an API key).
 
 ## LLM outer loop
 

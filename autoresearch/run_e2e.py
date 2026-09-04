@@ -18,7 +18,7 @@ from outer_loop import run
 def main():
     quick = "--quick" in sys.argv
     budget = dict(cem_iters=3, cem_pop=8, train_episodes=4, eval_episodes=4, max_steps=150) if quick \
-        else dict(cem_iters=3, cem_pop=8, train_episodes=4, eval_episodes=6, max_steps=200)
+        else dict(cem_iters=4, cem_pop=10, train_episodes=4, eval_episodes=6, max_steps=250)
     best = run(generations=1, children=2, seed=42, budget=budget,
                archive_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "archive.jsonl"))
     assert best is not None, "archive empty after one generation"
