@@ -1,23 +1,25 @@
-//! dronestudio.chassis/1 manifest loader.
+//! dronestudio.chassis/1.1 manifest loader.
 //! Draft for the chassis branch: replaces the hardcoded mass/inertia/motor
 //! values in prefabs/Drone.zig with values authored by the CAD auto-researcher.
+//! v1.1: reads the composed `dynamics` block directly - no derivation in the sim.
 //! Compile-checked on the CAD box (zig build -Dcuda=false -Dpi=false) before merge.
 
 const std = @import("std");
 
+pub const Vec3 = [3]f64;
+pub const InertiaTensor = struct { ixx: f64, iyy: f64, izz: f64, ixy: f64, ixz: f64, iyz: f64 };
+
 pub const Motor = struct {
     id: u32,
-    position_m: [3]f64,
-    axis: [3]f64,
+    position_m: Vec3,
+    axis: Vec3,
     direction: []const u8, // "cw" | "ccw"
     mass_kg: f64,
+    prop_diameter_m: f64 = 0.127,
     max_thrust_n: f64,
     time_constant_s: f64,
     drag_ratio: f64,
 };
-
-pub const InertiaTriplet = struct { ixx: f64, iyy: f64, izz: f64 };
-pub const InertiaTensor = struct { ixx: f64, iyy: f64, izz: f64, ixy: f64, ixz: f64, iyz: f64 };
 
 pub const ChassisManifest = struct {
     schema: []const u8,
@@ -28,21 +30,30 @@ pub const ChassisManifest = struct {
         forward: []const u8 = "+X",
         up: []const u8 = "+Z",
     },
-    material: struct { name: []const u8, density_kg_m3: f64 },
-    inertial: struct {
-        frame_mass_kg: f64,
-        frame_com_m: [3]f64,
-        frame_inertia_kgm2: InertiaTensor,
-        motor_inertia_add_kgm2: InertiaTriplet,
+    material: struct { name: []const u8, density_kg_m3: f64, e_mpa: f64 = 0, yield_mpa: f64 = 0 },
+    dynamics: struct {
+        total_mass_kg: f64,
+        com_m: Vec3,
+        inertia_about_com_kgm2: InertiaTensor,
+        composition: ?[]const struct {
+            name: []const u8,
+            mass_kg: f64,
+            com_m: Vec3,
+        } = null,
         note: ?[]const u8 = null,
     },
+    aero: ?struct {
+        projected_area_m2: struct { x: f64, y: f64, z: f64 },
+        cd_flat_plate_estimate: f64 = 1.1,
+        note: ?[]const u8 = null,
+    } = null,
     collision: struct {
         type: []const u8, // "convex_hull" | "vhacd"
         fallback: ?[]const u8 = null,
         max_hulls: ?u32 = null,
     },
     motors: []Motor,
-    imu: struct { position_m: [3]f64 },
+    imu: struct { position_m: Vec3, note: ?[]const u8 = null },
     stack: struct { pattern_mm: f64, hole_dia_mm: f64, z_bottom_m: f64 },
 
     pub fn load(alloc: std.mem.Allocator, path: []const u8) !std.json.Parsed(ChassisManifest) {
@@ -54,18 +65,21 @@ pub const ChassisManifest = struct {
         });
     }
 
-    /// Frame + mounted motors. Payload (battery/stack/cameras) is composed by the caller.
+    /// Total rigid-body mass (frame + motors + payload), kg.
     pub fn totalMassKg(self: *const ChassisManifest) f32 {
-        var m: f64 = self.inertial.frame_mass_kg;
-        for (self.motors) |mot| m += mot.mass_kg;
-        return @floatCast(m);
+        return @floatCast(self.dynamics.total_mass_kg);
     }
 
-    /// Diagonal inertia (frame full tensor diagonal + motor point-mass adds), kg*m^2.
+    /// Diagonal inertia about the composed CoM, kg*m^2 -> RigidBodyComponent.setInertia.
     pub fn diagonalInertia(self: *const ChassisManifest) [3]f32 {
-        const f = self.inertial.frame_inertia_kgm2;
-        const a = self.inertial.motor_inertia_add_kgm2;
-        return .{ @floatCast(f.ixx + a.ixx), @floatCast(f.iyy + a.iyy), @floatCast(f.izz + a.izz) };
+        const t = self.dynamics.inertia_about_com_kgm2;
+        return .{ @floatCast(t.ixx), @floatCast(t.iyy), @floatCast(t.izz) };
+    }
+
+    /// Center of mass (sim should offset the body origin by this), meters.
+    pub fn comM(self: *const ChassisManifest) [3]f32 {
+        const c = self.dynamics.com_m;
+        return .{ @floatCast(c[0]), @floatCast(c[1]), @floatCast(c[2]) };
     }
 
     /// Center -> motor axis distance (quad symmetric), meters. Feeds FlightController.motor_arm_length.

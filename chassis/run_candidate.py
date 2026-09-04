@@ -26,9 +26,9 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
                                       out_base + "_fea")
         checks.append(("fea", fea_result["passed"], json.dumps(fea_result), 0.0 if fea_result["passed"] else 0.5))
         score = ev.score(checks)
-    rec = sn.make_record(variant_id, parent_id, generation, dataclasses.asdict(params), checks, score, props)
-    rec["fea"] = fea_result
+    rec = sn.make_record(variant_id, parent_id, generation, dataclasses.asdict(params), checks, score, props, fea=fea_result)
     d = sn.save_snapshot(rec, out_base)
+    sn.publish(rec, d)
     print(f"variant={variant_id} score={score:.3f} snapshot={d}")
     for n, p, det, _ in checks:
         print(f"  [{'PASS' if p else 'FAIL'}] {n}: {det}")
@@ -44,5 +44,4 @@ if __name__ == "__main__":
     args = ap.parse_args()
     out = args.out or os.path.join(os.getcwd(), args.variant)
     rec = run(args.variant, args.parent, args.gen, ChassisParams(), out)
-    sn.post_records([rec])
     print("RESULT_JSON " + json.dumps({"variant": args.variant, "score": rec["score"], "parent": args.parent}))
