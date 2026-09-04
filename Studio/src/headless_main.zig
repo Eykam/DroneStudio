@@ -412,6 +412,28 @@ pub fn main() !void {
             } else 0;
             world.reset(scene, seed);
             try writeObsReply(stdout, world, 0.0, false, false);
+        } else if (std.mem.eql(u8, cmd, "set_gains")) {
+            // Tuning support (RATE_CONTROLLER_ASSESSMENT.md): swap PID gains
+            // per axis at runtime and reset controller/filter state, so a
+            // sweep never needs a rebuild. Firmware defaults stay the
+            // compiled-in baseline; this only affects this process.
+            if (root.object.get("roll")) |g| {
+                const ga = g.array.items;
+                if (ga.len == 3) world.rate_ctrl.pid.roll.setGains(f32FromJson(ga[0], 0), f32FromJson(ga[1], 0), f32FromJson(ga[2], 0));
+            }
+            if (root.object.get("pitch")) |g| {
+                const ga = g.array.items;
+                if (ga.len == 3) world.rate_ctrl.pid.pitch.setGains(f32FromJson(ga[0], 0), f32FromJson(ga[1], 0), f32FromJson(ga[2], 0));
+            }
+            if (root.object.get("yaw")) |g| {
+                const ga = g.array.items;
+                if (ga.len == 3) world.rate_ctrl.pid.yaw.setGains(f32FromJson(ga[0], 0), f32FromJson(ga[1], 0), f32FromJson(ga[2], 0));
+            }
+            world.rate_ctrl.reset();
+            world.filtered_rates = .{ 0, 0, 0 };
+            world.filtered_thrust = 0;
+            try stdout.writeAll("{\"ok\":true}\n");
+            try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "rate_step")) {
             // Tuning probe (RATE_CONTROLLER_ASSESSMENT.md): hold a constant
             // body-rate setpoint for `ticks` fast ticks at `thrust` (N) and

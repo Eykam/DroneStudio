@@ -1,0 +1,166 @@
+{
+  "purpose": "in-sim rate-loop gain sweep - SIM-TUNED CANDIDATES ONLY, hardware validation required",
+  "setpoint_rad_s": 3.0,
+  "roll_pitch": [
+    {
+      "rise_time_s": 0.86,
+      "t10_s": 0.08,
+      "t90_s": 0.94,
+      "overshoot_pct": 0.0,
+      "settling_time_s": 1.16,
+      "steady_state_mean_rad_s": 2.9425,
+      "steady_state_err_rad_s": 0.0575,
+      "peak_rate_rad_s": 2.9599,
+      "mean_abs_torque_first_20ms_Nm": 0.11757,
+      "mean_abs_torque_steady_Nm": 0.01054,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.1,
+        "ki": 0.005,
+        "kd": 0.001
+      }
+    },
+    {
+      "rise_time_s": 0.47,
+      "t10_s": 0.05,
+      "t90_s": 0.52,
+      "overshoot_pct": 0.85,
+      "settling_time_s": 0.64,
+      "steady_state_mean_rad_s": 3.0243,
+      "steady_state_err_rad_s": -0.0243,
+      "peak_rate_rad_s": 3.0256,
+      "mean_abs_torque_first_20ms_Nm": 0.22359,
+      "mean_abs_torque_steady_Nm": 0.00082,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.2,
+        "ki": 0.01,
+        "kd": 0.002
+      }
+    },
+    {
+      "rise_time_s": 0.28,
+      "t10_s": 0.03,
+      "t90_s": 0.31,
+      "overshoot_pct": 0.48,
+      "settling_time_s": 0.37,
+      "steady_state_mean_rad_s": 3.0142,
+      "steady_state_err_rad_s": -0.0142,
+      "peak_rate_rad_s": 3.0143,
+      "mean_abs_torque_first_20ms_Nm": 0.40711,
+      "mean_abs_torque_steady_Nm": 2e-05,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.4,
+        "ki": 0.02,
+        "kd": 0.004
+      }
+    },
+    {
+      "rise_time_s": 0.18,
+      "t10_s": 0.02,
+      "t90_s": 0.2,
+      "overshoot_pct": 0.18,
+      "settling_time_s": 0.24,
+      "steady_state_mean_rad_s": 3.0054,
+      "steady_state_err_rad_s": -0.0054,
+      "peak_rate_rad_s": 3.0055,
+      "mean_abs_torque_first_20ms_Nm": 0.69093,
+      "mean_abs_torque_steady_Nm": 1e-05,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.8,
+        "ki": 0.03,
+        "kd": 0.008
+      }
+    },
+    {
+      "rise_time_s": 0.15,
+      "t10_s": 0.02,
+      "t90_s": 0.17,
+      "overshoot_pct": 0.14,
+      "settling_time_s": 0.2,
+      "steady_state_mean_rad_s": 3.004,
+      "steady_state_err_rad_s": -0.004,
+      "peak_rate_rad_s": 3.0041,
+      "mean_abs_torque_first_20ms_Nm": 0.90264,
+      "mean_abs_torque_steady_Nm": 1e-05,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 1.2,
+        "ki": 0.05,
+        "kd": 0.012
+      }
+    }
+  ],
+  "yaw": [
+    {
+      "rise_time_s": null,
+      "t10_s": 0.14,
+      "t90_s": null,
+      "overshoot_pct": 0.0,
+      "settling_time_s": null,
+      "steady_state_mean_rad_s": 2.3415,
+      "steady_state_err_rad_s": 0.6585,
+      "peak_rate_rad_s": 2.3933,
+      "mean_abs_torque_first_20ms_Nm": 0.06058,
+      "mean_abs_torque_steady_Nm": 0.03562,
+      "reached_setpoint": false,
+      "gains": {
+        "kp": 0.05,
+        "ki": 0.003,
+        "kd": 0.0005
+      }
+    },
+    {
+      "rise_time_s": 0.69,
+      "t10_s": 0.06,
+      "t90_s": 0.75,
+      "overshoot_pct": 0.72,
+      "settling_time_s": 0.92,
+      "steady_state_mean_rad_s": 3.0121,
+      "steady_state_err_rad_s": -0.0121,
+      "peak_rate_rad_s": 3.0215,
+      "mean_abs_torque_first_20ms_Nm": 0.19288,
+      "mean_abs_torque_steady_Nm": 0.00673,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.15,
+        "ki": 0.01,
+        "kd": 0.002
+      }
+    },
+    {
+      "rise_time_s": 0.39,
+      "t10_s": 0.04,
+      "t90_s": 0.43,
+      "overshoot_pct": 0.96,
+      "settling_time_s": 0.53,
+      "steady_state_mean_rad_s": 3.0284,
+      "steady_state_err_rad_s": -0.0284,
+      "peak_rate_rad_s": 3.0287,
+      "mean_abs_torque_first_20ms_Nm": 0.39229,
+      "mean_abs_torque_steady_Nm": 0.00022,
+      "reached_setpoint": true,
+      "gains": {
+        "kp": 0.3,
+        "ki": 0.02,
+        "kd": 0.005
+      }
+    }
+  ],
+  "candidates": {
+    "roll_pitch": {
+      "kp": 1.2,
+      "ki": 0.05,
+      "kd": 0.012
+    },
+    "yaw": {
+      "kp": 0.3,
+      "ki": 0.02,
+      "kd": 0.005
+    },
+    "selection_rule": "fastest rise time with overshoot <= 20% and |SS err| < 0.1 rad/s",
+    "warning": "SIM-TUNED against the Drone.zig inertia model (no aero drag, motor lag, or mixer). NOT flight-ready. Validate on hardware."
+  }
+}

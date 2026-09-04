@@ -23,13 +23,15 @@ TICKS = 750          # 1.5 s at 500 Hz
 SAMPLE_EVERY = 5     # 100 Hz sampling
 HOVER = 1.5 * 9.81
 
-def run_step(axis_idx, sp=SETPOINT, ticks=TICKS):
+def run_step(axis_idx, sp=SETPOINT, ticks=TICKS, gains=None):
     setpoint = [0.0, 0.0, 0.0]
     setpoint[axis_idx] = sp
     proc = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     def cmd(obj):
         proc.stdin.write(json.dumps(obj) + "\n"); proc.stdin.flush()
         return json.loads(proc.stdout.readline())
+    if gains:
+        cmd({"cmd": "set_gains", **gains})
     cmd({"cmd": "reset", "seed": 1, "scene": {
         "spawn": [0, 1, 0], "goal": [0, 1, 12], "extent": 40,
         "max_steps": 250, "dynamics_noise": 0, "obstacles": []}})
