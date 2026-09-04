@@ -14,19 +14,19 @@
     "yield_mpa": 50
   },
   "dynamics": {
-    "total_mass_kg": 0.514324,
+    "total_mass_kg": 0.49592400000000003,
     "com_m": [
-      0.001186,
-      -0.000642,
-      0.021158
+      0.0012300035166678766,
+      -0.0006658197788370799,
+      0.021720399077277967
     ],
     "inertia_about_com_kgm2": {
-      "ixx": 0.002133222478097594,
-      "iyy": 0.0022044913214616024,
-      "izz": 0.003942529671877721,
-      "ixy": 9.508612249905311e-06,
-      "ixz": 6.246412658763128e-06,
-      "iyz": -3.682157667855425e-06
+      "ixx": 0.001921830147461784,
+      "iyy": 0.001993080014392934,
+      "izz": 0.0035284950991522953,
+      "ixy": 9.494082464363574e-06,
+      "ixz": 6.589469495587111e-06,
+      "iyz": -3.867859598075495e-06
     },
     "composition": [
       {
@@ -40,7 +40,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.0334,
+        "mass_kg": 0.0288,
         "com_m": [
           0.106066,
           0.106066,
@@ -49,7 +49,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.0334,
+        "mass_kg": 0.0288,
         "com_m": [
           -0.106066,
           0.106066,
@@ -58,7 +58,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.0334,
+        "mass_kg": 0.0288,
         "com_m": [
           -0.106066,
           -0.106066,
@@ -67,7 +67,7 @@
       },
       {
         "name": "motor",
-        "mass_kg": 0.0334,
+        "mass_kg": 0.0288,
         "com_m": [
           0.106066,
           -0.106066,
@@ -187,11 +187,14 @@
         1
       ],
       "direction": "cw",
-      "mass_kg": 0.0334,
+      "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.015
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     },
     {
       "id": 2,
@@ -206,11 +209,14 @@
         1
       ],
       "direction": "ccw",
-      "mass_kg": 0.0334,
+      "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.015
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     },
     {
       "id": 3,
@@ -225,11 +231,14 @@
         1
       ],
       "direction": "cw",
-      "mass_kg": 0.0334,
+      "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.015
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     },
     {
       "id": 4,
@@ -244,11 +253,14 @@
         1
       ],
       "direction": "ccw",
-      "mass_kg": 0.0334,
+      "mass_kg": 0.0288,
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.015
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     }
   ],
   "imu": {
