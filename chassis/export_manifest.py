@@ -17,7 +17,7 @@ RHO_PETG = 1240e-9  # kg/mm^3
 MOTOR = {"max_thrust_n": 17.27, "time_constant_s": 0.04, "drag_ratio": 0.15,
          "kv": 2400, "cells": 4, "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"}
 MOTOR_DIRS = ["cw", "ccw", "cw", "ccw"]  # sim quad-X order M1..M4
-from components import LIBRARY, placed_items
+from components import LIBRARY, placed_items, placed_cad_items
 MOTOR_MASS_KG = LIBRARY["motor"].mass_g / 1000.0  # 33.4 g EMAX Eco II 2207
 PROP_DIA_M = 0.127  # 5 inch
 
@@ -36,6 +36,7 @@ def compose_dynamics(part, p: ChassisParams):
         pos = np.array([mx*0.001, my*0.001, p.body_thickness_mm*0.001])
         items.append({"name": "motor", "mass_kg": MOTOR_MASS_KG, "com": pos,
                       "I_self": _solid_inertia_box(MOTOR_MASS_KG, 0.028, 0.028, 0.030)})
+    cad_items = placed_cad_items()
     for it in placed_items():
         if it["shape"] == "cylinder-z":
             r_, h_ = it["size_m"][0] / 2, it["size_m"][2]
@@ -44,6 +45,15 @@ def compose_dynamics(part, p: ChassisParams):
             I_self = _solid_inertia_box(it["mass_kg"], *it["size_m"])
         items.append({"name": it["component"], "mass_kg": it["mass_kg"], "com": np.array(it["position_m"]),
                       "I_self": I_self, "source": it.get("source"), "mount": it.get("mount")})
+    name_to_cad = {}
+    for k, (sh, I_self, com_m) in cad_items.items():
+        name_to_cad.setdefault(LIBRARY[k.split("#")[0]].name, []).append((I_self, com_m))
+    for i in items:
+        lst = name_to_cad.get(i.get("name"))
+        if lst:
+            # match the placed instance nearest to the item's com
+            best = min(lst, key=lambda t: sum((t[1][j]-i["com"][j])**2 for j in range(3)))
+            i["I_self"] = best[0]
     M = sum(i["mass_kg"] for i in items)
     com = sum(i["mass_kg"]*i["com"] for i in items) / M
     I = np.zeros((3, 3))
@@ -75,8 +85,14 @@ def export(p: ChassisParams, out_base: str):
     com_mm = part.center()
     I_mm5 = part.matrix_of_inertia
     I = [[I_mm5[i][j] * rho * 1e-6 for j in range(3)] for i in range(3)]
-    b.export_gltf(part, out_base + ".glb", binary=True)  # mm -> m on write
+    # STEP before GLB: the gltf writer on a big Compound leaves OCC unable to
+    # write STEP afterwards (export_step "Failed to write STEP file").
     b.export_step(part, out_base + ".step")
+    cad_shapes = [sh for (sh, _, _) in placed_cad_items().values()]
+    if cad_shapes:
+        b.export_gltf(b.Compound(children=[part] + cad_shapes), out_base + ".glb", binary=True)
+    else:
+        b.export_gltf(part, out_base + ".glb", binary=True)  # mm -> m on write
     M, com, I_tot, items = compose_dynamics(part, p)
     z_top_m = p.body_thickness_mm * 0.001
     motors = []
