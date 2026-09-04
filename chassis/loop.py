@@ -104,12 +104,22 @@ def run_generation():
     except Exception:
         pass
     best_mass = st.get("best_mass_g")
-    improved = score > st["best_score"] or (score == st["best_score"] and cand_mass and (best_mass is None or cand_mass < best_mass))
+    # hard-gate status: every "[PASS]/[FAIL] <check>" line the candidate printed
+    check_lines = [l for l in r2.stdout.splitlines() if l.strip().startswith(("[PASS]", "[FAIL]"))]
+    cand_all_pass = bool(check_lines) and all("[PASS]" in l for l in check_lines)
+    best_all_pass = st.get("best_all_pass", False)
+    # gates first: a fully-passing candidate always displaces a failing incumbent;
+    # among equal gate status, score wins; score ties break on frame mass
+    improved = (cand_all_pass and not best_all_pass) or \
+               (cand_all_pass == best_all_pass and (score > st["best_score"] or
+                (score == st["best_score"] and cand_mass and (best_mass is None or cand_mass < best_mass))))
     if not improved:
         shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
-        print(f"[gen {gen}] {variant} score {score:.3f} <= best {st['best_score']:.3f}; rolled back chassis.py (record kept)", flush=True)
+        print(f"[gen {gen}] {variant} score {score:.3f} all_pass={cand_all_pass} <= best {st['best_score']:.3f} all_pass={best_all_pass}; rolled back chassis.py (record kept)", flush=True)
     else:
         st["best_variant"], st["best_score"] = variant, score
+        st["best_all_pass"] = cand_all_pass
+        if cand_mass: st["best_mass_g"] = cand_mass
     st["generation"] = gen
     st["history"].append({"variant": variant, "parent": parent, "score": score, "improved": improved, "summary": summary})
     # commit candidate artifacts + (possibly rolled-back) code state
