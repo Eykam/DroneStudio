@@ -8,7 +8,7 @@ import export_manifest as em
 import snapshot as sn
 
 def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
-    progress.set_stage("building", f"{variant_id}: generating geometry", design_id=variant_id)
+    progress.set_stage("building", f"{variant_id}: generating geometry", design_id=f"cad-chassis-{variant_id}")
     part = build_chassis(params)
     import build123d as b
     b.export_stl(part, out_base + ".stl")
