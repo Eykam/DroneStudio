@@ -37,56 +37,55 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_s
     import meshio
     m = meshio.read(inp_path)
     pts = m.points  # mm
-    # stack fixation: nodes within 4 mm of any stack hole axis
     sh = stack_spacing_mm / 2
     stack_xy = np.array([(sh, sh), (-sh, sh), (-sh, -sh), (sh, -sh)])
     fix = np.zeros(len(pts), bool)
     for (sx, sy) in stack_xy:
         fix |= (np.hypot(pts[:,0]-sx, pts[:,1]-sy) < 4.0)
-    # motor pad load nodes: within pad radius of each motor axis
     loads = []
     for (mx, my) in motor_positions_mm:
         sel = np.hypot(pts[:,0]-mx, pts[:,1]-my) < 12.0
         loads.append(np.where(sel)[0])
-    lines = [l for l in open(inp_path).read().splitlines() if not l.startswith("*")]
-    head = ["*HEADING", "chassis auto-researcher job"]
-    # reuse nodes/elements blocks from gmsh inp verbatim
-    raw = open(inp_path).read()
-    keep = []
-    in_keep = False
-    for l in raw.splitlines():
-        u = l.upper()
-        if u.startswith("*NODE") or u.startswith("*ELEMENT"):
-            in_keep = True
-        elif l.startswith("*") and in_keep and not (u.startswith("*NODE") or u.startswith("*ELEMENT")):
-            in_keep = False
-        if in_keep or l.startswith("*NODE") or l.startswith("*ELEMENT"):
-            keep.append(l)
+    out = []
+    out.append("*HEADING")
+    out.append("chassis FEA")
+    out.append("*NODE")
+    for i, p_ in enumerate(pts):
+        out.append("%d,%.8e,%.8e,%.8e" % (i + 1, p_[0], p_[1], p_[2]))
+    eid = 1
+    for blk in [c for c in m.cells if c.type == "tetra"]:
+        out.append("*ELEMENT,TYPE=C3D4,ELSET=EALL")
+        for tet in blk.data:
+            out.append("%d,%d,%d,%d,%d" % (eid, tet[0]+1, tet[1]+1, tet[2]+1, tet[3]+1))
+            eid += 1
+    def nset(name, ids):
+        out.append("*NSET,NSET=%s" % name)
+        for i in range(0, len(ids), 12):
+            out.append(",".join(str(x) for x in ids[i:i+12]))
+    nset("NFIX", np.where(fix)[0] + 1)
+    for mi, sel in enumerate(loads):
+        nset("NLOAD%d" % (mi+1), sel + 1)
+    out.append("*MATERIAL,NAME=PETG")
+    out.append("*ELASTIC")
+    out.append("%.1f,%.3f" % (E_MPA, NU))
+    out.append("*SOLID SECTION,ELSET=EALL,MATERIAL=PETG")
+    out.append("*BOUNDARY")
+    out.append("NFIX,1,3,0.0")
+    out.append("*STEP")
+    out.append("*STATIC")
+    out.append("*CLOAD")
+    per = MAX_THRUST_N * thrust_scale
+    for mi, sel in enumerate(loads):
+        n = max(len(sel), 1)
+        for nid in (sel + 1):
+            out.append("%d,3,%.6f" % (nid, per / n))
+    out.append("*NODE FILE")
+    out.append("U")
+    out.append("*EL FILE")
+    out.append("S")
+    out.append("*END STEP")
     with open(job_name + ".inp", "w") as f:
-        f.write("*HEADING\nchassis FEA\n")
-        f.write("\n".join(keep) + "\n")
-        f.write("*NSET,NSET=NFIX\n")
-        idx = np.where(fix)[0] + 1
-        for i in range(0, len(idx), 12):
-            f.write(",".join(str(x) for x in idx[i:i+12]) + "\n")
-        for mi, sel in enumerate(loads):
-            f.write(f"*NSET,NSET=NLOAD{mi+1}\n")
-            ids = sel + 1
-            for i in range(0, len(ids), 12):
-                f.write(",".join(str(x) for x in ids[i:i+12]) + "\n")
-        # element set: all
-        f.write("")  # ELSET=EALL already on every *ELEMENT block
-        f.write("*MATERIAL,NAME=PETG\n*ELASTIC\n%.1f,%.3f\n" % (E_MPA, NU))
-        f.write("*SOLID SECTION,ELSET=EALL,MATERIAL=PETG\n")
-        f.write("*BOUNDARY\nNFIX,1,3,0.0\n")
-        f.write("*STEP\n*STATIC\n")
-        per = MAX_THRUST_N * thrust_scale
-        f.write("*CLOAD\n")
-        for mi, sel in enumerate(loads):
-            n = max(len(sel), 1)
-            for nid in (sel + 1):
-                f.write("%d,3,%.6f\n" % (nid, per / n))
-        f.write("*NODE FILE\nU\n*EL FILE\nS\n*END STEP\n")
+        f.write(chr(10).join(out) + chr(10))
     return job_name + ".inp", int(fix.sum()), [int(len(s)) for s in loads]
 
 def run_ccx(job_base, ccx="ccx"):
