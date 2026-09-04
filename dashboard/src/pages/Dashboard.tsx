@@ -31,6 +31,15 @@ export default function Dashboard() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { data, error } = useQuery({ queryKey: ["state"], queryFn: fetchState, refetchInterval: 10_000 });
+  const streamQ = useQuery({
+    queryKey: ["stream-state"],
+    queryFn: async () => (await (await fetch("/api/stream/state", { credentials: "same-origin" })).json()) as any,
+    refetchInterval: 5_000,
+  });
+  const stream = streamQ.data as any;
+  const streamAge = stream?.last_event_at ? (Date.now() - new Date(stream.last_event_at).getTime()) / 1000 : 1e9;
+  const streamLive = streamAge < 30 && stream?.meta?.status && stream.meta.status !== "offline";
+  const lastFrame = stream?.frames?.length ? stream.frames[stream.frames.length - 1] : null;
 
   if (error) return <div className="p-8 text-red-400">Failed to load state: {(error as Error).message}</div>;
   const records = (data?.records ?? []).filter((r: any) =>
@@ -77,16 +86,24 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5 md:gap-4">
         <Card>
           <CardHeader className="p-3 md:p-6 pb-1 md:pb-2"><CardDescription className="text-xs">Run status</CardDescription>
             <CardTitle className="flex items-center gap-1.5 text-base md:text-lg">
-              <Activity className={`h-4 w-4 md:h-5 md:w-5 shrink-0 ${running ? "text-emerald-400 animate-pulse" : "text-muted-foreground"}`} />
-              <span className="leading-tight">{run ? (running ? `Running - gen ${run.generations ?? "?"}` : (run.status ?? "idle")) : "No signal"}</span>
+              <Activity className={`h-4 w-4 md:h-5 md:w-5 shrink-0 ${running || streamLive ? "text-emerald-400 animate-pulse" : "text-muted-foreground"}`} />
+              <span className="leading-tight">{running
+                ? `Training run - gen ${run.generations ?? "?"}`
+                : streamLive
+                  ? (stream.meta.status === "training" ? "Watch channel - training policy" : "Watch channel - flying live")
+                  : "No run active"}</span>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-3 md:p-6 pt-0 md:pt-0 text-xs md:text-sm text-muted-foreground">
-            <span className="line-clamp-2 break-all">{run?.detail ? String(run.detail).split("/").pop() : "waiting for heartbeat"}</span>
+            <span className="line-clamp-2 break-all">{running
+              ? (run?.detail ? String(run.detail).split("/").pop() : "generations run in progress")
+              : streamLive
+                ? `best-known policy on dist ${stream.meta.dist_id ?? "?"}${stream.meta.dynamics ? " - " + String(stream.meta.dynamics).replace(".manifest.json", "") : ""}`
+                : "outer loop idle - watch channel off"}</span>
           </CardContent>
         </Card>
         <Card>
@@ -104,6 +121,19 @@ export default function Dashboard() {
             </CardTitle></CardHeader>
           <CardContent className="p-3 md:p-6 pt-0 md:pt-0 text-xs md:text-sm text-muted-foreground">
             {best ? `${best.id} via ` : "no variants yet"}{best && <MutTag m={best.mutator} />}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="p-3 md:p-6 pb-1 md:pb-2"><CardDescription className="text-xs">Live activity</CardDescription>
+            <CardTitle className="text-base md:text-lg">
+              {streamLive
+                ? (lastFrame ? `ep ${lastFrame.episode_id} - step ${lastFrame.step}` : "connecting")
+                : "-"}
+            </CardTitle></CardHeader>
+          <CardContent className="p-3 md:p-6 pt-0 md:pt-0 text-xs md:text-sm text-muted-foreground">
+            {streamLive
+              ? `streaming ${String(stream.meta.mode ?? "watch")} at 20 steps/s real-time${lastFrame ? ` - alt ${lastFrame.pos?.[1]?.toFixed(1)}m` : ""}`
+              : `last event ${streamAge > 3600 ? "over an hour ago" : streamAge > 90 ? `${Math.round(streamAge / 60)} min ago` : "just now"}`}
           </CardContent>
         </Card>
         <Card>
@@ -162,7 +192,7 @@ export default function Dashboard() {
           <CardDescription className="text-xs md:text-sm">Every evaluated scene-distribution variant, newest first</CardDescription></CardHeader>
         <CardContent className="p-3 md:p-6 pt-0 md:pt-0">
           {/* phone: card list, no horizontal scroll */}
-          <div className="md:hidden space-y-2">
+          <div className="md:hidden space-y-2 max-h-[420px] overflow-y-auto pr-1">
             {recent.map((r) => (
               <div key={r.id} className={`rounded-lg border border-border p-3 ${best?.id === r.id ? "bg-amber-400/5 border-amber-400/30" : ""}`}>
                 <div className="flex items-center justify-between gap-2">
@@ -193,7 +223,7 @@ export default function Dashboard() {
             )}
           </div>
           {/* desktop: full table */}
-          <div className="hidden md:block">
+          <div className="hidden md:block max-h-[520px] overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>

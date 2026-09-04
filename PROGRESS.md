@@ -93,3 +93,11 @@ swap is an informed choice, not a default.
 - Watch channel live: streamer.py flies the best policy on the manifest airframe
   and streams telemetry to the dashboard /watch page (SSE + 2D canvas + per-episode
   metric graphs: time-in-air, RMS jerk, off-ideal-path residual).
+
+## Adaptive stopping (outer loop)
+
+Plateau stop: after a stagnation restart, if the post-restart best success rate
+does not improve on the pre-restart best by at least `plateau_min_improvement`
+(default 0.02), the run stops instead of restarting again. The fixed generation
+count remains an upper bound, not a target. Logged as "plateau stop" with the
+gen number, pre-restart best, and current best.

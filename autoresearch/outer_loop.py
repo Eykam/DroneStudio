@@ -36,7 +36,8 @@ def run(generations=1, children=2, seed=0, budget=None, verbose=True,
         archive_path="archive.jsonl", base=None, elite_k=2,
         novelty_weight=0.05, stagnation_limit=3, backend=None,
         dynamics=None,
-        trainer="cem", ppo_config=None, n_jobs=None):
+        trainer="cem", ppo_config=None, n_jobs=None,
+        plateau_min_improvement=0.02):
     budget = budget or {}
     rng = np.random.default_rng(seed)
     archive = Archive(archive_path)
@@ -44,6 +45,7 @@ def run(generations=1, children=2, seed=0, budget=None, verbose=True,
     elite_ids = [None]
     best_succ = -1.0
     stagnant = 0
+    pre_restart_best = None  # adaptive stopping: best success at last restart
 
     for gen in range(generations):
         # one mutation batch per elite parent
@@ -55,8 +57,20 @@ def run(generations=1, children=2, seed=0, budget=None, verbose=True,
                 cands.append((f"elite{ei}", parent, elite_ids[ei], d, mutator))
             cands.append(("base", parent, elite_ids[ei], parent, "none"))
 
-        # stagnation restart: replace one child with a full random resample
+        # stagnation restart: replace one child with a full random resample.
+        # Adaptive stop: if a restart already happened and the best success
+        # since has not beaten the pre-restart best by
+        # plateau_min_improvement, the search has plateaued - stop instead
+        # of restarting again.  stays the upper bound.
         if stagnant >= stagnation_limit and cands:
+            if (pre_restart_best is not None
+                    and best_succ < pre_restart_best + plateau_min_improvement):
+                if verbose:
+                    print(f"gen {gen}: plateau stop - post-restart best "
+                          f"{best_succ:.3f} < pre-restart {pre_restart_best:.3f} "
+                          f"+ {plateau_min_improvement:.3f}", flush=True)
+                break
+            pre_restart_best = best_succ
             names = SceneDistribution.names()
             vec = [rng.uniform(*SceneDistribution.BOUNDS[n]) for n in names]
             cands[-1] = ("restart", elites[0], elite_ids[0],
