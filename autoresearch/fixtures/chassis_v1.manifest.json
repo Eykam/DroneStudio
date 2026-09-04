@@ -191,7 +191,7 @@
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.015
     },
     {
       "id": 2,
@@ -210,7 +210,7 @@
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.015
     },
     {
       "id": 3,
@@ -229,7 +229,7 @@
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.015
     },
     {
       "id": 4,
@@ -248,7 +248,7 @@
       "prop_diameter_m": 0.127,
       "max_thrust_n": 10.0,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15
+      "drag_ratio": 0.015
     }
   ],
   "imu": {
