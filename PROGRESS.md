@@ -26,3 +26,22 @@ Follow-on: PPO-vs-CEM comparison launched on the g13v140 distribution
 (autoresearch/ppo_vs_cem.json, compare.log on the box) - first real test of
 whether PPO beats CEM on the discovered distribution before the inner loop
 swaps to PPO by default.
+
+## PPO vs CEM on run-2 best dist (g13v140) - 2026-09-04
+
+compare_trainers.py, backend=sim (headless Zig), eval seed 20000, 6 episodes, 250 max steps.
+
+  CEM (iters 6, pop 12): 0.6s wall, train best return +0.81, eval success 0/6, mean return -7.16
+  PPO (hidden 128, lr 3e-4, rollout 8 x 80 updates, 62k env steps): 10.1s wall,
+    eval success 0/6, mean return -36.03
+
+Reading: 0/6 for both is not conclusive against the 33.3% (2/6) run-2 eval -
+small-sample noise (P(0/6 | p=1/3) ~ 9%) plus a different eval seed and
+from-scratch retrains. The load-bearing finding is PPO's training curve:
+eval mean went -16.9 (update 20) -> -125.3 (40) -> -109.4 (60) -> -203.5 (80).
+PPO did not just fail to learn, it diverged monotonically after update 20.
+At return magnitudes in the hundreds, lr 3e-4 without return scaling looks
+too hot; candidates: lower lr, advantage/return normalization, value-loss
+clipping, or smaller epochs-per-rollout. Until that is stable, CEM stays the
+default inner-loop trainer; PPO needs a hyperparameter stabilization pass
+before the swap mandated in the steering note.

@@ -1,0 +1,83 @@
+{
+  "backend": "sim",
+  "distribution": {
+    "obstacle_density": 0.018,
+    "obstacle_size_mean": 0.75,
+    "obstacle_size_spread": 0.08,
+    "corridor_width": 10.0,
+    "scene_extent": 22.0,
+    "goal_distance": 5.0,
+    "light_intensity": 0.92,
+    "light_direction_entropy": 0.35,
+    "texture_variety": 0.55,
+    "dynamics_noise": 0.0
+  },
+  "eval_protocol": {
+    "eval_seed": 20000,
+    "episodes": 6,
+    "max_steps": 250
+  },
+  "cem": {
+    "iters": 6,
+    "pop": 12,
+    "wall_s": 0.6,
+    "train_best_return": 0.8092906666666669,
+    "success_rate": 0.0,
+    "mean_return": -7.1621586666666675
+  },
+  "ppo": {
+    "config": {
+      "hidden": 128,
+      "lr": 0.0003,
+      "lr_decay": true,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip": 0.2,
+      "entropy_coef": 0.001,
+      "value_coef": 0.5,
+      "max_grad_norm": 0.5,
+      "epochs": 10,
+      "minibatch": 256,
+      "rollout_episodes": 8,
+      "max_updates": 80,
+      "init_log_std": -0.5,
+      "target_reward": null,
+      "eval_every": 20,
+      "eval_episodes": 6,
+      "obs_norm_clip": 10.0,
+      "seed": 42
+    },
+    "wall_s": 10.1,
+    "best_eval_mean_during_train": -16.89813883333333,
+    "env_steps": 62228,
+    "eval_history": [
+      {
+        "update": 20,
+        "eval_mean": -16.89813883333333,
+        "eval_min": -26.356144999999998,
+        "steps": 8136
+      },
+      {
+        "update": 40,
+        "eval_mean": -125.30299466666668,
+        "eval_min": -148.409566,
+        "steps": 19952
+      },
+      {
+        "update": 60,
+        "eval_mean": -109.38417949999996,
+        "eval_min": -224.75502899999995,
+        "steps": 40088
+      },
+      {
+        "update": 80,
+        "eval_mean": -203.52763633333333,
+        "eval_min": -299.13477100000006,
+        "steps": 62228
+      }
+    ],
+    "success_rate": 0.0,
+    "mean_return": -36.02686616666667
+  },
+  "finished_at": "2026-09-04T07:07:58Z"
+}
