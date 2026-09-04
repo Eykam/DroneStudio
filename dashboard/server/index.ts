@@ -341,16 +341,77 @@ app.get("/api/state", async (c) => c.json(await loadState()));
 // --- static frontend ----------------------------------------------------------
 
 // --- live sim stream (watch channel) ---------------------------------------
-// The streamer on the research box POSTs scene/frame/episode_end events with
-// the ingest bearer token; viewers subscribe over SSE. In-memory only: the
-// stream is live, not history.
+// Streamers on the research box POST scene/frame/episode_end events with the
+// ingest bearer token; viewers subscribe over SSE. Multi-source: every payload
+// may carry "source" (default "default"); state is kept per source so /watch
+// can show several concurrent experiments side by side. The sources registry
+// (POST /api/stream/sources) lists streamable experiments and is persisted so
+// redeploys keep the picker. Streams are live, not history.
 const FRAME_CAP = 400;
-const streamState: {
+type StreamChan = {
   meta: Record<string, unknown>;
   scene: Record<string, unknown> | null;
   frames: Record<string, unknown>[];
   last_event_at: string | null;
-} = { meta: { status: "offline" }, scene: null, frames: [], last_event_at: null };
+};
+const streams = new Map<string, StreamChan>();
+const SRC_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+function chan(id: string): StreamChan {
+  let ch = streams.get(id);
+  if (!ch) {
+    if (streams.size >= 8) throw new Error("too many stream sources");
+    ch = { meta: { status: "offline" }, scene: null, frames: [], last_event_at: null };
+    streams.set(id, ch);
+  }
+  return ch;
+}
+function streamsSnapshot() {
+  return Object.fromEntries([...streams].map(([k, v]) => [k, v]));
+}
+
+// Registry of streamable experiments (the /watch picker). The research box
+// upserts one entry per experiment/hypothesis it can stream.
+const STREAM_SOURCES_FILE = `${DATA_DIR}/stream_sources.json`;
+let streamSources: Record<string, unknown>[] = await (async () => {
+  try {
+    const f = Bun.file(STREAM_SOURCES_FILE);
+    if (await f.exists()) return await f.json();
+  } catch {}
+  return [];
+})();
+
+async function saveStreamSources() {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = STREAM_SOURCES_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify(streamSources));
+  await fs.rename(tmp, STREAM_SOURCES_FILE);
+}
+
+app.post("/api/stream/sources", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body)
+      || typeof body.id !== "string" || !SRC_ID.test(body.id)) {
+    return c.json({ error: "bad request: {id: [a-z0-9-], label?, policy?, policy_obs?, eval?, status?, note?}" }, 400);
+  }
+  const { id, remove, ...fields } = body;
+  const i = streamSources.findIndex((s) => s.id === id);
+  if (remove === true) {
+    if (i >= 0) streamSources.splice(i, 1);
+  } else {
+    const entry = { ...(i >= 0 ? streamSources[i] : {}), ...fields, id, updated_at: new Date().toISOString() };
+    if (i >= 0) streamSources[i] = entry; else streamSources.push(entry);
+  }
+  await saveStreamSources();
+  return c.json({ ok: true, n: streamSources.length });
+});
+
+app.get("/api/stream/sources", (c) => c.json(streamSources));
 
 type SseClient = { send: (event: string, data: unknown) => void };
 const sseClients = new Set<SseClient>();
@@ -367,31 +428,57 @@ app.post("/api/stream/ingest", async (c) => {
   }
   let body: any;
   try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  const src = typeof body.source === "string" && SRC_ID.test(body.source) ? body.source : "default";
+  const st = chan(src);
   const now = new Date().toISOString();
-  streamState.last_event_at = now;
+  st.last_event_at = now;
   const t = body.type;
   if (t === "status") {
-    const { type, ...rest } = body;
-    streamState.meta = { ...rest, ts: now };
-    broadcast("status", streamState.meta);
+    const { type, source, ...rest } = body;
+    st.meta = { ...rest, ts: now };
+    broadcast("status", { source: src, ...st.meta });
   } else if (t === "scene") {
-    const { type, ...rest } = body;
-    streamState.scene = { ...rest, ts: now };
-    streamState.frames = [];
-    broadcast("scene", streamState.scene);
+    const { type, source, ...rest } = body;
+    st.scene = { ...rest, ts: now };
+    st.frames = [];
+    broadcast("scene", { source: src, ...st.scene });
   } else if (t === "frame") {
-    const f = { ...body, ts: now };
-    streamState.frames.push(f);
-    if (streamState.frames.length > FRAME_CAP) streamState.frames.splice(0, streamState.frames.length - FRAME_CAP);
+    const f = { ...body, source: src, ts: now };
+    st.frames.push(f);
+    if (st.frames.length > FRAME_CAP) st.frames.splice(0, st.frames.length - FRAME_CAP);
     broadcast("frame", f);
   } else if (t === "episode_end") {
-    broadcast("episode_end", body);
+    broadcast("episode_end", { ...body, source: src });
   } else {
     return c.json({ error: "unknown type" }, 400);
   }
   return c.json({ ok: true });
 });
 
+app.get("/api/stream/state", (c) => c.json({
+  sources: streamsSnapshot(),
+  registry: streamSources,
+}));
+
+app.get("/api/stream", (c) =>
+  streamSSE(c, async (stream) => {
+    const client: SseClient = {
+      send: (event, data) => {
+        void stream.writeSSE({ event, data: JSON.stringify(data) }).catch(() => sseClients.delete(client));
+      },
+    };
+    sseClients.add(client);
+    await stream.writeSSE({
+      event: "snapshot",
+      data: JSON.stringify({ sources: streamsSnapshot(), registry: streamSources }),
+    });
+    const keepalive = setInterval(() => {
+      void stream.writeSSE({ event: "ping", data: "{}" }).catch(() => {});
+    }, 15000);
+    stream.onAbort(() => { clearInterval(keepalive); sseClients.delete(client); });
+    await new Promise<void>(() => {});
+  })
+);
 
 // --- CAD work-in-progress signal --------------------------------------------
 // The CAD research loop POSTs its current stage here; /cad renders an
@@ -498,33 +585,6 @@ app.post("/api/series", async (c) => {
 });
 
 app.get("/api/series", (c) => c.json(seriesStore));
-
-app.get("/api/stream/state", (c) => c.json({
-  meta: streamState.meta,
-  scene: streamState.scene,
-  frames: streamState.frames,
-  last_event_at: streamState.last_event_at,
-}));
-
-app.get("/api/stream", (c) =>
-  streamSSE(c, async (stream) => {
-    const client: SseClient = {
-      send: (event, data) => {
-        void stream.writeSSE({ event, data: JSON.stringify(data) }).catch(() => sseClients.delete(client));
-      },
-    };
-    sseClients.add(client);
-    await stream.writeSSE({
-      event: "snapshot",
-      data: JSON.stringify({ meta: streamState.meta, scene: streamState.scene, frames: streamState.frames }),
-    });
-    const keepalive = setInterval(() => {
-      void stream.writeSSE({ event: "ping", data: "{}" }).catch(() => {});
-    }, 15000);
-    stream.onAbort(() => { clearInterval(keepalive); sseClients.delete(client); });
-    await new Promise<void>(() => {});
-  })
-);
 
 app.use("/*", serveStatic({ root: "./dist" }));
 app.get("*", serveStatic({ root: "./dist", path: "index.html" })); // SPA fallback

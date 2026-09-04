@@ -18,6 +18,9 @@ from scene_schema import SceneDistribution
 from env_sim import SimBinaryEnv, make_sim_factory
 from policy import cem_train, MLP
 
+if os.environ.get("STREAM_SCENARIOS"):
+    from scenario_sampler import sample_spec
+
 DASH = os.environ.get("DASHBOARD_URL", "").rstrip("/")
 TOKEN = os.environ.get("INGEST_TOKEN", "")
 DYNAMICS = os.environ.get("STREAM_DYNAMICS", os.path.join(HERE, "fixtures", "chassis_v1.manifest.json"))
@@ -26,11 +29,17 @@ FPS = float(os.environ.get("STREAM_FPS", "20"))
 RETRAIN_EPS = int(os.environ.get("STREAM_RETRAIN_EPS", "8"))
 POLICY_FLAT = os.environ.get("STREAM_POLICY_FLAT", "")  # flat-vector json: fly this policy, hot-reload on mtime change
 MAX_STEPS = 200
+# multi-source /watch: this streamer's source id + picker metadata
+SOURCE = os.environ.get("STREAM_SOURCE", "default")
+LABEL = os.environ.get("STREAM_LABEL", "")
+SCENARIOS = bool(os.environ.get("STREAM_SCENARIOS"))  # sample scenario specs per episode (v2 track)
+EVAL_JSON = os.environ.get("STREAM_EVAL", "")  # inline JSON eval scores for the picker chip
 
 
 def post(payload):
     if not DASH or not TOKEN:
         return
+    payload = {"source": SOURCE, **payload}
     req = urllib.request.Request(
         DASH + "/api/stream/ingest",
         data=json.dumps(payload).encode(),
@@ -71,17 +80,45 @@ def status(state, dist_id):
           "policy_obs": os.environ.get("STREAM_POLICY_OBS", "")})
 
 
+def register():
+    """Upsert this source into the /watch picker registry."""
+    if not DASH or not TOKEN:
+        return
+    body = {"id": SOURCE,
+            "label": LABEL or SOURCE,
+            "policy": os.path.basename(POLICY_FLAT) if POLICY_FLAT else "archive-best",
+            "policy_obs": os.environ.get("STREAM_POLICY_OBS", "v1"),
+            "dynamics": os.path.basename(DYNAMICS),
+            "status": "streaming"}
+    if EVAL_JSON:
+        try:
+            body["eval"] = json.loads(EVAL_JSON)
+        except Exception:
+            pass
+    req = urllib.request.Request(
+        DASH + "/api/stream/sources",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + TOKEN})
+    try:
+        urllib.request.urlopen(req, timeout=8).read()
+    except Exception as e:
+        print("register:", e, flush=True)
+
+
 def main():
     ep = 0
     dist_id, dist = best_dist()
     status("training", dist_id)
     factory = make_sim_factory(dist, max_steps=MAX_STEPS, dynamics=DYNAMICS)
     policy_mtime = [None]
+    obs_dim = [SimBinaryEnv.OBS_DIM]
+
     def load_policy(force_seed):
         if POLICY_FLAT and os.path.exists(POLICY_FLAT):
             mt = os.path.getmtime(POLICY_FLAT)
             if mt != policy_mtime[0]:
-                pol = MLP(SimBinaryEnv.OBS_DIM, SimBinaryEnv.ACT_DIM)
+                pol = MLP(obs_dim[0], SimBinaryEnv.ACT_DIM)
                 pol.set_flat(np.array(json.load(open(POLICY_FLAT)), dtype=np.float64))
                 policy_mtime[0] = mt
                 print(f"loaded policy from {POLICY_FLAT}", flush=True)
@@ -91,17 +128,25 @@ def main():
                                    iters=2, pop=8, episodes_per_eval=3, seed=42 + force_seed)
         print(f"trained on {dist_id}: ret={train_ret:.2f}", flush=True)
         return pol
-    policy = load_policy(0)
+    policy = None  # built lazily: obs dim depends on obs v1/v2 until first reset
+    register()
     while True:
         ep += 1
         ep_id = f"w{ep:05d}"
         seed = 50_000 + ep
-        env = StreamingEnv(dist, seed=seed, max_steps=MAX_STEPS, dynamics=DYNAMICS)
+        spec = sample_spec(seed) if SCENARIOS else None
+        env = StreamingEnv(dist, seed=seed, max_steps=MAX_STEPS, dynamics=DYNAMICS,
+                           scenario_spec=spec)
         try:
             obs = env.reset()
+            if policy is None:
+                obs_dim[0] = len(obs)
+                policy = load_policy(0)
             status("streaming", dist_id)
             post({"type": "scene", "episode_id": ep_id, "dist_id": dist_id,
                   "seed": seed,
+                  **({"scenario": spec["scenario"],
+                      "success_radius": round(spec["success_radius"], 2)} if spec else {}),
                   "spawn": [float(x) for x in env.spawn],
                   "goal": [float(x) for x in env.goal],
                   "obstacles": [[float(c[0]), float(c[1]), float(c[2]), float(r)]
