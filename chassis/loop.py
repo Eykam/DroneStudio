@@ -185,6 +185,15 @@ def run_generation():
     return w["score"]
 
 if __name__ == "__main__":
+    # single-instance lock: a second loop.py exits immediately (stale starts,
+    # double restarts). flock is released by the OS on process death.
+    import fcntl
+    _lock_fd = open("/work/loop.lock", "w")
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("another loop.py holds /work/loop.lock; exiting", flush=True)
+        sys.exit(0)
     progress.start_heartbeat()
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     for _ in range(n):
