@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { fetchState, logout, type ArchiveRecord } from "@/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Activity, FlaskConical, Trophy, LogOut, Bot, Dices } from "lucide-react";
+import { Activity, FlaskConical, Trophy, LogOut, Bot, Dices, Box } from "lucide-react";
 
 const MUTATOR_META: Record<string, { label: string; cls: string }> = {
   codex: { label: "ChatGPT", cls: "text-emerald-400" },
@@ -33,7 +33,9 @@ export default function Dashboard() {
   const { data, error } = useQuery({ queryKey: ["state"], queryFn: fetchState, refetchInterval: 10_000 });
 
   if (error) return <div className="p-8 text-red-400">Failed to load state: {(error as Error).message}</div>;
-  const records = data?.records ?? [];
+  const records = (data?.records ?? []).filter((r: any) =>
+    r && r.metrics && typeof r.metrics.success_rate === "number" &&
+    (r.kind === undefined || r.kind === null || r.kind === "variant"));
   const run = data?.run ?? null;
   const best = bestOf(records);
 
@@ -61,10 +63,15 @@ export default function Dashboard() {
             Live loop state - auto-refresh 10s - updated {updated}
           </p>
         </div>
-        <Button variant="ghost" size="sm" className="shrink-0 mt-1"
-          onClick={async () => { await logout(); await qc.invalidateQueries({ queryKey: ["me"] }); nav("/login"); }}>
-          <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign out</span>
-        </Button>
+        <div className="flex items-center gap-1 shrink-0 mt-1">
+          <Link to="/cad">
+            <Button variant="ghost" size="sm"><Box className="h-4 w-4" /> <span className="hidden sm:inline">CAD</span></Button>
+          </Link>
+          <Button variant="ghost" size="sm"
+            onClick={async () => { await logout(); await qc.invalidateQueries({ queryKey: ["me"] }); nav("/login"); }}>
+            <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign out</span>
+          </Button>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">

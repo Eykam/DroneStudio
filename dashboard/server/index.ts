@@ -142,7 +142,113 @@ app.post("/api/ingest", async (c) => {
   return c.json({ ok: true, records: state.records.length });
 });
 
+
+// --- CAD / Mechanicals ------------------------------------------------------
+// Contract: dashboard/CAD_INGEST_API.md (read by the CAD researcher agent).
+type CadMetrics = {
+  mass_g?: number;
+  inertia?: { ixx?: number; iyy?: number; izz?: number };
+  printability?: Record<string, unknown>;
+  fea?: Record<string, unknown>;
+  [k: string]: unknown;
+};
+type CadDesign = {
+  id: string;
+  name?: string;
+  parent_id: string | null;
+  created_at: string;
+  source?: string;
+  metrics: CadMetrics;
+  notes?: string;
+  glb_bytes: number;
+};
+const CAD_DIR = `${DATA_DIR}/cad`;
+const CAD_FILE = `${CAD_DIR}/designs.json`;
+
+async function loadDesigns(): Promise<CadDesign[]> {
+  try {
+    const f = Bun.file(CAD_FILE);
+    if (await f.exists()) return await f.json();
+  } catch {}
+  return [];
+}
+
+async function saveDesigns(d: CadDesign[]) {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(CAD_DIR, { recursive: true });
+  const tmp = CAD_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify(d));
+  await fs.rename(tmp, CAD_FILE);
+}
+
+function safeId(id: string): string | null {
+  return /^[A-Za-z0-9._-]{1,80}$/.test(id) ? id : null;
+}
+
+app.post("/api/cad/designs", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let form: any;
+  try { form = await c.req.parseBody(); } catch { return c.json({ error: "expected multipart/form-data" }, 400); }
+  const file = form["file"];
+  if (!(file instanceof File)) return c.json({ error: "missing GLB in 'file' field" }, 400);
+  if (file.size > 64 * 1024 * 1024) return c.json({ error: "GLB over 64MB limit" }, 400);
+  let meta: any;
+  try { meta = JSON.parse(String(form["meta"] || "{}")); } catch { return c.json({ error: "bad JSON in 'meta' field" }, 400); }
+  const id = safeId(String(meta.id || ""));
+  if (!id) return c.json({ error: "meta.id required (A-Za-z0-9._-, max 80)" }, 400);
+  const designs = await loadDesigns();
+  const existing = designs.findIndex((d) => d.id === id);
+  const rec: CadDesign = {
+    id,
+    name: typeof meta.name === "string" ? meta.name : id,
+    parent_id: typeof meta.parent_id === "string" ? meta.parent_id : null,
+    created_at: typeof meta.created_at === "string" ? meta.created_at : new Date().toISOString(),
+    source: typeof meta.source === "string" ? meta.source : undefined,
+    metrics: (meta.metrics && typeof meta.metrics === "object") ? meta.metrics : {},
+    notes: typeof meta.notes === "string" ? meta.notes : undefined,
+    glb_bytes: file.size,
+  };
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(CAD_DIR, { recursive: true });
+  await Bun.write(`${CAD_DIR}/${id}.glb`, file);
+  if (existing >= 0) {
+    rec.created_at = designs[existing].created_at; // keep original timestamp on update
+    designs[existing] = rec;
+  } else {
+    designs.push(rec);
+  }
+  await saveDesigns(designs);
+  return c.json({ ok: true, id, glb_bytes: file.size });
+});
+
+const cadAuthed = async (c: any, next: any) => {
+  if (!(await checkSession(getCookie(c, "ds_session")))) return c.json({ error: "unauthorized" }, 401);
+  await next();
+};
+app.use("/api/cad/designs", cadAuthed);
+app.use("/api/cad/designs/:id/glb", cadAuthed);
+
+app.get("/api/cad/designs", async (c) => {
+  const designs = await loadDesigns();
+  return c.json({
+    designs: designs.map((d) => ({ ...d, glb_url: `/api/cad/designs/${d.id}/glb` })),
+    updated_at: new Date().toISOString(),
+  });
+});
+
+app.get("/api/cad/designs/:id/glb", async (c) => {
+  const id = safeId(c.req.param("id"));
+  if (!id) return c.json({ error: "bad id" }, 400);
+  const f = Bun.file(`${CAD_DIR}/${id}.glb`);
+  if (!(await f.exists())) return c.json({ error: "not found" }, 404);
+  return new Response(f, { headers: { "content-type": "model/gltf-binary", "cache-control": "no-store" } });
+});
+
 // --- authed reads ---------------------------------------------------------------
+
 app.use("/api/state", async (c, next) => {
   if (!(await checkSession(getCookie(c, "ds_session")))) return c.json({ error: "unauthorized" }, 401);
   await next();

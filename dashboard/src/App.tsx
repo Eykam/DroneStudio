@@ -1,7 +1,10 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+
+const Cad = lazy(() => import("./pages/Cad"));
 
 export default function App() {
   const me = useQuery({
@@ -17,6 +20,9 @@ export default function App() {
     <Routes>
       <Route path="/login" element={me.data ? <Navigate to="/" /> : <Login />} />
       <Route path="/" element={me.data ? <Dashboard /> : <Navigate to="/login" />} />
+      <Route path="/cad" element={me.data
+        ? <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Loading CAD viewer...</div>}><Cad /></Suspense>
+        : <Navigate to="/login" />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

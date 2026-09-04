@@ -31,3 +31,38 @@ export async function login(password: string): Promise<void> {
 export async function logout(): Promise<void> {
   await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
 }
+
+export type CadSnapshotRecord = {
+  id: string;
+  kind: "cad.chassis.snapshot";
+  parent_id?: string | null;
+  name?: string;
+  ts?: string;
+  glb_path?: string;
+  metrics?: Record<string, any>;
+  notes?: string;
+  [k: string]: unknown;
+};
+
+export type CadDesign = {
+  id: string;
+  name?: string;
+  parent_id: string | null;
+  created_at: string;
+  source?: string;
+  metrics: Record<string, any> & {
+    mass_g?: number;
+    inertia?: { ixx?: number; iyy?: number; izz?: number };
+    printability?: Record<string, unknown>;
+    fea?: Record<string, unknown>;
+  };
+  notes?: string;
+  glb_bytes: number;
+  glb_url: string;
+};
+
+export async function fetchCadDesigns(): Promise<{ designs: CadDesign[]; updated_at: string }> {
+  const r = await fetch("/api/cad/designs", { credentials: "same-origin" });
+  if (!r.ok) throw new Error(`cad fetch failed: ${r.status}`);
+  return r.json();
+}
