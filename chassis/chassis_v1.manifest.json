@@ -27,9 +27,12 @@
       "iyz": -4.0177523458715255e-21
     },
     "motor_inertia_add_kgm2": {
-      "ixx": 0.0014399999999999994,
-      "iyy": 0.0014399999999999994,
-      "izz": 0.002879999999999999
+      "ixx": 0.0013001467802111998,
+      "iyy": 0.0013001467802111998,
+      "izz": 0.0025919991604223995,
+      "ixy": 0.0,
+      "ixz": 0.0,
+      "iyz": 0.0
     },
     "note": "sim should compose frame_inertia + motor_inertia_add + payload (battery/stack/cameras) point masses"
   },
@@ -52,13 +55,13 @@
         1
       ],
       "direction": "cw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0288,
       "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15,
-      "kv": 2400,
+      "drag_ratio": 0.015,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     },
     {
       "id": 2,
@@ -73,13 +76,13 @@
         1
       ],
       "direction": "ccw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0288,
       "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15,
-      "kv": 2400,
+      "drag_ratio": 0.015,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     },
     {
       "id": 3,
@@ -94,13 +97,13 @@
         1
       ],
       "direction": "cw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0288,
       "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15,
-      "kv": 2400,
+      "drag_ratio": 0.015,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     },
     {
       "id": 4,
@@ -115,13 +118,13 @@
         1
       ],
       "direction": "ccw",
-      "mass_kg": 0.032,
+      "mass_kg": 0.0288,
       "max_thrust_n": 17.27,
       "time_constant_s": 0.04,
-      "drag_ratio": 0.15,
-      "kv": 2400,
+      "drag_ratio": 0.015,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, Amazon https://a.co/d/066TbARJ); EMAX RS2205 clone - specs via emaxmodel.com + oscarliang thrust stand"
     }
   ],
   "imu": {
