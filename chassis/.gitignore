@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.chassis_parent.py
+*_fea/
+*.msh
+*.frd
+*.dat
+*.sta
+*.cvg
+v*-g*.stl
+v*-g*.step
+v*-g*.glb
+v*-g*.manifest.json
+chassis_v*.stl
+chassis_v*.step
+chassis_v*.glb
+chassis_v*.manifest.json
