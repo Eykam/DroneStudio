@@ -89,8 +89,15 @@ def export(p: ChassisParams, out_base: str):
     # write STEP afterwards (export_step "Failed to write STEP file").
     b.export_step(part, out_base + ".step")
     cad_shapes = [sh for (sh, _, _) in placed_cad_items().values()]
+    # motors: 4x CAD at parametric motor positions (not in placement map)
+    if LIBRARY["motor"].step_path:
+        from components import cad_geometry
+        for i, (mx, my) in enumerate(p.motor_positions()):
+            g, _, _ = cad_geometry("motor#%d" % i, [mx * 0.001, my * 0.001, p.body_thickness_mm * 0.001])
+            if g is not None:
+                cad_shapes.append(g)
     if cad_shapes:
-        b.export_gltf(b.Compound(children=[part] + cad_shapes), out_base + ".glb", binary=True)
+        b.export_gltf(b.Compound(children=[part] + cad_shapes), out_base + ".glb", binary=True, linear_deflection=0.1, angular_deflection=0.5)
     else:
         b.export_gltf(part, out_base + ".glb", binary=True)  # mm -> m on write
     M, com, I_tot, items = compose_dynamics(part, p)
