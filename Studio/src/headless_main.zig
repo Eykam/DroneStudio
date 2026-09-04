@@ -69,6 +69,24 @@ const Dynamics = struct {
     motor_yaw_sign: [4]f32 = undefined, // -1 cw, +1 ccw (his prop_drag_signs)
     mix_inv: [4][4]f32 = undefined, // maps [T, taux, tauy, tauz] -> motor thrusts
     motor_lag_state: [4]f32 = .{ 0, 0, 0, 0 },
+    // Motor model v2: electromechanical per-motor prop-speed state
+    // (BLDC + ESC + battery). Constants below are ANCHORS from the manifest
+    // plus spec-sheet estimates pending bench sysid - see PROGRESS.md.
+    motor_v2: bool = false,
+    m2_omega: [4]f32 = .{ 0, 0, 0, 0 }, // prop speed, rad/s
+    m2_cmd_hist: [4][4]f32 = undefined, // ESC latency queue (rad/s commands)
+    m2_hist_idx: usize = 0,
+    m2_omega_max: f32 = 3560.0, // rad/s, ~2300KV * 14.8V (ESTIMATE)
+    m2_kf: f32 = 0.0, // thrust = kf*omega^2; set from max_thrust/omega_max^2
+    m2_kd_over_kf: f32 = 0.015, // drag/thrust ratio, m (typical 5in prop)
+    m2_ke: f32 = 0.00416, // V*s/rad = N*m/A, from omega_max at nom voltage
+    m2_rw: f32 = 0.06, // winding resistance, ohm (ESTIMATE)
+    m2_jr: f32 = 9.0e-6, // rotor+prop inertia, kg*m^2 (ESTIMATE)
+    m2_imax: f32 = 40.0, // ESC per-motor current limit, A (ESTIMATE)
+    m2_batt_r_int: f32 = 0.024, // 4S pack internal resistance, ohm (ESTIMATE)
+    m2_batt_cap_as: f32 = 4680.0, // charge, A*s (~1.3Ah, ASSUMPTION)
+    m2_soc: f32 = 1.0,
+    m2_esc_delay_ticks: usize = 1, // DShot latency in 500Hz ticks (ESTIMATE)
 };
 const GROUND_Y: f32 = 0.05;
 
@@ -236,6 +254,8 @@ const World = struct {
         self.filtered_rates = .{ 0, 0, 0 };
         self.filtered_thrust = 0;
         self.dyn.motor_lag_state = .{ 0, 0, 0, 0 };
+        self.dyn.m2_omega = .{ 0, 0, 0, 0 };
+        self.dyn.m2_soc = 1.0;
         self.steps = 0;
         self.collided = false;
         self.succeeded = false;
@@ -293,17 +313,74 @@ const World = struct {
             const min_t = @max(0.1, avg * 0.1); // his dynamic minimum
             var total: f32 = 0;
             var torque_b = [3]f32{ 0, 0, 0 };
-            inline for (0..4) |i| {
-                const tc = std.math.clamp(t[i], min_t, d.motor_max_thrust);
-                const lag_alpha = FAST_DT / (d.motor_lag_s + FAST_DT);
-                d.motor_lag_state[i] += lag_alpha * (tc - d.motor_lag_state[i]);
-                const ti = d.motor_lag_state[i];
-                total += ti;
-                const mp = d.motor_pos[i];
-                // force = ti * +Y at mp; torque_arm = mp x (ti*Y) = ti*(-mp.z, 0, mp.x)
-                torque_b[0] += ti * -mp[2];
-                torque_b[2] += ti * mp[0];
-                torque_b[1] += ti * d.motor_drag_ratio * d.motor_yaw_sign[i]; // ktau yaw
+            if (d.motor_v2) {
+                // Electromechanical path: cmd thrust -> omega_cmd (invert
+                // kf*omega^2) -> ESC latency -> DC motor + prop inertia ->
+                // thrust/drag from ACTUAL omega^2. Battery: 4S LiPo with
+                // SoC-dependent open-circuit voltage and I*R sag.
+                const kf = d.m2_kf;
+                const kd = kf * d.m2_kd_over_kf;
+                const v_oc = 12.0 + 4.8 * d.m2_soc; // 4S: 12.0 empty .. 16.8 full
+                var i_total: f32 = 0;
+                // two-half-step solve so sag sees this tick's current
+                var currents: [4]f32 = undefined;
+                inline for (0..4) |i| {
+                    const tc = std.math.clamp(t[i], min_t, d.motor_max_thrust);
+                    var oc = @sqrt(tc / kf);
+                    // ESC latency: push through the delay queue
+                    d.m2_cmd_hist[i][d.m2_hist_idx % 4] = oc;
+                    oc = d.m2_cmd_hist[i][(d.m2_hist_idx + 4 - d.m2_esc_delay_ticks) % 4];
+                    currents[i] = oc; // stash cmd temporarily
+                }
+                d.m2_hist_idx += 1;
+                inline for (0..4) |i| {
+                    const omega_cmd = @min(currents[i], d.m2_omega_max);
+                    const duty = omega_cmd / d.m2_omega_max;
+                    const v_batt = v_oc; // first pass: sag applied below
+                    var cur = (duty * v_batt - d.m2_ke * d.m2_omega[i]) / d.m2_rw;
+                    cur = std.math.clamp(cur, 0.0, d.m2_imax);
+                    currents[i] = cur;
+                    i_total += cur;
+                }
+                const v_batt = @max(9.0, v_oc - i_total * d.m2_batt_r_int);
+                inline for (0..4) |i| {
+                    const omega_cmd = @min(@sqrt(std.math.clamp(t[i], min_t, d.motor_max_thrust) / kf), d.m2_omega_max);
+                    _ = omega_cmd;
+                    var cur = currents[i];
+                    // recompute with sagged bus
+                    const duty = @min(1.0, @sqrt(std.math.clamp(t[i], min_t, d.motor_max_thrust) / kf) / d.m2_omega_max);
+                    cur = std.math.clamp((duty * v_batt - d.m2_ke * d.m2_omega[i]) / d.m2_rw, 0.0, d.m2_imax);
+                    const tau_m = d.m2_ke * cur;
+                    const dw = (tau_m - kd * d.m2_omega[i] * d.m2_omega[i]) / d.m2_jr;
+                    d.m2_omega[i] = @max(0.0, d.m2_omega[i] + dw * FAST_DT);
+                    const ti = kf * d.m2_omega[i] * d.m2_omega[i];
+                    total += ti;
+                    const mp = d.motor_pos[i];
+                    torque_b[0] += ti * -mp[2];
+                    torque_b[2] += ti * mp[0];
+                    torque_b[1] += kd * d.m2_omega[i] * d.m2_omega[i] * d.motor_yaw_sign[i];
+                }
+                d.m2_soc = @max(0.0, d.m2_soc - i_total * FAST_DT / d.m2_batt_cap_as);
+                // Rotor gyroscopic reaction: -Omega_body x (0, L_r, 0)
+                var l_r: f32 = 0;
+                inline for (0..4) |i| l_r += d.m2_jr * d.m2_omega[i] * d.motor_yaw_sign[i];
+                const om = self.bodyOmega();
+                // cross(om, [0, l_r, 0]) = (-om.z*l_r, 0, om.x*l_r); reaction on body = -that
+                torque_b[0] += om.z() * l_r;
+                torque_b[2] += -om.x() * l_r;
+            } else {
+                inline for (0..4) |i| {
+                    const tc = std.math.clamp(t[i], min_t, d.motor_max_thrust);
+                    const lag_alpha = FAST_DT / (d.motor_lag_s + FAST_DT);
+                    d.motor_lag_state[i] += lag_alpha * (tc - d.motor_lag_state[i]);
+                    const ti = d.motor_lag_state[i];
+                    total += ti;
+                    const mp = d.motor_pos[i];
+                    // force = ti * +Y at mp; torque_arm = mp x (ti*Y) = ti*(-mp.z, 0, mp.x)
+                    torque_b[0] += ti * -mp[2];
+                    torque_b[2] += ti * mp[0];
+                    torque_b[1] += ti * d.motor_drag_ratio * d.motor_yaw_sign[i]; // ktau yaw
+                }
             }
             const thrust_w = Vec3.init(0, total, 0).rotate_by_quaternion(q);
             const torque_w = Vec3.from_array(torque_b).rotate_by_quaternion(q);
@@ -633,6 +710,23 @@ pub fn main() !void {
                 }
                 world.dyn.mix_inv = invert4(A);
                 world.dyn.motor_mode = true;
+                // m2_* defaults: World.init uses create() (undefined memory),
+                // so struct field defaults never applied. Assign explicitly.
+                world.dyn.motor_v2 = false;
+                world.dyn.m2_omega = .{ 0, 0, 0, 0 };
+                world.dyn.m2_hist_idx = 0;
+                world.dyn.m2_omega_max = 3560.0; // rad/s, ~2300KV * 14.8V (ESTIMATE)
+                world.dyn.m2_kd_over_kf = 0.015; // drag/thrust ratio, m (typical 5in prop)
+                world.dyn.m2_ke = 0.00416; // V*s/rad = N*m/A, from omega_max at nom voltage
+                world.dyn.m2_rw = 0.06; // winding resistance, ohm (ESTIMATE)
+                world.dyn.m2_jr = 9.0e-6; // rotor+prop inertia, kg*m^2 (ESTIMATE)
+                world.dyn.m2_imax = 40.0; // ESC per-motor current limit, A (ESTIMATE)
+                world.dyn.m2_batt_r_int = 0.024; // 4S pack internal resistance, ohm (ESTIMATE)
+                world.dyn.m2_batt_cap_as = 4680.0; // charge, A*s (~1.3Ah, ASSUMPTION)
+                world.dyn.m2_soc = 1.0;
+                world.dyn.m2_esc_delay_ticks = 1; // DShot latency in 500Hz ticks (ESTIMATE)
+                world.dyn.m2_kf = world.dyn.motor_max_thrust / (world.dyn.m2_omega_max * world.dyn.m2_omega_max);
+                inline for (0..4) |i| world.dyn.m2_cmd_hist[i] = .{ 0, 0, 0, 0 };
             }
             const n = @min(m.name.len, world.dyn_name_buf.len);
             @memcpy(world.dyn_name_buf[0..n], m.name[0..n]);
@@ -641,6 +735,11 @@ pub fn main() !void {
             const cross_max = @max(@abs(I.ixy), @max(@abs(I.ixz), @abs(I.iyz)));
             const diag_min = @min(I.ixx, @min(I.iyy, I.izz));
             try stdout.print("{{\"ok\":true,\"dynamics\":\"{s}\",\"mass\":{d:.4},\"inertia\":[{d:.6},{d:.6},{d:.6}],\"cross_term_ratio\":{d:.4}}}\n", .{ m.name, world.dyn.mass, world.dyn.inertia[0], world.dyn.inertia[1], world.dyn.inertia[2], cross_max / diag_min });
+            try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "motor_v2")) {
+            const on_v = root.object.get("on") orelse continue;
+            world.dyn.motor_v2 = (on_v == .bool and on_v.bool);
+            try stdout.print("{{\"ok\":true,\"motor_v2\":{}}}\n", .{world.dyn.motor_v2});
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;

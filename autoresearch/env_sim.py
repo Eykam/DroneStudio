@@ -33,6 +33,8 @@ class SimBinaryEnv(QuadNavEnv):
                 text=True, bufsize=1)
             if self.dynamics:
                 self._call({"cmd": "set_dynamics", "path": self.dynamics})
+            if os.environ.get("AUTORESEARCH_MOTOR_V2"):
+                self._call({"cmd": "motor_v2", "on": True})
             self._call({"cmd": "ping"})
 
     def _call(self, msg):
