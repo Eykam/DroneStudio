@@ -92,6 +92,8 @@ const GROUND_Y: f32 = 0.05;
 
 const Obstacle = struct { center: Vec3, radius: f32 };
 
+const Scenario = enum { goto, hover_hold, land };
+
 const Scene = struct {
     spawn: Vec3,
     goal: Vec3,
@@ -99,6 +101,12 @@ const Scene = struct {
     extent: f32 = 40.0,
     max_steps: u32 = 250,
     dynamics_noise: f32 = 0.05,
+    // scenario sampler (all default to today's goto behavior):
+    success_radius: f32 = 2.0, // was the GOAL_RADIUS const
+    scenario: Scenario = .goto,
+    hold_s: f32 = 4.0, // hover_hold: seconds inside radius to succeed
+    max_touchdown_vs: f32 = 0.5, // land: max |vertical speed| at touchdown, m/s
+    shaping_v2: bool = false, // small smooth-flight penalty, all scenarios
 };
 
 fn vecFromJson(v: std.json.Value) !Vec3 {
@@ -172,6 +180,8 @@ const World = struct {
     collided: bool = false,
     succeeded: bool = false,
     done: bool = false,
+    obs_v2: bool = false, // 19-dim yaw-relative obs (default off: 15-dim v1)
+    hold_steps: u32 = 0, // hover_hold consecutive in-radius policy steps
     last_torque: [3]f32 = .{ 0, 0, 0 }, // PID torque output, body frame (telemetry)
 
     fn init(alloc: std.mem.Allocator) !*World {
@@ -257,6 +267,7 @@ const World = struct {
         self.dyn.m2_omega = .{ 0, 0, 0, 0 };
         self.dyn.m2_soc = 1.0;
         self.steps = 0;
+        self.hold_steps = 0;
         self.collided = false;
         self.succeeded = false;
         self.done = false;
@@ -430,12 +441,47 @@ const World = struct {
 
         const pos = self.bodyPos();
         const dist = self.scene.goal.sub(pos).length();
+        const scenario = self.scene.scenario;
         var reward = (self.prev_dist - dist) - 0.01;
         self.prev_dist = dist;
+        if (self.scene.shaping_v2) {
+            reward -= 0.005 * self.bodyOmega().length() / 10.0;
+        }
+        // hover_hold: inside the radius the progress term is replaced by a
+        // drift penalty and the hold counter runs; exiting resets it.
+        if (scenario == .hover_hold and !self.done) {
+            if (dist < self.scene.success_radius) {
+                reward = -0.01 - 0.02 * self.bodyVel().length();
+                self.hold_steps += 1;
+                const need: u32 = @intFromFloat(self.scene.hold_s * 20.0); // 20 policy Hz
+                if (self.hold_steps >= need) {
+                    reward += 10.0;
+                    self.succeeded = true;
+                    self.done = true;
+                }
+            } else {
+                self.hold_steps = 0;
+            }
+        }
 
-        if (pos.y() < GROUND_Y) {
-            reward -= 5.0;
-            self.collided = true;
+        if (pos.y() < GROUND_Y and !self.done) {
+            if (scenario == .land) {
+                // touchdown: horizontal dist to the pad + vertical speed decide
+                const ddx = self.scene.goal.x() - pos.x();
+                const ddz = self.scene.goal.z() - pos.z();
+                const dist_xz = @sqrt(ddx * ddx + ddz * ddz);
+                const vs = @abs(self.bodyVel().y());
+                if (dist_xz <= self.scene.success_radius and vs <= self.scene.max_touchdown_vs) {
+                    reward += 10.0;
+                    self.succeeded = true;
+                } else {
+                    reward -= 5.0;
+                    self.collided = true;
+                }
+            } else {
+                reward -= 5.0;
+                self.collided = true;
+            }
             self.done = true;
         }
         if (!self.done) {
@@ -448,10 +494,22 @@ const World = struct {
                 }
             }
         }
-        if (!self.done and dist < GOAL_RADIUS) {
+        // in-air radius entry succeeds only for goto (land succeeds at
+        // touchdown, hover_hold on completing the hold)
+        if (!self.done and scenario == .goto and dist < self.scene.success_radius) {
             reward += 10.0;
             self.succeeded = true;
             self.done = true;
+        }
+        // land approach shaping: below 1m near the pad, penalize horizontal
+        // speed (discourages slamming in sideways)
+        if (!self.done and scenario == .land and pos.y() < 1.0) {
+            const ddx = self.scene.goal.x() - pos.x();
+            const ddz = self.scene.goal.z() - pos.z();
+            if (@sqrt(ddx * ddx + ddz * ddz) < 2.0 * self.scene.success_radius) {
+                const vv = self.bodyVel();
+                reward -= 0.01 * @sqrt(vv.x() * vv.x() + vv.z() * vv.z());
+            }
         }
         if (!self.done and self.steps >= self.scene.max_steps) {
             self.done = true;
@@ -496,12 +554,75 @@ const World = struct {
             rel_obs.x(),  rel_obs.y(),  rel_obs.z(),
         };
     }
+
+    /// Rotate a world-frame vector into the yaw frame: level frame whose x
+    /// axis is the body x axis projected to the world xz plane. At spawn
+    /// (identity rotation) this is the identity, so the teacher's implicit
+    /// yaw=0 world<->body mapping is exact in this frame at any heading.
+    fn yawFrame(v: Vec3, yaw: f32) Vec3 {
+        const c = @cos(yaw);
+        const s = @sin(yaw);
+        return Vec3.init(v.x() * c - v.z() * s, v.y(), v.x() * s + v.z() * c);
+    }
+
+    /// Observation v2: 19 floats. rel_goal, velocity and the obstacle vector
+    /// are yaw-frame (heading-relative) so nav is yaw-invariant; g_body and
+    /// rates are unchanged; then scenario one-hot(3) + success_radius/extent.
+    fn obsV2(self: *World) [19]f32 {
+        const pos = self.bodyPos();
+        const vel = self.bodyVel();
+        const omega = self.bodyOmega();
+        const q = self.bodyQuat();
+        const q_conj = q.conjugate();
+        const fwd = Vec3.init(1, 0, 0).rotate_by_quaternion(q);
+        const yaw = std.math.atan2(-fwd.z(), fwd.x());
+
+        const extent = @max(self.scene.extent, 1.0);
+        const rel_goal = yawFrame(self.scene.goal.sub(pos), yaw).scale(1.0 / extent);
+        const v = yawFrame(vel, yaw).scale(1.0 / 10.0);
+        const g_body = Vec3.init(0, -9.81, 0).rotate_by_quaternion(q_conj).scale(1.0 / 9.81);
+        const rates = omega.scale(1.0 / 10.0);
+        var rel_obs = Vec3.zero();
+        if (self.scene.obstacles.len > 0) {
+            var best_d: f32 = std.math.inf(f32);
+            var best = Vec3.zero();
+            for (self.scene.obstacles) |ob| {
+                const dvec = ob.center.sub(pos);
+                const d = dvec.length();
+                if (d < best_d) {
+                    best_d = d;
+                    best = dvec;
+                }
+            }
+            rel_obs = yawFrame(best, yaw).scale(1.0 / extent);
+        }
+        const one_hot: [3]f32 = switch (self.scene.scenario) {
+            .goto => .{ 1, 0, 0 },
+            .hover_hold => .{ 0, 1, 0 },
+            .land => .{ 0, 0, 1 },
+        };
+        return .{
+            rel_goal.x(), rel_goal.y(), rel_goal.z(),
+            v.x(),        v.y(),        v.z(),
+            g_body.x(),   g_body.y(),   g_body.z(),
+            rates.x(),    rates.y(),    rates.z(),
+            rel_obs.x(),  rel_obs.y(),  rel_obs.z(),
+            one_hot[0],   one_hot[1],   one_hot[2],
+            self.scene.success_radius / extent,
+        };
+    }
 };
 
 fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info: bool) !void {
-    const o = w.obs();
-    try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
-    for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
+    if (w.obs_v2) {
+        const o = w.obsV2();
+        try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
+        for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
+    } else {
+        const o = w.obs();
+        try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
+        for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
+    }
     try writer.print("],\"reward\":{d:.6},\"done\":{}", .{ reward, done });
     if (with_info) {
         const p3 = w.bodyPos();
@@ -509,8 +630,8 @@ fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info:
         const v3 = w.bodyVel();
         // telemetry powers the dashboard live stream (streamer reads
         // info.pos/quat/vel per policy step)
-        try writer.print(",\"info\":{{\"collided\":{},\"succeeded\":{},\"steps\":{d},\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.4},{d:.4},{d:.4},{d:.4}],\"vel\":[{d:.4},{d:.4},{d:.4}]}}", .{
-            w.collided, w.succeeded, w.steps,
+        try writer.print(",\"info\":{{\"collided\":{},\"succeeded\":{},\"steps\":{d},\"hold_steps\":{d},\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.4},{d:.4},{d:.4},{d:.4}],\"vel\":[{d:.4},{d:.4},{d:.4}]}}", .{
+            w.collided, w.succeeded, w.steps, w.hold_steps,
             p3.x(), p3.y(), p3.z(),
             q4.data[0], q4.data[1], q4.data[2], q4.data[3],
             v3.x(), v3.y(), v3.z(),
@@ -579,6 +700,16 @@ pub fn main() !void {
             if (scene_v.object.get("extent")) |e| scene.extent = f32FromJson(e, 40.0);
             if (scene_v.object.get("max_steps")) |m| scene.max_steps = @intFromFloat(f32FromJson(m, 250));
             if (scene_v.object.get("dynamics_noise")) |n| scene.dynamics_noise = f32FromJson(n, 0.05);
+            if (scene_v.object.get("success_radius")) |r| scene.success_radius = f32FromJson(r, 2.0);
+            if (scene_v.object.get("hold_s")) |h| scene.hold_s = f32FromJson(h, 4.0);
+            if (scene_v.object.get("max_touchdown_vs")) |tv| scene.max_touchdown_vs = f32FromJson(tv, 0.5);
+            if (scene_v.object.get("shaping_v2")) |sv| scene.shaping_v2 = (sv == .bool and sv.bool);
+            if (scene_v.object.get("scenario")) |sc| {
+                if (sc == .string) {
+                    if (std.mem.eql(u8, sc.string, "hover_hold")) scene.scenario = .hover_hold;
+                    if (std.mem.eql(u8, sc.string, "land")) scene.scenario = .land;
+                }
+            }
             if (scene_v.object.get("obstacles")) |obs_v| {
                 const arr = obs_v.array;
                 _ = scene_arena.reset(.retain_capacity);
@@ -735,6 +866,11 @@ pub fn main() !void {
             const on_v = root.object.get("on") orelse continue;
             world.dyn.motor_v2 = (on_v == .bool and on_v.bool);
             try stdout.print("{{\"ok\":true,\"motor_v2\":{}}}\n", .{world.dyn.motor_v2});
+            try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "obs_v2")) {
+            const on_v = root.object.get("on") orelse continue;
+            world.obs_v2 = (on_v == .bool and on_v.bool);
+            try stdout.print("{{\"ok\":true,\"obs_v2\":{}}}\n", .{world.obs_v2});
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;

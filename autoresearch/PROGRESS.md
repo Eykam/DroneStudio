@@ -70,3 +70,20 @@ Running log, newest last. All work on branch `auto-researcher`.
 20 gens x 6 children, multi-elite loop, fully ChatGPT-driven. At gen 9:
 best succ 0.17, diversity recovered to 0.94 after stagnation restart.
 Completion -> report commit + PPO-vs-CEM on best variant (armed wake).
+
+## 2026-09-04 obs v2 (yaw-relative) + scenario sampler, sim side
+
+- headless_main.zig: scenario params (`success_radius`, `scenario`,
+  `hold_s`, `max_touchdown_vs`, `shaping_v2`) with goto-preserving
+  defaults; hover_hold (4s hold, drift shaping) and land (touchdown
+  classification: horizontal pad dist + |vertical speed|) scenarios;
+  `obs_v2` cmd: 19-dim obs with rel_goal/vel/obstacle rotated into the
+  yaw frame + scenario one-hot + success_radius/extent.
+- WHY yaw-frame: obs v1 was yaw-blind (world-frame rel_goal/vel/obstacle,
+  yaw-invariant g_body) while spawn yaw is always identity and the
+  teacher implicitly assumes yaw=0; ktau/gyro yaw drift silently broke
+  the frame mapping mid-flight (user-observed "nav wonky, always points
+  one way"). In the yaw frame the teacher's mapping is exact at any
+  heading and the policy gets working nav regardless of yaw.
+- Parity: bit-identical consumed trajectories vs the previous binary
+  under goto defaults. Land/hover/obs_v2 functionally validated.
