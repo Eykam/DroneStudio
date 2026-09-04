@@ -13,17 +13,9 @@ from chassis import ChassisParams, build_chassis
 RHO_PETG = 1240e-9  # kg/mm^3
 MOTOR = {"max_thrust_n": 10.0, "time_constant_s": 0.04, "drag_ratio": 0.15}  # sim FlightController defaults
 MOTOR_DIRS = ["cw", "ccw", "cw", "ccw"]  # sim quad-X order M1..M4
-MOTOR_MASS_KG = 0.032
+from components import LIBRARY, placed_items
+MOTOR_MASS_KG = LIBRARY["motor"].mass_g / 1000.0  # 33.4 g EMAX Eco II 2207
 PROP_DIA_M = 0.127  # 5 inch
-
-# payload model: name, mass_kg, position relative to frame origin (m), approx size (m) for self-inertia
-def payload_items(p: ChassisParams):
-    z = p.body_thickness_mm * 0.001
-    return [
-        {"name": "fc_esc_stack", "mass_kg": 0.090, "position_m": [0.0, 0.0, z + 0.015], "size_m": [0.036, 0.036, 0.020]},
-        {"name": "battery_4s_1300", "mass_kg": 0.180, "position_m": [0.0, 0.0, z + 0.045], "size_m": [0.075, 0.035, 0.035]},
-        {"name": "stereo_camera_pair", "mass_kg": 0.060, "position_m": [0.040, 0.0, z + 0.010], "size_m": [0.060, 0.025, 0.025]},
-    ]
 
 def _solid_inertia_box(m, sx, sy, sz):
     return np.diag([m*(sy*sy+sz*sz)/12, m*(sx*sx+sz*sz)/12, m*(sx*sx+sy*sy)/12])
@@ -40,9 +32,14 @@ def compose_dynamics(part, p: ChassisParams):
         pos = np.array([mx*0.001, my*0.001, p.body_thickness_mm*0.001])
         items.append({"name": "motor", "mass_kg": MOTOR_MASS_KG, "com": pos,
                       "I_self": _solid_inertia_box(MOTOR_MASS_KG, 0.028, 0.028, 0.030)})
-    for it in payload_items(p):
-        items.append({"name": it["name"], "mass_kg": it["mass_kg"], "com": np.array(it["position_m"]),
-                      "I_self": _solid_inertia_box(it["mass_kg"], *it["size_m"])})
+    for it in placed_items():
+        if it["shape"] == "cylinder-z":
+            r_, h_ = it["size_m"][0] / 2, it["size_m"][2]
+            I_self = np.diag([it["mass_kg"]*(3*r_*r_+h_*h_)/12]*2 + [it["mass_kg"]*r_*r_/2])
+        else:
+            I_self = _solid_inertia_box(it["mass_kg"], *it["size_m"])
+        items.append({"name": it["component"], "mass_kg": it["mass_kg"], "com": np.array(it["position_m"]),
+                      "I_self": I_self, "source": it.get("source"), "mount": it.get("mount")})
     M = sum(i["mass_kg"] for i in items)
     com = sum(i["mass_kg"]*i["com"] for i in items) / M
     I = np.zeros((3, 3))
@@ -100,8 +97,9 @@ def export(p: ChassisParams, out_base: str):
             "inertia_about_com_kgm2": {"ixx": float(I_tot[0][0]), "iyy": float(I_tot[1][1]), "izz": float(I_tot[2][2]),
                                         "ixy": float(I_tot[0][1]), "ixz": float(I_tot[0][2]), "iyz": float(I_tot[1][2])},
             "composition": [{"name": i["name"], "mass_kg": round(i["mass_kg"], 6),
-                             "com_m": [round(float(x), 6) for x in i["com"]]} for i in items],
-            "note": "fully composed rigid body: frame + 4 motors + payload. Sim should use these directly.",
+                             "com_m": [round(float(x), 6) for x in i["com"]],
+                             **({"source": i["source"], "mount": i["mount"]} if i.get("source") else {})} for i in items],
+            "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly.",
         },
         "inertial": {  # frame-only, kept for reference/debug
             "frame_mass_kg": round(frame_mass, 6),
