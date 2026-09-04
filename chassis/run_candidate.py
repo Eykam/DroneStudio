@@ -35,7 +35,8 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
         score = ev.score(checks)
     rec = sn.make_record(variant_id, parent_id, generation, dataclasses.asdict(params), checks, score, props, fea=fea_result)
     d = sn.save_snapshot(rec, out_base)
-    sn.publish(rec, d)
+    if os.environ.get("SKIP_PUBLISH") != "1":
+        sn.publish(rec, d)
     print(f"variant={variant_id} score={score:.3f} snapshot={d}")
     for n, p, det, _ in checks:
         print(f"  [{'PASS' if p else 'FAIL'}] {n}: {det}")
@@ -48,7 +49,15 @@ if __name__ == "__main__":
     ap.add_argument("--parent", default=None)
     ap.add_argument("--gen", type=int, default=0)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--source", default=None,
+                    help="path to an alternative chassis.py (multi-candidate gens)")
     args = ap.parse_args()
+    if args.source:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("chassis_alt", args.source)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ChassisParams, build_chassis = mod.ChassisParams, mod.build_chassis
     out = args.out or os.path.join(os.getcwd(), args.variant)
     rec = run(args.variant, args.parent, args.gen, ChassisParams(), out)
     print("RESULT_JSON " + json.dumps({"variant": args.variant, "score": rec["score"], "parent": args.parent}))

@@ -9,14 +9,15 @@ import progress
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(HERE, "loop_state.json")
 ARCHIVE = os.path.join(HERE, "archive.jsonl")
+LETTERS = ("a", "b", "c")  # candidates per generation
 
 PROMPT_TEMPLATE = """You are the mutation brain of an auto-researcher optimizing a 3D-printed 5-inch FPV quad chassis.
 
 Context:
 - chassis.py in this directory holds the parametric model (build123d). ChassisParams + build_chassis(p) -> Part MUST keep their signatures.
 - evaluate.py scores candidates: watertight, single body, FDM overhang, wall thickness, prop clearance, hover margin, CONTAINMENT, and FEA.
-- CONTAINMENT (hard gate): every placed component (stack, battery, Pi, cameras, GPS, IMU) must sit FULLY INSIDE the frame envelope plus 2mm service clearance. Current designs FAIL this - the stack pokes ~11mm above the deck, battery ~55mm, Pi ~16mm, GPS ~27mm. The frame must grow an enclosed fuselage/deck cavity tall enough to swallow them (target interior Z >= 40mm over the deck area) OR recess bays; components.py placement() says where they sit (placement.json may be edited to move them - x/y/z in meters, z = component bottom). Enclose like DJI/Avata: battery and stack INSIDE the body, GPS in a rear fin/perch cavity, camera behind the nose shell with only the lens aperture forward.
-- FEA (gmsh+CalculiX, all must pass): hover_max (4x 11.0N up), crash (3x), torsion (diagonal pairs +/-1.5x yaw torque), modal (first eigenmode >= 120 Hz). Directional allowables (FFF anisotropy): vertical-load cases 0.6*0.55*yield = 16.5 MPa, torsion 0.6*0.8*yield = 24 MPa; arm-tip displacement < 5 mm.
+- CONTAINMENT (hard gate): every placed component (stack, battery, Pi, cameras, GPS, IMU) must sit FULLY INSIDE the frame envelope plus 2mm service clearance. The frame must keep an enclosed fuselage/deck cavity tall enough to swallow them OR recess bays; components.py placement() says where they sit (placement.json may be edited to move them - x/y/z in meters, z = component bottom). Enclose like DJI/Avata: battery and stack INSIDE the body, GPS in a rear fin/perch cavity, camera behind the nose shell with only the lens aperture forward.
+- FEA (gmsh+CalculiX, all must pass): hover_max (4x 11.0N up), crash (3x), torsion (diagonal pairs +/-1.5x yaw torque), pullout (single motor pad 1x), cartwheel (2x lateral side impact on one motor pad), battery_eject (30g x 0.18kg forward at the tray), modal (first eigenmode >= 120 Hz), buckling (factor >= 2.0), fatigue screen. Directional allowables (FFF anisotropy): vertical-load cases 0.6*0.55*yield = 16.5 MPa, torsion 0.6*0.8*yield = 24 MPa; arm-tip displacement < 5 mm.
 - The sim contract (DroneStudio): quad-X, motor arm length 0.15 m, 11.0 N/motor max (AKK RS2205 2300KV bench peak on 5045-class props, 4S). Do NOT change arm_length_mm or motor hole pattern; the sim depends on them. Everything else is fair game: arm cross-section, ribs, fillets, plate shapes, cutouts, material distribution.
 - DESIGN LANGUAGE: read INSPIRATION.md in this directory first. The user wants the chassis to move beyond flat-plate freestyle frames toward DJI/Anduril-style form factors - faired enclosed body, swept/tapered arms with filleted roots, closed arm sections, recessed battery bay - while staying single-body, printable, and serviceable.
 - Print process: FDM, PETG (rho 1240 kg/m3, E 2.1 GPa, yield 50 MPa), no supports, flat on the plate.
@@ -25,9 +26,21 @@ Current best: variant {best_variant}, score {best_score:.3f}
 Its evaluation failures: {failures}
 History of tried mutations and scores: {history}
 
-Your job: edit chassis.py and optionally placement.json (component placement) to make the chassis pass ALL checks with the lowest frame mass. Stiffness is the binding constraint: add ribs/depth/taper rather than uniform thickness where you can. Push the DESIGN LANGUAGE too: each generation should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md (faired shell, tapered swept arms, closed sections, recessed bays) - incremental but real steps, never just a parameter nudge. Keep it printable (no support-requiring overhangs, walls >= 1.2 mm).
-After editing, verify the model still builds: run `python3 -c "from chassis import ChassisParams, build_chassis; p=ChassisParams(); part=build_chassis(p); print(round(part.volume,1))"`.
-End by printing one line: MUTATION_SUMMARY <one sentence describing what you changed>."""
+Your job: propose THREE DISTINCT candidate mutations of the current design, each aimed at passing ALL checks with the lowest frame mass. Stiffness is the binding constraint: add ribs/depth/taper rather than uniform thickness where you can. Keep every candidate printable (no support-requiring overhangs, walls >= 1.2 mm).
+Write each candidate as a COMPLETE drop-in replacement of chassis.py (same interface: ChassisParams dataclass with the same constructor, build_chassis(p) -> Part) at these exact paths:
+  /tmp/candidates/{base_variant}a.py
+  /tmp/candidates/{base_variant}b.py
+  /tmp/candidates/{base_variant}c.py
+Do NOT edit chassis.py itself - treat it as the read-only reference implementation of the current best. Read it first.
+The three candidates must take genuinely different design directions (e.g. one reworks the fuselage/shell strategy, one reworks arm sections/roots, one attacks mass distribution via bays and cutouts) - NOT three parameter nudges of one idea. Each should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md - incremental but real steps.
+placement.json may be edited to move components (the edit is shared by all three candidates; x/y/z in meters, z = component bottom).
+Verify EACH candidate builds before finishing. For each file F in /tmp/candidates/{base_variant}a.py /tmp/candidates/{base_variant}b.py /tmp/candidates/{base_variant}c.py run:
+  python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(sys.argv[1],sys.argv[2]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); p=m.ChassisParams(); part=m.build_chassis(p); print(round(part.volume,1))" F F
+(a file named e.g. v18-g17a.py is not importable as a module name - the importlib form above is required)
+End by printing three lines:
+MUTATION_SUMMARY_A <one sentence describing candidate a>
+MUTATION_SUMMARY_B <one sentence describing candidate b>
+MUTATION_SUMMARY_C <one sentence describing candidate c>"""
 
 def kill_codex():
     for pid in os.listdir("/proc"):
@@ -54,10 +67,9 @@ def save_state(s):
 def run_generation():
     st = load_state()
     gen = st["generation"] + 1
-    variant = f"v{gen+1}-g{gen}"
+    base = f"v{gen+1}-g{gen}"
     parent = st["best_variant"]
-    # snapshot parent code for rollback
-    parent_backup = f"/tmp/chassis_parent_{variant}.py"
+    parent_backup = f"/tmp/chassis_parent_{base}.py"
     shutil.copy(os.path.join(HERE, "chassis.py"), parent_backup)
     parent_metrics = os.path.join(HERE, "snapshots", parent, "metrics.json")
     failures = "unknown"
@@ -65,78 +77,112 @@ def run_generation():
         pm = json.load(open(parent_metrics))
         failures = json.dumps([c for c in pm["evaluator"] if not c["passed"]], indent=2)
     hist = "; ".join(f"{h['variant']}={h['score']:.3f} ({h.get('summary','')[:60]})" for h in st["history"][-8:]) or "none yet"
-    prompt = PROMPT_TEMPLATE.format(best_variant=parent, best_score=st["best_score"], failures=failures, history=hist)
-    progress.set_stage("codex editing", f"gen {gen}: codex mutating {parent} -> {variant}", design_id=f"cad-chassis-{variant}")
-    print(f"[gen {gen}] asking Codex for mutation of {parent}...", flush=True)
+    os.makedirs("/tmp/candidates", exist_ok=True)
+    for L in LETTERS:
+        p = f"/tmp/candidates/{base}{L}.py"
+        if os.path.exists(p):
+            os.remove(p)
+    prompt = PROMPT_TEMPLATE.format(best_variant=parent, best_score=st["best_score"],
+                                    failures=failures, history=hist, base_variant=base)
+    progress.set_stage("codex editing", f"gen {gen}: codex drafting 3 candidates from {parent}", design_id=f"cad-chassis-{base}")
+    print(f"[gen {gen}] asking Codex for 3 candidate mutations of {parent}...", flush=True)
     try:
         r = subprocess.run(["codex", "exec", "-m", "gpt-6-astra", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt],
                            capture_output=True, text=True, cwd=HERE, timeout=3600)
     except subprocess.TimeoutExpired:
         kill_codex()  # subprocess only kills the direct child; node orphans linger
         print(f"[gen {gen}] codex timed out after 3600s; skipping generation", flush=True)
-        progress.set_stage("codex timeout", f"gen {gen}: codex timed out, skipping", design_id=f"cad-chassis-{variant}")
+        progress.set_stage("codex timeout", f"gen {gen}: codex timed out, skipping", design_id=f"cad-chassis-{base}")
         return None
-    summary = ""
+    summaries = {}
     if os.path.exists("/tmp/codex_last.md"):
         for line in open("/tmp/codex_last.md"):
-            if "MUTATION_SUMMARY" in line:
-                summary = line.split("MUTATION_SUMMARY", 1)[1].strip()
+            for L in LETTERS:
+                tag = "MUTATION_SUMMARY_" + L.upper()
+                if tag in line:
+                    summaries[L] = line.split(tag, 1)[1].strip()
     if r.returncode != 0:
         print(f"[gen {gen}] codex failed: {r.stderr[-300:]}", flush=True)
         return None
-    # evaluate candidate
-    progress.set_stage("evaluating", f"gen {gen}: building + evaluating {variant}")
-    try:
-        r2 = subprocess.run([sys.executable, "-u", "run_candidate.py", "--variant", variant, "--parent", parent, "--gen", str(gen)],
-                            capture_output=True, text=True, cwd=HERE, env={**os.environ, "RUN_FEA": "1"}, timeout=1800)
-    except subprocess.TimeoutExpired:
-        print(f"[gen {gen}] evaluation timed out after 1800s; rolling back", flush=True)
-        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
+    cand_paths = {L: f"/tmp/candidates/{base}{L}.py" for L in LETTERS}
+    cand_paths = {L: p for L, p in cand_paths.items() if os.path.exists(p)}
+    if not cand_paths:
+        print(f"[gen {gen}] codex produced no candidate files in /tmp/candidates; skipping generation", flush=True)
         return None
-    print(r2.stdout[-800:], flush=True)
-    score = None
-    for line in r2.stdout.splitlines():
-        if line.startswith("RESULT_JSON "):
-            score = json.loads(line[len("RESULT_JSON "):])["score"]
-    if score is None:
-        print(f"[gen {gen}] candidate failed to evaluate; rolling back", flush=True)
-        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
+    # evaluate candidates SEQUENTIALLY: each eval already runs 8 ccx jobs in
+    # parallel, and 8 concurrent ccx is the proven memory ceiling on this box.
+    results = {}
+    for L, path in cand_paths.items():
+        variant = base + L
+        progress.set_stage("evaluating", f"gen {gen}: building + evaluating {variant}", design_id=f"cad-chassis-{variant}")
+        try:
+            r2 = subprocess.run([sys.executable, "-u", "run_candidate.py", "--variant", variant, "--parent", parent,
+                                 "--gen", str(gen), "--source", path],
+                                capture_output=True, text=True, cwd=HERE,
+                                env={**os.environ, "RUN_FEA": "1", "SKIP_PUBLISH": "1"}, timeout=1800)
+        except subprocess.TimeoutExpired:
+            print(f"[gen {gen}] {variant} evaluation timed out after 1800s; skipped", flush=True)
+            continue
+        print(r2.stdout[-800:], flush=True)
+        score = None
+        for line in r2.stdout.splitlines():
+            if line.startswith("RESULT_JSON "):
+                score = json.loads(line[len("RESULT_JSON "):])["score"]
+        if score is None:
+            print(f"[gen {gen}] {variant} failed to evaluate; skipped", flush=True)
+            continue
+        check_lines = [l for l in r2.stdout.splitlines() if l.strip().startswith(("[PASS]", "[FAIL]"))]
+        all_pass = bool(check_lines) and all("[PASS]" in l for l in check_lines)
+        mass = None
+        try:
+            pm = json.load(open(os.path.join(HERE, "snapshots", variant, "metrics.json")))
+            mass = (pm.get("metrics") or {}).get("mass_g") or (pm.get("mass") or {}).get("frame_mass_g")
+        except Exception:
+            pass
+        results[L] = {"variant": variant, "score": score, "all_pass": all_pass, "mass_g": mass}
+    if not results:
+        print(f"[gen {gen}] all candidates failed to evaluate; generation lost", flush=True)
         return None
-    cand_mass = None
-    try:
-        pm = json.load(open(os.path.join(HERE, "snapshots", variant, "metrics.json")))
-        cand_mass = (pm.get("metrics") or {}).get("mass_g") or (pm.get("mass") or {}).get("frame_mass_g")
-    except Exception:
-        pass
-    best_mass = st.get("best_mass_g")
-    # hard-gate status: every "[PASS]/[FAIL] <check>" line the candidate printed
-    check_lines = [l for l in r2.stdout.splitlines() if l.strip().startswith(("[PASS]", "[FAIL]"))]
-    cand_all_pass = bool(check_lines) and all("[PASS]" in l for l in check_lines)
     best_all_pass = st.get("best_all_pass", False)
-    # gates first: a fully-passing candidate always displaces a failing incumbent;
-    # among equal gate status, score wins; score ties break on frame mass
-    improved = (cand_all_pass and not best_all_pass) or \
-               (cand_all_pass == best_all_pass and (score > st["best_score"] or
-                (score == st["best_score"] and cand_mass and (best_mass is None or cand_mass < best_mass))))
-    if not improved:
-        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
-        print(f"[gen {gen}] {variant} score {score:.3f} all_pass={cand_all_pass} <= best {st['best_score']:.3f} all_pass={best_all_pass}; rolled back chassis.py (record kept)", flush=True)
+    best_mass = st.get("best_mass_g")
+    # winner among candidates: gates first, then score, then lowest mass
+    winner = max(results.values(), key=lambda c: (c["all_pass"], c["score"], -(c["mass_g"] or 1e9)))
+    w = winner
+    # then the winner must still beat the incumbent (same gates-first rule)
+    improved = (w["all_pass"] and not best_all_pass) or                (w["all_pass"] == best_all_pass and (w["score"] > st["best_score"] or
+                (w["score"] == st["best_score"] and w["mass_g"] and (best_mass is None or w["mass_g"] < best_mass))))
+    tally = " | ".join(f"{c['variant']}={c['score']:.3f}{' PASS' if c['all_pass'] else ' fail'}{(' %.1fg' % c['mass_g']) if c['mass_g'] else ''}" for c in results.values())
+    if improved:
+        wL = w["variant"][-1]
+        shutil.copy(cand_paths[wL], os.path.join(HERE, "chassis.py"))
+        st["best_variant"], st["best_score"] = w["variant"], w["score"]
+        st["best_all_pass"] = w["all_pass"]
+        if w["mass_g"]:
+            st["best_mass_g"] = w["mass_g"]
+        # all candidates suppressed publish during eval; publish only the winner
+        try:
+            import snapshot as sn_mod
+            mpath = os.path.join(HERE, "snapshots", w["variant"], "metrics.json")
+            sn_mod.publish(json.load(open(mpath)), os.path.dirname(mpath))
+        except Exception as e:
+            print(f"[gen {gen}] winner publish failed: {e}", flush=True)
     else:
-        st["best_variant"], st["best_score"] = variant, score
-        st["best_all_pass"] = cand_all_pass
-        if cand_mass: st["best_mass_g"] = cand_mass
+        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))  # defensive; codex never edits it now
+        print(f"[gen {gen}] no candidate beat incumbent; tally: {tally}", flush=True)
+    wsum = summaries.get(w["variant"][-1], "")[:100]
     st["generation"] = gen
-    st["history"].append({"variant": variant, "parent": parent, "score": score, "improved": improved, "summary": summary})
-    # commit candidate artifacts + (possibly rolled-back) code state
-    sh('git add -A && git -c user.name="Instinct Chassis Researcher" -c user.email="instinct-chassis-researcher@users.noreply.github.com" commit -q -m "gen %d: %s score %.3f (parent %s)%s - %s" && git push -q origin chassis' % (
-        gen, variant, score, parent, " NEW BEST" if improved else " rolled-back", summary[:120] or "no summary"))
+    st["history"].append({"variant": w["variant"], "parent": parent, "score": w["score"],
+                          "improved": improved, "summary": (wsum + " [" + tally + "]")[:200]})
+    # commit candidate artifacts + adopted code state
+    sh("git add -A && git -c user.name=\"Instinct Chassis Researcher\" -c user.email=\"instinct-chassis-researcher@users.noreply.github.com\" commit -q -m \"gen %d: %s (parent %s, %s) - %s\" && git push -q origin chassis" % (
+        gen, tally, parent, "NEW BEST " + w["variant"] if improved else "incumbent held", wsum[:80] or "no summary"))
     with open(ARCHIVE, "a") as f:
-        f.write(json.dumps({"id": f"cad-gen-{gen}", "kind": "cad.chassis.generation", "variant": variant,
-                            "parent": parent, "score": score, "improved": improved, "summary": summary,
-                            "ts": time.time()}) + "\n")
+        f.write(json.dumps({"id": f"cad-gen-{gen}", "kind": "cad.chassis.generation", "variant": w["variant"],
+                            "parent": parent, "score": w["score"], "improved": improved,
+                            "candidates": tally, "summary": wsum, "ts": time.time()}) + "\n")
     save_state(st)
-    print(f"[gen {gen}] done: {variant} score {score:.3f} ({'NEW BEST' if improved else 'no improvement'})", flush=True)
-    return score
+    print(f"[gen {gen}] done: {w['variant']} score {w['score']:.3f} ({'NEW BEST' if improved else 'no improvement'}) [{tally}]", flush=True)
+    return w["score"]
 
 if __name__ == "__main__":
     progress.start_heartbeat()

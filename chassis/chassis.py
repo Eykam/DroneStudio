@@ -22,7 +22,7 @@ class ChassisParams:
     arm_crown_width_mm: float = 3.6     # broader bending flange; <2.5 mm inner bridge
     arm_height_falloff: float = 0.68    # retain root depth, shed low-moment span skin
     arm_tip_height_mm: float = 10.8     # faired nacelle depth at the motor load transfer
-    center_plate_len_mm: float = 242.0  # compact twin-cheek nose to rear avionics fin
+    center_plate_len_mm: float = 240.5  # shared stepped nose to rear avionics fin
     center_plate_wid_mm: float = 68.0
     top_plate_thickness_mm: float = 2.5
     body_thickness_mm: float = 1.25     # structural skin; all faces use normal offsets
@@ -239,7 +239,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     body = arms[0]
     for a in arms[1:]:
         body = body + a
-    # A longitudinal monocoque gives each payload a real, disjoint cavity.
+    # A longitudinal monocoque gives the payloads recessed, serviceable bays.
     # The low battery well sits BETWEEN the rear arms, the stack clears their
     # crowned junction, and the upright Pi occupies the narrow forward bay.
     # Keeping the deep arm roots intact is cheaper than weakening them with
@@ -247,7 +247,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     wall = p.body_thickness_mm
     slope = p.body_roof_slope
     draft = p.body_fairing_draft_mm / p.body_fairing_height_mm
-    sx = p.center_plate_len_mm / 242.0
+    sx = p.center_plate_len_mm / 240.5
     sy = p.center_plate_wid_mm / 68.0
     cockpit_h = p.body_fairing_height_mm
 
@@ -263,7 +263,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         (-145.0, 26.0, 15.0, 12.0),
         (-141.0, 31.0, 20.0, 18.0),
         (-120.0, 31.0, 20.0, 18.0),
-        (-114.0, 52.0, 41.5, 43.5),
+        (-114.5, 52.0, 41.5, 43.5),
         (-105.0, 50.2, 41.5, 41.7),
         (-56.0, 50.2, 41.5, 41.7),
         (-45.0, 52.0, 41.5, 43.5),
@@ -271,13 +271,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
         (-24.0, 57.0, cockpit_h, 40.0),
         (24.0, 57.0, cockpit_h, 40.0),
         (38.0, 26.0, 37.0, 10.0),
-        (92.5, 26.0, 37.0, 10.0),
-        (97.0, 18.0, 30.0, 8.0),
+        (91.85, 26.0, 37.0, 10.0),
+        (95.5, 18.0, 30.0, 8.0),
     ]
     stations = [(x*sx, w*sy, h, c*sy) for x, w, h, c in stations]
 
-    def cabin_shell(stations):
-        """Mitered, normal-gauge shell with bottom and dorsal service access."""
+    def cabin_envelopes(stations):
+        """Outer/inner envelopes for a mitered shell with service access."""
         # Each side plane is y + draft*z = breadth/2; each roof plane is
         # z + slope*y = shoulder*(1-slope*draft) + slope*breadth/2.
         # Offset their full 3D normals, including the longitudinal sweep. This
@@ -347,31 +347,38 @@ def build_chassis(p: ChassisParams) -> b.Part:
                           if inner_sides[0][0] <= x <= inner_sides[-1][0]})
         inner_fairing = b.Solid.make_loft(
             [cabin_wire((x, 0, 0, 0), inner=True) for x in inner_x], ruled=True)
-        return outer_fairing - inner_fairing, max(z for _, z in outer_roofs)
+        return outer_fairing, inner_fairing, max(z for _, z in outer_roofs)
 
-    fairing, roof_z = cabin_shell(stations)
-    body = body + fairing
+    fairing, inner_fairing, roof_z = cabin_envelopes(stations)
+    service_cavities = [inner_fairing]
 
-    # Low camera cheeks flank the tall Pi spine. Each recessed pocket has its
-    # own pitched coaming, so the wide stereo nose no longer needs a tall full-
-    # width canopy or a long prow ahead of the avionics. The inward cheek skin
-    # overlaps the spine, creating a continuous monocoque junction on the bed.
-    # All camera service boxes clear the inner faces by 2 mm; the lens ports
-    # below are the only forward openings.
+    # Inset camera cheeks flow into the Pi spine as a single stepped nose.
+    # Fuse the outside envelopes BEFORE cutting all three service cavities:
+    # the overlapping pods then share their structural skin instead of carrying
+    # redundant internal walls. Their low shoulders retain pitched coamings;
+    # the taller center spine braces the shortened prow and shelters the Pi.
+    # Shoulder stations extend past the boards' 2 mm service boxes to allow
+    # for the inward movement of the mitered inner corners at each end.
     cheek_stations = [
-        (62.5, 26.0, 14.0, 16.0),
-        (65.0, 35.0, 18.2, 29.0),
-        (93.5, 35.0, 18.2, 29.0),
-        (97.0, 26.0, 14.0, 16.0),
+        (61.0, 24.0, 14.0, 16.0),
+        (64.0, 35.0, 18.2, 29.0),
+        (94.0, 35.0, 18.2, 29.0),
+        (95.5, 26.0, 14.0, 16.0),
     ]
     cheek_stations = [(x*sx, w*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
-    cheek, cheek_roof = cabin_shell(cheek_stations)
+    cheek, inner_cheek, cheek_roof = cabin_envelopes(cheek_stations)
     roof_z = max(roof_z, cheek_roof)
-    for camera_y in (-28.0*sy, 28.0*sy):
-        body = body + b.Pos(0, camera_y, 0) * cheek
+    camera_offsets = (-24.5*sy, 24.5*sy)
+    for camera_y in camera_offsets:
+        fairing = fairing + b.Pos(0, camera_y, 0) * cheek
+        service_cavities.append(b.Pos(0, camera_y, 0) * inner_cheek)
+    for cavity in service_cavities:
+        fairing = fairing - cavity
+    body = body + fairing
+    for camera_y in camera_offsets:
         # Short first-layer seat rails tie each cheek's end bulkheads together.
-        seat = b.Pos(79.75*sx, camera_y, 0) * b.extrude(
+        seat = b.Pos(78.25*sx, camera_y, 0) * b.extrude(
             b.Rectangle(33.25*sx, p.payload_rail_width_mm).face(), wall)
         body = body + seat
 
@@ -388,7 +395,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # First-layer diagonal ties brace nose and tail against lateral sway.
     # Their triangular load paths replace shell thickening and sit below the
     # 2 mm service clearance of the recessed battery, Pi, GPS and cameras.
-    for root_x, end_x in ((-27.0, -144.0), (27.0, 96.0)):
+    for root_x, end_x in ((-27.0, -144.0), (27.0, 94.5)):
         for side in (-1, 1):
             ax, ay = root_x*sx, side*27.0*sy
             bx, by = end_x*sx, -side*11.0*sy
@@ -412,7 +419,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Teardrop lens ports have a 45-degree roof, so the nose needs no support.
     # Only the sight lines pierce the shell; both camera boards remain inside.
     aperture_r = p.camera_aperture_dia_mm/2
-    for camera_y in (-28.0*sy, 28.0*sy):
+    for camera_y in camera_offsets:
         port = b.Wire.make_polygon([
             (93.0*sx, camera_y-aperture_r, 9.0),
             (93.0*sx, camera_y-aperture_r, 9.0-aperture_r),
