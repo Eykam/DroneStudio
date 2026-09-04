@@ -572,4 +572,39 @@ pub fn build(b: *std.Build) void {
         test_pi_step.?.dependOn(&run_imu_tests.step);
         test_pi_step.?.dependOn(&run_motor_tests.step);
     }
+
+    // Headless physics-only episode runner (auto-researcher inner loop).
+    // Additive target: Bullet + flight-control code only - no GL, imgui,
+    // ffmpeg, cuda, or ECS. See autoresearch/HEADLESS_API.md.
+    const headless_step = b.step("headless", "Build the headless episode API runner");
+    const headless_exe = b.addExecutable(.{
+        .name = "dronestudio-headless",
+        .root_source_file = b.path("src/headless_main.zig"),
+        .target = desktop_target,
+        .optimize = optimize,
+    });
+    headless_exe.addIncludePath(b.path("lib/cbullet"));
+    headless_exe.addIncludePath(b.path("lib/bullet"));
+    const headless_flags = &.{
+        "-DBT_USE_OLD_DAMPING_METHOD",
+        "-DBT_THREADSAFE=1",
+        "-std=c++11",
+        "-fno-sanitize=undefined",
+        "-O3",
+        "-ffast-math",
+    };
+    headless_exe.addCSourceFiles(.{
+        .files = &.{
+            "lib/cbullet/cbullet.cpp",
+            "lib/bullet/btLinearMathAll.cpp",
+            "lib/bullet/btBulletCollisionAll.cpp",
+            "lib/bullet/btBulletDynamicsAll.cpp",
+        },
+        .flags = headless_flags,
+    });
+    headless_exe.linkLibC();
+    headless_exe.linkLibCpp();
+    b.installArtifact(headless_exe);
+    const headless_install = b.addInstallArtifact(headless_exe, .{});
+    headless_step.dependOn(&headless_install.step);
 }

@@ -1,0 +1,23 @@
+{
+  "steps_compared": 61,
+  "quad": {
+    "return": -0.5660340812237397,
+    "succeeded": false,
+    "wall_s": 0.087
+  },
+  "sim": {
+    "return": -0.566032,
+    "succeeded": false,
+    "wall_s": 0.006
+  },
+  "position_divergence_m": {
+    "final": 2.532071839109311e-05,
+    "max": 3.1389879314854295e-05,
+    "mean": 2.6629502174204274e-05
+  },
+  "velocity_divergence_mps": {
+    "final": 1.3527215605990683e-06,
+    "max": 5.269007274655291e-06
+  },
+  "verdict": "track"
+}

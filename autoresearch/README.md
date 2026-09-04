@@ -18,13 +18,23 @@ evaluator.py    THE source of truth: variant score = held-out success rate of
                 a policy trained from scratch under that variant
 policy.py       tiny MLP (10->32->32->2) + CEM trainer (numpy, CPU-scale)
 env.py          StubNavEnv (analytic placeholder, kept for A/B)
-env_quad.py     QuadNavEnv (DEFAULT): 3D quadrotor on DroneStudio's own flight
-                model - his mass/inertia (Drone.zig), his rate-PID gains and
+env_quad.py     QuadNavEnv: 3D quadrotor on DroneStudio's own flight model -
+                his mass/inertia (Drone.zig), his rate-PID gains and
                 thrust/rate filters (FlightController.zig), thrust along body
                 +Y with torque plant (PhysicsThread.zig). Policy emits desired
                 body rates + collective thrust at 20 Hz; his PID tracks them
                 at 500 Hz - the same classical-fast-loop + learned-nav-policy
                 split the full system will use.
+                TUNING STATUS UNKNOWN: the gains are lifted verbatim from his
+                firmware; whether they are tuned, placeholder, or flight-proven
+                is an open question - nothing here claims flight-readiness.
+                Parity with the real Zig binary is verified (parity_report.json:
+                25 um position divergence over a 61-step episode).
+env_sim.py      SimBinaryEnv (PREFERRED when the binary is present): episodes
+                run inside the actual DroneStudio physics - Bullet rigid body
+                + his RateController/PID code path, built as
+                `zig build headless` (Studio/src/headless_main.zig, no GL).
+                QuadNavEnv stays as the fast debug/fallback env.
 archive.py      JSONL variant archive - the loop's memory + audit trail
 run_e2e.py      single-cycle end-to-end test (this is the CI gate)
 ```
@@ -41,9 +51,10 @@ PROVES: the loop machinery closes - mutation, training, held-out evaluation,
 archive writes, and elite selection all execute to budget on CPU, and metrics
 are sane.
 DOES NOT PROVE: rendering/vision (no pixels - obs are state-based),
-sim-exact dynamics (quad env replicates his flight model in numpy with
-semi-implicit Euler, not Bullet), RL quality (CEM, not PPO), LLM outer loop
-(heuristic without an API key).
+RL quality at scale, or hardware flight-readiness. The sim backend runs
+his actual Zig physics (Bullet + his PID), but whether his controller
+gains are tuned for real flight is unverified - see the rate-controller
+assessment.
 
 ## LLM outer loop
 

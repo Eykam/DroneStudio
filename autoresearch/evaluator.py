@@ -14,6 +14,9 @@ def _backend(name):
     if name == "quad":
         from env_quad import QuadNavEnv, make_quad_factory
         return QuadNavEnv, make_quad_factory
+    if name == "sim":
+        from env_sim import SimBinaryEnv, make_sim_factory
+        return SimBinaryEnv, make_sim_factory
     from env import StubNavEnv, make_stub_factory
     return StubNavEnv, make_stub_factory
 

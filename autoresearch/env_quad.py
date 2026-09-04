@@ -6,6 +6,8 @@ Parameters lifted from the sim source (Studio/src):
 - mass 1.5 kg, inertia from 0.3 m arms: Ixx=Iyy=0.040, Izz=0.047 kg m^2
   (core/ecs/prefabs/Drone.zig)
 - Rate PID gains roll/pitch [0.1, 0.005, 0.001], yaw [0.05, 0.003, 0.0005],
+  LIFTED VERBATIM from his firmware - TUNING STATUS UNKNOWN, do not read
+  flight-readiness into these numbers.
   anti-windup clamped (core/ecs/components/FlightController.zig +
   core/flight/PIDController.zig)
 - Low-pass filters tau=0.05 s on thrust and rates; max rates
