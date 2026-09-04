@@ -43,7 +43,8 @@ def run_generation():
     variant = f"v{gen+1}-g{gen}"
     parent = st["best_variant"]
     # snapshot parent code for rollback
-    shutil.copy(os.path.join(HERE, "chassis.py"), os.path.join(HERE, ".chassis_parent.py"))
+    parent_backup = f"/tmp/chassis_parent_{variant}.py"
+    shutil.copy(os.path.join(HERE, "chassis.py"), parent_backup)
     parent_metrics = os.path.join(HERE, "snapshots", parent, "metrics.json")
     failures = "unknown"
     if os.path.exists(parent_metrics):
@@ -72,11 +73,18 @@ def run_generation():
             score = json.loads(line[len("RESULT_JSON "):])["score"]
     if score is None:
         print(f"[gen {gen}] candidate failed to evaluate; rolling back", flush=True)
-        shutil.copy(os.path.join(HERE, ".chassis_parent.py"), os.path.join(HERE, "chassis.py"))
+        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
         return None
-    improved = score > st["best_score"]
+    cand_mass = None
+    try:
+        pm = json.load(open(os.path.join(HERE, "snapshots", variant, "metrics.json")))
+        cand_mass = (pm.get("metrics") or {}).get("mass_g") or (pm.get("mass") or {}).get("frame_mass_g")
+    except Exception:
+        pass
+    best_mass = st.get("best_mass_g")
+    improved = score > st["best_score"] or (score == st["best_score"] and cand_mass and (best_mass is None or cand_mass < best_mass))
     if not improved:
-        shutil.copy(os.path.join(HERE, ".chassis_parent.py"), os.path.join(HERE, "chassis.py"))
+        shutil.copy(parent_backup, os.path.join(HERE, "chassis.py"))
         print(f"[gen {gen}] {variant} score {score:.3f} <= best {st['best_score']:.3f}; rolled back chassis.py (record kept)", flush=True)
     else:
         st["best_variant"], st["best_score"] = variant, score
