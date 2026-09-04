@@ -87,6 +87,15 @@ class SimBinaryEnv(QuadNavEnv):
             except Exception:
                 pass
             self.proc.terminate()
+        if self.proc is not None:
+            try:
+                self.proc.wait(timeout=5)  # reap: no zombie accumulation
+            except Exception:
+                try:
+                    self.proc.kill()
+                    self.proc.wait(timeout=5)
+                except Exception:
+                    pass
         self.proc = None
 
     def __del__(self):
