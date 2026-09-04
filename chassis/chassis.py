@@ -15,10 +15,11 @@ class ChassisParams:
     arm_length_mm: float = 150.0        # sim motor_arm_length (center to motor axis)
     arm_width_mm: float = 8.2
     arm_thickness_mm: float = 27.0      # maximum closed-section depth at the loaded root
-    arm_root_width_mm: float = 14.0
+    arm_root_width_mm: float = 12.4     # 1.5x tip-width printable root chine
     arm_shell_root_width_mm: float = 11.0
     arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
     arm_roof_slope: float = 1.15        # >1 gives a support-free (>45 deg) inner roof
+    arm_crown_width_mm: float = 3.0     # narrow high-fiber facet on the closed arm shell
     arm_height_falloff: float = 0.58    # deep root, lean span; moment-shaped shell
     center_plate_len_mm: float = 90.0
     center_plate_wid_mm: float = 46.0
@@ -61,32 +62,41 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return -p.arm_sweep_mm * math.sin(math.pi * x / p.arm_length_mm)
 
     def section_wire(x, center, width, height, inner=False):
-        """Support-free pentagonal arm section in the local YZ plane."""
+        """Support-free crowned arm section in the local YZ plane."""
         wall = p.arm_rib_thickness_mm
         slope = p.arm_roof_slope
-        roof_rise = slope * width / 2
+        roof_normal = math.hypot(slope, 1.0)
+        crown = min(p.arm_crown_width_mm, width - 2.5 * wall)
+        roof_rise = slope * (width - crown) / 2
         if not inner:
             shoulder = height - roof_rise
             points = [
                 (x, center - width/2, 0),
                 (x, center + width/2, 0),
                 (x, center + width/2, shoulder),
-                (x, center, height),
+                (x, center + crown/2, height),
+                (x, center - crown/2, height),
                 (x, center - width/2, shoulder),
             ]
         else:
-            # Offset each wall inward by its true normal thickness.  The cavity
-            # remains open at both ends for wiring, inspection, and powder-free
-            # printing; along its span the arm is a torsionally closed section.
-            roof_normal = math.hypot(slope, 1.0)
+            # The narrow crown moves skin onto the upper bending fiber while
+            # shortening the two pitched roof faces.  Their inner surfaces stay
+            # steeper than 45 degrees, so the cavity prints without support.
             half_inner = width/2 - wall
-            shoulder = height - slope * half_inner - wall * roof_normal
-            apex = height - wall * roof_normal
+            shoulder = (
+                height + slope*crown/2 - wall*roof_normal
+                - slope*half_inner
+            )
+            inner_crown_half = (
+                crown/2 - wall*(roof_normal - 1.0)/slope
+            )
+            crown_z = height - wall
             points = [
                 (x, center - half_inner, wall),
                 (x, center + half_inner, wall),
                 (x, center + half_inner, shoulder),
-                (x, center, apex),
+                (x, center + inner_crown_half, crown_z),
+                (x, center - inner_crown_half, crown_z),
                 (x, center - half_inner, shoulder),
             ]
         return b.Wire.make_polygon(points, close=True)
@@ -117,9 +127,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         arm = b.extrude(b.make_face(outline), p.body_thickness_mm)
 
         # Loft a hollow structural skin in six bending-moment stations.  The
-        # tall root and rapidly falling depth retain the v5-g4 bending economy,
-        # while the roof closes the section for torsion.  Its two pitched faces
-        # (rather than a flat ceiling) make the internal cavity self-supporting.
+        # tall root and rapidly falling depth retain the bending economy, while
+        # a narrow dorsal facet turns the old peaked tube into a more efficient
+        # faired box.  Pitched cavity ceilings remain self-supporting.
         span = rib_end - x0
         tube_sections = []
         for frac in (0.0, 0.25, 0.50, 0.75, 0.90, 1.0):
@@ -129,7 +139,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             ) * frac
             roof_normal = math.hypot(p.arm_roof_slope, 1.0)
             min_tip_height = (
-                p.arm_roof_slope * width/2
+                p.arm_roof_slope * (width - p.arm_crown_width_mm)/2
                 + p.arm_rib_thickness_mm * (1 + roof_normal - p.arm_roof_slope)
                 + 0.15
             )
@@ -157,7 +167,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             p.arm_width_mm - p.arm_shell_root_width_mm
         ) * cap_frac
         cap_min_height = (
-            p.arm_roof_slope * cap_width/2
+            p.arm_roof_slope * (cap_width - p.arm_crown_width_mm)/2
             + p.arm_rib_thickness_mm * (
                 1 + math.hypot(p.arm_roof_slope, 1.0) - p.arm_roof_slope
             )
@@ -231,35 +241,48 @@ def build_chassis(p: ChassisParams) -> b.Part:
     body = arms[0]
     for a in arms[1:]:
         body = body + a
-    # A drafted rounded coaming makes the center structure read as one fuselage
-    # and braces all four swept arm roots.  It encloses an open-top/open-bottom
-    # recessed service bay: battery straps and stack wiring stay accessible,
-    # while the crossed lower arm skins form local capture ledges.  Both inner
-    # and outer walls lean by far less than 45 degrees and need no support.
+    # A drafted, pinched lozenge coaming makes the center structure read as one
+    # low-drag fuselage and braces all four swept arm roots.  It encloses an
+    # open-top/open-bottom recessed service bay: battery straps and stack wiring
+    # stay accessible, while the crossed lower arm skins form capture ledges.
+    # Both inner and outer walls lean by far less than 45 degrees.
     fair_h = p.body_fairing_height_mm
     draft = p.body_fairing_draft_mm
     wall = p.body_thickness_mm
 
-    def rounded_wire(length, width, radius, z):
-        radius = min(radius, length/2 - 0.1, width/2 - 0.1)
-        return b.RectangleRounded(length, width, radius).face().outer_wire().locate(
-            b.Pos(0, 0, z)
-        )
+    def faired_wire(length, width, radius, z):
+        """A filleted, fore-aft pinched fuselage perimeter."""
+        hl, hw = length/2, width/2
+        points = [
+            (hl, 0, z),
+            (0.82*hl, 0.65*hw, z),
+            (0.45*hl, hw, z),
+            (-0.45*hl, hw, z),
+            (-0.82*hl, 0.65*hw, z),
+            (-hl, 0, z),
+            (-0.82*hl, -0.65*hw, z),
+            (-0.45*hl, -hw, z),
+            (0.45*hl, -hw, z),
+            (0.82*hl, -0.65*hw, z),
+        ]
+        wire = b.Polyline(*points, close=True)
+        corner = min(0.4*radius, 0.11*width)
+        return b.fillet(wire.vertices(), corner)
 
     outer_fairing = b.Solid.make_loft([
-        rounded_wire(p.center_plate_len_mm, p.center_plate_wid_mm,
-                     p.body_corner_radius_mm, 0),
-        rounded_wire(p.center_plate_len_mm - 2*draft,
-                     p.center_plate_wid_mm - 2*draft,
-                     p.body_corner_radius_mm - draft, fair_h),
+        faired_wire(p.center_plate_len_mm, p.center_plate_wid_mm,
+                    p.body_corner_radius_mm, 0),
+        faired_wire(p.center_plate_len_mm - 2*draft,
+                    p.center_plate_wid_mm - 2*draft,
+                    p.body_corner_radius_mm - draft, fair_h),
     ], ruled=True)
     inner_fairing = b.Solid.make_loft([
-        rounded_wire(p.center_plate_len_mm - 2*wall,
-                     p.center_plate_wid_mm - 2*wall,
-                     p.body_corner_radius_mm - wall, -0.1),
-        rounded_wire(p.center_plate_len_mm - 2*(draft + wall),
-                     p.center_plate_wid_mm - 2*(draft + wall),
-                     p.body_corner_radius_mm - draft - wall, fair_h + 0.1),
+        faired_wire(p.center_plate_len_mm - 2*wall,
+                    p.center_plate_wid_mm - 2*wall,
+                    p.body_corner_radius_mm - wall, -0.1),
+        faired_wire(p.center_plate_len_mm - 2*(draft + wall),
+                    p.center_plate_wid_mm - 2*(draft + wall),
+                    p.body_corner_radius_mm - draft - wall, fair_h + 0.1),
     ], ruled=True)
     body = body + (outer_fairing - inner_fairing)
 

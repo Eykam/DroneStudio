@@ -1,0 +1,279 @@
+{
+  "schema": "dronestudio.chassis/1.1",
+  "name": "v8-g7",
+  "geometry": {
+    "file": "v8-g7.glb",
+    "units": "meters",
+    "forward": "+X",
+    "up": "+Z"
+  },
+  "material": {
+    "name": "PETG",
+    "density_kg_m3": 1240,
+    "e_mpa": 2100,
+    "yield_mpa": 50
+  },
+  "dynamics": {
+    "total_mass_kg": 0.467996,
+    "com_m": [
+      0.001303,
+      -0.000705,
+      0.022078
+    ],
+    "inertia_about_com_kgm2": {
+      "ixx": 0.001889440113213931,
+      "iyy": 0.001957263413392409,
+      "izz": 0.0034580369863995153,
+      "ixy": 9.48716265175796e-06,
+      "ixz": 1.225399363573438e-05,
+      "iyz": -3.9808084333206025e-06
+    },
+    "composition": [
+      {
+        "name": "frame",
+        "mass_kg": 0.042396,
+        "com_m": [
+          0.0,
+          0.0,
+          0.008434
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0334,
+        "com_m": [
+          0.106066,
+          0.106066,
+          0.00122
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0334,
+        "com_m": [
+          -0.106066,
+          0.106066,
+          0.00122
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0334,
+        "com_m": [
+          -0.106066,
+          -0.106066,
+          0.00122
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0334,
+        "com_m": [
+          0.106066,
+          -0.106066,
+          0.00122
+        ]
+      },
+      {
+        "name": "30.5mm FC+ESC stack (BLHELI_S, his hardware per repo assets/Drone/drone_esc_mount_30mm.stl)",
+        "mass_kg": 0.09,
+        "com_m": [
+          0.0,
+          0.0,
+          0.016
+        ],
+        "source": "estimate - replace with his actual stack datasheet",
+        "mount": "stack"
+      },
+      {
+        "name": "4S 1300mAh LiPo (Tattu-class)",
+        "mass_kg": 0.18,
+        "com_m": [
+          0.0,
+          0.0,
+          0.045
+        ],
+        "source": "user-confirmed 4S build 2026-09-04; capacity/mass still Tattu-class estimate until he names the battery model",
+        "mount": "deck"
+      },
+      {
+        "name": "Raspberry Pi Zero 2W",
+        "mass_kg": 0.011,
+        "com_m": [
+          0.03,
+          -0.03,
+          0.01
+        ],
+        "source": "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/",
+        "mount": "nose"
+      },
+      {
+        "name": "Raspberry Pi Camera Module 3",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.035,
+          -0.03,
+          0.012
+        ],
+        "source": "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
+        "mount": "nose"
+      },
+      {
+        "name": "Raspberry Pi Camera Module 3",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.035,
+          0.03,
+          0.012
+        ],
+        "source": "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
+        "mount": "nose"
+      },
+      {
+        "name": "MPU-9250 breakout (GY-9250)",
+        "mass_kg": 0.003,
+        "com_m": [
+          0.0,
+          0.0,
+          0.022
+        ],
+        "source": "estimate - generic GY-9250 module",
+        "mount": "stack"
+      }
+    ],
+    "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly."
+  },
+  "inertial": {
+    "frame_mass_kg": 0.042396,
+    "frame_com_m": [
+      0.0,
+      0.0,
+      0.008434
+    ],
+    "frame_inertia_kgm2_about_origin": {
+      "ixx": 0.0001465993799746535,
+      "iyy": 0.0001469769345261511,
+      "izz": 0.0002890919225163454,
+      "ixy": 3.5394001307823494e-09,
+      "ixz": 6.527957245511092e-14,
+      "iyz": 3.687629952275573e-14
+    }
+  },
+  "aero": {
+    "projected_area_m2": {
+      "x": 0.014164,
+      "y": 0.014319,
+      "z": 0.010173
+    },
+    "cd_flat_plate_estimate": 1.1,
+    "note": "linear drag ~ 0.5*rho_air*cd*area*v^2 per axis; rho_air=1.225"
+  },
+  "collision": {
+    "type": "convex_hull",
+    "fallback": "vhacd",
+    "max_hulls": 8
+  },
+  "motors": [
+    {
+      "id": 1,
+      "position_m": [
+        0.106066,
+        0.106066,
+        0.00122
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.0334,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 17.27,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+    },
+    {
+      "id": 2,
+      "position_m": [
+        -0.106066,
+        0.106066,
+        0.00122
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.0334,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 17.27,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+    },
+    {
+      "id": 3,
+      "position_m": [
+        -0.106066,
+        -0.106066,
+        0.00122
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.0334,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 17.27,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+    },
+    {
+      "id": 4,
+      "position_m": [
+        0.106066,
+        -0.106066,
+        0.00122
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.0334,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 17.27,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.15,
+      "kv": 2400,
+      "cells": 4,
+      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+    }
+  ],
+  "imu": {
+    "position_m": [
+      0,
+      0,
+      0.00122
+    ],
+    "note": "IMU sits on the FC stack"
+  },
+  "stack": {
+    "pattern_mm": 30.5,
+    "hole_dia_mm": 3.2,
+    "z_bottom_m": 0.00122
+  }
+}
