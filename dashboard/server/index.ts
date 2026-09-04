@@ -372,6 +372,33 @@ app.post("/api/curriculum/progress", async (c) => {
 
 app.get("/api/curriculum/progress", (c) => c.json(curriculum));
 
+// Named time series for training curves (curriculum success over time,
+// BC/DAgger loss over time, ...). Producers POST one point at a time;
+// the Research page main chart toggles between these and generations.
+const seriesStore: Record<string, { t: string; y: number; label?: string }[]> = {};
+const SERIES_CAP = 1000;
+
+app.post("/api/series", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  if (!body || typeof body !== "object" || typeof body.series !== "string"
+      || !body.point || typeof body.point.y !== "number") {
+    return c.json({ error: "bad request: {series, point:{y, label?}, reset?}" }, 400);
+  }
+  if (body.reset === true) seriesStore[body.series] = [];
+  const arr = (seriesStore[body.series] ||= []);
+  arr.push({ t: new Date().toISOString(), y: body.point.y,
+             label: typeof body.point.label === "string" ? body.point.label : undefined });
+  if (arr.length > SERIES_CAP) arr.splice(0, arr.length - SERIES_CAP);
+  return c.json({ ok: true, n: arr.length });
+});
+
+app.get("/api/series", (c) => c.json(seriesStore));
+
 app.get("/api/stream/state", (c) => c.json({
   meta: streamState.meta,
   scene: streamState.scene,

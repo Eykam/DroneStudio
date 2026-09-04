@@ -61,37 +61,60 @@ function episodeMetrics(ep: string, scene: Scene, frames: Frame[],
 
 const OUTCOME_COLOR = { success: "#2ecc71", crash: "#e74c3c", timeout: "#f1c40f" };
 
-function drawStrip(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
-  label: string, unit: string, eps: EpMetric[], pick: (m: EpMetric) => number, lowerBetter: boolean) {
+function drawSpark(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
+  opts: { label: string; unit: string; vals: number[]; color: string }, eps: EpMetric[]) {
+  const pad = 10, labelH = 14;
   ctx.fillStyle = "#8b95a5";
   ctx.font = "10px system-ui";
-  ctx.fillText(label, x + 2, y + 10);
-  const n = Math.min(eps.length, 30);
+  ctx.fillText(opts.label, x + pad, y + labelH - 3);
+  const n = Math.min(opts.vals.length, 30);
   if (!n) {
     ctx.fillStyle = "#3a4356";
-    ctx.fillText("waiting for episodes", x + 70, y + 10);
+    ctx.fillText("waiting for episodes", x + pad + 100, y + labelH - 3);
     return;
   }
-  const vals = eps.slice(-n).map(pick);
-  const max = Math.max(...vals, 1e-6);
+  const vals = opts.vals.slice(-n);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const span = max - min || max || 1e-6;
   const lastV = vals[n - 1];
   const lastM = eps[eps.length - 1];
   ctx.fillStyle = OUTCOME_COLOR[lastM.outcome];
-  ctx.fillText(`${lastV.toFixed(1)}${unit}`, x + w - 52, y + 10);
-  const bw = Math.max(2, (w - 4) / n - 2);
-  const chartH = h - 16;
+  const shown = opts.unit === "%" ? `${Math.round(lastV)}%` : `${lastV.toFixed(1)}${opts.unit}`;
+  ctx.fillText(shown, x + w - 50, y + labelH - 3);
+  const cw = w - pad * 2, chh = h - labelH - 12;
+  const top = y + labelH + 2;
+  const px = (i: number) => x + pad + (n === 1 ? cw / 2 : (i * cw) / (n - 1));
+  const py = (v: number) => top + chh * (1 - (v - min) / span);
+  ctx.strokeStyle = "#1a2230";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + pad, top + chh);
+  ctx.lineTo(x + pad + cw, top + chh);
+  ctx.stroke();
+  ctx.beginPath();
+  vals.forEach((v, i) => (i ? ctx.lineTo(px(i), py(v)) : ctx.moveTo(px(0), py(v))));
+  ctx.strokeStyle = opts.color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.lineTo(px(n - 1), top + chh);
+  ctx.lineTo(px(0), top + chh);
+  ctx.closePath();
+  ctx.fillStyle = opts.color + "1a";
+  ctx.fill();
   for (let i = 0; i < n; i++) {
     const m = eps[eps.length - n + i];
-    const v = vals[i] / max;
     ctx.fillStyle = OUTCOME_COLOR[m.outcome];
-    ctx.globalAlpha = 0.9;
-    ctx.fillRect(x + 2 + i * (bw + 2), y + 14 + chartH * (1 - v), bw, Math.max(1, chartH * v));
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    ctx.arc(px(i), top + chh, 1.5, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.globalAlpha = 1;
-  if (lowerBetter) {
-    ctx.fillStyle = "#4a5568";
-    ctx.fillText("lower=better", x + w - 52, y + h - 2);
-  }
+  ctx.fillStyle = opts.color;
+  ctx.beginPath();
+  ctx.arc(px(n - 1), py(lastV), 2.5, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 export default function Watch() {
@@ -237,13 +260,25 @@ export default function Watch() {
           ctx.fillStyle = "#0d1219";
           ctx.fillRect(0, 0, w, h);
           const eps = metrics.current;
-          const stripH = h / 3;
-          drawStrip(ctx, 0, 0, w, stripH, "time in air", "s", eps, (m) => m.air_s, false);
-          drawStrip(ctx, 0, stripH, w, stripH, "jerk (RMS)", " m/s3", eps, (m) => m.jerk, true);
-          drawStrip(ctx, 0, stripH * 2, w, stripH, "off-ideal-path", " m", eps, (m) => m.xtrack, true);
-          ctx.strokeStyle = "#1a2230";
-          ctx.beginPath(); ctx.moveTo(0, stripH); ctx.lineTo(w, stripH);
-          ctx.moveTo(0, stripH * 2); ctx.lineTo(w, stripH * 2); ctx.stroke();
+          const succ = eps.map((_, i) => {
+            const win = eps.slice(Math.max(0, i - 9), i + 1);
+            return (win.filter((e) => e.outcome === "success").length / win.length) * 100;
+          });
+          const cells = [
+            { label: "time in air", unit: "s", vals: eps.map((m) => m.air_s), color: "#4aa3ff" },
+            { label: "success rate (last 10)", unit: "%", vals: succ, color: "#2ecc71" },
+            { label: "jerk (RMS)", unit: " m/s3", vals: eps.map((m) => m.jerk), color: "#b088f9" },
+            { label: "off-ideal-path", unit: " m", vals: eps.map((m) => m.xtrack), color: "#2dd4bf" },
+          ];
+          const cw = w / 2, chh = h / 2;
+          cells.forEach((c, i) =>
+            drawSpark(ctx, (i % 2) * cw, Math.floor(i / 2) * chh, cw, chh, c, eps));
+          ctx.strokeStyle = "#141b26";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, chh); ctx.lineTo(w, chh);
+          ctx.moveTo(cw, 0); ctx.lineTo(cw, h);
+          ctx.stroke();
         }
       }
     };
