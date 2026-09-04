@@ -1,0 +1,13 @@
+{
+  "purpose": "smoke test: full evaluator path (CEM train + held-out eval) on the real Zig binary backend",
+  "config": {"cem_iters": 2, "cem_pop": 6, "train_episodes": 2, "eval_episodes": 3, "max_steps": 150, "train_seed": 1, "eval_seed": 5000, "dist": "SceneDistribution defaults"},
+  "sim": {"success_rate": 0.0, "mean_return": -18.67, "mean_steps": 60.3, "train_best_return": 3.52, "wall_s": 0.09},
+  "quad_same_config": {"success_rate": 0.0, "mean_return": -6.13, "mean_steps": 21.7, "train_best_return": -4.70, "wall_s": 1.02},
+  "notes": [
+    "both backends execute the full evaluator contract; backend label lands in records",
+    "sim backend ~11x faster end-to-end (headless Bullet + PID, no numpy overhead)",
+    "succ 0 on the hard default distribution is expected at this tiny budget - run 2's selected variants are much easier scenes",
+    "exact dynamics parity is the parity_report.json claim (identical actions); training-level numbers diverge via episode RNG order, as expected"
+  ],
+  "ts": "2026-09-04T06:29:45Z"
+}

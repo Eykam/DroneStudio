@@ -18,11 +18,23 @@ import numpy as np
 from scene_schema import SceneDistribution
 from mutate import mutate
 from evaluator import evaluate_distribution
+
+def _default_backend():
+    """Mandate: the inner loop runs on the actual Zig sim binary when it is
+    present; QuadNavEnv is the debug/fallback env. Override with backend=."""
+    import os
+    try:
+        from env_sim import BINARY
+        if os.path.exists(BINARY):
+            return "sim"
+    except Exception:
+        pass
+    return "quad"
 from archive import Archive
 
 def run(generations=1, children=2, seed=0, budget=None, verbose=True,
         archive_path="archive.jsonl", base=None, elite_k=2,
-        novelty_weight=0.05, stagnation_limit=3, backend="quad",
+        novelty_weight=0.05, stagnation_limit=3, backend=None,
         trainer="cem", ppo_config=None):
     budget = budget or {}
     rng = np.random.default_rng(seed)
@@ -60,7 +72,7 @@ def run(generations=1, children=2, seed=0, budget=None, verbose=True,
                 train_episodes=budget.get("train_episodes", 4),
                 eval_episodes=budget.get("eval_episodes", 6),
                 max_steps=budget.get("max_steps", 200),
-                verbose=False, backend=backend,
+                verbose=False, backend=backend or _default_backend(),
                 trainer=trainer, ppo_config=ppo_config)
             nov = archive.novelty(dist)
             rec = archive.add(gen, parent_id, dist, metrics, mut, novelty=nov)
