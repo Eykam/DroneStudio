@@ -154,7 +154,15 @@ def codex_mutants(base: SceneDistribution, k: int, seed: int, archive_summary: s
         raise RuntimeError(f"codex call budget exhausted ({CODEX_MAX_CALLS})")
     since = time.time() - st["last_ts"] if st["last_ts"] else 1e18
     if since < CODEX_MIN_INTERVAL_S:
-        raise RuntimeError(f"codex throttle: {CODEX_MIN_INTERVAL_S - since:.0f}s until next allowed call")
+        wait = CODEX_MIN_INTERVAL_S - since
+        if wait <= 120:
+            # short wait: sleep it out instead of falling back - sleeping
+            # costs nothing and keeps the loop LLM-driven (lesson from run 1:
+            # generations were ~30s apart, so a hard 45s gate silently
+            # demoted every other generation to heuristic)
+            time.sleep(wait)
+        else:
+            raise RuntimeError(f"codex throttle: {wait:.0f}s until next allowed call")
     prompt = (
         "You are the outer loop of an auto-researcher that optimizes a drone "
         "simulator's procedural scene distribution to train better navigation "
