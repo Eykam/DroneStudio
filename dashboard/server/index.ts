@@ -324,6 +324,10 @@ app.post("/api/cad/progress", async (c) => {
   }
   let body: any;
   try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  // Ignore empty/malformed bodies so probes cannot wipe the live banner state.
+  if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.status !== "string") {
+    return c.json({ error: "bad request: body must be an object with a status field" }, 400);
+  }
   cadProgress = { ...body, ts: new Date().toISOString() };
   return c.json({ ok: true });
 });
