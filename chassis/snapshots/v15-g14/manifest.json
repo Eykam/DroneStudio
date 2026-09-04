@@ -239,9 +239,9 @@
       "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); bench peak 11.0N 5045-class, fitted 9.7N (MOTOR_V2.md)"
     },
     {
       "id": 2,
@@ -261,9 +261,9 @@
       "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); bench peak 11.0N 5045-class, fitted 9.7N (MOTOR_V2.md)"
     },
     {
       "id": 3,
@@ -283,9 +283,9 @@
       "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); bench peak 11.0N 5045-class, fitted 9.7N (MOTOR_V2.md)"
     },
     {
       "id": 4,
@@ -305,9 +305,9 @@
       "max_thrust_n": 11.0,
       "time_constant_s": 0.04,
       "drag_ratio": 0.015,
-      "kv": 2400,
+      "kv": 2300,
       "cells": 4,
-      "source": "https://www.robozar.com/product/emax-ecoii-2207-2400kv-brushless-motor/"
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); bench peak 11.0N 5045-class, fitted 9.7N (MOTOR_V2.md)"
     }
   ],
   "imu": {
