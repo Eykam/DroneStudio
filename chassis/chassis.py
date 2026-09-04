@@ -1,4 +1,4 @@
-"""Candidate A: low coaming monocoque with a shared stereo nose and slender belly.
+"""Candidate B: chamfered closed spars with short roots and continuous swept chines.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -30,7 +30,7 @@ class ChassisParams:
     body_thickness_mm: float = 1.25     # structural skin; all faces use normal offsets
     arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
-    arm_rib_root_mm: float = 16.0
+    arm_rib_root_mm: float = 19.0
     body_fairing_height_mm: float = 46.5 # stack canopy follows the recessed mounting ring
     body_fairing_draft_mm: float = 4.7   # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
@@ -73,47 +73,32 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return -p.arm_sweep_mm * math.sin(math.pi * x / p.arm_length_mm)
 
     def section_wire(x, center, width, height, inner=False):
-        """Support-free crowned arm section in the local YZ plane."""
-        # Reinforce only the root, fading the inner wall back to span gauge.
-        # The outer chine remains continuous through the fuselage junction.
-        root_blend = max(0.0, min(1.0, (75.0 - x) / 30.0))
-        wall = p.arm_rib_thickness_mm + 0.20 * root_blend
-        slope = p.arm_roof_slope
-        roof_normal = math.hypot(slope, 1.0)
-        crown = min(p.arm_crown_width_mm, width - 2.5 * wall)
-        roof_rise = slope * (width - crown) / 2
-        if not inner:
-            shoulder = height - roof_rise
-            points = [
-                (x, center - width/2, 0),
-                (x, center + width/2, 0),
-                (x, center + width/2, shoulder),
-                (x, center + crown/2, height),
-                (x, center - crown/2, height),
-                (x, center - width/2, shoulder),
-            ]
-        else:
-            # The narrow crown moves skin onto the upper bending fiber while
-            # shortening the two pitched roof faces.  Their inner surfaces stay
-            # steeper than 45 degrees, so the cavity prints without support.
-            half_inner = width/2 - wall
-            shoulder = (
-                height + slope*crown/2 - wall*roof_normal
-                - slope*half_inner
-            )
-            inner_crown_half = (
-                crown/2 - wall*(roof_normal - 1.0)/slope
-            )
-            crown_z = height - wall
-            points = [
-                (x, center - half_inner, wall),
-                (x, center + half_inner, wall),
-                (x, center + half_inner, shoulder),
-                (x, center + inner_crown_half, crown_z),
-                (x, center - inner_crown_half, crown_z),
-                (x, center - half_inner, shoulder),
-            ]
-        return b.Wire.make_polygon(points, close=True)
+        """Closed octagonal spar; 45-degree belly chines and pitched crown."""
+        root_blend = max(0.0, min(1.0, (75.0-x)/30.0))
+        wall = p.arm_rib_thickness_mm + 0.10*root_blend
+        half = width/2
+        crown = min(p.arm_crown_width_mm/2, half-1.25*wall)
+        chamfer = min(1.65, 0.15*width)
+        shoulder = height-p.arm_roof_slope*(half-crown)
+        points = [(-half+chamfer,0), (half-chamfer,0),
+                  (half,chamfer), (half,shoulder), (crown,height),
+                  (-crown,height), (-half,shoulder), (-half,chamfer)]
+        if inner:
+            # Offset every face in its local normal; the extra 2% preserves
+            # the minimum gauge through the longitudinal taper and sweep.
+            gauge = wall*1.02
+            lines = []
+            for (y0,z0),(y1,z1) in zip(points,points[1:]+points[:1]):
+                dy,dz = y1-y0,z1-z0
+                length = math.hypot(dy,dz)
+                ny,nz = -dz/length,dy/length
+                lines.append((ny,nz,ny*y0+nz*z0+gauge))
+            inset = []
+            for (ay,az,ac),(by,bz,bc) in zip(lines[-1:]+lines[:-1],lines):
+                det = ay*bz-by*az
+                inset.append(((ac*bz-bc*az)/det,(ay*bc-by*ac)/det))
+            points = inset
+        return b.Wire.make_polygon([(x,center+y,z) for y,z in points],close=True)
 
     arms = []
     for (mx, my) in p.motor_positions():
@@ -126,35 +111,33 @@ def build_chassis(p: ChassisParams) -> b.Part:
         bolt_radius = p.motor_hole_spacing_mm / math.sqrt(2.0)
         profile_end = L - bolt_radius
         rib_end = profile_end
-        plan_x = [0, x0, x0 + 0.25*(profile_end-x0),
-                  x0 + 0.50*(profile_end-x0),
-                  x0 + 0.75*(profile_end-x0), profile_end, L]
-        lower = []
-        upper = []
+        # Only a short hub saddle is needed: the closed spar already has a
+        # continuous lower skin. Removing the old full-span flat apron leaves
+        # an integrated chine instead of a plate edge beside every arm.
+        plan_x = [0.0, x0, x0+5.0]
+        lower, upper = [], []
         for x in plan_x:
-            width = p.arm_root_width_mm + (
-                p.arm_width_mm - p.arm_root_width_mm
-            ) * x / L
+            width = p.arm_root_width_mm*(1-0.10*x/(x0+5.0))
             center = sweep_center(x)
-            lower.append((x, center - width/2))
-            upper.append((x, center + width/2))
-        outline = b.Polyline(*(lower + list(reversed(upper))), close=True)
-        outline = b.fillet(outline.vertices(), p.fillet_radius_mm)
-        arm = b.extrude(b.make_face(outline), p.body_thickness_mm)
+            lower.append((x,center-width/2))
+            upper.append((x,center+width/2))
+        outline = b.Polyline(*(lower+list(reversed(upper))),close=True)
+        outline = b.fillet(outline.vertices(),p.fillet_radius_mm)
+        arm = b.extrude(b.make_face(outline),p.body_thickness_mm)
 
-        # Hollow six-sided spars put depth just beyond the stack ring, where
+        # Hollow octagonal spars put depth just beyond the stack ring, where
         # the cantilever begins. A slimmer outer span replaces the old broad
         # shallow tube; its roof descends continuously into the motor fairing.
         # The terminal depth never dips below the nacelle, removing a notch.
         span = profile_end-x0
         spar_stations = [
-            (0.00, 15.5, 22.0),
-            (0.08, 15.5, 24.0),
-            (0.20, 15.0, 24.2),
-            (0.40, 12.8, 20.2),
-            (0.60, 10.5, 15.8),
-            (0.80, 9.2, 11.8),
-            (0.92, 9.2, 10.8),
+            (0.00, 15.0, 22.5),
+            (0.10, 15.0, 24.2),
+            (0.24, 14.6, 25.0),
+            (0.42, 12.5, 20.8),
+            (0.62, 10.3, 16.0),
+            (0.81, 9.2, 12.0),
+            (0.93, 9.2, 10.8),
             (1.00, 9.2, 10.8),
         ]
         tube_sections = []
