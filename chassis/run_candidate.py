@@ -35,5 +35,5 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     return rec
 
 if __name__ == "__main__":
-    rec = run("v1-baseline", None, 0, ChassisParams(), "/home/sandbox/cad-researcher/chassis_v1")
+    rec = run("v1-baseline", None, 0, ChassisParams(), os.path.join(os.getcwd(), "chassis_v1"))
     sn.post_records([rec])
