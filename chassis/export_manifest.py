@@ -21,9 +21,8 @@ def export(p: ChassisParams, out_base: str):
     com_mm = part.center()
     I_mm5 = part.matrix_of_inertia  # geometric, mm^5
     I = [[I_mm5[i][j] * rho * 1e-6 for j in range(3)] for i in range(3)]  # kg*m^2 (frame only)
-    # scale mm -> m for the sim
-    part_m = part.scale(0.001)
-    b.export_gltf(part_m, out_base + ".glb")
+    # build123d converts the declared unit (MM) to glTF-native meters on write
+    b.export_gltf(part, out_base + ".glb", binary=True)
     b.export_step(part, out_base + ".step")  # mm, for printing/CAD interchange
     z_top_m = p.body_thickness_mm * 0.001
     motors = []
