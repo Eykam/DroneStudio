@@ -25,11 +25,12 @@ def diverse_dist():
 def student_rollouts(net, n_eps=16):
     X, Y = [], []
     for _ in range(n_eps):
-        env = make_sim_factory(diverse_dist(), max_steps=400, dynamics=MANIFEST)(int(rng.integers(1, 1 << 30)))
+        ddist = diverse_dist()
+        env = make_sim_factory(ddist, max_steps=400, dynamics=MANIFEST)(int(rng.integers(1, 1 << 30)))
         obs = env.reset()
         for _ in range(400):
             X.append(obs.copy())
-            Y.append(pilot_act2(obs, 1.5).copy())   # teacher label on student-visited state
+            Y.append(pilot_act2(obs, 1.5, ddist.scene_extent).copy())   # teacher label on student-visited state
             obs, r, done = env.step(net.act(obs))
             if done:
                 break

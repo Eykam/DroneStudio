@@ -19,28 +19,29 @@ import scripted_pilot
 
 MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json"
 
-def pilot_act2(obs, vmax):
-    rel = obs[0:3] * 10.0
-    vel = obs[3:6]
+def pilot_act2(obs, vmax, ext=10.0):
+    rel = obs[0:3] * ext           # world rel goal, m (obs = rel / scene_extent)
+    vel = obs[3:6] * 10.0          # world vel, m/s (obs = v / 10)
     gb = obs[6:9]
     v_des = np.clip(0.5 * rel, -vmax, vmax)
-    a_des = np.clip(1.2 * (v_des - vel), -2.0, 2.0)
+    # damp against HALF the true velocity: 0.1 (obs-raw) orbits the goal,
+    # 1.0 over-brakes; 0.5 swept to 100% at 2/5/10m, >=0.87 at 15/25m.
+    a_des = np.clip(1.2 * (v_des - 0.5 * vel), -2.0, 2.0)
     # obstacle repulsion (potential field on nearest-obstacle center)
-    dvec = obs[12:15] * 20.0
+    dvec = obs[12:15] * ext
     d = float(np.linalg.norm(dvec))
     if 1e-3 < d < 3.5:
         a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
     a_des = np.clip(a_des, -3.0, 3.0)
-    gx_des = np.clip(a_des[0] / 9.81, -0.20, 0.20)
-    gz_des = np.clip(a_des[2] / 9.81, -0.20, 0.20)
+    gx_des = np.clip(a_des[0] / 9.81, -0.30, 0.30)
+    gz_des = np.clip(a_des[2] / 9.81, -0.30, 0.30)
     rates = obs[9:12]
-    kp, kd = 0.4, 0.6
+    kp, kd = 0.4, 1.0
     act0 = kp * (gz_des - gb[2]) - kd * rates[0]
     act2 = -kp * (gx_des - gb[0]) - kd * rates[2]
     vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
     thr = -0.6 + 0.15 * (vy_des - vel[1])
     return np.clip(np.array([act0, 0.0, act2, thr]), -1, 1)
-
 def collect(target_eps=48, max_attempts=400):
     rng = np.random.default_rng(7)
     X, Y, kept, attempts = [], [], 0, 0
@@ -58,7 +59,7 @@ def collect(target_eps=48, max_attempts=400):
         obs = env.reset()
         traj = []
         for _ in range(400):
-            a = pilot_act2(obs, vmax)
+            a = pilot_act2(obs, vmax, max(10.0, gd * 2))
             traj.append((obs.copy(), a.copy()))
             obs, r, done = env.step(a)
             if done:

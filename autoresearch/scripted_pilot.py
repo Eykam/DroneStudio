@@ -6,8 +6,8 @@ from env_sim import make_sim_factory
 
 MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json"
 
-def pilot_act(obs):
-    rel = obs[0:3] * 10.0          # world rel goal, m
+def pilot_act(obs, ext=10.0):
+    rel = obs[0:3] * ext          # world rel goal, m (obs = rel / scene_extent)
     vel = obs[3:6]                 # world vel, m/s
     gb  = obs[6:9]                 # gravity dir in body frame (~thrust.x=gb.x, thrust.z=gb.z)
     # position -> velocity

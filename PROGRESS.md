@@ -135,3 +135,17 @@ avoidance); no sim/binary changes.
 Artifacts: autoresearch/diverse_bc.py, autoresearch/dagger.py (box
 /workspace), teacher autoresearch/scripted_pilot.py, best policy
 /workspace/bc_flat.json (hot-reloaded by the /watch streamer).
+
+## Scripted-teacher decode fix (2026-09-04, post-DAgger10)
+
+The 10m curriculum wall was a TEACHER bug, not a student/sim bug. pilot_act2
+decoded obs with constants that only hold for extent-10 scenes: rel_goal is
+scaled by 1/scene_extent (extent = max(10, 2*goal_m) = 20 at 10m), and velocity
+damping used obs-raw values (true vel / 10) making the loop nearly undamped.
+Symptoms: orbiting the goal, sign-flipping rel vector, 33% teacher success at
+10m d0.0. Fix: decode rel/obstacle vectors with scene_extent; damp against 0.5x
+true velocity (gain swept over 24 configs x real sim episodes; 0.1x orbits,
+1.0x over-brakes). Fixed teacher (16 eps each, real sim): 2m/5m/10m = 100%
+(d0.1 included), 15m d0.2 = 87.5%, 25m d0.1 = 87.5%. DAgger10 rerun excludes
+the old buggy-teacher long-range labels. Same /10 hardcode fixed in
+scripted_pilot.pilot_act (takes ext=10.0 default now).
