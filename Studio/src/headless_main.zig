@@ -432,8 +432,16 @@ fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info:
     for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
     try writer.print("],\"reward\":{d:.6},\"done\":{}", .{ reward, done });
     if (with_info) {
-        try writer.print(",\"info\":{{\"collided\":{},\"succeeded\":{},\"steps\":{d}}}", .{
+        const p3 = w.bodyPos();
+        const q4 = w.bodyQuat();
+        const v3 = w.bodyVel();
+        // telemetry powers the dashboard live stream (streamer reads
+        // info.pos/quat/vel per policy step)
+        try writer.print(",\"info\":{{\"collided\":{},\"succeeded\":{},\"steps\":{d},\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.4},{d:.4},{d:.4},{d:.4}],\"vel\":[{d:.4},{d:.4},{d:.4}]}}", .{
             w.collided, w.succeeded, w.steps,
+            p3.x(), p3.y(), p3.z(),
+            q4.data[0], q4.data[1], q4.data[2], q4.data[3],
+            v3.x(), v3.y(), v3.z(),
         });
     }
     try writer.writeAll("}\n");
