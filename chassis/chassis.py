@@ -3,7 +3,7 @@
 Constraints from DroneStudio sim (Studio/src/core/ecs/components/FlightController.zig):
   - quad-X, motor_arm_length 0.15 m (center -> motor axis)
   - motor order: M1 FR (CW), M2 FL (CCW), M3 RL (CW), M4 RR (CCW)
-  - EMAX ECO II 2207 2400KV / 4S, max thrust 17.27 N per motor
+  - AKK RS2205 2300KV / 4S, max thrust 11.0 N per motor
 Print target: FDM, PETG baseline (rho = 1240 kg/m^3), 0.4 mm nozzle, no supports.
 """
 from dataclasses import dataclass, field, asdict
@@ -14,7 +14,7 @@ import build123d as b
 class ChassisParams:
     arm_length_mm: float = 150.0        # sim motor_arm_length (center to motor axis)
     arm_width_mm: float = 9.2
-    arm_thickness_mm: float = 31.0      # closed-section depth, balanced against side impact
+    arm_thickness_mm: float = 26.5      # closed-section root stays 2 mm below the recessed stack
     arm_root_width_mm: float = 14.0     # broad root chine flows into the cabin shell
     arm_shell_root_width_mm: float = 16.2
     arm_sweep_mm: float = 3.0           # chiral plan-view bow; motor axes stay fixed
@@ -22,15 +22,15 @@ class ChassisParams:
     arm_crown_width_mm: float = 3.6     # broader bending flange; <2.5 mm inner bridge
     arm_height_falloff: float = 0.68    # retain root depth, shed low-moment span skin
     arm_tip_height_mm: float = 10.8     # faired nacelle depth at the motor load transfer
-    center_plate_len_mm: float = 271.0  # shortened camera prow, rear avionics to nose
+    center_plate_len_mm: float = 242.0  # compact twin-cheek nose to rear avionics fin
     center_plate_wid_mm: float = 68.0
     top_plate_thickness_mm: float = 2.5
     body_thickness_mm: float = 1.25     # structural skin; all faces use normal offsets
     arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
     arm_rib_root_mm: float = 12.0
-    body_fairing_height_mm: float = 54.0 # lowered stack canopy over uninterrupted roots
-    body_fairing_draft_mm: float = 5.4  # inward side inset at the stack shoulder
+    body_fairing_height_mm: float = 49.0 # stack canopy follows the recessed mounting ring
+    body_fairing_draft_mm: float = 4.9   # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
     body_roof_top_len_mm: float = 86.0
     body_roof_top_wid_mm: float = 46.0
@@ -48,7 +48,7 @@ class ChassisParams:
     stack_spacing_mm: float = 30.5      # standard FC/ESC stack
     stack_hole_dia_mm: float = 3.2
     stack_standoff_dia_mm: float = 6.0   # 1.4 mm annular wall around each M3 bore
-    stack_standoff_height_mm: float = 32.0
+    stack_standoff_height_mm: float = 26.5
     camera_aperture_dia_mm: float = 10.0
     fillet_radius_mm: float = 2.0
     prop_dia_mm: float = 127.0          # 5 inch
@@ -247,15 +247,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
     wall = p.body_thickness_mm
     slope = p.body_roof_slope
     draft = p.body_fairing_draft_mm / p.body_fairing_height_mm
-    sx = p.center_plate_len_mm / 271.0
+    sx = p.center_plate_len_mm / 242.0
     sy = p.center_plate_wid_mm / 68.0
     cockpit_h = p.body_fairing_height_mm
 
     # x, belly breadth, shoulder height, dorsal crown breadth (mm). The
     # sidewalls lean inward with height: broad first-layer chines still collect
     # the arm loads, while the upper body wraps closely around the payloads.
-    # GPS and IMU share the aft avionics pod; moving the IMU off the stack lets
-    # its canopy drop without clipping either board's service envelope. The
+    # GPS and IMU share the aft avionics pod; the central canopy follows the
+    # lower stack ring while maintaining its 2 mm service envelope. The
     # battery remains recessed and accessible through the dorsal opening.
     # Its shallow waist removes broad parallel flanks, then flares back into
     # the rear pod and arm roots; the inner walls still clear the 35 mm pack
@@ -268,89 +268,112 @@ def build_chassis(p: ChassisParams) -> b.Part:
         (-56.0, 50.2, 41.5, 41.7),
         (-45.0, 52.0, 41.5, 43.5),
         (-33.0, 56.0, 42.0, 40.0),
-        (-24.0, 60.0, cockpit_h, 44.0),
-        (24.0, 60.0, cockpit_h, 44.0),
+        (-24.0, 57.0, cockpit_h, 40.0),
+        (24.0, 57.0, cockpit_h, 40.0),
         (38.0, 26.0, 37.0, 10.0),
-        (77.0, 26.0, 37.0, 10.0),
-        (89.0, 68.0, 18.0, 26.0),
-        (93.0, 68.0, 18.0, 26.0),
-        (117.0, 68.0, 18.0, 46.0),
-        (123.0, 44.0, 17.0, 20.0),
-        (126.0, 26.0, 15.0, 12.0),
+        (92.5, 26.0, 37.0, 10.0),
+        (97.0, 18.0, 30.0, 8.0),
     ]
     stations = [(x*sx, w*sy, h, c*sy) for x, w, h, c in stations]
 
-    # Each side plane is y + draft*z = breadth/2; each roof plane is
-    # z + slope*y = shoulder*(1-slope*draft) + slope*breadth/2.
-    # Offset their full 3D normals, including the longitudinal sweep. This
-    # preserves the printable gauge through both tapered sides and roof folds.
-    side_offsets, roof_offsets = [], []
-    for a, z in zip(stations, stations[1:]):
-        dx = z[0] - a[0]
-        side_gradient = (z[1]-a[1])/(2*dx)
-        roof_gradient = (1-slope*draft)*(z[2]-a[2])/dx + slope*side_gradient
-        side_offsets.append(wall*math.sqrt(1+draft*draft+side_gradient**2))
-        roof_offsets.append(wall*math.sqrt(1+slope*slope+roof_gradient**2))
+    def cabin_shell(stations):
+        """Mitered, normal-gauge shell with bottom and dorsal service access."""
+        # Each side plane is y + draft*z = breadth/2; each roof plane is
+        # z + slope*y = shoulder*(1-slope*draft) + slope*breadth/2.
+        # Offset their full 3D normals, including the longitudinal sweep. This
+        # preserves the printable gauge through both tapered sides and roof folds.
+        side_offsets, roof_offsets = [], []
+        for a, z in zip(stations, stations[1:]):
+            dx = z[0] - a[0]
+            side_gradient = (z[1]-a[1])/(2*dx)
+            roof_gradient = (1-slope*draft)*(z[2]-a[2])/dx + slope*side_gradient
+            side_offsets.append(wall*math.sqrt(1+draft*draft+side_gradient**2))
+            roof_offsets.append(wall*math.sqrt(1+slope*slope+roof_gradient**2))
 
-    def offset_profile(values, offsets):
-        """Miter adjacent offset planes, preserving gauge through each chine."""
-        lines = []
-        for i, offset in enumerate(offsets):
-            x0, x1 = stations[i][0], stations[i+1][0]
-            gradient = (values[i+1]-values[i])/(x1-x0)
-            lines.append((gradient, values[i]-gradient*x0-offset))
-        joints = [stations[0][0] + wall]
-        for i, (a, z) in enumerate(zip(lines, lines[1:]), 1):
-            x = ((z[1]-a[1])/(a[0]-z[0])
-                 if abs(a[0]-z[0]) > 1e-9 else stations[i][0])
-            joints.append(x)
-        joints.append(stations[-1][0] - wall)
-        return [(x, lines[min(i, len(lines)-1)][0]*x
-                 + lines[min(i, len(lines)-1)][1]) for i, x in enumerate(joints)]
+        def offset_profile(values, offsets):
+            """Miter adjacent offset planes, preserving gauge through each chine."""
+            lines = []
+            for i, offset in enumerate(offsets):
+                x0, x1 = stations[i][0], stations[i+1][0]
+                gradient = (values[i+1]-values[i])/(x1-x0)
+                lines.append((gradient, values[i]-gradient*x0-offset))
+            joints = [stations[0][0] + wall]
+            for i, (a, z) in enumerate(zip(lines, lines[1:]), 1):
+                x = ((z[1]-a[1])/(a[0]-z[0])
+                     if abs(a[0]-z[0]) > 1e-9 else stations[i][0])
+                joints.append(x)
+            joints.append(stations[-1][0] - wall)
+            return [(x, lines[min(i, len(lines)-1)][0]*x
+                     + lines[min(i, len(lines)-1)][1]) for i, x in enumerate(joints)]
 
-    def interpolate(profile, x):
-        for a, z in zip(profile, profile[1:]):
-            if x <= z[0]:
-                return a[1] + (z[1]-a[1])*(x-a[0])/(z[0]-a[0])
-        return profile[-1][1]
+        def interpolate(profile, x):
+            for a, z in zip(profile, profile[1:]):
+                if x <= z[0]:
+                    return a[1] + (z[1]-a[1])*(x-a[0])/(z[0]-a[0])
+            return profile[-1][1]
 
-    inner_sides = offset_profile([w/2 for _, w, _, _ in stations], side_offsets)
-    inner_roofs = offset_profile(
-        [(1-slope*draft)*h+slope*w/2 for _, w, h, _ in stations], roof_offsets)
-    outer_roofs = [(x, h+slope*((w-c)/2-draft*h)) for x, w, h, c in stations]
+        inner_sides = offset_profile([w/2 for _, w, _, _ in stations], side_offsets)
+        inner_roofs = offset_profile(
+            [(1-slope*draft)*h+slope*w/2 for _, w, h, _ in stations], roof_offsets)
+        outer_roofs = [(x, h+slope*((w-c)/2-draft*h)) for x, w, h, c in stations]
 
-    def cabin_wire(station, inner=False):
-        x, width, shoulder, crown = station
-        roof = shoulder + slope*((width-crown)/2-draft*shoulder)
-        if inner:
-            side_constant = interpolate(inner_sides, x)
-            roof_constant = interpolate(inner_roofs, x)
-            # Offset the pitched surface along its normal, then extend it
-            # through the crown: an open service hatch, with no broad bridge.
-            shoulder = (roof_constant - slope*side_constant)/(1-slope*draft)
-            roof = interpolate(outer_roofs, x) + 0.5
-            crown_half = (roof_constant-roof)/slope
-            bottom = -0.2
-        else:
-            side_constant, crown_half, bottom = width/2, crown/2, 0.0
-        belly_half = side_constant - draft*bottom
-        shoulder_half = side_constant - draft*shoulder
-        return b.Wire.make_polygon([
-            (x, -belly_half, bottom), (x, belly_half, bottom),
-            (x, shoulder_half, shoulder), (x, crown_half, roof),
-            (x, -crown_half, roof), (x, -shoulder_half, shoulder),
-        ], close=True)
+        def cabin_wire(station, inner=False):
+            x, width, shoulder, crown = station
+            roof = shoulder + slope*((width-crown)/2-draft*shoulder)
+            if inner:
+                side_constant = interpolate(inner_sides, x)
+                roof_constant = interpolate(inner_roofs, x)
+                # Offset the pitched surface along its normal, then extend it
+                # through the crown: an open service hatch, with no broad bridge.
+                shoulder = (roof_constant - slope*side_constant)/(1-slope*draft)
+                roof = interpolate(outer_roofs, x) + 0.5
+                crown_half = (roof_constant-roof)/slope
+                bottom = -0.2
+            else:
+                side_constant, crown_half, bottom = width/2, crown/2, 0.0
+            belly_half = side_constant - draft*bottom
+            shoulder_half = side_constant - draft*shoulder
+            return b.Wire.make_polygon([
+                (x, -belly_half, bottom), (x, belly_half, bottom),
+                (x, shoulder_half, shoulder), (x, crown_half, roof),
+                (x, -crown_half, roof), (x, -shoulder_half, shoulder),
+            ], close=True)
 
-    outer_fairing = b.Solid.make_loft(
-        [cabin_wire(s) for s in stations], ruled=True)
-    # End bulkheads join both skins without closing the service openings.
-    inner_x = sorted({x for profile in (inner_sides, inner_roofs, outer_roofs)
-                      for x, _ in profile
-                      if inner_sides[0][0] <= x <= inner_sides[-1][0]})
-    inner_fairing = b.Solid.make_loft(
-        [cabin_wire((x, 0, 0, 0), inner=True) for x in inner_x], ruled=True)
-    body = body + (outer_fairing - inner_fairing)
-    roof_z = max(z for _, z in outer_roofs)
+        outer_fairing = b.Solid.make_loft(
+            [cabin_wire(s) for s in stations], ruled=True)
+        # End bulkheads join both skins without closing the service openings.
+        inner_x = sorted({x for profile in (inner_sides, inner_roofs, outer_roofs)
+                          for x, _ in profile
+                          if inner_sides[0][0] <= x <= inner_sides[-1][0]})
+        inner_fairing = b.Solid.make_loft(
+            [cabin_wire((x, 0, 0, 0), inner=True) for x in inner_x], ruled=True)
+        return outer_fairing - inner_fairing, max(z for _, z in outer_roofs)
+
+    fairing, roof_z = cabin_shell(stations)
+    body = body + fairing
+
+    # Low camera cheeks flank the tall Pi spine. Each recessed pocket has its
+    # own pitched coaming, so the wide stereo nose no longer needs a tall full-
+    # width canopy or a long prow ahead of the avionics. The inward cheek skin
+    # overlaps the spine, creating a continuous monocoque junction on the bed.
+    # All camera service boxes clear the inner faces by 2 mm; the lens ports
+    # below are the only forward openings.
+    cheek_stations = [
+        (62.5, 26.0, 14.0, 16.0),
+        (65.0, 35.0, 18.2, 29.0),
+        (93.5, 35.0, 18.2, 29.0),
+        (97.0, 26.0, 14.0, 16.0),
+    ]
+    cheek_stations = [(x*sx, w*sy, h, c*sy)
+                      for x, w, h, c in cheek_stations]
+    cheek, cheek_roof = cabin_shell(cheek_stations)
+    roof_z = max(roof_z, cheek_roof)
+    for camera_y in (-28.0*sy, 28.0*sy):
+        body = body + b.Pos(0, camera_y, 0) * cheek
+        # Short first-layer seat rails tie each cheek's end bulkheads together.
+        seat = b.Pos(79.75*sx, camera_y, 0) * b.extrude(
+            b.Rectangle(33.25*sx, p.payload_rail_width_mm).face(), wall)
+        body = body + seat
 
     # Two first-layer longerons support the recessed payloads, tie the end
     # bulkheads to all four arm chines, and leave underside service access.
@@ -365,7 +388,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # First-layer diagonal ties brace nose and tail against lateral sway.
     # Their triangular load paths replace shell thickening and sit below the
     # 2 mm service clearance of the recessed battery, Pi, GPS and cameras.
-    for root_x, end_x in ((-27.0, -144.0), (27.0, 125.0)):
+    for root_x, end_x in ((-27.0, -144.0), (27.0, 96.0)):
         for side in (-1, 1):
             ax, ay = root_x*sx, side*27.0*sy
             bx, by = end_x*sx, -side*11.0*sy
@@ -389,13 +412,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Teardrop lens ports have a 45-degree roof, so the nose needs no support.
     # Only the sight lines pierce the shell; both camera boards remain inside.
     aperture_r = p.camera_aperture_dia_mm/2
-    for camera_y in (-16.0*sy, 16.0*sy):
+    for camera_y in (-28.0*sy, 28.0*sy):
         port = b.Wire.make_polygon([
-            (115.0*sx, camera_y-aperture_r, 9.0),
-            (115.0*sx, camera_y-aperture_r, 9.0-aperture_r),
-            (115.0*sx, camera_y+aperture_r, 9.0-aperture_r),
-            (115.0*sx, camera_y+aperture_r, 9.0),
-            (115.0*sx, camera_y, 9.0+aperture_r),
+            (93.0*sx, camera_y-aperture_r, 9.0),
+            (93.0*sx, camera_y-aperture_r, 9.0-aperture_r),
+            (93.0*sx, camera_y+aperture_r, 9.0-aperture_r),
+            (93.0*sx, camera_y+aperture_r, 9.0),
+            (93.0*sx, camera_y, 9.0+aperture_r),
         ], close=True)
         body = body - b.Solid.extrude(b.Face(port), (20.0*sx, 0, 0))
 
