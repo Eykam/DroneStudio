@@ -117,14 +117,39 @@ function drawSpark(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.fill();
 }
 
-export default function Watch() {
+
+// --- multi-source watch ------------------------------------------------------
+// The server keeps one stream channel per experiment source. This page holds a
+// single SSE connection, demultiplexes events by their `source` field, and
+// renders one pane per selected source.
+
+type SourceEntry = {
+  id: string; label?: string; policy?: string; policy_obs?: string;
+  dynamics?: string; status?: string;
+  eval?: { goto?: number; hover_hold?: number; land?: number };
+  updated_at?: string;
+};
+type ChanState = {
+  meta: Record<string, unknown>;
+  scene: Scene | null;
+  frames: Frame[];
+  last_event_at: string | null;
+};
+type Listener = (event: string, data: any) => void;
+
+function WatchPane({ sourceId, entry, single, subscribe, snapshot }: {
+  sourceId: string;
+  entry?: SourceEntry;
+  single: boolean;
+  subscribe: (id: string, fn: Listener) => () => void;
+  snapshot: (id: string) => ChanState | undefined;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartsRef = useRef<HTMLCanvasElement>(null);
   const [meta, setMeta] = useState<any>({ status: "connecting" });
   const [scene, setScene] = useState<Scene | null>(null);
   const [last, setLast] = useState<Frame | null>(null);
   const [outcome, setOutcome] = useState<string>("");
-  const [live, setLive] = useState(false);
   const [epCount, setEpCount] = useState(0);
   const trail = useRef<[number, number][]>([]);
   const trail3d = useRef<[number, number, number][]>([]);
@@ -139,62 +164,65 @@ export default function Watch() {
   lastRef.current = last;
 
   useEffect(() => {
-    const es = new EventSource("/api/stream");
-    es.addEventListener("snapshot", (e) => {
-      const d = JSON.parse((e as MessageEvent).data);
-      setMeta(d.meta || {});
-      setScene(d.scene);
-      trail.current = (d.frames || []).map((f: Frame) => [f.pos[0], f.pos[2]]);
-      trail3d.current = (d.frames || []).map((f: Frame) => [f.pos[0], f.pos[1], f.pos[2]]);
-      epFrames.current = d.frames || [];
-      const frames: Frame[] = d.frames || [];
+    const snap = snapshot(sourceId);
+    if (snap) {
+      setMeta(snap.meta || {});
+      setScene(snap.scene as Scene | null);
+      const frames = snap.frames || [];
+      epFrames.current = frames;
+      trail.current = frames.map((f) => [f.pos[0], f.pos[2]]);
+      trail3d.current = frames.map((f) => [f.pos[0], f.pos[1], f.pos[2]]);
       if (frames.length) setLast(frames[frames.length - 1]);
-      setLive(true);
-    });
-    es.addEventListener("status", (e) => setMeta(JSON.parse((e as MessageEvent).data)));
-    es.addEventListener("scene", (e) => {
-      const s = JSON.parse((e as MessageEvent).data);
-      setScene(s);
-      trail.current = [];
-      trail3d.current = [];
-      epFrames.current = [];
-      setOutcome("");
-      setLive(true);
-    });
-    es.addEventListener("frame", (e) => {
-      const f: Frame = JSON.parse((e as MessageEvent).data);
-      setLast(f);
-      epFrames.current.push(f);
-      trail.current.push([f.pos[0], f.pos[2]]);
-      trail3d.current.push([f.pos[0], f.pos[1], f.pos[2]]);
-      if (trail3d.current.length > 1200) trail3d.current.splice(0, trail3d.current.length - 1200);
-      if (trail.current.length > 1200) trail.current.splice(0, trail.current.length - 1200);
-    });
-    es.addEventListener("episode_end", (e) => {
-      const d = JSON.parse((e as MessageEvent).data);
-      const oc = d.succeeded ? "success" : d.collided ? "crash" : "timeout";
-      setOutcome(oc === "success" ? "SUCCESS" : oc === "crash" ? "CRASH" : "TIMEOUT");
-      const sc = sceneRef.current;
-      if (sc) {
-        const m = episodeMetrics(d.episode_id, sc, epFrames.current, oc);
-        if (m) {
-          metrics.current.push(m);
-          if (metrics.current.length > MAX_EPS) metrics.current.splice(0, metrics.current.length - MAX_EPS);
-          setEpCount(metrics.current.length);
+    }
+    return subscribe(sourceId, (event, data) => {
+      if (event === "__snapshot__") {
+        const snap = data as ChanState;
+        setMeta(snap.meta || {});
+        setScene(snap.scene as Scene | null);
+        const frames = snap.frames || [];
+        epFrames.current = frames;
+        trail.current = frames.map((f) => [f.pos[0], f.pos[2]]);
+        trail3d.current = frames.map((f) => [f.pos[0], f.pos[1], f.pos[2]]);
+        if (frames.length) setLast(frames[frames.length - 1]);
+        return;
+      }
+      if (event === "status") setMeta(data);
+      else if (event === "scene") {
+        setScene(data as Scene);
+        trail.current = [];
+        trail3d.current = [];
+        epFrames.current = [];
+        setOutcome("");
+      } else if (event === "frame") {
+        const f = data as Frame;
+        setLast(f);
+        epFrames.current.push(f);
+        trail.current.push([f.pos[0], f.pos[2]]);
+        trail3d.current.push([f.pos[0], f.pos[1], f.pos[2]]);
+        if (trail3d.current.length > 1200) trail3d.current.splice(0, trail3d.current.length - 1200);
+        if (trail.current.length > 1200) trail.current.splice(0, trail.current.length - 1200);
+      } else if (event === "episode_end") {
+        const oc = data.succeeded ? "success" : data.collided ? "crash" : "timeout";
+        setOutcome(oc === "success" ? "SUCCESS" : oc === "crash" ? "CRASH" : "TIMEOUT");
+        const sc = sceneRef.current;
+        if (sc) {
+          const m = episodeMetrics(data.episode_id, sc, epFrames.current, oc as EpMetric["outcome"]);
+          if (m) {
+            metrics.current.push(m);
+            if (metrics.current.length > MAX_EPS) metrics.current.splice(0, metrics.current.length - MAX_EPS);
+            setEpCount(metrics.current.length);
+          }
         }
       }
     });
-    es.onerror = () => setLive(false);
-    es.onopen = () => setLive(true);
-    return () => es.close();
-  }, []);
+  }, [sourceId, subscribe, snapshot]);
 
   useEffect(() => {
     let raf = 0;
     const draw = () => {
       raf = requestAnimationFrame(draw);
       const cv = canvasRef.current;
-      if (cv) {
+      if (cv && (single || view === "2d")) {
         const dpr = window.devicePixelRatio || 1;
         const w = cv.clientWidth, h = cv.clientHeight;
         if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
@@ -221,7 +249,8 @@ export default function Watch() {
             }
             ctx.strokeStyle = "#2ecc71";
             ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(toX(sc.goal[0]), toY(sc.goal[2]), 0.45 * scale, 0, Math.PI * 2); ctx.stroke();
+            const gr = (sc as any).success_radius ? Number((sc as any).success_radius) : 0.45;
+            ctx.beginPath(); ctx.arc(toX(sc.goal[0]), toY(sc.goal[2]), Math.max(0.2, gr) * scale, 0, Math.PI * 2); ctx.stroke();
             ctx.fillStyle = "#888";
             ctx.beginPath(); ctx.arc(toX(sc.spawn[0]), toY(sc.spawn[2]), 3, 0, Math.PI * 2); ctx.fill();
           }
@@ -249,7 +278,6 @@ export default function Watch() {
           }
         }
       }
-      // charts
       const ch = chartsRef.current;
       if (ch) {
         const dpr = window.devicePixelRatio || 1;
@@ -285,49 +313,46 @@ export default function Watch() {
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [single, view]);
 
-  const stale = !live;
+  const show3d = single && view === "3d";
   return (
-    <div className="h-screen bg-[#0b0f14] text-gray-200 flex flex-col overflow-hidden">
-      <header className="flex items-center justify-between px-4 py-2 border-b border-gray-800 shrink-0">
-        <div className="flex items-center gap-3">
-          <Link to="/" className="text-sm text-gray-400 hover:text-gray-200">&larr; Dashboard</Link>
-          <h1 className="text-sm font-semibold">Live sim watch</h1>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`inline-block w-2 h-2 rounded-full ${stale ? "bg-red-500" : "bg-green-500"}`} />
-          {stale ? "reconnecting" : "live"}
-        </div>
-      </header>
-      <div className="flex-1 relative min-h-0">
-        {view === "2d" ? (
+    <div className={`flex flex-col min-h-0 ${single ? "flex-1" : "border-b border-gray-800"}`}>
+      <div className={`relative ${single ? "flex-1 min-h-0" : "h-[46vh] shrink-0"}`}>
+        {!show3d ? (
           <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
         ) : (
           <div className="absolute inset-0">
             <WatchScene3D sceneRef={sceneRef} frameRef={lastRef} trail3dRef={trail3d} mode={camMode} onPick={setChassisId} />
           </div>
         )}
-        <div className="absolute top-2 right-2 flex gap-1 text-xs">
-          <button onClick={() => setView("2d")}
-            className={`px-2 py-1 rounded ${view === "2d" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300"}`}>2D</button>
-          <button onClick={() => setView("3d")}
-            className={`px-2 py-1 rounded ${view === "3d" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300"}`}>3D</button>
-          {view === "3d" && (["orbit", "chase", "fpv"] as CamMode[]).map((m) => (
-            <button key={m} onClick={() => setCamMode(m)}
-              className={`px-2 py-1 rounded ${camMode === m ? "bg-emerald-600 text-white" : "bg-gray-800 text-gray-300"}`}>
-              {m === "fpv" ? "FPV" : m}
-            </button>
-          ))}
-        </div>
+        {single && (
+          <div className="absolute top-2 right-2 flex gap-1 text-xs">
+            <button onClick={() => setView("2d")}
+              className={`px-2 py-1 rounded ${view === "2d" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300"}`}>2D</button>
+            <button onClick={() => setView("3d")}
+              className={`px-2 py-1 rounded ${view === "3d" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300"}`}>3D</button>
+            {view === "3d" && (["orbit", "chase", "fpv"] as CamMode[]).map((m) => (
+              <button key={m} onClick={() => setCamMode(m)}
+                className={`px-2 py-1 rounded ${camMode === m ? "bg-emerald-600 text-white" : "bg-gray-800 text-gray-300"}`}>
+                {m === "fpv" ? "FPV" : m}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="absolute top-2 left-2 flex flex-col gap-1 text-[11px] pointer-events-none">
           <span className="px-2 py-1 rounded bg-gray-900/80 border border-gray-700 text-gray-200">
-            policy: <span className="font-mono text-amber-300">{String(meta.policy || "bc_flat.json")}</span>
-            {meta.policy_obs ? <span className="text-gray-400"> ({String(meta.policy_obs)})</span> : null}
+            policy: <span className="font-mono text-amber-300">{String(meta.policy || entry?.policy || "-")}</span>
+            {(meta.policy_obs || entry?.policy_obs) ? <span className="text-gray-400"> ({String(meta.policy_obs || entry?.policy_obs)})</span> : null}
           </span>
-          {chassisId && (
+          {show3d && chassisId && (
             <span className="px-2 py-1 rounded bg-gray-900/80 border border-gray-700 text-gray-200">
               chassis: <span className="font-mono text-sky-300">{chassisId.replace(/^cad-chassis-/, "")}</span>
+            </span>
+          )}
+          {(scene as any)?.scenario && (
+            <span className="px-2 py-1 rounded bg-gray-900/80 border border-gray-700 text-gray-200">
+              {(scene as any).scenario} r={(scene as any).success_radius}m
             </span>
           )}
         </div>
@@ -338,7 +363,7 @@ export default function Watch() {
           </div>
         )}
       </div>
-      <div className="h-[150px] md:h-[180px] shrink-0 border-t border-gray-800">
+      <div className={`${single ? "h-[150px] md:h-[180px]" : "h-[110px]"} shrink-0 border-t border-gray-800`}>
         <canvas ref={chartsRef} className="w-full h-full" />
       </div>
       <footer className="px-4 py-1.5 border-t border-gray-800 text-xs text-gray-400 flex flex-wrap gap-x-4 gap-y-1 shrink-0">
@@ -349,6 +374,140 @@ export default function Watch() {
         <span>speed: {last ? Math.hypot(...last.vel).toFixed(1) + "m/s" : "-"}</span>
         <span>eps scored: {epCount}</span>
       </footer>
+    </div>
+  );
+}
+
+export default function Watch() {
+  const [registry, setRegistry] = useState<SourceEntry[]>([]);
+  const [liveIds, setLiveIds] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [connected, setConnected] = useState(false);
+  const chans = useRef<Map<string, ChanState>>(new Map());
+  const subs = useRef<Map<string, Set<Listener>>>(new Map());
+
+  const emit = (id: string, event: string, data: any) => {
+    const set = subs.current.get(id);
+    if (set) for (const fn of set) { try { fn(event, data); } catch { /* pane left */ } }
+  };
+  const subscribe = (id: string, fn: Listener) => {
+    let set = subs.current.get(id);
+    if (!set) { set = new Set(); subs.current.set(id, set); }
+    set.add(fn);
+    return () => { set.delete(fn); };
+  };
+  const snapshot = (id: string) => chans.current.get(id);
+
+  useEffect(() => {
+    const es = new EventSource("/api/stream");
+    const note = (id: string, patch: Partial<ChanState>) => {
+      const cur = chans.current.get(id) || { meta: {}, scene: null, frames: [], last_event_at: null };
+      chans.current.set(id, { ...cur, ...patch });
+      setLiveIds([...chans.current.keys()]);
+    };
+    es.addEventListener("snapshot", (e) => {
+      const d = JSON.parse((e as MessageEvent).data);
+      chans.current = new Map(Object.entries(d.sources || {}));
+      setRegistry(d.registry || []);
+      setLiveIds([...chans.current.keys()]);
+      for (const [id, ch] of chans.current) emit(id, "__snapshot__", ch);
+    });
+    es.addEventListener("status", (e) => {
+      const d = JSON.parse((e as MessageEvent).data);
+      const { source, ...meta } = d;
+      note(source, { meta, last_event_at: new Date().toISOString() });
+      emit(source, "status", meta);
+    });
+    es.addEventListener("scene", (e) => {
+      const d = JSON.parse((e as MessageEvent).data);
+      const { source, ...scene } = d;
+      note(source, { scene: scene as Scene, frames: [], last_event_at: new Date().toISOString() });
+      emit(source, "scene", scene);
+    });
+    es.addEventListener("frame", (e) => {
+      const d = JSON.parse((e as MessageEvent).data);
+      const cur = chans.current.get(d.source);
+      if (cur) {
+        cur.frames.push(d);
+        if (cur.frames.length > 400) cur.frames.splice(0, cur.frames.length - 400);
+        cur.last_event_at = d.ts;
+      } else {
+        note(d.source, { frames: [d], last_event_at: d.ts });
+      }
+      emit(d.source, "frame", d);
+    });
+    es.addEventListener("episode_end", (e) => {
+      const d = JSON.parse((e as MessageEvent).data);
+      emit(d.source, "episode_end", d);
+    });
+    es.onerror = () => setConnected(false);
+    es.onopen = () => setConnected(true);
+    const poll = setInterval(() => {
+      fetch("/api/stream/sources").then((r) => r.json()).then((r) => setRegistry(r)).catch(() => {});
+    }, 30000);
+    fetch("/api/stream/sources").then((r) => r.json()).then((r) => setRegistry(r)).catch(() => {});
+    return () => { es.close(); clearInterval(poll); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // known sources: registry entries + any live channel not registered
+  const known: SourceEntry[] = [...registry];
+  for (const id of liveIds) {
+    if (!known.some((k) => k.id === id)) known.push({ id, label: id === "default" ? "Live policy" : id });
+  }
+  // default selection: first known source
+  const sel = selected.length ? selected.filter((s) => known.some((k) => k.id === s)) : known.slice(0, 1).map((k) => k.id);
+  const toggle = (id: string) =>
+    setSelected((cur) => {
+      const base = cur.length ? cur : known.slice(0, 1).map((k) => k.id);
+      return base.includes(id) ? base.filter((s) => s !== id) : [...base, id];
+    });
+
+  return (
+    <div className={`bg-[#0b0f14] text-gray-200 flex flex-col ${sel.length <= 1 ? "h-screen overflow-hidden" : "min-h-screen"}`}>
+      <header className="flex items-center justify-between px-4 py-2 border-b border-gray-800 shrink-0">
+        <div className="flex items-center gap-3">
+          <Link to="/" className="text-sm text-gray-400 hover:text-gray-200">&larr; Dashboard</Link>
+          <h1 className="text-sm font-semibold">Live sim watch</h1>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`inline-block w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
+          {connected ? "live" : "reconnecting"}
+        </div>
+      </header>
+      <div className="flex gap-2 px-3 py-2 overflow-x-auto border-b border-gray-800 shrink-0">
+        {known.map((k) => {
+          const on = sel.includes(k.id);
+          const live = chans.current.get(k.id)?.meta?.status === "streaming";
+          return (
+            <button key={k.id} onClick={() => toggle(k.id)}
+              className={`shrink-0 text-left px-3 py-1.5 rounded border text-xs ${
+                on ? "border-blue-500 bg-blue-950/40" : "border-gray-700 bg-gray-900/60"}`}>
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-block w-1.5 h-1.5 rounded-full ${live ? "bg-emerald-500" : "bg-gray-600"}`} />
+                <span className="font-semibold text-gray-100">{k.label || k.id}</span>
+              </div>
+              <div className="text-gray-400 font-mono mt-0.5">
+                {k.policy || "-"}{k.policy_obs ? ` - ${k.policy_obs}` : ""}
+              </div>
+              {k.eval && (
+                <div className="text-gray-400 mt-0.5">
+                  goto {Math.round((k.eval.goto ?? 0) * 100)}% - hover {Math.round((k.eval.hover_hold ?? 0) * 100)}% - land {Math.round((k.eval.land ?? 0) * 100)}%
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className={`flex-1 min-h-0 ${sel.length > 1 ? "grid md:grid-cols-2" : "flex flex-col"}`}>
+        {sel.map((id) => (
+          <WatchPane key={id} sourceId={id} entry={known.find((k) => k.id === id)}
+            single={sel.length === 1} subscribe={subscribe} snapshot={snapshot} />
+        ))}
+        {sel.length === 0 && (
+          <div className="p-6 text-sm text-gray-400">No experiment selected - pick one above.</div>
+        )}
+      </div>
     </div>
   );
 }
