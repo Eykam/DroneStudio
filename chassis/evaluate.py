@@ -14,7 +14,7 @@ import trimesh
 RHO_PETG = 1240e-9   # kg/mm^3
 OVERHANG_LIMIT_DEG = 45.0
 MIN_WALL_MM = 1.2    # 3 perimeters at 0.4 mm nozzle
-MAX_THRUST_PER_MOTOR_N = 10.0  # from sim FlightController.zig
+MAX_THRUST_PER_MOTOR_N = 9.7  # AKK RS2205 2300KV fitted full-throttle equilibrium (sim MOTOR_V2.md, kf=7.9e-7 @ 3560 rad/s cap); conservative availability basis for hover margin
 
 def load(path):
     m = trimesh.load(path, force='mesh')

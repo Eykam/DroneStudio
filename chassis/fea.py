@@ -1,7 +1,7 @@
 """Structural FEA stage: gmsh mesh -> CalculiX ccx -> pass/fail.
 
 Load cases (fixed at the 30.5 mm stack hole ring, thrust at motor pads):
-  hover_max: 4x max thrust (17.27 N, EMAX ECO II 2207 2400KV 4S datasheet) upward
+  hover_max: 4x max thrust (11.0 N, AKK RS2205 2300KV bench peak on 5045-class) upward
   crash:     3x that (hard-impact proxy)
   torsion:   diagonal pairs at differential thrust [+1.5,-1.5,+1.5,-1.5] x max,
              net yaw torque - frames fail in torsion before bending
@@ -20,7 +20,7 @@ import os, math, subprocess, numpy as np
 EXTRA_NSETS = {}  # populated by _emit_base (e.g. NBATT)
 
 E_MPA, NU, YIELD_MPA = 2100.0, 0.36, 50.0
-MAX_THRUST_N = 17.27  # EMAX ECO II 2207 2400KV on 4S, datasheet 1760 g
+MAX_THRUST_N = 11.0  # AKK RS2205 2300KV (user motor 2026-09-04): bench peak 989-1155 g on 5045-class props, 4S (oscarliang/EMAX thrust stand); fitted 9.7 N full-throttle equilibrium (sim MOTOR_V2.md)
 TIP_DISP_LIMIT_MM = 5.0
 STRESS_FOS = 0.6
 RHO_T_PER_MM3 = 1.24e-9  # PETG, tonne/mm^3 (N-mm-s consistent)
