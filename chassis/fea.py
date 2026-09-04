@@ -1,17 +1,31 @@
 """Structural FEA stage: gmsh mesh -> CalculiX ccx -> pass/fail.
 
-Load case 1 (hover-max): 4x max thrust (10 N each) upward at motor pads,
-fixed at the 30.5 mm stack hole ring. Load case 2 (crash): 3x that.
-Material: PETG, E=2100 MPa, nu=0.36, yield 50 MPa. Pass: max von Mises
-< 0.6*yield AND arm-tip displacement < 5 mm, both cases.
+Load cases (fixed at the 30.5 mm stack hole ring, thrust at motor pads):
+  hover_max: 4x max thrust (17.27 N, EMAX ECO II 2207 2400KV 4S datasheet) upward
+  crash:     3x that (hard-impact proxy)
+  torsion:   diagonal pairs at differential thrust [+1.5,-1.5,+1.5,-1.5] x max,
+             net yaw torque - frames fail in torsion before bending
+  modal:     *FREQUENCY, first 8 eigenmodes - resonance screening vs control
+             band (FC gyro filters ~100-250Hz) and blade-pass excitation
+Material: PETG, E=2100 MPa, nu=0.36, yield 50 MPa, rho 1.24e-9 tonne/mm3.
+Anisotropy: FFF layer adhesion is weaker across layers - vertical-load cases
+(hover/crash bend arms across layer lines) gated at 0.55x yield-allowable,
+torsion (in-plane shear) at 0.8x. Pass: each case's max von Mises under its
+directional allowable AND arm-tip displacement < 5 mm AND first eigenmode
+>= MIN_FIRST_MODE_HZ.
 Node sets are built from coordinates (robust to gmsh surface-id churn).
 """
 import os, math, subprocess, numpy as np
 
 E_MPA, NU, YIELD_MPA = 2100.0, 0.36, 50.0
-MAX_THRUST_N = 10.0
+MAX_THRUST_N = 17.27  # EMAX ECO II 2207 2400KV on 4S, datasheet 1760 g
 TIP_DISP_LIMIT_MM = 5.0
 STRESS_FOS = 0.6
+RHO_T_PER_MM3 = 1.24e-9  # PETG, tonne/mm^3 (N-mm-s consistent)
+ANISO_VERTICAL = 0.55    # FFF Z-layer strength fraction vs in-plane
+ANISO_SHEAR = 0.8
+MIN_FIRST_MODE_HZ = 120.0  # first elastic mode floor (control-band margin)
+N_MODES = 8
 
 def mesh_step(step_path, inp_path, mesh_size=2.5):
     import gmsh
@@ -24,7 +38,6 @@ def mesh_step(step_path, inp_path, mesh_size=2.5):
     gmsh.model.mesh.generate(3)
     gmsh.write(inp_path.replace(".inp", ".msh"))
     gmsh.finalize()
-    # keep tetra only, write a clean abaqus/ccx mesh via meshio
     import meshio
     m = meshio.read(inp_path.replace(".inp", ".msh"))
     tets = [c for c in m.cells if c.type == "tetra"]
@@ -33,10 +46,11 @@ def mesh_step(step_path, inp_path, mesh_size=2.5):
     meshio.Mesh(m.points, tets).write(inp_path, file_format="abaqus")
     return inp_path
 
-def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_scale=1.0):
+def _emit_base(inp_path, motor_positions_mm, stack_spacing_mm):
+    """Shared mesh/nset/material cards. Returns (lines, fix_count, load_id_lists)."""
     import meshio
     m = meshio.read(inp_path)
-    pts = m.points  # mm
+    pts = m.points
     sh = stack_spacing_mm / 2
     stack_xy = np.array([(sh, sh), (-sh, sh), (-sh, -sh), (sh, -sh)])
     fix = np.zeros(len(pts), bool)
@@ -68,16 +82,23 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_s
     out.append("*MATERIAL,NAME=PETG")
     out.append("*ELASTIC")
     out.append("%.1f,%.3f" % (E_MPA, NU))
+    out.append("*DENSITY")
+    out.append("%.3e" % RHO_T_PER_MM3)
     out.append("*SOLID SECTION,ELSET=EALL,MATERIAL=PETG")
     out.append("*BOUNDARY")
     out.append("NFIX,1,3,0.0")
+    return out, int(fix.sum()), [list(s + 1) for s in loads]
+
+def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, motor_scales):
+    """Static job; motor_scales = signed per-motor multiplier of MAX_THRUST_N (dir 3)."""
+    out, nfix, loads = _emit_base(inp_path, motor_positions_mm, stack_spacing_mm)
     out.append("*STEP")
     out.append("*STATIC")
     out.append("*CLOAD")
-    per = MAX_THRUST_N * thrust_scale
     for mi, sel in enumerate(loads):
         n = max(len(sel), 1)
-        for nid in (sel + 1):
+        per = MAX_THRUST_N * motor_scales[mi]
+        for nid in sel:
             out.append("%d,3,%.6f" % (nid, per / n))
     out.append("*NODE FILE")
     out.append("U")
@@ -86,7 +107,19 @@ def build_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm, thrust_s
     out.append("*END STEP")
     with open(job_name + ".inp", "w") as f:
         f.write(chr(10).join(out) + chr(10))
-    return job_name + ".inp", int(fix.sum()), [int(len(s)) for s in loads]
+    return job_name + ".inp", nfix, [len(s) for s in loads]
+
+def build_freq_job(inp_path, job_name, motor_positions_mm, stack_spacing_mm):
+    out, nfix, loads = _emit_base(inp_path, motor_positions_mm, stack_spacing_mm)
+    out.append("*STEP")
+    out.append("*FREQUENCY")
+    out.append("%d" % N_MODES)
+    out.append("*NODE FILE")
+    out.append("U")
+    out.append("*END STEP")
+    with open(job_name + ".inp", "w") as f:
+        f.write(chr(10).join(out) + chr(10))
+    return job_name + ".inp"
 
 def run_ccx(job_base, ccx="ccx"):
     r = subprocess.run([ccx, "-i", job_base], capture_output=True, text=True, timeout=1800)
@@ -106,7 +139,7 @@ def parse_frd(frd_path):
                 mode = None
         elif s.startswith("-1") and mode in ("S", "U"):
             rest = s[2:]
-            body = rest[10:]  # skip 10-char node id; values are fixed 12-char fields
+            body = rest[10:]
             vals = []
             for i in range(0, len(body), 12):
                 c = body[i:i+12].strip()
@@ -124,32 +157,54 @@ def parse_frd(frd_path):
                 u = math.sqrt(vals[0]**2 + vals[1]**2 + vals[2]**2)
                 if u > max_u:
                     max_u = u
-        elif s.startswith("-2") and mode == "S":
-            pass  # stress fits on the -1 line; ignore continuations
     return max_vm, max_u
+
+def parse_freqs(dat_path):
+    """Eigenfrequencies (Hz, cycles/time) from a ccx .dat after a *FREQUENCY step.
+    Table rows: <mode> <eigenvalue> <rad/time> <cycles/time> <imaginary>; ends at PARTICIPATION FACTORS."""
+    import re
+    freqs = []
+    row = re.compile(r"^\s*(\d+)\s+\S+\s+\S+\s+(\S+)\s+\S+\s*$")
+    for line in open(dat_path):
+        if "PARTICIPATION" in line:
+            break
+        m = row.match(line)
+        if m:
+            try:
+                freqs.append(float(m.group(2)))
+            except ValueError:
+                pass
+    return freqs
 
 def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="ccx"):
     os.makedirs(workdir, exist_ok=True)
     inp = os.path.join(workdir, "mesh.inp")
     mesh_step(step_path, inp)
     out = {}
-    for name, scale in (("hover_max", 1.0), ("crash", 3.0)):
+    cases = (("hover_max", [1.0]*4, ANISO_VERTICAL),
+             ("crash", [3.0]*4, ANISO_VERTICAL),
+             ("torsion", [1.5, -1.5, 1.5, -1.5], ANISO_SHEAR))
+    for name, scales, aniso in cases:
         job = os.path.join(workdir, name)
-        inp_path, nfix, nloads = build_job(inp, job, motor_positions_mm, stack_spacing_mm, scale)
+        build_job(inp, job, motor_positions_mm, stack_spacing_mm, scales)
+        limit = STRESS_FOS * YIELD_MPA * aniso
         if run_ccx(job, ccx):
             vm, u = parse_frd(job + ".frd")
-            ok = vm < STRESS_FOS * YIELD_MPA and u < TIP_DISP_LIMIT_MM
+            ok = vm < limit and u < TIP_DISP_LIMIT_MM
             out[name] = {"max_von_mises_mpa": round(vm,1), "max_disp_mm": round(u,2),
-                         "limit_mpa": STRESS_FOS*YIELD_MPA, "passed": ok,
-                         "fix_nodes": nfix, "load_nodes": nloads}
+                         "limit_mpa": round(limit,1), "passed": ok}
         else:
             out[name] = {"passed": False, "error": "ccx failed"}
+    job = os.path.join(workdir, "modal")
+    build_freq_job(inp, job, motor_positions_mm, stack_spacing_mm)
+    if run_ccx(job, ccx):
+        freqs = parse_freqs(job + ".dat")
+        f1 = freqs[0] if freqs else 0.0
+        out["modal"] = {"modes_hz": [round(f,1) for f in freqs],
+                        "first_mode_hz": round(f1,1),
+                        "min_first_mode_hz": MIN_FIRST_MODE_HZ,
+                        "passed": bool(freqs) and f1 >= MIN_FIRST_MODE_HZ}
+    else:
+        out["modal"] = {"passed": False, "error": "ccx failed"}
     out["passed"] = all(v.get("passed") for v in out.values())
     return out
-
-if __name__ == "__main__":
-    from chassis import ChassisParams
-    p = ChassisParams()
-    r = evaluate_fea("/home/sandbox/cad-researcher/chassis_v1.step", p.motor_positions(), p.stack_spacing_mm,
-                     "/home/sandbox/cad-researcher/fea_v1", ccx="/tmp/CalculiX/ccx_2.22/src/ccx_2.22")
-    import json; print(json.dumps(r, indent=2))
