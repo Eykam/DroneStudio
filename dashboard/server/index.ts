@@ -3,6 +3,7 @@
 // Ingest: bearer-token POSTs from the research box; state persisted to disk.
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { streamSSE } from "hono/streaming";
 import { getCookie, setCookie } from "hono/cookie";
 
 const PASSWORD_SHA256 = process.env.DASHBOARD_PASSWORD_SHA256 || "";
@@ -256,6 +257,106 @@ app.use("/api/state", async (c, next) => {
 app.get("/api/state", async (c) => c.json(await loadState()));
 
 // --- static frontend ----------------------------------------------------------
+
+// --- live sim stream (watch channel) ---------------------------------------
+// The streamer on the research box POSTs scene/frame/episode_end events with
+// the ingest bearer token; viewers subscribe over SSE. In-memory only: the
+// stream is live, not history.
+const FRAME_CAP = 400;
+const streamState: {
+  meta: Record<string, unknown>;
+  scene: Record<string, unknown> | null;
+  frames: Record<string, unknown>[];
+  last_event_at: string | null;
+} = { meta: { status: "offline" }, scene: null, frames: [], last_event_at: null };
+
+type SseClient = { send: (event: string, data: unknown) => void };
+const sseClients = new Set<SseClient>();
+function broadcast(event: string, data: unknown) {
+  for (const cl of sseClients) {
+    try { cl.send(event, data); } catch { sseClients.delete(cl); }
+  }
+}
+
+app.post("/api/stream/ingest", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  const now = new Date().toISOString();
+  streamState.last_event_at = now;
+  const t = body.type;
+  if (t === "status") {
+    const { type, ...rest } = body;
+    streamState.meta = { ...rest, ts: now };
+    broadcast("status", streamState.meta);
+  } else if (t === "scene") {
+    const { type, ...rest } = body;
+    streamState.scene = { ...rest, ts: now };
+    streamState.frames = [];
+    broadcast("scene", streamState.scene);
+  } else if (t === "frame") {
+    const f = { ...body, ts: now };
+    streamState.frames.push(f);
+    if (streamState.frames.length > FRAME_CAP) streamState.frames.splice(0, streamState.frames.length - FRAME_CAP);
+    broadcast("frame", f);
+  } else if (t === "episode_end") {
+    broadcast("episode_end", body);
+  } else {
+    return c.json({ error: "unknown type" }, 400);
+  }
+  return c.json({ ok: true });
+});
+
+
+// --- CAD work-in-progress signal --------------------------------------------
+// The CAD research loop POSTs its current stage here; /cad renders an
+// in-progress banner. In-memory only, staleness handled client-side.
+// Contract documented in CAD_INGEST_API.md.
+let cadProgress: Record<string, unknown> = { status: "idle" };
+
+app.post("/api/cad/progress", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  cadProgress = { ...body, ts: new Date().toISOString() };
+  return c.json({ ok: true });
+});
+
+app.get("/api/cad/progress", (c) => c.json(cadProgress));
+
+app.get("/api/stream/state", (c) => c.json({
+  meta: streamState.meta,
+  scene: streamState.scene,
+  frames: streamState.frames,
+  last_event_at: streamState.last_event_at,
+}));
+
+app.get("/api/stream", (c) =>
+  streamSSE(c, async (stream) => {
+    const client: SseClient = {
+      send: (event, data) => {
+        void stream.writeSSE({ event, data: JSON.stringify(data) }).catch(() => sseClients.delete(client));
+      },
+    };
+    sseClients.add(client);
+    await stream.writeSSE({
+      event: "snapshot",
+      data: JSON.stringify({ meta: streamState.meta, scene: streamState.scene, frames: streamState.frames }),
+    });
+    const keepalive = setInterval(() => {
+      void stream.writeSSE({ event: "ping", data: "{}" }).catch(() => {});
+    }, 15000);
+    stream.onAbort(() => { clearInterval(keepalive); sseClients.delete(client); });
+    await new Promise<void>(() => {});
+  })
+);
+
 app.use("/*", serveStatic({ root: "./dist" }));
 app.get("*", serveStatic({ root: "./dist", path: "index.html" })); // SPA fallback
 

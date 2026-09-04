@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { fetchState, logout, type ArchiveRecord } from "@/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { Activity, FlaskConical, Trophy, LogOut, Bot, Dices, Box } from "lucide-react";
+import { Activity, FlaskConical, Trophy, LogOut, Bot, Dices, Box, Play } from "lucide-react";
 
 const MUTATOR_META: Record<string, { label: string; cls: string }> = {
   codex: { label: "ChatGPT", cls: "text-emerald-400" },
@@ -64,6 +64,9 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0 mt-1">
+          <Link to="/watch">
+            <Button variant="ghost" size="sm"><Play className="h-4 w-4" /> <span className="hidden sm:inline">Watch</span></Button>
+          </Link>
           <Link to="/cad">
             <Button variant="ghost" size="sm"><Box className="h-4 w-4" /> <span className="hidden sm:inline">CAD</span></Button>
           </Link>

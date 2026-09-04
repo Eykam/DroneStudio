@@ -60,6 +60,14 @@ export default function Cad() {
   const qc = useQueryClient();
   const { data, error } = useQuery({ queryKey: ["cad"], queryFn: fetchCadDesigns, refetchInterval: 15_000 });
   const stateQ = useQuery({ queryKey: ["state"], queryFn: fetchState, refetchInterval: 15_000 });
+  const progQ = useQuery({
+    queryKey: ["cad-progress"],
+    queryFn: async () => (await (await fetch("/api/cad/progress", { credentials: "same-origin" })).json()) as any,
+    refetchInterval: 10_000,
+  });
+  const prog = progQ.data as any;
+  const progAge = prog?.ts ? (Date.now() - new Date(prog.ts).getTime()) / 1000 : 1e9;
+  const progLive = prog && prog.status === "working" && progAge < 120;
   // Merge GLB-bearing designs with geometry-pending snapshot records
   // (kind="cad.chassis.snapshot" via /api/ingest) by id. GLB design wins;
   // snapshot fills missing metrics.
@@ -114,6 +122,22 @@ export default function Cad() {
           </Button>
         </div>
       </header>
+
+      {progLive && (
+        <Card className="border-primary/50">
+          <CardContent className="p-3 md:p-4 flex items-center gap-3">
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+            </span>
+            <div className="text-xs md:text-sm min-w-0">
+              <span className="font-semibold">Working on {String(prog.design_id || "next revision")}</span>
+              {prog.stage && <span className="text-muted-foreground"> - {String(prog.stage)}</span>}
+              {prog.detail && <div className="text-muted-foreground truncate">{String(prog.detail)}</div>}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {!designs.length && (
         <Card><CardContent className="p-6 text-sm text-muted-foreground">
