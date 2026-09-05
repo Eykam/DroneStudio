@@ -251,7 +251,7 @@ def main():
     # same recipe, fresh rollout seeds, reused anchor for comparability.
     params0 = unpack27(json.load(open("/workspace/t4_dag12_r24.json")))
     _ic(1)
-    z = np.load("/workspace/t4_demos_dag12b.npz")
+    z = np.load("/workspace/t4_demos_dag12.npz")
     Xa, Aa, Wa = z["X"], z["A"], z["W"]
     print(f"anchor_reused: {len(Xa)} samples (dag12b land-only anchor)", flush=True)
     XD, AD, WD = [], [], []
