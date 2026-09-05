@@ -88,7 +88,8 @@ def eval_all(actor_flat, label):
     res = parallel_episodes(eval_one, args)
     out, i = {}, 0
     for k in EVAL_CELLS:
-        n = len(cells[k])
+        kk = ("hover_hold", k[1]) if k[0] == "hover_hold60" else k
+        n = len(cells[kk])
         out[k] = float(np.mean(res[i:i + n]))
         i += n
     for (sc, t), v in out.items():
