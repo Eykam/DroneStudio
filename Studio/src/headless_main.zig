@@ -88,6 +88,10 @@ const Dynamics = struct {
     m2_batt_cap_as: f32 = 4680.0, // charge, A*s (~1.3Ah, ASSUMPTION)
     m2_soc: f32 = 1.0,
     m2_esc_delay_ticks: usize = 1, // DShot latency in 500Hz ticks (ESTIMATE)
+    // Prop inflow + ground-effect fidelity (2026-09-05):
+    m2_prop_d: f32 = 0.127, // prop diameter, m (manifest prop_diameter_m)
+    m2_j0: f32 = 1.2, // advance ratio where thrust -> 0 (ESTIMATE, 4.5in pitch)
+    m2_ge: bool = true, // ground-effect thrust amplification on/off
 };
 const GROUND_Y: f32 = 0.05;
 
@@ -349,9 +353,19 @@ const World = struct {
                 // kf*omega^2) -> ESC latency -> DC motor + prop inertia ->
                 // thrust/drag from ACTUAL omega^2. Battery: 4S LiPo with
                 // SoC-dependent open-circuit voltage and I*R sag.
+                // Prop fidelity (2026-09-05): static kf*omega^2 corrected for
+                //   (a) axial inflow: T *= clamp(1 - J/J0), J = 2*pi*v_ax/(omega*D),
+                //       v_ax = body speed along the rotor axis (positive = climb);
+                //   (b) ground effect: T *= 1/(1 - (R/4z)^2), z clamped >= 0.6R.
                 const kf = d.m2_kf;
                 const kd = kf * d.m2_kd_over_kf;
                 const v_oc = 12.0 + 4.8 * d.m2_soc; // 4S: 12.0 empty .. 16.8 full
+                const axis_w = Vec3.init(0, 1, 0).rotate_by_quaternion(q);
+                const v_w = self.bodyVel();
+                const v_ax = v_w.x() * axis_w.x() + v_w.y() * axis_w.y() + v_w.z() * axis_w.z();
+                const prop_r = 0.5 * d.m2_prop_d;
+                const z_ge = @max(self.bodyPos().y() - GROUND_Y, 0.6 * prop_r);
+                const ge_factor: f32 = if (d.m2_ge) 1.0 / (1.0 - (prop_r / (4.0 * z_ge)) * (prop_r / (4.0 * z_ge))) else 1.0;
                 var i_total: f32 = 0;
                 var ocmds: [4]f32 = undefined;
                 inline for (0..4) |i| {
@@ -379,12 +393,17 @@ const World = struct {
                     const tau_m = d.m2_ke * cur;
                     const dw = (tau_m - kd * d.m2_omega[i] * d.m2_omega[i]) / d.m2_jr;
                     d.m2_omega[i] = @max(0.0, d.m2_omega[i] + dw * FAST_DT);
-                    const ti = kf * d.m2_omega[i] * d.m2_omega[i];
+                    const w2 = d.m2_omega[i] * d.m2_omega[i];
+                    const adv = if (d.m2_omega[i] > 1.0)
+                        std.math.clamp(1.0 - (2.0 * std.math.pi * v_ax / (d.m2_omega[i] * d.m2_prop_d)) / d.m2_j0, 0.0, 1.5)
+                    else
+                        1.0;
+                    const ti = kf * w2 * adv * ge_factor;
                     total += ti;
                     const mp = d.motor_pos[i];
                     torque_b[0] += ti * -mp[2];
                     torque_b[2] += ti * mp[0];
-                    torque_b[1] += kd * d.m2_omega[i] * d.m2_omega[i] * d.motor_yaw_sign[i];
+                    torque_b[1] += kd * w2 * adv * ge_factor * d.motor_yaw_sign[i];
                 }
                 d.m2_soc = @max(0.0, d.m2_soc - i_total * FAST_DT / d.m2_batt_cap_as);
                 // Rotor gyroscopic reaction: -Omega_body x (0, L_r, 0)
@@ -972,6 +991,9 @@ pub fn main() !void {
                 world.dyn.m2_soc = 1.0;
                 world.dyn.m2_esc_delay_ticks = 1; // DShot latency in 500Hz ticks (ESTIMATE)
                 world.dyn.m2_kf = 7.9e-7; // N/(rad/s)^2, thrust-stand fit (oscarliang RS2205-2300KV HQ5045BN 4S); NOT derived from max_thrust so CAD thrust-cap changes don't recalibrate the prop
+                world.dyn.m2_prop_d = @floatCast(m.motors[0].prop_diameter_m);
+                world.dyn.m2_j0 = 1.2;
+                world.dyn.m2_ge = true;
                 inline for (0..4) |i| world.dyn.m2_cmd_hist[i] = .{ 0, 0, 0, 0 };
             }
             const n = @min(m.name.len, world.dyn_name_buf.len);
