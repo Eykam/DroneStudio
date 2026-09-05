@@ -10,7 +10,7 @@ export default function Sim() {
   return (
     <div className="space-y-4">
       <div className="flex gap-1 border-b border-border">
-        {([["live", "Live view"], ["research", "Research loop"]] as const).map(([t, label]) => (
+        {([["live", "Simulation"], ["research", "Research loop"]] as const).map(([t, label]) => (
           <button key={t} onClick={() => setParams(t === "live" ? {} : { tab: t }, { replace: true })}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
               tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>

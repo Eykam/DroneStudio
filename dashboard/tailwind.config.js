@@ -5,15 +5,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        border: "hsl(217 33% 17%)",
-        input: "hsl(217 33% 17%)",
+        border: "hsl(220 11% 18%)",
+        input: "hsl(220 11% 18%)",
         ring: "hsl(224 76% 48%)",
         background: "hsl(222 47% 6%)",
         foreground: "hsl(210 40% 96%)",
         primary: { DEFAULT: "hsl(217 91% 60%)", foreground: "hsl(222 47% 11%)" },
-        secondary: { DEFAULT: "hsl(217 33% 14%)", foreground: "hsl(210 40% 96%)" },
-        muted: { DEFAULT: "hsl(217 33% 14%)", foreground: "hsl(215 20% 65%)" },
-        accent: { DEFAULT: "hsl(217 33% 17%)", foreground: "hsl(210 40% 96%)" },
+        secondary: { DEFAULT: "hsl(220 11% 13%)", foreground: "hsl(210 40% 96%)" },
+        muted: { DEFAULT: "hsl(220 11% 13%)", foreground: "hsl(215 14% 62%)" },
+        accent: { DEFAULT: "hsl(220 11% 17%)", foreground: "hsl(210 40% 96%)" },
         destructive: { DEFAULT: "hsl(0 63% 31%)", foreground: "hsl(210 40% 98%)" },
         card: { DEFAULT: "hsl(222 47% 9%)", foreground: "hsl(210 40% 96%)" },
       },

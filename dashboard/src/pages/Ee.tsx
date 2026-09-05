@@ -261,10 +261,10 @@ export default function Ee() {
   const [diffFrom, setDiffFrom] = useState<number | null>(null);
 
   const board = (boards.data || []).find((b) => b.id === boardId) || (boards.data || [])[0] || null;
-  const version = board?.versions.find((v) => v.version === ver)
-    || board?.versions[board.versions.length - 1] || null;
+  const version = (board?.versions ?? []).find((v) => v.version === ver)
+    || (board?.versions ?? [])[(board?.versions ?? []).length - 1] || null;
   const prev = board && version
-    ? [...board.versions].reverse().find((v) => v.version < version.version) || null
+    ? [...(board.versions ?? [])].reverse().find((v) => v.version < version.version) || null
     : null;
   const dFrom = diffFrom ?? prev?.version ?? null;
 
@@ -308,11 +308,11 @@ export default function Ee() {
                       <button onClick={() => { setBoardId(b.id); setVer(null); setDiffFrom(null); }}
                         className={`w-full text-left rounded-lg border p-2.5 ${b.id === board?.id ? "border-primary bg-primary/5" : "border-border"}`}>
                         <div className="text-xs font-medium">{b.name}</div>
-                        <div className="text-[11px] text-muted-foreground">{b.versions.length} version{b.versions.length === 1 ? "" : "s"}</div>
+                        <div className="text-[11px] text-muted-foreground">{(b.versions ?? []).length} version{(b.versions ?? []).length === 1 ? "" : "s"}</div>
                       </button>
                       {b.id === board?.id && (
                         <div className="flex gap-1 flex-wrap mt-1.5 px-1">
-                          {[...b.versions].reverse().map((v) => (
+                          {[...(b.versions ?? [])].reverse().map((v) => (
                             <button key={v.version} onClick={() => { setVer(v.version); setDiffFrom(null); }}
                               className={`font-mono text-[11px] px-1.5 py-0.5 rounded border ${
                                 v.version === version?.version ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>
@@ -347,40 +347,50 @@ export default function Ee() {
                 {version.score !== null && <span className="text-xs font-normal">score {version.score}</span>}
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                {version.candidate_id} - {new Date(version.created_at).toLocaleString()} -
-                netlist {version.netlist_sha.slice(0, 12)}
+                {version.candidate_id} - {version.created_at ? new Date(version.created_at).toLocaleString() : "just now"} -
+                netlist {(version.netlist_sha ?? "").slice(0, 12) || "n/a"}
               </p>
               {version.notes && <p className="text-xs mt-1">{version.notes}</p>}
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex gap-1 items-center flex-wrap">
-                {(["sch", "pcb", "3d", "diff", "tests"] as const).map((t) => (
-                  <Button key={t} size="sm" variant={tab === t ? "default" : "ghost"}
-                    onClick={() => setTab(t)}
-                    disabled={(t === "sch" && !version.files.sch_svg) || (t === "pcb" && !version.files.pcb_svg) || (t === "3d" && !version.files.glb) || (t === "diff" && !prev) || (t === "tests" && !version.verify?.length)}>
+              <div className="flex gap-2 items-center flex-wrap">
+                <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted/50 p-1">
+                {(["sch", "pcb", "3d", "diff", "tests"] as const).map((t) => {
+                  const dis = (t === "sch" && !version.files?.sch_svg) || (t === "pcb" && !version.files?.pcb_svg) || (t === "3d" && !version.files?.glb) || (t === "diff" && !prev) || (t === "tests" && !version.verify?.length);
+                  return (
+                  <button key={t}
+                    onClick={() => !dis && setTab(t)}
+                    disabled={dis}
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                      tab === t ? "bg-background text-foreground shadow-sm"
+                                : dis ? "text-muted-foreground/40 cursor-not-allowed"
+                                      : "text-muted-foreground hover:text-foreground"}`}>
                     {t === "sch" ? "Schematic" : t === "pcb" ? "Layout" : t === "3d" ? "3D" : t === "diff" ? "Diff" : `Tests${version.verify?.length ? ` (${version.verify.length})` : ""}`}
-                  </Button>
-                ))}
+                  </button>
+                  );
+                })}
+                </div>
                 {tab === "diff" && prev && (
                   <select className="ml-2 bg-background border rounded px-2 py-1 text-xs"
                     value={dFrom ?? ""} onChange={(e) => setDiffFrom(Number(e.target.value))}>
-                    {board.versions.filter((v) => v.version < version.version).map((v) => (
+                    {(board.versions ?? []).filter((v) => v.version < version.version).map((v) => (
                       <option key={v.version} value={v.version}>from v{v.version}</option>
                     ))}
                   </select>
                 )}
               </div>
-              {tab === "sch" && version.files.sch_svg && (
+              <div className="md:h-[62vh] md:min-h-[320px] md:overflow-y-auto md:pr-1">
+              {tab === "sch" && version.files?.sch_svg && (
                 <PanZoom wrapClass="min-w-[800px] w-full">
                   <img src={fileUrl(board.id, version.version, "sch_svg")} alt="schematic" className="w-full" draggable={false} />
                 </PanZoom>
               )}
-              {tab === "pcb" && version.files.pcb_svg && (
+              {tab === "pcb" && version.files?.pcb_svg && (
                 <PanZoom wrapClass="min-w-[600px] w-full">
                   <img src={fileUrl(board.id, version.version, "pcb_svg")} alt="layout" className="w-full" draggable={false} />
                 </PanZoom>
               )}
-              {tab === "3d" && version.files.glb && (
+              {tab === "3d" && version.files?.glb && (
                 <div className="h-[60vh]"><CadViewer url={fileUrl(board.id, version.version, "glb")} /></div>
               )}
               {tab === "tests" && (
@@ -439,6 +449,7 @@ export default function Ee() {
               {tab === "diff" && diff.data && (diff.data.added_comps ?? []).length + (diff.data.removed_comps ?? []).length + (diff.data.changed_comps ?? []).length + (diff.data.added_nets ?? []).length + (diff.data.removed_nets ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground">No structural netlist changes between these versions.</p>
               )}
+              </div>
             </CardContent>
           </Card>
         )}

@@ -474,24 +474,30 @@ export default function Watch({ embedded = false }: { embedded?: boolean }) {
           {connected ? "live" : "reconnecting"}
         </div>
       </header>)}
-      <div className="flex gap-2 px-3 py-2 overflow-x-auto border-b border-gray-800 shrink-0">
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+      <div className="flex gap-2 p-2 overflow-x-auto border-b border-gray-800 shrink-0 md:w-64 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-b-0 md:border-r">
+        <div className="hidden md:block px-1.5 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Policies</div>
         {known.map((k) => {
           const on = sel.includes(k.id);
           const live = chans.current.get(k.id)?.meta?.status === "streaming";
           return (
             <button key={k.id} onClick={() => toggle(k.id)}
-              className={`shrink-0 text-left px-3 py-1.5 rounded border text-xs ${
-                on ? "border-blue-500 bg-blue-950/40" : "border-gray-700 bg-gray-900/60"}`}>
+              className={`shrink-0 text-left px-3 py-2 rounded-lg border text-xs transition-colors ${
+                on ? "border-primary/60 bg-primary/10" : "border-gray-800 bg-gray-900/50 hover:border-gray-600"}`}>
               <div className="flex items-center gap-1.5">
                 <span className={`inline-block w-1.5 h-1.5 rounded-full ${live ? "bg-emerald-500" : "bg-gray-600"}`} />
                 <span className="font-semibold text-gray-100">{k.label || k.id}</span>
               </div>
-              <div className="text-gray-400 font-mono mt-0.5">
+              <div className="text-gray-400 font-mono mt-1 truncate">
                 {k.policy || "-"}{k.policy_obs ? ` - ${k.policy_obs}` : ""}
               </div>
               {k.eval && (
-                <div className="text-gray-400 mt-0.5">
-                  goto {Math.round((k.eval.goto ?? 0) * 100)}% - hover {Math.round((k.eval.hover_hold ?? 0) * 100)}% - land {Math.round((k.eval.land ?? 0) * 100)}%
+                <div className="flex gap-1.5 mt-1.5">
+                  {(["goto", "hover_hold", "land"] as const).map((kk) => (
+                    <span key={kk} className="rounded bg-gray-800/80 px-1.5 py-0.5 text-[10px] text-gray-300 font-mono">
+                      {kk === "hover_hold" ? "hov" : kk} {Math.round(((k.eval as any)[kk] ?? 0) * 100)}%
+                    </span>
+                  ))}
                 </div>
               )}
             </button>
@@ -504,8 +510,9 @@ export default function Watch({ embedded = false }: { embedded?: boolean }) {
             single={sel.length === 1} subscribe={subscribe} snapshot={snapshot} />
         ))}
         {sel.length === 0 && (
-          <div className="p-6 text-sm text-gray-400">No experiment selected - pick one above.</div>
+          <div className="p-6 text-sm text-gray-400">No experiment selected - pick a policy from the list.</div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -67,6 +67,7 @@ export default function Dashboard() {
     return arr && arr.length ? arr[arr.length - 1].y : null;
   };
   const [chartMode, setChartMode] = useState<"generations" | "curriculum" | "loss">("curriculum");
+  const [range, setRange] = useState<number | "all">("all");
   const streamQ = useQuery({
     queryKey: ["stream-state"],
     queryFn: async () => (await (await fetch("/api/stream/state", { credentials: "same-origin" })).json()) as any,
@@ -212,7 +213,14 @@ export default function Dashboard() {
                 <CardTitle className="text-base md:text-lg">{MODE_META[chartMode].title}</CardTitle>
                 <CardDescription className="text-xs md:text-sm">{MODE_META[chartMode].desc}</CardDescription>
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 items-center flex-wrap">
+                {([["all", "All"], [500, "500"], [200, "200"], [50, "50"]] as const).map(([v, lab]) => (
+                  <button key={lab} onClick={() => setRange(v as number | "all")}
+                    className={`px-2 py-1 rounded text-[11px] font-medium ${range === v ? "bg-secondary text-foreground border border-border" : "text-muted-foreground hover:text-foreground"}`}>
+                    {lab}
+                  </button>
+                ))}
+                <span className="w-px h-4 bg-border mx-1" />
                 {(["curriculum", "loss", "generations"] as const).map((m) => (
                   <button key={m} onClick={() => setChartMode(m)}
                     className={`px-2 py-1 rounded text-[11px] font-medium ${chartMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -222,10 +230,10 @@ export default function Dashboard() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-3 md:p-6 pt-0 md:pt-0 h-52 md:h-64">
+          <CardContent className="p-3 md:p-6 pt-0 md:pt-0 h-64 md:h-80">
             {activeData.length ? (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={activeData} margin={{ top: 5, right: 8, bottom: 5, left: -6 }}>
+                <LineChart data={range === "all" ? activeData : activeData.slice(-range)} margin={{ top: 5, right: 8, bottom: 5, left: -6 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 33% 17%)" />
                   <XAxis dataKey={activeXKey} stroke="hsl(215 20% 65%)" fontSize={11} tickMargin={4} />
                   <YAxis stroke="hsl(215 20% 65%)" fontSize={10}
@@ -234,7 +242,7 @@ export default function Dashboard() {
                   <Tooltip contentStyle={{ background: "hsl(222 47% 9%)", border: "1px solid hsl(217 33% 17%)", borderRadius: 8, fontSize: 13 }}
                            labelStyle={{ color: "hsl(210 40% 96%)" }} />
                   <Line type="monotone" dataKey={activeYKey} stroke={chartMode === "loss" ? "hsl(45 93% 58%)" : "hsl(217 91% 60%)"}
-                        strokeWidth={2.5} dot={{ r: 3.5 }} />
+                        strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             ) : <div className="h-full grid place-items-center text-muted-foreground text-sm">

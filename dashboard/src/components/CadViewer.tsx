@@ -131,7 +131,7 @@ export default function CadViewer({ url }: { url: string }) {
           onClick={() => setFull(false)}
         >
           <div
-            className="relative w-[92vw] h-[85vh] max-w-6xl rounded-xl border border-border bg-background overflow-hidden shadow-2xl"
+            className="relative w-[96vw] h-[90vh] rounded-xl border border-border bg-background overflow-hidden shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <ViewerCanvas url={url} expanded onClose={() => setFull(false)} />

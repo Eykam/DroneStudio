@@ -50,10 +50,9 @@ export default function Home() {
     <div className="min-h-[calc(100dvh-7rem)] flex items-center justify-center">
       <div className="w-full max-w-5xl space-y-8 md:space-y-10 py-6">
       <header className="text-center space-y-3">
-        <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-primary/10 border border-primary/25 shadow-sm shadow-primary/10">
-          <Bird className="h-7 w-7 text-primary" />
-        </div>
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{BRAND}</h1>
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight flex items-center justify-center gap-3">
+          <Bird className="h-8 w-8 md:h-9 md:w-9 text-primary" />{BRAND}
+        </h1>
         <p className="text-sm md:text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
           {BRAND_TAGLINE} - one live view across the sim, EE, and CAD research loops.
         </p>
