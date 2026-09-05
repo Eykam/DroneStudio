@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CircuitBoard, Box, Radar, CheckCircle2, XCircle, Star, ArrowRight } from "lucide-react";
+import { CircuitBoard, Box, Radar, CheckCircle2, XCircle, Star, ArrowRight, Bird } from "lucide-react";
 import { fetchCadDesigns, fetchState } from "@/api";
 import { BRAND, BRAND_TAGLINE } from "@/brand";
 
@@ -39,18 +39,29 @@ export default function Home() {
   const records = ((stateQ.data?.records ?? []) as any[]).filter((r) => r && r.metrics && typeof r.metrics.success_rate === "number" && (r.kind == null || r.kind === "variant"));
   const best = records.length ? [...records].sort((a, b) => b.metrics.success_rate - a.metrics.success_rate)[0] : null;
 
+  const cardCls =
+    "group relative overflow-hidden rounded-xl border-border/60 bg-card/70 backdrop-blur transition-all duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5";
+  const iconChip = "inline-flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 shrink-0";
+
   return (
-    <div className="space-y-4 md:space-y-6">
-      <header>
-        <h1 className="text-xl md:text-2xl font-bold tracking-tight">{BRAND}</h1>
-        <p className="text-xs md:text-sm text-muted-foreground mt-1">{BRAND_TAGLINE} - live across sim, EE, and CAD - auto-refresh</p>
+    <div className="min-h-[calc(100dvh-7rem)] flex items-center justify-center">
+      <div className="w-full max-w-5xl space-y-8 md:space-y-10 py-6">
+      <header className="text-center space-y-3">
+        <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-primary/10 border border-primary/25 shadow-sm shadow-primary/10">
+          <Bird className="h-7 w-7 text-primary" />
+        </div>
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{BRAND}</h1>
+        <p className="text-sm md:text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
+          {BRAND_TAGLINE} - one live view across the sim, EE, and CAD research loops. Everything on this page auto-refreshes.
+        </p>
       </header>
 
-      <div className="grid gap-3 md:gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:gap-5 md:grid-cols-3 text-left">
         {/* SIM */}
-        <Card>
+        <Card className={cardCls}>
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Radar className="h-4 w-4 text-primary" /> SIM</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2"><span className={iconChip}><Radar className="h-4 w-4 text-primary" /></span> SIM</CardTitle>
             <CardDescription className="text-xs">navigation policy research</CardDescription>
           </CardHeader>
           <CardContent className="p-4 pt-1 space-y-2 text-sm">
@@ -86,9 +97,10 @@ export default function Home() {
         </Card>
 
         {/* EE */}
-        <Card>
+        <Card className={cardCls}>
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><CircuitBoard className="h-4 w-4 text-primary" /> EE</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2"><span className={iconChip}><CircuitBoard className="h-4 w-4 text-primary" /></span> EE</CardTitle>
             <CardDescription className="text-xs">board designs + verification</CardDescription>
           </CardHeader>
           <CardContent className="p-4 pt-1 space-y-2 text-sm">
@@ -126,9 +138,10 @@ export default function Home() {
         </Card>
 
         {/* CAD */}
-        <Card>
+        <Card className={cardCls}>
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><Box className="h-4 w-4 text-primary" /> CAD</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2"><span className={iconChip}><Box className="h-4 w-4 text-primary" /></span> CAD</CardTitle>
             <CardDescription className="text-xs">chassis + mechanicals</CardDescription>
           </CardHeader>
           <CardContent className="p-4 pt-1 space-y-2 text-sm">
@@ -150,6 +163,7 @@ export default function Home() {
             </Link>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

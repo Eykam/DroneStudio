@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Home, CircuitBoard, Box, Radar, LogOut, Bird } from "lucide-react";
 import { logout } from "@/api";
 import { BRAND } from "@/brand";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 const NAV = [
   { to: "/", label: "Home", icon: Home, end: true },
@@ -65,7 +66,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <div className="md:pl-16">
-        <main className="p-3 md:p-6 max-w-[1800px] mx-auto">{children}</main>
+        <main className="p-3 md:p-6 max-w-[1800px] mx-auto"><ErrorBoundary>{children}</ErrorBoundary></main>
       </div>
     </div>
   );

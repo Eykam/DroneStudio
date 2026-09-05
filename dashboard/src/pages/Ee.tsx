@@ -127,7 +127,8 @@ function PanZoom({ children, wrapClass }: { children: React.ReactNode; wrapClass
 
   return (
     <div ref={ref}
-      className="bg-white rounded-md overflow-hidden max-h-[70vh] relative touch-none select-none cursor-grab active:cursor-grabbing"
+      style={{ backgroundColor: "#ffffff", backgroundImage: "radial-gradient(circle, rgba(0,0,0,0.13) 1px, transparent 1.5px)", backgroundSize: "22px 22px" }}
+      className="rounded-md overflow-hidden max-h-[70vh] relative touch-none select-none cursor-grab active:cursor-grabbing p-2"
       onPointerDown={onPointerDown} onPointerMove={onPointerMove}
       onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
       onDoubleClick={() => setT({ x: 0, y: 0, k: 1 })}>
@@ -335,7 +336,7 @@ export default function Ee() {
               <CardTitle className="text-sm flex items-center gap-3 flex-wrap">
                 <span>{board.name} - v{version.version}</span>
                 {version.adopted && <Star className="h-4 w-4 text-yellow-400" />}
-                {version.gates.map((g) => (
+                {(version.gates ?? []).map((g) => (
                   <span key={g.gate} className="flex items-center gap-1 text-xs font-normal">
                     {g.pass
                       ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
@@ -404,33 +405,38 @@ export default function Ee() {
               )}
               {tab === "diff" && diff.data && (
                 <div className="grid md:grid-cols-2 gap-3 text-xs">
-                  <DiffList title={`Components added (${diff.data.added_comps.length})`}
-                    rows={diff.data.added_comps.map((c) => `${c.ref} ${c.value}`)} tone="text-green-500" />
-                  <DiffList title={`Components removed (${diff.data.removed_comps.length})`}
-                    rows={diff.data.removed_comps.map((c) => `${c.ref} ${c.value}`)} tone="text-red-500" />
-                  <DiffList title={`Components changed (${diff.data.changed_comps.length})`}
-                    rows={diff.data.changed_comps.map((c) => `${c.ref}: ${c.from} -> ${c.to}`)} tone="text-yellow-500" />
-                  <DiffList title={`Nets added (${diff.data.added_nets.length})`} rows={diff.data.added_nets} tone="text-green-500" />
-                  <DiffList title={`Nets removed (${diff.data.removed_nets.length})`} rows={diff.data.removed_nets} tone="text-red-500" />
+                  <DiffList title={`Components added (${(diff.data.added_comps ?? []).length})`}
+                    rows={(diff.data.added_comps ?? []).map((c) => `${c.ref} ${c.value}`)} tone="text-green-500" />
+                  <DiffList title={`Components removed (${(diff.data.removed_comps ?? []).length})`}
+                    rows={(diff.data.removed_comps ?? []).map((c) => `${c.ref} ${c.value}`)} tone="text-red-500" />
+                  <DiffList title={`Components changed (${(diff.data.changed_comps ?? []).length})`}
+                    rows={(diff.data.changed_comps ?? []).map((c) => `${c.ref}: ${c.from} -> ${c.to}`)} tone="text-yellow-500" />
+                  <DiffList title={`Nets added (${(diff.data.added_nets ?? []).length})`} rows={diff.data.added_nets ?? []} tone="text-green-500" />
+                  <DiffList title={`Nets removed (${(diff.data.removed_nets ?? []).length})`} rows={diff.data.removed_nets ?? []} tone="text-red-500" />
                 </div>
               )}
               {tab === "diff" && diff.data && (diff.data.layers?.length ?? 0) > 0 && dFrom !== null && (
                 <ArtworkDiff board={board.id} from={dFrom} to={version.version} layers={diff.data.layers!} />
               )}
-              {tab === "diff" && diff.data?.fp_diff && (
+              {tab === "diff" && diff.data?.fp_diff && (() => {
+                const fd = diff.data.fp_diff!;
+                const added = fd.fp_added ?? [], removed = fd.fp_removed ?? [];
+                const moved = fd.fp_moved ?? [], rotated = fd.fp_rotated ?? [], flipped = fd.fp_flipped ?? [];
+                return (
                 <div className="grid md:grid-cols-2 gap-3 text-xs border-t pt-3">
-                  <DiffList title={`Footprints added (${diff.data.fp_diff.fp_added.length})`}
-                    rows={diff.data.fp_added.map((f) => `${f.ref} ${f.value} @ ${f.x},${f.y} ${f.side}`)} tone="text-green-500" />
-                  <DiffList title={`Footprints removed (${diff.data.fp_diff.fp_removed.length})`}
-                    rows={diff.data.fp_removed.map((f) => `${f.ref} ${f.value}`)} tone="text-red-500" />
-                  <DiffList title={`Moved (${diff.data.fp_diff.fp_moved.length})`}
-                    rows={diff.data.fp_moved.map((f) => `${f.ref}: ${f.from.x},${f.from.y} -> ${f.to.x},${f.to.y}`)} tone="text-yellow-500" />
-                  <DiffList title={`Rotated / flipped (${diff.data.fp_diff.fp_rotated.length + diff.data.fp_diff.fp_flipped.length})`}
-                    rows={[...diff.data.fp_rotated.map((f) => `${f.ref}: rot ${f.from} -> ${f.to}`),
-                           ...diff.data.fp_flipped.map((f) => `${f.ref}: ${f.from} -> ${f.to} side`)]} tone="text-yellow-500" />
+                  <DiffList title={`Footprints added (${added.length})`}
+                    rows={added.map((f) => `${f.ref} ${f.value} @ ${f.x},${f.y} ${f.side}`)} tone="text-green-500" />
+                  <DiffList title={`Footprints removed (${removed.length})`}
+                    rows={removed.map((f) => `${f.ref} ${f.value}`)} tone="text-red-500" />
+                  <DiffList title={`Moved (${moved.length})`}
+                    rows={moved.map((f) => `${f.ref}: ${f.from.x},${f.from.y} -> ${f.to.x},${f.to.y}`)} tone="text-yellow-500" />
+                  <DiffList title={`Rotated / flipped (${rotated.length + flipped.length})`}
+                    rows={[...rotated.map((f) => `${f.ref}: rot ${f.from} -> ${f.to}`),
+                           ...flipped.map((f) => `${f.ref}: ${f.from} -> ${f.to} side`)]} tone="text-yellow-500" />
                 </div>
-              )}
-              {tab === "diff" && diff.data && diff.data.added_comps.length + diff.data.removed_comps.length + diff.data.changed_comps.length + diff.data.added_nets.length + diff.data.removed_nets.length === 0 && (
+                );
+              })()}
+              {tab === "diff" && diff.data && (diff.data.added_comps ?? []).length + (diff.data.removed_comps ?? []).length + (diff.data.changed_comps ?? []).length + (diff.data.added_nets ?? []).length + (diff.data.removed_nets ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground">No structural netlist changes between these versions.</p>
               )}
             </CardContent>
