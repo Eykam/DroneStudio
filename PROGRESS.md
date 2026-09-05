@@ -253,3 +253,24 @@ crashes (1/16 off-pad) but the loop still cannot converge inside 0.5m, so
 episodes die to the new skim penalty while holding. Teacher terminal
 accuracy is a position-loop redesign problem of its own; the dag7-9
 integrator pilot remains the label source.
+
+## dag10 PPO experiment (2026-09-05): residual RL vs the new yardstick - NULL
+
+Experiment (approved 12:37 PM, own artifacts only): ppo6b residual recipe
+(frozen champion + bounded 0.1 additive residual, zero-init R2) warm-started
+from dag10 r14 (best round, mean 0.354 new yardstick), obs v4 + motor v2,
+skim penalty live. 60 updates, no floor abort (trend was the signal).
+
+Result: land_t0 = 0.0 in ALL 60 updates. The residual re-triggered the
+ppo1-5 precision collapse: hover_hold_t0 0.25 -> 0.0 by u41, goto_t0
+0.688 -> 0.25 by u60, while mean return crept -4 -> +1.8 (return-chasing
+trading precision, exactly the failure the residual was built to avoid -
+the 0.1 action bound is not small enough to protect a marginal champion).
+
+Conclusion: the skim-equilibrium lever fails under BOTH imitation (dag10:
+reward-blind) and residual RL (this run: collapse dominates before land
+precision can be explored). Land is blocked by terminal precision, full
+stop: 0.5m heldout radius vs the teacher loop's +-1m limit cycle. The
+teacher position-loop redesign is now THE land blocker. Open question to
+quantify during the redesign: is 0.5m reachable at all under m2 actuation
+latency, or does tier-0 land radius need to move?
