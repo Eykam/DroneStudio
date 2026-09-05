@@ -31,6 +31,8 @@ def teacher_act(obs, ext, scenario, radius):
     vel = obs[3:6] * 10.0                 # world vel, m/s (obs = v/10)
     gb = obs[6:9]
     vmax = 2.0
+    dvec = obs[12:15] * ext               # nearest-obstacle vector
+    d = float(np.linalg.norm(dvec))
     dist_xz = float(np.hypot(rel[0], rel[2]))
     alt = -float(rel[1])                  # land pads sit at ground level
     land_descend = (scenario == "land" and alt <= 1.4
@@ -44,13 +46,26 @@ def teacher_act(obs, ext, scenario, radius):
     if land_descend:
         v_des = np.array([np.clip(0.6 * rel[0], -0.3, 0.3), 0.0,
                           np.clip(0.6 * rel[2], -0.3, 0.3)])
+    if scenario == "goto" and 1e-3 < d < 6.0:
+        # cap only the velocity component TOWARD the obstacle: fast sliding
+        # along walls stays allowed, gap passages stay possible
+        u = dvec / d
+        allow = max(0.3, 0.6 * (d - 0.8))
+        v_to = float(np.dot(v_des, u))
+        if v_to > allow:
+            v_des = v_des - (v_to - allow) * u
     # damping: 0.5 far, 1.0 near (half-damping limit-cycles at the target)
-    damp = 0.5 if float(np.linalg.norm(rel)) > 3.0 else 1.0
+    damp = 0.5 if (float(np.linalg.norm(rel)) > 3.0
+                   and not (scenario == "goto" and d < 6.0)) else 1.0
     a_des = np.clip(1.2 * (v_des - damp * vel), -2.0, 2.0)
-    dvec = obs[12:15] * ext               # nearest-obstacle vector
-    d = float(np.linalg.norm(dvec))
     if 1e-3 < d < 3.5 and not land_descend:   # pad corridor stays clear
         a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
+    if scenario == "goto" and 1e-3 < d < 5.0:
+        # fixed-physics approach is faster (~4.2 m/s); brake actively for walls
+        u = dvec / d
+        closing = float(np.dot(vel, u))
+        if closing > 0.0:
+            a_des = a_des - min(2.5, 1.4 * closing) * u
     a_des = np.clip(a_des, -3.0, 3.0)
     gx_des = np.clip(a_des[0] / 9.81, -0.30, 0.30)
     gz_des = np.clip(a_des[2] / 9.81, -0.30, 0.30)
@@ -65,7 +80,18 @@ def teacher_act(obs, ext, scenario, radius):
     else:
         vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
     thr = -0.756 + 0.3 * (vy_des - vel[1])
-    return np.clip(np.array([act0, 0.0, act2, thr]), -1, 1)
+    # bearing-seeking yaw (fixed flight stack supports closed-loop yaw now):
+    # gently face the target; obs rel is yaw-frame so atan2 gives the
+    # heading error directly. Disabled during precision land descent.
+    yaw_cmd = 0.0
+    if not land_descend:
+        yaw_err = float(np.arctan2(-rel[2], rel[0]))  # sign verified on fixed physics (yawpure test)
+        if abs(yaw_err) < 2.0:
+            # refine heading only when roughly facing the target; a full
+            # turn at the atan2 antipode bang-bangs and traps the position
+            # loop - translate out instead
+            yaw_cmd = float(np.clip(0.5 * yaw_err, -0.04, 0.04))
+    return np.clip(np.array([act0, yaw_cmd, act2, thr]), -1, 1)
 
 def run_one(seed, dist, spec, max_steps):
     ext = float(dist.scene_extent)
