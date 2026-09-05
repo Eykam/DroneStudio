@@ -51,29 +51,67 @@ def make_record(variant_id, parent_id, generation, params, eval_checks, score, m
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
-def render_preview(stl_path, png_path):
-    """Orthographic side/top vertex-projection preview of a variant STL ->
+def render_preview(stl_path, png_path, manifest_path=None):
+    """Orthographic side/top/front vertex-projection preview of a variant ->
     PNG smoke-check image in the snapshot dir. Numeric gates cannot catch
     geometry that is obviously wrong to a human (the 2026-09-04 camera
-    orientation bug passed every gate); eyeball these at adoption/milestone."""
+    orientation bug passed every gate); eyeball these at adoption/milestone.
+    Camera markers show the measured lens apex AND a 25mm arrow along the lens
+    axis - the arrow must point toward the nose (+X). Component poses come from
+    the snapshot manifest when available (retro-renders), else live components."""
+    import json as _json
     import numpy as np, trimesh
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     m = trimesh.load(stl_path)
-    V = m.vertices
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
-    for ax, (i, j, title) in zip(axes, [(0, 2, "side (x=nose, z=up)"), (0, 1, "top (x=nose, y=lateral)")]):
-        ax.scatter(V[::7, i], V[::7, j], s=0.3, c="k")
+    if isinstance(m, trimesh.Scene):
+        m = trimesh.util.concatenate(tuple(m.dump()))
+    V = np.asarray(m.vertices, dtype=float)
+    scale = 1000.0 if np.ptp(V, axis=0).max() < 1.0 else 1.0  # glb is meters, step/stl mm
+    V = V * scale
+    views = [(0, 2, "side (x=nose, z=up)"), (0, 1, "top (x=nose, y=lateral)"), (1, 2, "front (y=lateral, z=up)")]
+    fig, axes = plt.subplots(1, 3, figsize=(24, 7))
+    step = max(1, len(V) // 60000)
+    for ax, (i, j, title) in zip(axes, views):
+        ax.scatter(V[::step, i], V[::step, j], s=0.3, c="k")
         ax.set_aspect("equal"); ax.set_title(title); ax.grid(True, alpha=0.3)
+    overlay_note = ""
     try:
-        from components import camera_lens_poses
-        for _k, p in camera_lens_poses().items():
-            o = [v * 1000 for v in p["origin_m"]]
-            axes[0].scatter([o[0]], [o[2]], c="r", s=40, marker="x")
-            axes[1].scatter([o[0]], [o[1]], c="r", s=40, marker="x")
-    except Exception:
-        pass
+        cams, imu_p, motors = None, None, []
+        if manifest_path and os.path.exists(manifest_path):
+            man = _json.load(open(manifest_path))
+            cams = [(c["lens_origin_m"], c["lens_axis"]) for c in man.get("cameras", [])]
+            imu_p = (man.get("imu") or {}).get("position_m")
+            motors = [mt["position_m"] for mt in man.get("motors", [])]
+        else:
+            from components import camera_lens_poses, imu_pose
+            cams = [(p["origin_m"], p["axis"]) for p in camera_lens_poses().values()]
+            imu_p = imu_pose()["position_m"]
+        for o_m, a in cams or []:
+            o = np.array(o_m, dtype=float) * 1000.0
+            a = np.array(a, dtype=float)
+            bad = a[0] < 0.5
+            for ax, (i, j, _t) in zip(axes, views):
+                ax.scatter([o[i]], [o[j]], c=("r" if not bad else "m"), s=60, marker="x", zorder=5)
+                ax.annotate("", xy=(o[i] + a[i] * 25, o[j] + a[j] * 25), xytext=(o[i], o[j]),
+                            arrowprops=dict(arrowstyle="->", color=("r" if not bad else "m"), lw=2.5), zorder=6)
+            if bad:
+                overlay_note += " CAMERA %s AXIS NOT +X!" % str(o_m)
+        if imu_p:
+            io = np.array(imu_p, dtype=float) * 1000.0
+            for ax, (i, j, _t) in zip(axes, views):
+                ax.scatter([io[i]], [io[j]], c="g", s=60, marker="D", zorder=5)
+        for mo in motors:
+            mv = np.array(mo, dtype=float) * 1000.0
+            for ax, (i, j, _t) in zip(axes, views):
+                ax.scatter([mv[i]], [mv[j]], c="b", s=45, marker="^", zorder=5)
+    except Exception as e:
+        overlay_note = " overlay failed: %s" % e
+    fig.text(0.01, 0.02, "red X+arrow: camera lens apex + axis (MUST point to nose/+X); green D: IMU; blue ^: motors." + overlay_note,
+             color=("r" if "NOT +X" in overlay_note else "k"))
+    if "NOT +X" in overlay_note:
+        print("SMOKE CHECK FAIL:" + overlay_note, flush=True)
     fig.tight_layout(); fig.savefig(png_path, dpi=110); plt.close(fig)
 
 

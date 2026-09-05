@@ -21,3 +21,4 @@ PiTransfer.zig
 VideoStream.zig
 CLAUDE.md
 chassis/snapshots/cadtest*/
+chassis/snapshots/*/chassis.sim.glb
