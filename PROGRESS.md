@@ -195,3 +195,36 @@ full 2.02%). dynamics_jitter.py: should_jitter() + scale env. env_sim.py:
 mix gating in make_sim_factory. t4_dagger6j2.py: seeds 500000+, labels
 t4-dag6j2, outputs t4_dag6j2_r{k}.json / t4_dag6j2_best.json, t4_best.json
 still untouched, eval stays base-airframe for comparability.
+
+### T11b - motor_v2 teacher retune (2026-09-04 ~9:30 PM)
+
+Problem (found in T9): the t4 scripted teacher is hand-tuned for the 40ms
+lag plant and porpoises under motor_v2's ~200-300ms EM spin-up. Retune is
+env-gated on AUTORESEARCH_MOTOR_V2 (same var the sim reads), so base-plant
+behavior stays bit-identical for the t4 lineage.
+
+Sweeps (m2_teacher_tune.py, m2_land_tune*.py, m2_trim_test.py):
+- Vertical loop: K_VTHR >= 0.20 porpoises; 0.10 stable. Hover throttle
+  -0.742 (T9 analytic, validated).
+- Attitude: KP/KD 0.30/0.45 (from 0.40/0.60).
+- Land: near-pad cruise offset 1.2 -> 0.6 (old offset found a hover
+  equilibrium 0.02m ABOVE the land_descend gate from SoC sag: hover point
+  drifts -0.742 -> -0.759 over an episode); terminal vy -0.4 -> -0.25.
+- Terminal-commit throttle REJECTED: any pinned value either creeps or
+  touches down at -1.1 m/s (limit 0.5); sag makes fixed values fragile.
+- Trim integrators: land_descend-scoped I-term (0.0008/step, clamp 0.12)
+  fixes the near-ground creep stall (touchdowns at -0.05 m/s); hover-scoped
+  micro-trim (0.0003, clamp 0.05). Global trim sank drones (oscillation
+  rectifies into the integrator) - rejected.
+
+n=16 tier-0 teacher yields under m2 (m2_validate.py): goto 0.938, land
+0.438, hover_hold 0.312-0.375. Workable for demo collection (pipeline
+keeps successes only; run more seeds). Known limitations: hover vertical
+loop marginal under SoC sag; occasional transit crashes into obstacles
+under actuation lag (avoidance gains tuned to fast plant).
+
+Also: CAD sim GLB (chassis b171a6e, chassis.sim.glb) verified structurally:
+GLB v2, zero required/used extensions (GLTF.zig-compatible), single mesh,
+no materials (as documented), Y-up confirmed numerically (Y span 49mm vs
+X/Z 262/235mm). Runtime parse + visual frame check still open for a
+desktop run.

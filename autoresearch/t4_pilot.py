@@ -116,6 +116,13 @@ def teacher_act(obs, ext, scenario, radius, state=None):
     else:
         vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
     thr = HOVER_THR + K_VTHR * (vy_des - vel[1])
+    if M2 and state is not None and scenario == "hover_hold":
+        # hover-scoped micro-trim: same SoC false-equilibrium fix as the
+        # land trim, but 3x slower and tightly clamped - the 0.0008/0.12
+        # global variant rectified oscillation asymmetry and sank drones.
+        trim = float(state.get("htrim", 0.0))
+        thr += trim
+        state["htrim"] = float(np.clip(trim + 0.0003 * (vy_des - vel[1]), -0.05, 0.05))
     if M2 and state is not None and land_descend:
         # vertical trim integrator (m2, terminal descent only): battery SoC
         # sag drifts the hover throttle point over an episode (observed
