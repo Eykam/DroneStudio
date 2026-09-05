@@ -217,3 +217,37 @@ themselves encode the park behavior in terminal descent, (b) the land
 success criterion is unreachable from near-pad spawns under m2 dynamics,
 (c) student capacity. Recommend probing teacher behavior in terminal
 descent before more DAgger volume.
+
+## 2026-09-05 ~19:12 UTC - m2 land probe (dag9 follow-up): the blocker is the skim equilibrium, not imitation
+
+Probe: m2_land_probe.py + m2_land_probe_c.py, 16 heldout land t0 cells, m2 plant.
+
+Phase A (integrator teacher census): 6/16 success, 6/16 OFF-PAD touchdowns
+(dxz 2.5-3.6 vs radius 1.0-2.0 - horizontal terminal accuracy is the
+teacher's real weakness under m2), 3/16 porpoise timeouts (vy 0.2-0.7
+sustained), 1/16 park. The dag8-era "teacher stalls at the descend gate"
+is NOT the dominant t0 failure mode.
+
+Phase B (forced terminal descent law): changed nothing structural - failures
+are upstream of the gate region (transit/centering), except it broke one
+teacher success (99011) by fighting its horizontal correction.
+
+Phase C (dag8c r24 student): thrust gap vs teacher along the teacher's own
+traces is negligible (terminal region mean -0.009, p90 |gap| < 0.04) -
+imitation fidelity is NOT the problem. Student solo census: 11/16 PARK at
+alt ~= 0.00, vy ~= 0 indefinitely; 2 off_pad, 2 porpoise, 1 off-pad
+touchdown. The student skims at ground level and never crosses the
+touchdown plane (sim requires y < GROUND_Y with dxz <= radius, |vs| <= 0.5).
+
+Interpretation: land_t0 = 0.0 across dag7m2/8/9 was never a data or capacity
+problem. Under m2 ground-effect the hover equilibrium sits at ground-skim
+height; parking there costs -0.01/step while a failed touchdown costs -5,
+so the policy rationally refuses to commit. Teacher labels can't fix it -
+the teacher itself misses the pad 37% of the time on t0.
+
+Attack for dag10 (proposed): (1) teacher terminal horizontal centering
+(tighten land_descend horizontal loop, the off-pad source), (2) reward-side
+commit pressure: sustained skim below ~0.15m without touchdown ends the
+episode with a penalty worse than a good-faith touchdown attempt, or a
+shaping bonus for plane-crossing within radius. Touching reward/scenario
+logic only - 500Hz physics untouched.
