@@ -149,3 +149,32 @@ true velocity (gain swept over 24 configs x real sim episodes; 0.1x orbits,
 (d0.1 included), 15m d0.2 = 87.5%, 25m d0.1 = 87.5%. DAgger10 rerun excludes
 the old buggy-teacher long-range labels. Same /10 hardcode fixed in
 scripted_pilot.pilot_act (takes ext=10.0 default now).
+
+## 2026-09-05 - SIM next-steps track (user-approved 2026-09-04 21:08)
+
+T8 (83101be, 5d40877): CAD chassis manifest 1.2 consumption. Loader
+(core/ChassisManifest.zig, 1.1-compatible), IMUSensor lever-arm correction
+(a_imu = a_com + alpha x r + omega x (omega x r), alpha finite-differenced
+at the 1kHz sample rate - pos_body existed but was never applied before),
+noise densities to MPU-9250 datasheet typ (gyro 0.01 dps/rtHz, accel
+300 ug/rtHz), Drone.zig env-gated manifest consumption
+(DRONE_CHASSIS_MANIFEST): mass/inertia/IMU pose/stereo poses+FOV, 56mm
+baseline (was 75mm hardcode), Pi Cam 3 Standard module (was Wide 102deg).
+Open: v22 chassis.glb needs KHR_mesh_quantization+EXT_meshopt_compression
+(unsupported by core/GLTF.zig - CAD asked to export uncompressed);
+Z-up->Y-up mapping needs visual verification on a desktop run. See
+docs/MANIFEST_SIM.md.
+
+T9 (fd2f40d): motor_v2 prop fidelity. Axial inflow (advance ratio, ~16%
+thrust loss at 5 m/s climb, J0=1.2 ESTIMATE) + ground effect
+(1/(1-(R/4z)^2), z clamp >= 0.6R, max +21%). Hover validates at analytic
+throttle -0.742 (kf fit, 0.526kg fixture). motor_v2 still env-gated OFF.
+BLOCKER for m2 training: scripted teacher porpoises under m2s slower EM
+response (tuned for the 40ms lag plant) - needs m2 gain retune first.
+
+T10: per-episode dynamics tolerance jitter (autoresearch/dynamics_jitter.py,
+env-gated AUTORESEARCH_DYN_JITTER). mass +/-5%, inertia +/-8%, per-motor
+thrust +/-4% independent, lag +/-25%, drag +/-15%, CoM +/-3mm. Deterministic
+per episode seed (own rng stream, atomic file writes for 24-worker safety).
+Teacher flies jittered airframes (goto succ 29 steps, seed 80000). Ranges
+are anchors pending bench sysid.
