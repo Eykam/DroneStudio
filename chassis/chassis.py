@@ -1,4 +1,4 @@
-"""Candidate A: folded battery-bay chines and a unified, vented stereo nose shell.
+"""Candidate A: swept stereo shoulders with a vaulted, shared avionics nose.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -395,11 +395,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # overlaps the spine, creating a continuous monocoque junction on the bed.
     # All camera service boxes clear the inner faces by 2 mm; the lens ports
     # below are the only forward openings.
-    # One shallow transverse prow replaces the two inward cheek skins.
-    # The upright Pi spine continues to the bed as an internal shear member;
-    # the camera bay stays accessible from its dorsal opening.
+    # Swept camera shoulders grow continuously from the narrow avionics neck.
+    # Their diagonal skins replace the blunt transverse cheek bulkhead and
+    # carry stereo-nose side loads into the spine as a folded monocoque.
+    # The full breadth is reached before either camera's 2 mm service box.
     cheek_stations = [
-        (69.8, 89.0, 28.5, 78.0),
+        (56.0, 20.0, 28.5, 12.0),
         (71.3, 94.2, 28.8, 84.0),
         (86.8, 94.2, 28.8, 84.0),
         (88.5, 89.0, 28.5, 78.0),
@@ -413,13 +414,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
     outer_hull, inner_hull = shell_envelopes[0]
     outer_hull = outer_hull + shell_envelopes[1][0]
     inner_hull = inner_hull + shell_envelopes[1][1]
-    # A vaulted cross-passage joins the stereo cavity through the Pi spine.
-    # Retain its end piers and pitched haunches so the high dorsal coaming
-    # grows from supported layers above the common camera service space.
+    # A longer longitudinal vault eliminates doubled spine partitions inside
+    # the swept shoulders. Keep its first-layer sill, aft/front piers and a
+    # 1.6+ mm crown ligament: the two haunches close at >45 degrees, so the
+    # dorsal coaming remains supported while the shared bay opens for service.
     cross_passage = b.Wire.make_polygon([
-        (72.5*sx,-13.5*sy,1.5), (86.0*sx,-13.5*sy,1.5),
-        (86.0*sx,-13.5*sy,22.5), (79.25*sx,-13.5*sy,31.0),
-        (72.5*sx,-13.5*sy,22.5),
+        (57.5*sx,-13.5*sy,1.5), (86.0*sx,-13.5*sy,1.5),
+        (86.0*sx,-13.5*sy,19.0), (71.75*sx,-13.5*sy,35.5),
+        (57.5*sx,-13.5*sy,19.0),
     ],close=True)
     spine = fairing-b.Solid.extrude(b.Face(cross_passage),(0,27.0*sy,0))
     shell = (outer_hull-inner_hull)+spine
