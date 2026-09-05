@@ -570,7 +570,12 @@ const World = struct {
         // good-faith touchdown attempt (learned false equilibrium in dag7-9:
         // park vy~0 at skim height, -0.01/step forever, never commit).
         if (!self.done and scenario == .land) {
-            if (pos.y() < GROUND_Y + 0.15) {
+            // dag10 refinement: the clock runs only when NOT descending
+            // (|vy| < 0.05). A quasi-static ground-effect cushion arrest
+            // (equilibrium ~0.09m) still reads as active descent while the
+            // vertical loop works through it; only a true park ticks.
+            const vspeed = @abs(self.bodyVel().y());
+            if (pos.y() < GROUND_Y + 0.15 and vspeed < 0.05) {
                 self.skim_steps += 1;
                 if (self.skim_steps >= 60) { // ~3s at 20 policy Hz
                     reward -= 3.0;

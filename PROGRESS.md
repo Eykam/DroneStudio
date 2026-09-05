@@ -274,3 +274,44 @@ stop: 0.5m heldout radius vs the teacher loop's +-1m limit cycle. The
 teacher position-loop redesign is now THE land blocker. Open question to
 quantify during the redesign: is 0.5m reachable at all under m2 actuation
 latency, or does tier-0 land radius need to move?
+
+## Teacher position-loop redesign (2026-09-05 PM): land teacher 6/16 -> 11/16
+
+Follow-up to the dag10 teacher-lever rejection. Reachability study FIRST
+(m2_teacher_reach.py): spawned at alt 1.4m, offsets to 2m, a position PD
+through the teacher's own attitude pipeline settles to sustained dxz
+0.02-0.09m in 1.6-3.6s - the 0.5m tier-0 radius is REACHABLE with 5-10x
+margin; the teacher's +-1m limit cycle was a tuning bug (velocity-saturated
+loop rectifying plant lag), not a physics limit. Best gains kp=1.2, kd=2.0
+(higher gains oscillate MORE - latency-limited).
+
+Redesign (t4_pilot.py, land_descend only unless noted):
+1. Terminal horizontal: direct position PD (kp 1.2, kd 2.0, accel clip
+   +-2.5) replacing the v_des-saturation loop.
+2. land_descend latched with hysteresis (unlatched gate mode-flickered
+   into porpoise crashes).
+3. Center-first descent gate: vy_des = -0.25 only when dxz <= max(0.25,
+   0.5r); while centering, POSITION-hold at 1.2m (kv 0.25) - a velocity
+   hold sagged through SoC drift faster than the trim integrator winds.
+4. Low+in-gate commit: alt<0.35 and dxz<=r -> vy_des=-0.35.
+5. SoC feedforward now applied in integrator mode too (was stateless-only;
+   FF carries the sag, integrator mops residual). Also touches hover_hold.
+6. Cushion-arrest fast-wind: the descent arrests quasi-statically at the
+   max-GE equilibrium (~0.09m); trim integrator winds 10x (0.008/step) when
+   arrested low with a descent command - breakthrough in ~1-2s. THIS was
+   the last blocker: the old teacher's 6/16 successes relied on slow
+   integrator wind-through over 10-15s, which the 60-step skim-kill
+   preempted (the yardstick change broke the old teacher's own mechanism).
+
+Sim skim-clock refinement (headless_main.zig): the clock now ticks only
+when |vy| < 0.05 (a true park), not while the vertical loop is actively
+working through the cushion. Yardstick note: dag10 itself trained against
+the v1 clock; v1->v2 changes only WHEN the clock ticks, and dag10's null
+result (BC reward-blind) is unaffected.
+
+Teacher census (16 heldout tier-0 land cells, m2): 11/16 success (was
+6/16). Remaining 5 are APPROACH-phase, not terminal: 1 off-pad transit
+miss (dxz 3.25), 2 transit timeouts (alt 1.3-2.2, never reached the gate),
+2 slow-centering timeouts at alt 0.8-0.9. Terminal landing accuracy is
+fixed; approach-phase robustness is the next teacher item if land labels
+need more yield.

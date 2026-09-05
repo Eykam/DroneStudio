@@ -60,8 +60,20 @@ def teacher_act(obs, ext, scenario, radius, state=None):
     d = float(np.linalg.norm(dvec))
     dist_xz = float(np.hypot(rel[0], rel[2]))
     alt = -float(rel[1])                  # land pads sit at ground level
-    land_descend = (scenario == "land" and alt <= 1.4
-                    and dist_xz <= max(1.0, 2.0 * radius))
+    # dag10 redesign: latched with hysteresis - the unlatched gate flickered
+    # on alt/dxz oscillation, alternating corridor descent (vy~-1.2) with the
+    # terminal hold into porpoise crashes (diag_teacher.py, seeds 99000/2).
+    if scenario == "land":
+        engaged = bool(state.get("_land_engaged", False)) if state is not None else False
+        if not engaged and alt <= 1.4 and dist_xz <= max(0.75, 1.5 * radius):
+            engaged = True
+        elif engaged and (alt > 3.0 or dist_xz > max(3.0, 3.0 * radius)):
+            engaged = False
+        land_descend = engaged
+        if state is not None:
+            state["_land_engaged"] = engaged
+    else:
+        land_descend = False
     if scenario == "land" and not land_descend:
         # phase 1: high transit while far (t2 gap-wall tops ~2.6-2.8m),
         # descend into the pad corridor once nearly overhead
@@ -94,6 +106,12 @@ def teacher_act(obs, ext, scenario, radius, state=None):
     damp = 0.5 if (float(np.linalg.norm(rel)) > 3.0
                    and not (scenario in ("goto", "land") and not land_descend and d < 6.0)) else 1.0
     a_des = np.clip(1.2 * (v_des - damp * vel), -2.0, 2.0)
+    if land_descend:
+        # dag10 terminal PD (m2_teacher_reach.py): direct position-error accel
+        # with velocity damping - the v_des-saturation path above rectified the
+        # plant lag into a +-1m limit cycle vs the 0.5m tier-0 radius.
+        a_des[0] = np.clip(1.2 * rel[0] - 2.0 * vel[0], -2.5, 2.5)
+        a_des[2] = np.clip(1.2 * rel[2] - 2.0 * vel[2], -2.5, 2.5)
     if 1e-3 < d < 3.5 and not land_descend:   # pad corridor stays clear
         a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
     if scenario in ("goto", "land") and not land_descend and 1e-3 < d < 5.0:
@@ -110,17 +128,31 @@ def teacher_act(obs, ext, scenario, radius, state=None):
     act0 = kp * (gz_des - gb[2]) - kd * rates[0]
     act2 = -kp * (gx_des - gb[0]) - kd * rates[2]
     if land_descend:
-        vy_des = LAND_VY_DESCEND
+        if dist_xz <= max(0.25, 0.5 * radius):
+            vy_des = LAND_VY_DESCEND
+        elif alt < 0.35 and dist_xz <= radius:
+            vy_des = -0.35  # dag10: low + in-gate - commit (skim clock running)
+        else:
+            # dag10: center-first hold is a POSITION hold at 1.2m, not
+            # vy_des=0 - a velocity hold sags through SoC drift faster than
+            # the trim integrator winds (arrived at the GE cushion
+            # uncentered and parked there, probes 6-8).
+            vy_des = float(np.clip(1.0 * (1.2 - alt), -0.1, 0.4))
     elif scenario == "hover_hold":
         vy_des = np.clip(0.8 * rel[1], -0.8, 0.8)
     else:
         vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
-    thr = HOVER_THR + K_VTHR * (vy_des - vel[1])
+    kv = 0.25 if (land_descend and alt > 0.35 and dist_xz > max(0.25, 0.5 * radius)) else K_VTHR  # dag10: firmer hold servo while centering
+    thr = HOVER_THR + kv * (vy_des - vel[1])
     # m2 obs v4 (27-dim): stateless SoC-feedforward trim. Fit from the
     # integrator's equilibrium over 24 land episodes (m2_trim_calib.py):
     # trim ~= -0.0061 - 0.0794*(1-soc), rmse 0.011. Replaces the integrator
     # for imitation: feedforward is Markovian in obs, an MLP can learn it.
-    if M2 and len(obs) >= 27 and state is None:
+    if M2 and len(obs) >= 27:
+        # dag10: feedforward SoC trim in BOTH modes (was stateless-only). The
+        # center-first hold exposes the vertical loop to SoC sag for seconds;
+        # the land trim integrator (0.0008/step) cannot wind fast enough
+        # against the 60-step skim-kill clock. FF carries the sag, I mops up.
         soc_ff = float(np.clip(-0.0061 - 0.0794 * (1.0 - float(obs[26])), -0.12, 0.12))
         if land_descend or scenario == "hover_hold":
             thr += soc_ff
@@ -142,7 +174,13 @@ def teacher_act(obs, ext, scenario, radius, state=None):
         # integrator and sink the drone (0.333 vs 0.667 succ without trim).
         trim = float(state.get("trim", 0.0))
         thr += trim
-        state["trim"] = float(np.clip(trim + 0.0008 * (vy_des - vel[1]), -0.12, 0.12))
+        # dag10: cushion-arrest fast-wind. Quasi-static descent stalls at the
+        # max-GE equilibrium (~0.09m); the base rate (0.0008) needs 250+
+        # steps to break through, longer than the 60-step skim clock. When
+        # arrested low with a descent command, wind 10x (breakthrough ~1-2s,
+        # still under the ~4 rad/s EM-lag corner at 20Hz).
+        arrested = alt < 0.35 and vy_des < 0.0 and abs(vel[1]) < 0.05
+        state["trim"] = float(np.clip(trim + (0.008 if arrested else 0.0008) * (vy_des - vel[1]), -0.12, 0.12))
     # bearing-seeking yaw (fixed flight stack supports closed-loop yaw now):
     # gently face the target; obs rel is yaw-frame so atan2 gives the
     # heading error directly. Disabled during precision land descent.
