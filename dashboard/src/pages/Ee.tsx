@@ -291,17 +291,17 @@ export default function Ee() {
         </CardContent></Card>
       )}
 
-      <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 md:items-start space-y-4 md:space-y-0">
+      <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 space-y-4 md:space-y-0">
         {/* sidebar */}
-        <div className="space-y-3 md:sticky md:top-6">
+        <div className="space-y-3 md:h-full md:min-h-0 md:flex md:flex-col">
           <LiveRound prog={progQ.data?.current ?? null} />
           {boards.data && boards.data.length > 0 && (
-            <Card>
-              <CardHeader className="p-3 pb-2">
+            <Card className="md:flex-1 md:min-h-0 md:flex md:flex-col">
+              <CardHeader className="p-3 pb-2 shrink-0">
                 <CardTitle className="text-sm">Boards & versions</CardTitle>
               </CardHeader>
-              <CardContent className="p-2 pt-0">
-                <div className="max-h-[280px] md:max-h-[calc(100dvh-26rem)] overflow-y-auto space-y-1.5 pr-1">
+              <CardContent className="p-2 pt-0 md:flex-1 md:min-h-0 md:flex md:flex-col">
+                <div className="max-h-[280px] md:max-h-none md:flex-1 overflow-y-auto space-y-1.5 pr-1">
                   {boards.data.map((b) => (
                     <div key={b.id}>
                       <button onClick={() => { setBoardId(b.id); setVer(null); setDiffFrom(null); }}

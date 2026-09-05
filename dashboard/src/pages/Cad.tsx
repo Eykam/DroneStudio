@@ -116,29 +116,14 @@ export default function Cad() {
 
       <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 md:flex-1 md:min-h-0 space-y-4 md:space-y-0">
         {/* sidebar: live status + designs list */}
-        <div className="space-y-3 md:min-h-0 md:overflow-y-auto">
-          {progLive && (
-            <Card className="border-primary/50">
-              <CardContent className="p-3 flex items-center gap-3">
-                <span className="relative flex h-3 w-3 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-                </span>
-                <div className="text-xs md:text-sm min-w-0">
-                  <span className="font-semibold">Working on {String(prog.design_id || "next revision")}</span>
-                  {prog.stage && <span className="text-muted-foreground"> - {String(prog.stage)}</span>}
-                  {prog.detail && <div className="text-muted-foreground truncate">{String(prog.detail)}</div>}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-          <Card>
-            <CardHeader className="p-3 pb-2">
-              <CardTitle className="text-sm">Designs</CardTitle>
+        <div className="space-y-3 md:h-full md:min-h-0 md:flex md:flex-col">
+          <Card className="md:h-full md:min-h-0 md:flex md:flex-col">
+            <CardHeader className="p-3 pb-2 shrink-0">
+              <CardTitle className="text-base md:text-lg">Designs</CardTitle>
               <CardDescription className="text-xs">{designs.length} design{designs.length === 1 ? "" : "s"}, newest last</CardDescription>
             </CardHeader>
-            <CardContent className="p-2 pt-0">
-              <div className="max-h-[320px] md:max-h-[calc(100dvh-16rem)] overflow-y-auto space-y-1.5 pr-1">
+            <CardContent className="p-2 pt-0 md:flex-1 md:min-h-0 md:flex md:flex-col">
+              <div className="max-h-[320px] md:max-h-none md:flex-1 overflow-y-auto space-y-1.5 pr-1">
                 {!designs.length && (
                   <div className="p-3 text-xs text-muted-foreground">
                     No chassis designs yet. The CAD researcher pushes them to <code className="font-mono">POST /api/cad/designs</code> as they land.
@@ -165,15 +150,28 @@ export default function Cad() {
 
         {/* main: chassis viewer + properties */}
         {sel && (
-          <Card className="min-w-0 md:min-h-0 md:overflow-y-auto">
-            <CardHeader className="p-3 md:p-6">
+          <Card className="min-w-0 md:h-full md:min-h-0 md:flex md:flex-col">
+            <CardHeader className="p-3 md:p-6 shrink-0">
               <CardTitle className="text-base md:text-lg">{sel.name || sel.id}</CardTitle>
               <CardDescription className="text-xs md:text-sm">
                 {sel.id} - {new Date(sel.created_at).toLocaleString()} - {(sel.glb_bytes / 1024).toFixed(0)} KB
                 {sel.source ? ` - ${sel.source}` : ""}
               </CardDescription>
             </CardHeader>
-            <CardContent className="p-3 md:p-6 pt-0 md:pt-0 space-y-4">
+            <CardContent className="p-3 md:p-6 pt-0 md:pt-0 md:flex-1 md:min-h-0 md:flex md:flex-col md:gap-3 space-y-4 md:space-y-0">
+              {progLive && (
+                <div className="rounded-lg border border-primary/50 p-3 flex items-center gap-3 shrink-0">
+                  <span className="relative flex h-3 w-3 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+                  </span>
+                  <div className="text-xs md:text-sm min-w-0">
+                    <span className="font-semibold">Working on {String(prog.design_id || "next revision")}</span>
+                    {prog.stage && <span className="text-muted-foreground"> - {String(prog.stage)}</span>}
+                    {prog.detail && <div className="text-muted-foreground truncate">{String(prog.detail)}</div>}
+                  </div>
+                </div>
+              )}
               <div className="h-72 md:h-[45vh] md:min-h-[320px] md:shrink-0">
                 {sel.glb_url ? (
                   <CadViewer key={sel.id} url={sel.glb_url} />
@@ -189,6 +187,7 @@ export default function Cad() {
                 )}
               </div>
 
+              <div className="md:flex-1 md:min-h-0 md:overflow-y-auto space-y-4 md:pr-1">
               {/* lineage */}
               <div>
                 <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">lineage</div>
@@ -229,6 +228,7 @@ export default function Cad() {
                 {Object.keys(otherMetrics).length > 0 && <PropGroup title="other metrics" obj={otherMetrics} />}
               </div>
               {sel.notes && <p className="text-xs md:text-sm text-muted-foreground">{sel.notes}</p>}
+              </div>
             </CardContent>
           </Card>
         )}
