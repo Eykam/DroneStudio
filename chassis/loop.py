@@ -3,7 +3,7 @@
 One invocation = one generation (designed to be driven by a cron/supervisor or repeated calls).
 State: loop_state.json in this dir (best variant, score, history).
 """
-import os, sys, json, subprocess, shutil, dataclasses, time
+import os, sys, json, subprocess, shutil, dataclasses, time, glob
 import progress
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -114,6 +114,14 @@ def run_generation():
                 kill_codex(proc); proc.wait()
                 raise subprocess.TimeoutExpired(codex_cmd, 3600)
             latest = gen_start  # a session that never writes runs to the hard timeout
+            # codex session rollout files count as activity too: sessions can sit
+            # 15+ min pre-rollout at startup (API stall), then work fine - killing
+            # them at the 20-min mark wastes the work that just started.
+            for rf in glob.glob("/root/.codex/sessions/*/*/*/*.jsonl"):
+                try:
+                    latest = max(latest, os.path.getmtime(rf))
+                except OSError:
+                    pass
             for root, _, files in os.walk("/tmp/candidates"):
                 for fn in files:
                     try:
