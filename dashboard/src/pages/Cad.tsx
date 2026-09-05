@@ -108,15 +108,15 @@ export default function Cad() {
     Object.entries(sel.metrics).filter(([k]) => !["mass_g", "inertia", "printability", "fea"].includes(k))) : {};
 
   return (
-    <div className="space-y-4">
-      <header>
+    <div className="space-y-4 md:h-[calc(100dvh-3rem)] md:flex md:flex-col">
+      <header className="shrink-0">
         <h1 className="text-xl md:text-2xl font-bold tracking-tight">CAD</h1>
         <p className="text-xs md:text-sm text-muted-foreground mt-1">chassis designs from the CAD researcher - auto-refresh 15s</p>
       </header>
 
-      <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 md:items-start space-y-4 md:space-y-0">
+      <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 md:flex-1 md:min-h-0 space-y-4 md:space-y-0">
         {/* sidebar: live status + designs list */}
-        <div className="space-y-3 md:sticky md:top-6">
+        <div className="space-y-3 md:min-h-0 md:overflow-y-auto">
           {progLive && (
             <Card className="border-primary/50">
               <CardContent className="p-3 flex items-center gap-3">
@@ -165,7 +165,7 @@ export default function Cad() {
 
         {/* main: chassis viewer + properties */}
         {sel && (
-          <Card className="min-w-0">
+          <Card className="min-w-0 md:min-h-0 md:overflow-y-auto">
             <CardHeader className="p-3 md:p-6">
               <CardTitle className="text-base md:text-lg">{sel.name || sel.id}</CardTitle>
               <CardDescription className="text-xs md:text-sm">
@@ -174,7 +174,7 @@ export default function Cad() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-3 md:p-6 pt-0 md:pt-0 space-y-4">
-              <div className="h-72 md:h-[52vh]">
+              <div className="h-72 md:h-[45vh] md:min-h-[320px] md:shrink-0">
                 {sel.glb_url ? (
                   <CadViewer key={sel.id} url={sel.glb_url} />
                 ) : (
