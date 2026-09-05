@@ -172,6 +172,8 @@ const World = struct {
     body: bullet.CbtBodyHandle,
     shape: bullet.CbtShapeHandle,
     rate_ctrl: FC.RateController,
+    dbg_motors: bool = false,
+    dbg_tick: u32 = 0,
     dyn: Dynamics = .{},
     dyn_name_buf: [80]u8 = undefined,
     dyn_name_len: usize = 0,
@@ -217,6 +219,7 @@ const World = struct {
         bullet.cbtWorldAddBody(w.world, w.body);
 
         w.rate_ctrl = FC.RateController.init(1.0, 1.0); // integrator/output limits
+        w.dbg_motors = std.posix.getenv("HEADLESS_DBG_MOTORS") != null;
         w.rng = std.Random.Xoshiro256.init(0);
         return w;
     }
@@ -260,7 +263,16 @@ const World = struct {
     fn bodyOmega(self: *World) Vec3 {
         var o: [3]f32 = undefined;
         bullet.cbtBodyGetAngularVelocity(self.body, &o);
-        return Vec3.from_array(o);
+        // Bullet stores angular velocity in the WORLD frame; every consumer
+        // here (rate PID measurement, obs rates, rotor gyro term) wants BODY
+        // frame - rotate it back. Feeding world-frame omega was the root
+        // cause of the long-standing "sustained yaw tumbles the quad" issue
+        // (user-reported, root-caused 2026-09-04): at heading psi the PID's
+        // roll/pitch feedback was rotated by -psi from the true body rates,
+        // an energy pump proportional to yaw rate (any tilt seeded it, f32
+        // noise suffices; growth ~10/s at 0.42 rad/s yaw; zero-yaw flight
+        // near-unaffected since the frames agree for a level quad).
+        return Vec3.from_array(o).rotate_by_quaternion(self.bodyQuat().conjugate());
     }
 
     fn reset(self: *World, scene: Scene, seed: u64) void {
@@ -393,6 +405,14 @@ const World = struct {
                     torque_b[0] += ti * -mp[2];
                     torque_b[2] += ti * mp[0];
                     torque_b[1] += ti * d.motor_drag_ratio * d.motor_yaw_sign[i]; // ktau yaw
+                }
+                // Yaw-instability forensics (2026-09-04): per-policy-step motor
+                // channel dump to stderr, gated by HEADLESS_DBG_MOTORS.
+                if (self.dbg_motors) {
+                    self.dbg_tick +%= 1;
+                    if (self.dbg_tick % 25 == 0) {
+                        std.debug.print("MOT t=({d:.4},{d:.4},{d:.4},{d:.4}) lag=({d:.4},{d:.4},{d:.4},{d:.4}) tq=({d:.5},{d:.5},{d:.5}) fthr={d:.4} om=({d:.4},{d:.4},{d:.4})\n", .{ t[0], t[1], t[2], t[3], d.motor_lag_state[0], d.motor_lag_state[1], d.motor_lag_state[2], d.motor_lag_state[3], torque_b[0], torque_b[1], torque_b[2], self.filtered_thrust, self.bodyOmega().x(), self.bodyOmega().y(), self.bodyOmega().z() });
+                    }
                 }
             }
             const thrust_w = Vec3.init(0, total, 0).rotate_by_quaternion(q);
