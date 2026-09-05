@@ -97,6 +97,17 @@ export default function Dashboard() {
     }));
   const curriculumChart = toSeries("curriculum_success", true);
   const lossChart = toSeries("training_loss", false);
+  const campaignData = (() => {
+    const g = series["success_goto_t0"] ?? [];
+    const h = series["success_hover_hold_t0"] ?? [];
+    const l = series["success_land_t0"] ?? [];
+    return g.map((p, i) => ({
+      x: p.label ?? String(i),
+      goto: +(p.y * 100).toFixed(1),
+      hover: h[i] ? +(h[i].y * 100).toFixed(1) : null,
+      land: l[i] ? +(l[i].y * 100).toFixed(1) : null,
+    }));
+  })();
   const MODE_META = {
     generations: { title: "Best success rate per generation", desc: "Selection trajectory across the run" },
     curriculum: { title: "Curriculum hill climbing", desc: "Held-out success as the ladder + DAgger advance (live)" },
@@ -249,6 +260,31 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="p-3 md:p-6">
+          <CardTitle className="text-base md:text-lg">t4 campaign rounds</CardTitle>
+          <CardDescription className="text-xs md:text-sm">
+            Per-round scenario success (t0 tier, held-out) - posts live as each DAgger round lands. Blue go-to, amber hover-hold, green land.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-3 md:p-6 pt-0 md:pt-0 h-56 md:h-64">
+          {campaignData.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={campaignData} margin={{ top: 5, right: 8, bottom: 5, left: -6 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(217 33% 17%)" />
+                <XAxis dataKey="x" stroke="hsl(215 20% 65%)" fontSize={9} tickMargin={4} interval="preserveStartEnd" />
+                <YAxis stroke="hsl(215 20% 65%)" fontSize={10} unit="%" domain={[0, 100]} width={46} />
+                <Tooltip contentStyle={{ background: "hsl(222 47% 9%)", border: "1px solid hsl(217 33% 17%)", borderRadius: 8, fontSize: 13 }}
+                         labelStyle={{ color: "hsl(210 40% 96%)" }} />
+                <Line type="monotone" dataKey="goto" stroke="hsl(217 91% 60%)" strokeWidth={2} dot={{ r: 2.5 }} name="go-to" />
+                <Line type="monotone" dataKey="hover" stroke="hsl(45 93% 58%)" strokeWidth={2} dot={{ r: 2.5 }} name="hover-hold" />
+                <Line type="monotone" dataKey="land" stroke="hsl(142 71% 45%)" strokeWidth={2} dot={{ r: 2.5 }} name="land" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : <div className="h-full grid place-items-center text-muted-foreground text-sm">no t4 campaign rounds yet</div>}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="p-3 md:p-6">
