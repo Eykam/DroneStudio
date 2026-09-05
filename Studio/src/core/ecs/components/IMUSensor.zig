@@ -76,12 +76,18 @@ pub const IMUSensorComponent = struct {
     bias_walk_accel: f32 = 5e-4, // m/s²/√s
     pos_body: Vec3 = Vec3.init(0, 0, 0), // mount offset (B frame)
     rot_body: Quaternion = Quaternion.identity(), // mount orientation (B→sensor)
+    /// Lever arm: when true (and pos_body != 0), accel samples are translated
+    /// from the CoM to the mount point: a_imu = a_com + alpha x r + omega x (omega x r).
+    /// alpha is finite-differenced from body-frame omega at the sample rate.
+    lever_arm_enabled: bool = true,
 
     // Runtime state
     entity_id: Core.EntityID = undefined,
     bias_gyro: Vec3 = Vec3.init(0, 0, 0),
     bias_accel: Vec3 = Vec3.init(0, 0, 0),
     last_update_us: u64 = 0,
+    last_omega_body: Vec3 = Vec3.init(0, 0, 0),
+    has_last_omega: bool = false,
 
     // Output queue for flight controller
     sample_queue: IMUSampleQueue(1024), // 1024 samples buffer (~1 second at 1kHz)
@@ -132,8 +138,26 @@ pub const IMUSensorComponent = struct {
 
         const accel_body = accel_world.rotate_by_quaternion(rotation_bw);
 
+        // Lever-arm correction: translate specific force from the CoM to the IMU
+        // mount point (schema 1.2 imu.offset_from_com_m feeds pos_body).
+        //   a_imu = a_com + alpha x r + omega x (omega x r)   (body frame)
+        // alpha is finite-differenced from body-frame omega across samples.
+        var accel_point = accel_body;
+        if (self.lever_arm_enabled and self.pos_body.length() > 1e-9) {
+            const r = self.pos_body;
+            var alpha_b = Vec3.init(0, 0, 0);
+            if (self.has_last_omega and dt > 0) {
+                alpha_b = angular_vel_body.sub(self.last_omega_body).scale(1.0 / dt);
+            }
+            self.last_omega_body = angular_vel_body;
+            self.has_last_omega = true;
+            const tangential = alpha_b.cross(r);
+            const centripetal = angular_vel_body.cross(angular_vel_body.cross(r));
+            accel_point = accel_body.add(tangential).add(centripetal);
+        }
+
         // Transform to sensor frame
-        const accel_sensor = accel_body.rotate_by_quaternion(self.rot_body);
+        const accel_sensor = accel_point.rotate_by_quaternion(self.rot_body);
         const angular_vel_sensor = angular_vel_body.rotate_by_quaternion(self.rot_body);
 
         // Evolve bias random walk
@@ -201,6 +225,8 @@ pub const IMUSensorComponent = struct {
         self.bias_gyro = Vec3.init(0, 0, 0);
         self.bias_accel = Vec3.init(0, 0, 0);
 
+        self.last_omega_body = Vec3.init(0, 0, 0);
+        self.has_last_omega = false;
         self.last_update_us = 0;
         while (self.sample_queue.pop()) |_| {}
     }
