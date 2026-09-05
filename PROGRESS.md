@@ -347,3 +347,12 @@ hover 0.688 through the same path, so the eval is healthy - the t4_best bake
 itself (03:03 UTC) is the anomaly. Live t4-yaw stream tile is visibly
 degraded (22/40 recent episodes vs t4-training 29/40). No tile flip, no
 promotion per standing hold; flagged for user decision.
+
+dag12 (land-focused DAgger: land-only mix 7 near-pad t0 / 1 near-pad t1 /
+2 full t2, 4x terminal-phase loss weight, warm t4_best): land_t0 0.0 ->
+0.062 (r10) -> 0.125 (r11) -> 0.375 (r17) -> 0.438 (r22) -> 0.562 (r24,
+still climbing); land_t2 to 0.438. First campaign to move land off zero
+under the new yardstick. Expected cost: goto 0.062, hover 0.0 (land-only
+anchor+mix starves them). No champion (floors gate goto/hover). Levers
+confounded by design; ablation needed for attribution. Continuation dag12b
+launched from r24 params with fresh rollout seeds, reused anchor.
