@@ -174,3 +174,28 @@ bit-identical), bullet.cbtBodySetLinearVelocity at reset. Verified: reset obs
 velocity channel = 2.0 m/s / 10 with spawn_vel [2,0,0] vs 0 without; velocity
 persists through steps. Binary swapped at /workspace/zig-out/bin/
 (previous preserved as dronestudio-headless.pre-icv1).
+
+## 2026-09-05 ~06:15 UTC - SI single-port matrix: run5 exonerated, run4 the corrupt sweep; v6 verify visuals regenerated clean
+
+The 12x12 single-port matrix (one port excited per run, 13 runs incl. a
+run5 re-run) closed the SI harness question:
+
+- Matrix == run5 BIT-IDENTICAL on 11/12 ports (port 0 differs at numerical
+  noise level). run5 (ems/simulation_run5_full) is CLEAN.
+- run4 (ems/simulation_sweep1, source of the original v6 SI visuals) is the
+  sole corrupt sweep: bottom-port block 2.147-2.168 passivity, port 10 at
+  2.47; its clean-looking top-port 1.03 values are ALSO wrong (cross-checked
+  bit-level, not by plausibility).
+- Top board-edge ports carry a DETERMINISTIC +0.4 passivity excess
+  (1.36-1.42), bit-identical across all 13 runs - a board-edge port artifact
+  of the harness, not a board defect. Root-causing it is an open experiment.
+- Bottom ports carry ~+0.2 excess from an open stub in the harness.
+
+Dashboard ee-cam3 v6 Tests tab: all four SI visuals (sdd_diff, z_diff,
+diff_delay, s11_smith) regenerated from the clean matrix only, plus a new
+si_passivity panel carrying the reworked HARNESS caveat naming both
+artifacts. Uniform-trace ports only, connector/fanout excluded, 550-1500 MHz
+characterized band (sweep-edge artifacts >1.9 GHz excluded).
+
+gerber2ems bug report (drafted, covers the run4 corruption signature) is with
+the user for review before filing upstream.
