@@ -87,10 +87,14 @@ def teacher_act(obs, ext, scenario, radius):
     if not land_descend:
         yaw_err = float(np.arctan2(-rel[2], rel[0]))  # sign verified on fixed physics (yawpure test)
         if abs(yaw_err) < 2.0:
-            # refine heading only when roughly facing the target; a full
-            # turn at the atan2 antipode bang-bangs and traps the position
-            # loop - translate out instead
-            yaw_cmd = float(np.clip(0.5 * yaw_err, -0.04, 0.04))
+            yaw_cmd = float(np.clip(0.5 * yaw_err, -0.2, 0.2))
+        elif float(np.hypot(rel[0], rel[2])) > 2.0 * radius:
+            # badly misaligned and far out: commit to one fixed turn
+            # direction (fixed sign dodges the atan2 antipode bang-bang) at
+            # a real rate (0.3*5.24=1.57 rad/s, pi turn in ~2s) so facing is
+            # sustained from early in the trajectory, not only near the goal
+            # (user 2026-09-04: sensors must face a direction)
+            yaw_cmd = 0.45
     return np.clip(np.array([act0, yaw_cmd, act2, thr]), -1, 1)
 
 def run_one(seed, dist, spec, max_steps):

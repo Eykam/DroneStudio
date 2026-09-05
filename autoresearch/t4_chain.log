@@ -1,0 +1,73 @@
+CHAIN_START 2026-09-05T00:24:28Z
+STAGE_START t4_pilot.py 2026-09-05T00:24:28Z
+collect goto_t0: kept 48/48 samples=5287
+collect hover_hold_t0: kept 46/48 samples=14845
+collect land_t0: kept 48/48 samples=24489
+collect goto_t1: kept 47/48 samples=30408
+collect hover_hold_t1: kept 43/48 samples=39787
+collect land_t1: kept 41/48 samples=47990
+collect goto_t2: kept 36/48 samples=55329
+collect hover_hold_t2: kept 35/48 samples=63465
+collect land_t2: kept 7/48 samples=65025
+collect t3_A: kept 64/64 samples=73656
+collect t3_B: kept 64/64 samples=83436
+T4PILOT_DONE {"goto_t0": 48, "hover_hold_t0": 46, "land_t0": 48, "goto_t1": 47, "hover_hold_t1": 43, "land_t1": 41, "goto_t2": 36, "hover_hold_t2": 35, "land_t2": 7, "t3_A": 64, "t3_B": 64} samples=83436 wall=12s
+STAGE_DONE t4_pilot.py 2026-09-05T00:24:41Z
+STAGE_START t4_pilot2.py 2026-09-05T00:24:41Z
+collect land_t0: kept 96/97 samples=19465
+collect land_t1: kept 96/107 samples=38477
+collect land_t2: kept 84/500 samples=54751
+T4PILOT2_DONE {"land_t0": {"kept": 96, "attempts": 97}, "land_t1": {"kept": 96, "attempts": 107}, "land_t2": {"kept": 84, "attempts": 500}} samples=54751 wall=12s
+STAGE_DONE t4_pilot2.py 2026-09-05T00:24:53Z
+STAGE_START t4_bc.py 2026-09-05T00:24:53Z
+BC data: 83436 samples meta={"goto_t0": 48, "hover_hold_t0": 46, "land_t0": 48, "goto_t1": 47, "hover_hold_t1": 43, "land_t1": 41, "goto_t2": 36, "hover_hold_t2": 35, "land_t2": 7, "t3_A": 64, "t3_B": 64}
+bc ep50 loss=0.00086 wall=12s
+bc ep100 loss=0.00063 wall=24s
+bc ep150 loss=0.00035 wall=41s
+bc ep200 loss=0.00029 wall=54s
+bc ep250 loss=0.00024 wall=68s
+bc ep300 loss=0.00021 wall=79s
+T4BC_EVAL {"goto_t0": 0.625, "goto_t1": 0.688, "goto_t2": 0.438, "goto_t3": 0.25, "hover_hold_t0": 0.125, "hover_hold_t2": 0.125, "land_t0": 0.0, "land_t2": 0.0}
+T4BC_DONE wall=79s
+STAGE_DONE t4_bc.py 2026-09-05T00:26:12Z
+STAGE_START t4_bc_eval.py 2026-09-05T00:26:12Z
+T4BC_EVAL {"goto_t0": 0.625, "goto_t1": 0.688, "goto_t2": 0.438, "goto_t3": 0.25, "hover_hold_t0": 0.125, "hover_hold_t2": 0.125, "land_t0": 0.0, "land_t2": 0.0}
+T4BC_EVAL_DONE
+STAGE_DONE t4_bc_eval.py 2026-09-05T00:26:13Z
+STAGE_START t4_dagger.py 2026-09-05T00:26:13Z
+anchor: 20859 demo samples
+round 1: student succ 0.458 dataset 7433 wall=1s
+round 1 EVAL {"goto_t0": 1.0, "goto_t1": 0.812, "goto_t2": 0.625, "goto_t3": 0.125, "hover_hold_t0": 0.062, "hover_hold_t2": 0.0, "land_t0": 0.062, "land_t2": 0.0}
+round 2: student succ 0.375 dataset 14021 wall=6s
+round 2 EVAL {"goto_t0": 0.75, "goto_t1": 0.688, "goto_t2": 0.438, "goto_t3": 0.312, "hover_hold_t0": 0.5, "hover_hold_t2": 0.0, "land_t0": 0.0, "land_t2": 0.0}
+round 3: student succ 0.500 dataset 20456 wall=15s
+round 3 EVAL {"goto_t0": 0.812, "goto_t1": 0.938, "goto_t2": 0.375, "goto_t3": 0.438, "hover_hold_t0": 0.562, "hover_hold_t2": 0.375, "land_t0": 0.062, "land_t2": 0.0}
+round 4: student succ 0.375 dataset 26675 wall=26s
+round 4 EVAL {"goto_t0": 0.812, "goto_t1": 0.688, "goto_t2": 0.375, "goto_t3": 0.625, "hover_hold_t0": 0.75, "hover_hold_t2": 0.562, "land_t0": 0.0, "land_t2": 0.0}
+round 5: student succ 0.333 dataset 34955 wall=40s
+round 5 EVAL {"goto_t0": 0.938, "goto_t1": 0.875, "goto_t2": 0.438, "goto_t3": 0.625, "hover_hold_t0": 0.625, "hover_hold_t2": 0.438, "land_t0": 0.0, "land_t2": 0.0}
+round 6: student succ 0.375 dataset 40832 wall=56s
+round 6 EVAL {"goto_t0": 1.0, "goto_t1": 0.875, "goto_t2": 0.5, "goto_t3": 0.688, "hover_hold_t0": 0.5, "hover_hold_t2": 0.438, "land_t0": 0.062, "land_t2": 0.0}
+T4DAG_DONE wall=73s
+STAGE_DONE t4_dagger.py 2026-09-05T00:27:26Z
+STAGE_START t4_dagger2.py 2026-09-05T00:27:26Z
+anchor: 20859 demo samples
+round 1: student succ 0.267 dataset 9127 wall=1s
+round 1 EVAL {"goto_t0": 0.938, "goto_t1": 0.875, "goto_t2": 0.562, "goto_t3": 0.375, "hover_hold_t0": 0.5, "hover_hold_t2": 0.438, "land_t0": 0.312, "land_t2": 0.0}
+round 2: student succ 0.467 dataset 16981 wall=8s
+round 2 EVAL {"goto_t0": 1.0, "goto_t1": 0.875, "goto_t2": 0.625, "goto_t3": 0.5, "hover_hold_t0": 0.75, "hover_hold_t2": 0.625, "land_t0": 0.188, "land_t2": 0.0}
+round 3: student succ 0.367 dataset 26763 wall=19s
+round 3 EVAL {"goto_t0": 1.0, "goto_t1": 0.875, "goto_t2": 0.625, "goto_t3": 0.375, "hover_hold_t0": 0.875, "hover_hold_t2": 0.688, "land_t0": 0.312, "land_t2": 0.062}
+round 4: student succ 0.467 dataset 35720 wall=33s
+round 4 EVAL {"goto_t0": 0.938, "goto_t1": 0.875, "goto_t2": 0.625, "goto_t3": 0.75, "hover_hold_t0": 0.812, "hover_hold_t2": 0.688, "land_t0": 0.312, "land_t2": 0.062}
+round 5: student succ 0.467 dataset 45595 wall=48s
+round 5 EVAL {"goto_t0": 0.938, "goto_t1": 0.875, "goto_t2": 0.562, "goto_t3": 0.562, "hover_hold_t0": 0.812, "hover_hold_t2": 0.688, "land_t0": 0.25, "land_t2": 0.25}
+round 6: student succ 0.333 dataset 56025 wall=67s
+round 6 EVAL {"goto_t0": 1.0, "goto_t1": 0.875, "goto_t2": 0.625, "goto_t3": 0.375, "hover_hold_t0": 0.562, "hover_hold_t2": 0.5, "land_t0": 0.188, "land_t2": 0.125}
+round 7: student succ 0.467 dataset 64110 wall=93s
+round 7 EVAL {"goto_t0": 1.0, "goto_t1": 0.875, "goto_t2": 0.562, "goto_t3": 0.438, "hover_hold_t0": 0.562, "hover_hold_t2": 0.625, "land_t0": 0.312, "land_t2": 0.062}
+round 8: student succ 0.500 dataset 73024 wall=119s
+round 8 EVAL {"goto_t0": 1.0, "goto_t1": 0.812, "goto_t2": 0.688, "goto_t3": 0.375, "hover_hold_t0": 0.938, "hover_hold_t2": 0.625, "land_t0": 0.188, "land_t2": 0.062}
+T4DAG2_DONE wall=151s
+STAGE_DONE t4_dagger2.py 2026-09-05T00:29:57Z
+CHAIN_DONE 2026-09-05T00:29:57Z

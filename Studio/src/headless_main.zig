@@ -108,6 +108,7 @@ const Scene = struct {
     hold_s: f32 = 4.0, // hover_hold: seconds inside radius to succeed
     max_touchdown_vs: f32 = 0.5, // land: max |vertical speed| at touchdown, m/s
     shaping_v2: bool = false, // small smooth-flight penalty, all scenarios
+    face_reward_w: f32 = 0.0, // per-step reward for nose alignment with the current target (sustained facing; user 2026-09-04)
     // T3 (harder-scenes Phase 2): ordered waypoints to pass through (goto
     // only) before the final goal. Empty = today's behavior.
     waypoints: []Vec3 = &.{},
@@ -486,6 +487,22 @@ const World = struct {
         if (self.scene.shaping_v2) {
             reward -= 0.005 * self.bodyOmega().length() / 10.0;
         }
+        // sustained facing (user 2026-09-04): per-step nose-to-target
+        // alignment vs the CURRENT target (waypoint while pending, else
+        // goal). Bounded by w * episode steps; +10/-5 outcome terms stay
+        // dominant at w <= 0.03.
+        if (self.scene.face_reward_w != 0.0 and !self.done) {
+            const to_t = target.sub(pos);
+            const dxz = @sqrt(to_t.x() * to_t.x() + to_t.z() * to_t.z());
+            if (dxz > 0.05) {
+                const fwd = Vec3.init(1, 0, 0).rotate_by_quaternion(self.bodyQuat());
+                const fxz = @sqrt(fwd.x() * fwd.x() + fwd.z() * fwd.z());
+                if (fxz > 0.05) {
+                    const cos_e = (fwd.x() * to_t.x() + fwd.z() * to_t.z()) / (fxz * dxz);
+                    reward += self.scene.face_reward_w * @max(0.0, cos_e);
+                }
+            }
+        }
         // hover_hold: inside the radius the progress term is replaced by a
         // drift penalty and the hold counter runs; exiting resets it.
         if (scenario == .hover_hold and !self.done) {
@@ -793,6 +810,7 @@ pub fn main() !void {
             if (scene_v.object.get("hold_s")) |h| scene.hold_s = f32FromJson(h, 4.0);
             if (scene_v.object.get("max_touchdown_vs")) |tv| scene.max_touchdown_vs = f32FromJson(tv, 0.5);
             if (scene_v.object.get("shaping_v2")) |sv| scene.shaping_v2 = (sv == .bool and sv.bool);
+            if (scene_v.object.get("face_reward_w")) |fw| scene.face_reward_w = f32FromJson(fw, 0.0);
             if (scene_v.object.get("scenario")) |sc| {
                 if (sc == .string) {
                     if (std.mem.eql(u8, sc.string, "hover_hold")) scene.scenario = .hover_hold;

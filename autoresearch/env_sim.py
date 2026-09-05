@@ -77,6 +77,9 @@ class SimBinaryEnv(QuadNavEnv):
                 # pad at the goal point, altitude forced to ground level
                 scene["goal"][1] = 0.0
                 self.goal = np.array(scene["goal"], dtype=np.float64)
+        frw = float(os.environ.get("AUTORESEARCH_FACE_REWARD", "0") or 0)
+        if frw:
+            scene["face_reward_w"] = frw
         resp = self._call({"cmd": "reset", "seed": int(self.seed), "scene": scene})
         # mirror bookkeeping used by env_quad.succeeded
         self.pos = self.spawn.copy()
