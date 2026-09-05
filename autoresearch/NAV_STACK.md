@@ -67,7 +67,7 @@ GL_ARB_bindless_texture; no CPU rasterizer implements it
   randomization rides the new renderer path (option D: primitive
   material IDs -> segmentation + depth noise; option A: real materials).
 
-### 4. VIO in the training loop
+### 4. VIO in the training loop (in-repo implementation - decided 2026-09-05)
 
 - Run VIO at camera rate inside episode rollouts (or precompute per
   frame and replay); the nav policy sees the ESTIMATE, not ground truth.
@@ -97,13 +97,23 @@ GL_ARB_bindless_texture; no CPU rasterizer implements it
    sim state; nav policy offboard first.
 4. **Real scenes**: field tests.
 
-## Open questions for Eyad
+## Decisions (Eyad, 2026-09-05 12:32 PM)
 
-- First vision policy: depth+segmentation (option D, fast, standard) is
-  enough - RGB photorealism is rung 2. Confirm that's the split he wants,
-  since his message emphasized realism. Our read: he wants the realism
-  PATH built, not necessarily RGB-first; D->A delivers both in order.
-- Stereo baseline / resolution / FOV targets from the hardware he has in
-  mind (drives camera model + VIO choice).
-- VIO stack preference: implement in-repo (deterministic, headless) vs
-  wrap an existing one (OpenVINS/VINS-Fusion - heavier, but battle-tested).
+- **Split: depth+segmentation first (option D), RGB photorealism on rung
+  2 (option A).** His call: "figure it out" - default confirmed. The D->A
+  order delivers both; the realism path stays the plan, not the first
+  rung.
+- **Camera targets: match the real hardware.** Stereo pair = 2x Raspberry
+  Pi Camera Module 3 (IMX708) at the CAD manifest's 56mm baseline. Sim
+  camera model targets: 640x480 @ 30Hz per camera (VIO operating point;
+  native 4608x2592 is capture-side only), rolling shutter (IMX708 is
+  rolling - per-row time offset in the rasterizer), ~75 deg horizontal
+  FOV (standard lens variant; revisit if he mounts the 120 deg wide).
+- **VIO: our own implementation, in-repo.** His call: "we should write
+  our own better and faster implementation" - no OpenVINS/VINS-Fusion
+  wrap. Design consequences: deterministic, headless, runs inside the
+  training loop; tight IMU preintegration against the existing 500Hz
+  sim IMU; stereo frontend (KLT features + depth from the rasterizer as
+  ground truth for supervised signal during development); the estimator
+  stays classical so it is testable against sim ground truth before the
+  learned nav policy ever sees it.
