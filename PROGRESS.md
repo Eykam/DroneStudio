@@ -356,3 +356,12 @@ under the new yardstick. Expected cost: goto 0.062, hover 0.0 (land-only
 anchor+mix starves them). No champion (floors gate goto/hover). Levers
 confounded by design; ablation needed for attribution. Continuation dag12b
 launched from r24 params with fresh rollout seeds, reused anchor.
+
+dag12b (continuation from dag12 r24, 24 more rounds, fresh seeds, reused
+land-only anchor): land_t0 peak 0.75 (r11), 0.625 (r22), final 0.562 (r24);
+land_t2 peak 0.625 (r15). High round-to-round variance (0.19-0.75); no
+convergence plateau yet. No champion (floors gate starved goto/hover).
+Peak-land checkpoint preserved at /workspace/t4_dag12b_r11.json. Answer to
+experiment (b): YES - land-focused imitation moves land_t0 (0 -> 0.75 peak)
+where mixed-scenario BC/DAgger never left 0.0. Levers (land-only mix vs 4x
+terminal weighting) remain confounded; ablation unprompted.
