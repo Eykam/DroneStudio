@@ -367,10 +367,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The upright Pi spine continues to the bed as an internal shear member;
     # the camera bay stays accessible from its dorsal opening.
     cheek_stations = [
-        (62.5, 82.0, 14.0, 72.0),
-        (65.0, 91.0, 16.8, 83.0),
-        (93.5, 91.0, 16.8, 83.0),
-        (95.4, 87.0, 16.0, 79.0),
+        (62.5, 82.0, 27.0, 72.0),
+        (65.0, 91.0, 29.0, 83.0),
+        (93.5, 91.0, 29.0, 83.0),
+        (95.4, 87.0, 27.0, 79.0),
     ]
     cheek_stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
@@ -422,18 +422,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
             p.stack_standoff_dia_mm/2, p.stack_standoff_height_mm)
         body = body + boss
 
-    # Teardrop lens ports have a 45-degree roof, so the nose needs no support.
-    # Only the sight lines pierce the shell; both camera boards remain inside.
-    aperture_r = p.camera_aperture_dia_mm/2
-    for camera_y in (-28.0*sy, 28.0*sy):
-        port = b.Wire.make_polygon([
-            (93.0*sx, camera_y-aperture_r, 9.0),
-            (93.0*sx, camera_y-aperture_r, 9.0-aperture_r),
-            (93.0*sx, camera_y+aperture_r, 9.0-aperture_r),
-            (93.0*sx, camera_y+aperture_r, 9.0),
-            (93.0*sx, camera_y, 9.0+aperture_r),
-        ], close=True)
-        body = body - b.Solid.extrude(b.Face(port), (20.0*sx, 0, 0))
+    # Camera sight lines: one FOV-pyramid void per camera, apex at the real lens
+    # point (components.camera_lens_poses, boards mounted lens-forward +X).
+    # Half-angles = Camera Module 3 spec (66.3h x 41.6v deg) + 1 deg margin, so no
+    # frame material sits inside the field of view - evaluate.py:check_camera_fov
+    # gates exactly this. Pyramid ceiling slopes down at ~22 deg: printable, no supports.
+    from components import camera_lens_poses as _clp
+    for _key, _pose in _clp().items():
+        _ox, _oy, _oz = (v * 1000 for v in _pose["origin_m"])
+        _hh = math.tan(math.radians(_pose["hfov_deg"] / 2 + 1.0))
+        _vh = math.tan(math.radians(_pose["vfov_deg"] / 2 + 1.0))
+        def _fov_rect(_x, _ox=_ox, _oy=_oy, _oz=_oz, _hh=_hh, _vh=_vh):
+            _w = _hh * (_x - _ox) + 0.5
+            _h = _vh * (_x - _ox) + 0.5
+            return b.Wire.make_polygon([
+                (_x, _oy - _w, _oz - _h), (_x, _oy + _w, _oz - _h),
+                (_x, _oy + _w, _oz + _h), (_x, _oy - _w, _oz + _h),
+            ], close=True)
+        body = body - b.Solid.make_loft([_fov_rect(_ox + 0.5), _fov_rect(125.0)])
 
     # motor bolt holes (16x16 M3) + center bore, through each pad
     cut_height = max(roof_z, p.arm_thickness_mm,

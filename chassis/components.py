@@ -35,7 +35,7 @@ def cad_geometry(key, pos_m):
             except Exception:
                 pass
         _STEP_CACHE[path] = sh
-    src = _STEP_CACHE[path]
+    src = _apply_orientation(key.split("#")[0], _STEP_CACHE[path])
     bb = src.bounding_box()
     cx, cy = (bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2
     sh = src.moved(b.Location((pos_m[0] * 1000 - cx, pos_m[1] * 1000 - cy,
@@ -64,6 +64,7 @@ def primitive_geometry(key, pos_m):
     else:
         sh = b.Box(dx, dy, dz)
     # Box/Cylinder are centered at origin; placement z = component bottom
+    sh = _apply_orientation(key.split("#")[0], sh)
     return sh.moved(b.Location((cx, cy, z0 + dz / 2)))
 
 
@@ -148,6 +149,26 @@ LIBRARY = {
         "estimate - generic GY-9250 module"),
 }
 
+ORIENTATIONS = {
+    # Pi Camera Module 3 STEP is modeled board-flat with the lens pointing +Z.
+    # Mount it lens-forward (+X, out through the nose aperture): rotate +90 deg about Y.
+    # User feedback 2026-09-04: cameras pointed downward and were obstructed.
+    "pi_camera_3": ("Y", 90.0),
+}
+
+CAMERA_SPEC = {
+    # Standard (non-wide) lens. Sources: raspberrypi.com/products/camera-module-3
+    "pi_camera_3": {"hfov_deg": 66.3, "vfov_deg": 41.6},
+}
+
+def _apply_orientation(cname, sh):
+    spec = ORIENTATIONS.get(cname)
+    if not spec:
+        return sh
+    import build123d as b
+    ax = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}[spec[0]]
+    return sh.rotate(b.Axis((0, 0, 0), ax), spec[1])  # returns a copy
+
 # default placements relative to frame origin (m); z=0 is arm-plate bottom.
 # His physical layout: stereo pair 60mm apart at the nose (repo README),
 # stack center, battery on deck above the stack.
@@ -179,3 +200,37 @@ def placed_items():
                     "size_m": list(c.dims_m), "shape": c.shape, "source": c.source,
                     "mount": c.mount})
     return out
+
+
+def camera_lens_poses():
+    """{placement_key: {origin_m, axis, hfov_deg, vfov_deg}} - lens point of each
+    placed camera: center of the board forward (+X) face after ORIENTATIONS.
+    Board dims permute under the +90 deg Y mount rotation: x-extent = old z-dim
+    (thickness), z-extent = old x-dim (board height)."""
+    out = {}
+    for key, pos in placement().items():
+        cname = key.split("#")[0]
+        if cname not in CAMERA_SPEC:
+            continue
+        c = LIBRARY[cname]
+        thick = c.dims_m[2]   # along +X after rotation
+        height = c.dims_m[0]  # along +Z after rotation
+        spec = CAMERA_SPEC[cname]
+        out[key] = {"origin_m": [pos[0] + thick / 2, pos[1], pos[2] + height / 2],
+                    "axis": [1.0, 0.0, 0.0],
+                    "hfov_deg": spec["hfov_deg"], "vfov_deg": spec["vfov_deg"]}
+    return out
+
+
+def imu_pose():
+    """IMU site: real placement + orientation (identity unless ORIENTATIONS says otherwise).
+    The sim/estimator corrects readings with this transform relative to CoM."""
+    pos = placement()["mpu9250"]
+    rot = ORIENTATIONS.get("mpu9250")
+    quat = [0.0, 0.0, 0.0, 1.0]
+    if rot:
+        import math as _m
+        ax = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}[rot[0]]
+        h = _m.radians(rot[1]) / 2
+        quat = [ax[0] * _m.sin(h), ax[1] * _m.sin(h), ax[2] * _m.sin(h), _m.cos(h)]
+    return {"position_m": [float(x) for x in pos], "rotation_quat_xyzw": quat}

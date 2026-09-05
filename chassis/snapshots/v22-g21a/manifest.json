@@ -1,5 +1,5 @@
 {
-  "schema": "dronestudio.chassis/1.1",
+  "schema": "dronestudio.chassis/1.2",
   "name": "v22-g21a",
   "geometry": {
     "file": "v22-g21a.glb",
@@ -14,28 +14,28 @@
     "yield_mpa": 50
   },
   "dynamics": {
-    "total_mass_kg": 0.524065,
+    "total_mass_kg": 0.526078,
     "com_m": [
-      -0.026804,
-      0.0,
-      0.009809
+      -0.025739,
+      1e-06,
+      0.009939
     ],
     "inertia_about_com_kgm2": {
-      "ixx": 0.0018026912237205997,
-      "iyy": 0.0027389098532521598,
-      "izz": 0.0043934749210824435,
-      "ixy": -1.8923884316378928e-06,
-      "ixz": -6.682993633481485e-05,
-      "iyz": -5.844904345128656e-07
+      "ixx": 0.0018057283554733753,
+      "iyy": 0.0027325486138411515,
+      "izz": 0.0043886160191162465,
+      "ixy": -1.8947427708425354e-06,
+      "ixz": -6.969624791731124e-05,
+      "iyz": -5.82058201168252e-07
     },
     "composition": [
       {
         "name": "frame",
-        "mass_kg": 0.090065,
+        "mass_kg": 0.092078,
         "com_m": [
-          -0.002291,
-          2e-06,
-          0.012979
+          -0.00088,
+          4e-06,
+          0.013343
         ]
       },
       {
@@ -149,7 +149,7 @@
         "com_m": [
           0.079,
           -0.028,
-          0.004
+          0.002
         ],
         "source": "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
         "mount": "nose"
@@ -160,7 +160,7 @@
         "com_m": [
           0.079,
           0.028,
-          0.004
+          0.002
         ],
         "source": "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
         "mount": "nose"
@@ -169,9 +169,9 @@
         "name": "MPU-9250 breakout (GY-9250)",
         "mass_kg": 0.003,
         "com_m": [
-          -0.127,
           0.0,
-          0.0131
+          0.0,
+          0.028
         ],
         "source": "estimate - generic GY-9250 module",
         "mount": "stack"
@@ -191,26 +191,26 @@
     "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly."
   },
   "inertial": {
-    "frame_mass_kg": 0.090065,
+    "frame_mass_kg": 0.092078,
     "frame_com_m": [
-      -0.002291,
-      2e-06,
-      0.012979
+      -0.00088,
+      4e-06,
+      0.013343
     ],
     "frame_inertia_kgm2_about_origin": {
-      "ixx": 0.00021161316562871846,
-      "iyy": 0.0004242663465547546,
-      "izz": 0.0006131231294005694,
-      "ixy": 5.0037035771050685e-08,
-      "ixz": 4.844872954277881e-06,
-      "iyz": -1.7385182846330211e-09
+      "ixx": 0.00021432071631767246,
+      "iyy": 0.00043730603106655004,
+      "izz": 0.0006279947328872845,
+      "ixy": 5.636921613318154e-08,
+      "ixz": 1.630522165532039e-06,
+      "iyz": 1.0664828852497491e-09
     }
   },
   "aero": {
     "projected_area_m2": {
-      "x": 0.019896,
-      "y": 0.036015,
-      "z": 0.015879
+      "x": 0.021399,
+      "y": 0.03516,
+      "z": 0.015962
     },
     "cd_flat_plate_estimate": 1.1,
     "note": "linear drag ~ 0.5*rho_air*cd*area*v^2 per axis; rho_air=1.225"
@@ -312,12 +312,55 @@
   ],
   "imu": {
     "position_m": [
-      0,
-      0,
-      0.00125
+      0.0,
+      0.0,
+      0.028
     ],
-    "note": "IMU sits on the FC stack"
+    "rotation_quat_xyzw": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "offset_from_com_m": [
+      0.025739,
+      -1e-06,
+      0.018061
+    ],
+    "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m. MAGNETOMETER QUIRK: the AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (MPU-9250 datasheet)."
   },
+  "cameras": [
+    {
+      "id": "pi_camera_3#left",
+      "lens_origin_m": [
+        0.085,
+        -0.028,
+        0.0145
+      ],
+      "lens_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hfov_deg": 66.3,
+      "vfov_deg": 41.6
+    },
+    {
+      "id": "pi_camera_3#right",
+      "lens_origin_m": [
+        0.085,
+        0.028,
+        0.0145
+      ],
+      "lens_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hfov_deg": 66.3,
+      "vfov_deg": 41.6
+    }
+  ],
   "stack": {
     "pattern_mm": 30.5,
     "hole_dia_mm": 3.2,

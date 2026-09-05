@@ -4,6 +4,8 @@ Manifest dronestudio.chassis/1.1 - the contract DroneStudio's chassis-branch
 loader reads instead of hardcoded values in prefabs/Drone.zig.
 v1.1 adds: dynamics (composed rigid body incl. payload, inertia about CoM)
 and aero (projected areas for drag), so the sim needs no derivation of its own.
+v1.2 adds: real imu pose (position + rotation quaternion + offset from CoM, for
+lever-arm correction of IMU readings) and camera lens poses + FOV.
 """
 import json, math
 import numpy as np
@@ -70,6 +72,29 @@ def compose_dynamics(part, p: ChassisParams):
         I += i["I_self"] + i["mass_kg"] * ((d @ d) * np.eye(3) - np.outer(d, d))
     return M, com, I, items
 
+
+def _imu_block(com):
+    """Real IMU pose relative to the composed CoM: the estimator corrects readings
+    for lever-arm effects with this (rotation + offset). Schema 1.2."""
+    from components import imu_pose
+    ip = imu_pose()
+    off = [ip["position_m"][i] - float(com[i]) for i in range(3)]
+    return {
+        "position_m": [round(float(x), 6) for x in ip["position_m"]],
+        "rotation_quat_xyzw": [round(float(x), 6) for x in ip["rotation_quat_xyzw"]],
+        "offset_from_com_m": [round(float(x), 6) for x in off],
+        "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m; correct accel readings with a_imu = a_com + alpha x r + omega x (omega x r), r = offset rotated by the body attitude. MAGNETOMETER QUIRK: the MPU-9250s AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (see MPU-9250 datasheet).",
+    }
+
+def _camera_block():
+    """Camera lens poses + FOV (stereo pair out the nose apertures). Schema 1.2."""
+    from components import camera_lens_poses
+    out = []
+    for key, pose in sorted(camera_lens_poses().items()):
+        out.append({"id": key, "lens_origin_m": [round(float(x), 6) for x in pose["origin_m"]],
+                    "lens_axis": pose["axis"], "hfov_deg": pose["hfov_deg"], "vfov_deg": pose["vfov_deg"]})
+    return out
+
 def aero_areas(out_stl):
     """Projected areas (m^2) facing +/- each axis, from the exported mesh."""
     import trimesh
@@ -128,7 +153,7 @@ def export(p: ChassisParams, out_base: str):
             **MOTOR,
         })
     manifest = {
-        "schema": "dronestudio.chassis/1.1",
+        "schema": "dronestudio.chassis/1.2",
         "name": out_base.split("/")[-1],
         "geometry": {"file": out_base.split("/")[-1] + ".glb", "units": "meters", "forward": "+X", "up": "+Z"},
         "material": {"name": "PETG", "density_kg_m3": 1240, "e_mpa": 2100, "yield_mpa": 50},
@@ -155,7 +180,8 @@ def export(p: ChassisParams, out_base: str):
         },
         "collision": {"type": "convex_hull", "fallback": "vhacd", "max_hulls": 8},
         "motors": motors,
-        "imu": {"position_m": [0, 0, round(z_top_m, 6)], "note": "IMU sits on the FC stack"},
+        "imu": _imu_block(com),
+        "cameras": _camera_block(),
         "stack": {"pattern_mm": p.stack_spacing_mm, "hole_dia_mm": p.stack_hole_dia_mm, "z_bottom_m": round(z_top_m, 6)},
     }
     with open(out_base + ".manifest.json", "w") as f:

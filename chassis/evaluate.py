@@ -81,6 +81,49 @@ def mass_properties(m, motor_positions_mm, arm_length_mm):
         "hover_thrust_frac": round(total_mass*9.81/(4*MAX_THRUST_PER_MOTOR_N),3),
     }, total_mass
 
+def check_camera_fov(m):
+    """User requirement 2026-09-04: cameras must point OUT through the nose apertures,
+    unobstructed - not downward into the shell. For each placed camera, cast rays from
+    the real lens point across the Camera Module 3 FOV pyramid (2 deg margin inside
+    spec): every ray must clear the frame mesh entirely."""
+    from components import camera_lens_poses
+    poses = camera_lens_poses()
+    if not poses:
+        return ("camera_fov", False, "no cameras placed", 0.5)
+    problems = []
+    for key, pose in poses.items():
+        o = np.array(pose["origin_m"]) * 1000.0  # mm
+        axis = np.array(pose["axis"], dtype=float)
+        if float(axis @ np.array([1.0, 0.0, 0.0])) < 0.98:
+            problems.append(f"{key}: lens axis {pose['axis']} not forward +X")
+            continue
+        hh = math.tan(math.radians(pose["hfov_deg"] / 2 - 2.0))
+        vh = math.tan(math.radians(pose["vfov_deg"] / 2 - 2.0))
+        dirs = []
+        for sy in (-1, 0, 1):
+            for sz in (-1, 0, 1):
+                v = np.array([1.0, hh * sy, vh * sz])
+                dirs.append(v / np.linalg.norm(v))
+        origins = np.tile(o + np.array([1.0, 0.0, 0.0]), (len(dirs), 1))
+        hits = m.ray.intersects_any(origins, np.array(dirs))
+        n = int(np.asarray(hits).sum())
+        if n:
+            problems.append(f"{key}: {n}/{len(dirs)} FOV rays blocked")
+    ok = not problems
+    return ("camera_fov", ok, "; ".join(problems) if problems else
+            f"{len(poses)} cameras: lens forward, FOV pyramid clear", 0.0 if ok else 0.5)
+
+def check_imu_lever_arm(m):
+    """IMU must sit near the frame CoM (lever-arm corrections only work for small
+    offsets); its full transform still exports to the manifest for the estimator."""
+    from components import imu_pose
+    pos = np.array(imu_pose()["position_m"]) * 1000.0
+    com = np.array(m.center_mass)
+    d = float(np.linalg.norm(pos - com)) / 1000.0
+    ok = d <= 0.060
+    return ("imu_lever_arm", ok, f"IMU {d*1000:.0f} mm from frame CoM (limit 60 mm)",
+            0.0 if ok else 0.3)
+
 def score(checks):
     pen = sum(c[3] for c in checks)
     return max(0.0, 1.0 - pen)

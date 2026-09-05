@@ -5,7 +5,7 @@ Consumer: DroneStudio sim (auto-researcher branch work: manifest-driven Drone pr
 Zig loader draft: `chassis/sim/ChassisManifest.zig`; integration notes: `chassis/sim/INTEGRATION.md`.
 If the shape changes, bump the `schema` field AND update this file in the same commit.
 
-Current version: **dronestudio.chassis/1.1**
+Current version: **dronestudio.chassis/1.2**
 
 ## Design intent
 
@@ -15,7 +15,7 @@ from the CAD B-rep (exact) plus an explicit payload model.
 
 ## Top-level fields
 
-- `schema`: "dronestudio.chassis/1.1"
+- `schema`: "dronestudio.chassis/1.2"
 - `name`: variant id, matches the git commit / dashboard record
 - `geometry.file`: binary glTF (GLB), meters, +X forward, +Z up.
   NOTE the axis-convention open question in INTEGRATION.md (sim is Y-up
@@ -40,7 +40,14 @@ from the CAD B-rep (exact) plus an explicit payload model.
   - `mass_kg`, `prop_diameter_m`
   - `max_thrust_n`, `time_constant_s` (first-order lag), `drag_ratio` (ktau/kT)
     - these map 1:1 onto FlightController.FlightControllerParams
-- `imu.position_m`: IMU site on the FC stack
+- `imu` (1.2): REAL pose from components.py placement, no longer hardcoded:
+  - `position_m`: IMU (mpu9250) site in the GLB frame
+  - `rotation_quat_xyzw`: IMU orientation (identity when mounted axis-aligned)
+  - `offset_from_com_m`: `imu.position_m - dynamics.com_m` - lever arm for
+    correcting readings: a_com = a_imu - alpha x r - omega x (omega x r)
+- `cameras[]` (1.2): per camera: `id`, `lens_origin_m`, `lens_axis` (+X forward),
+  `hfov_deg`, `vfov_deg` (Pi Camera Module 3: 66.3h x 41.6v). Lenses point out the
+  nose apertures; the CAD evaluator gates that the FOV pyramid clears the frame.
 - `stack`: 30.5 mm pattern info for the FC/ESC mount
 
 ## What changes per design vs what is fixed

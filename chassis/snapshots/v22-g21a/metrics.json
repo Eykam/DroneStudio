@@ -1,20 +1,20 @@
 {
   "id": "cad-chassis-v22-g21a",
   "kind": "cad.chassis.snapshot",
-  "parent_id": "cad-chassis-v21-g20b",
+  "parent_id": "cad-chassis-v22-g21a",
   "name": "Chassis v22-g21a",
-  "ts": "2026-09-04T16:37:33.951675+00:00",
+  "ts": "2026-09-05T03:38:58.331477+00:00",
   "glb_path": "snapshots/v22-g21a/chassis.glb",
   "metrics": {
-    "mass_g": 90.1,
-    "all_up_mass_kg": 0.548,
+    "mass_g": 92.1,
+    "all_up_mass_kg": 0.55,
     "inertia": {
-      "ixx": 0.00194862,
-      "iyy": 0.00216127,
-      "izz": 0.00431813
+      "ixx": 0.00195132,
+      "iyy": 0.00217431,
+      "izz": 0.004333
     },
     "printability": {
-      "overhang": "0.98% of surface overhangs > 45.0deg (1114 mm^2)",
+      "overhang": "0.96% of surface overhangs > 45.0deg (1117 mm^2)",
       "wall_thickness": "0.00% of samples below 1.2 mm wall",
       "prop_clearance": "212 mm vs 137 mm needed"
     },
@@ -32,50 +32,50 @@
         "passed": true
       },
       "torsion": {
-        "max_von_mises_mpa": 6.6,
+        "max_von_mises_mpa": 6.5,
         "max_disp_mm": 2.19,
         "limit_mpa": 24.0,
         "passed": true
       },
       "pullout": {
-        "max_von_mises_mpa": 4.1,
+        "max_von_mises_mpa": 4.0,
         "max_disp_mm": 1.45,
         "limit_mpa": 16.5,
         "passed": true
       },
       "cartwheel": {
-        "max_von_mises_mpa": 13.8,
+        "max_von_mises_mpa": 13.3,
         "max_disp_mm": 4.43,
         "limit_mpa": 30.0,
         "passed": true
       },
       "battery_eject": {
-        "max_von_mises_mpa": 4.0,
-        "max_disp_mm": 0.24,
+        "max_von_mises_mpa": 3.2,
+        "max_disp_mm": 0.16,
         "limit_mpa": 30.0,
         "passed": true
       },
       "modal": {
         "modes_hz": [
-          144.4,
-          147.3,
-          184.9,
-          204.3,
-          205.3,
+          151.0,
+          185.5,
+          205.0,
+          207.3,
+          219.5,
           221.5,
-          222.8,
-          229.5
+          258.1,
+          271.9
         ],
-        "first_mode_hz": 144.4,
+        "first_mode_hz": 151.0,
         "min_first_mode_hz": 120.0,
         "passed": true
       },
       "buckling": {
         "load_factors": [
-          10095770000.0,
-          14829010000.0
+          1663142000.0,
+          6746935000.0
         ],
-        "first_factor": 10095770000.0,
+        "first_factor": 1663142000.0,
         "min_factor": 2.0,
         "passed": true
       },
@@ -93,7 +93,7 @@
   "notes": "all checks pass",
   "variant": {
     "id": "v22-g21a",
-    "parent_id": "v21-g20b",
+    "parent_id": "v22-g21a",
     "generation": 21,
     "params": {
       "arm_length_mm": 150.0,
@@ -138,7 +138,7 @@
       "prop_dia_mm": 127.0,
       "prop_clearance_mm": 10.0
     },
-    "git_commit": "9d7618fe4aac00c277e5aaa21acd0eeb9cba39c7"
+    "git_commit": "7a6e905bf5e9ff7e395730d5ce1e850b40427f64"
   },
   "score": 1.0,
   "evaluator": [
@@ -155,7 +155,7 @@
     {
       "name": "overhang",
       "passed": true,
-      "detail": "0.98% of surface overhangs > 45.0deg (1114 mm^2)"
+      "detail": "0.96% of surface overhangs > 45.0deg (1117 mm^2)"
     },
     {
       "name": "wall_thickness",
@@ -173,6 +173,16 @@
       "detail": "all components inside frame envelope + 2mm clearance, none embedded"
     },
     {
+      "name": "camera_fov",
+      "passed": true,
+      "detail": "2 cameras: lens forward, FOV pyramid clear"
+    },
+    {
+      "name": "imu_lever_arm",
+      "passed": true,
+      "detail": "IMU 15 mm from frame CoM (limit 60 mm)"
+    },
+    {
       "name": "hover_margin",
       "passed": true,
       "detail": "hover at 14% max thrust"
@@ -180,8 +190,8 @@
     {
       "name": "fea",
       "passed": true,
-      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 3.8, \"max_disp_mm\": 1.44, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 11.3, \"max_disp_mm\": 4.32, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 6.6, \"max_disp_mm\": 2.19, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.1, \"max_disp_mm\": 1.45, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 13.8, \"max_disp_mm\": 4.43, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 4.0, \"max_disp_mm\": 0.24, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [144.4, 147.3, 184.9, 204.3, 205.3, 221.5, 222.8, 229.5], \"first_mode_hz\": 144.4, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [10095770000.0, 14829010000.0], \"first_factor\": 10095770000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.1, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 3.8, \"max_disp_mm\": 1.44, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 11.3, \"max_disp_mm\": 4.32, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 6.5, \"max_disp_mm\": 2.19, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.0, \"max_disp_mm\": 1.45, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 13.3, \"max_disp_mm\": 4.43, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 3.2, \"max_disp_mm\": 0.16, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [151.0, 185.5, 205.0, 207.3, 219.5, 221.5, 258.1, 271.9], \"first_mode_hz\": 151.0, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [1663142000.0, 6746935000.0], \"first_factor\": 1663142000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.1, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
     }
   ],
-  "created_at": "2026-09-04T16:37:33.953045+00:00"
+  "created_at": "2026-09-05T03:38:58.332861+00:00"
 }
