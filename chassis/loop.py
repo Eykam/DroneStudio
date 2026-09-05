@@ -9,6 +9,16 @@ import progress
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.path.join(HERE, "loop_state.json")
 ARCHIVE = os.path.join(HERE, "archive.jsonl")
+def codex_model_args():
+    """Model is file-driven: /work/codex_model.txt holds the model name; empty or 'default' = codex default.
+    The astra recovery probe flips this file live when astra passes a realistic long-session probe."""
+    try:
+        m = open("/work/codex_model.txt").read().strip()
+    except OSError:
+        m = ""
+    return [] if m in ("", "default") else ["-m", m]
+
+
 LETTERS = ("a", "b")  # candidates per generation (dropped 3->2: shorter astra sessions, hang mitigation)
 
 PROMPT_TEMPLATE = """You are the mutation brain of an auto-researcher optimizing a 3D-printed 5-inch FPV quad chassis.
@@ -84,7 +94,7 @@ def run_generation():
                                     failures=failures, history=hist, base_variant=base)
     progress.set_stage("codex editing", f"gen {gen}: codex drafting 2 candidates from {parent}", design_id=f"cad-chassis-{base}")
     print(f"[gen {gen}] asking Codex for 2 candidate mutations of {parent}...", flush=True)
-    codex_cmd = ["codex", "exec", "-m", "gpt-6-astra", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt]
+    codex_cmd = ["codex", "exec", *codex_model_args(), "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-o", "/tmp/codex_last.md", prompt]
     try:
         # Popen + poll instead of blocking run(): adds a stall watchdog. Two live
         # hangs showed the same signature - codex finishes tool work (candidates
