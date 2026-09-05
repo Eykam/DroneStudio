@@ -1,12 +1,12 @@
 {
   "schema": "dronestudio.chassis/1.2",
-  "name": "repub-v22g21a",
+  "name": "v26-g25a",
   "geometry": {
-    "file": "repub-v22g21a.glb",
+    "file": "v26-g25a.glb",
     "units": "meters",
     "forward": "+X",
     "up": "+Z",
-    "sim_file": "repub-v22g21a.sim.glb",
+    "sim_file": "v26-g25a.sim.glb",
     "sim_file_note": "uncompressed (no KHR_mesh_quantization / EXT_meshopt_compression in extensionsRequired), Z-up -> Y-up root rotation baked in"
   },
   "material": {

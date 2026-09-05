@@ -1,51 +1,51 @@
 {
-  "id": "cad-chassis-v22-g21a",
+  "id": "cad-chassis-v26-g25b",
   "kind": "cad.chassis.snapshot",
-  "parent_id": "cad-chassis-cad-chassis-v22-g21a",
-  "name": "Chassis v22-g21a",
-  "ts": "2026-09-05T06:57:09.658985+00:00",
-  "glb_path": "snapshots/v22-g21a/chassis.glb",
+  "parent_id": "cad-chassis-v22-g21a",
+  "name": "Chassis v26-g25b",
+  "ts": "2026-09-05T07:38:08.720327+00:00",
+  "glb_path": "snapshots/v26-g25b/chassis.glb",
   "metrics": {
-    "mass_g": 92.0,
+    "mass_g": 91.7,
     "all_up_mass_kg": 0.55,
     "inertia": {
-      "ixx": 0.00195126,
-      "iyy": 0.0021737,
-      "izz": 0.00433234
+      "ixx": 0.00194812,
+      "iyy": 0.00217055,
+      "izz": 0.00432609
     },
     "printability": {
-      "overhang": "0.96% of surface overhangs > 45.0deg (1120 mm^2)",
+      "overhang": "0.97% of surface overhangs > 45.0deg (1120 mm^2)",
       "wall_thickness": "0.00% of samples below 1.2 mm wall",
       "prop_clearance": "212 mm vs 137 mm needed"
     },
     "fea": {
       "hover_max": {
         "max_von_mises_mpa": 3.8,
-        "max_disp_mm": 1.44,
+        "max_disp_mm": 1.45,
         "limit_mpa": 16.5,
         "passed": true
       },
       "crash": {
         "max_von_mises_mpa": 11.3,
-        "max_disp_mm": 4.32,
+        "max_disp_mm": 4.34,
         "limit_mpa": 16.5,
         "passed": true
       },
       "torsion": {
         "max_von_mises_mpa": 6.5,
-        "max_disp_mm": 2.19,
+        "max_disp_mm": 2.2,
         "limit_mpa": 24.0,
         "passed": true
       },
       "pullout": {
         "max_von_mises_mpa": 4.0,
-        "max_disp_mm": 1.45,
+        "max_disp_mm": 1.46,
         "limit_mpa": 16.5,
         "passed": true
       },
       "cartwheel": {
-        "max_von_mises_mpa": 13.3,
-        "max_disp_mm": 4.43,
+        "max_von_mises_mpa": 13.8,
+        "max_disp_mm": 4.44,
         "limit_mpa": 30.0,
         "passed": true
       },
@@ -57,25 +57,25 @@
       },
       "modal": {
         "modes_hz": [
-          151.0,
-          187.0,
-          205.0,
-          207.4,
-          219.5,
-          221.5,
-          258.1,
+          151.1,
+          187.1,
+          207.8,
+          210.2,
+          222.7,
+          224.7,
+          258.3,
           272.8
         ],
-        "first_mode_hz": 151.0,
+        "first_mode_hz": 151.1,
         "min_first_mode_hz": 120.0,
         "passed": true
       },
       "buckling": {
         "load_factors": [
-          1548383000.0,
-          14550510000.0
+          6085279000.0,
+          8807963000.0
         ],
-        "first_factor": 1548383000.0,
+        "first_factor": 6085279000.0,
         "min_factor": 2.0,
         "passed": true
       },
@@ -92,9 +92,9 @@
   },
   "notes": "all checks pass",
   "variant": {
-    "id": "v22-g21a",
-    "parent_id": "cad-chassis-v22-g21a",
-    "generation": 21,
+    "id": "v26-g25b",
+    "parent_id": "v22-g21a",
+    "generation": 25,
     "params": {
       "arm_length_mm": 150.0,
       "arm_width_mm": 9.2,
@@ -122,7 +122,7 @@
       "body_hatch_wid_mm": 40.0,
       "payload_rail_width_mm": 1.4,
       "body_corner_radius_mm": 12.0,
-      "motor_pad_thickness_mm": 4.6,
+      "motor_pad_thickness_mm": 4.2,
       "motor_pad_dia_mm": 28.7,
       "motor_boss_wall_mm": 1.2,
       "motor_spoke_width_mm": 3.4,
@@ -155,7 +155,7 @@
     {
       "name": "overhang",
       "passed": true,
-      "detail": "0.96% of surface overhangs > 45.0deg (1120 mm^2)"
+      "detail": "0.97% of surface overhangs > 45.0deg (1120 mm^2)"
     },
     {
       "name": "wall_thickness",
@@ -190,8 +190,8 @@
     {
       "name": "fea",
       "passed": true,
-      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 3.8, \"max_disp_mm\": 1.44, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 11.3, \"max_disp_mm\": 4.32, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 6.5, \"max_disp_mm\": 2.19, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.0, \"max_disp_mm\": 1.45, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 13.3, \"max_disp_mm\": 4.43, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 3.2, \"max_disp_mm\": 0.16, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [151.0, 187.0, 205.0, 207.4, 219.5, 221.5, 258.1, 272.8], \"first_mode_hz\": 151.0, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [1548383000.0, 14550510000.0], \"first_factor\": 1548383000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.1, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 3.8, \"max_disp_mm\": 1.45, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 11.3, \"max_disp_mm\": 4.34, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 6.5, \"max_disp_mm\": 2.2, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.0, \"max_disp_mm\": 1.46, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 13.8, \"max_disp_mm\": 4.44, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 3.2, \"max_disp_mm\": 0.16, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [151.1, 187.1, 207.8, 210.2, 222.7, 224.7, 258.3, 272.8], \"first_mode_hz\": 151.1, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [6085279000.0, 8807963000.0], \"first_factor\": 6085279000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.1, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
     }
   ],
-  "created_at": "2026-09-05T06:57:09.661479+00:00"
+  "created_at": "2026-09-05T07:38:08.721755+00:00"
 }

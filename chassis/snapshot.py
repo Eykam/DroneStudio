@@ -51,6 +51,32 @@ def make_record(variant_id, parent_id, generation, params, eval_checks, score, m
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
+def render_preview(stl_path, png_path):
+    """Orthographic side/top vertex-projection preview of a variant STL ->
+    PNG smoke-check image in the snapshot dir. Numeric gates cannot catch
+    geometry that is obviously wrong to a human (the 2026-09-04 camera
+    orientation bug passed every gate); eyeball these at adoption/milestone."""
+    import numpy as np, trimesh
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    m = trimesh.load(stl_path)
+    V = m.vertices
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    for ax, (i, j, title) in zip(axes, [(0, 2, "side (x=nose, z=up)"), (0, 1, "top (x=nose, y=lateral)")]):
+        ax.scatter(V[::7, i], V[::7, j], s=0.3, c="k")
+        ax.set_aspect("equal"); ax.set_title(title); ax.grid(True, alpha=0.3)
+    try:
+        from components import camera_lens_poses
+        for _k, p in camera_lens_poses().items():
+            o = [v * 1000 for v in p["origin_m"]]
+            axes[0].scatter([o[0]], [o[2]], c="r", s=40, marker="x")
+            axes[1].scatter([o[0]], [o[1]], c="r", s=40, marker="x")
+    except Exception:
+        pass
+    fig.tight_layout(); fig.savefig(png_path, dpi=110); plt.close(fig)
+
+
 def save_snapshot(record, out_base):
     d = os.path.join(SNAP_DIR, record["variant"]["id"])
     os.makedirs(d, exist_ok=True)
@@ -60,6 +86,10 @@ def save_snapshot(record, out_base):
                      (out_base + ".manifest.json", "manifest.json")):
         if os.path.exists(src):
             shutil.copy(src, os.path.join(d, dst))
+    try:
+        render_preview(out_base + ".stl", os.path.join(d, "preview.png"))
+    except Exception as e:
+        print(f"preview render failed (non-fatal): {e}", flush=True)
     with open(os.path.join(d, "metrics.json"), "w") as f:
         json.dump(record, f, indent=2)
     return d

@@ -1,12 +1,12 @@
 {
   "schema": "dronestudio.chassis/1.2",
-  "name": "repub-v22g21a",
+  "name": "v26-g25b",
   "geometry": {
-    "file": "repub-v22g21a.glb",
+    "file": "v26-g25b.glb",
     "units": "meters",
     "forward": "+X",
     "up": "+Z",
-    "sim_file": "repub-v22g21a.sim.glb",
+    "sim_file": "v26-g25b.sim.glb",
     "sim_file_note": "uncompressed (no KHR_mesh_quantization / EXT_meshopt_compression in extensionsRequired), Z-up -> Y-up root rotation baked in"
   },
   "material": {
@@ -16,28 +16,28 @@
     "yield_mpa": 50
   },
   "dynamics": {
-    "total_mass_kg": 0.526012,
+    "total_mass_kg": 0.525739,
     "com_m": [
-      -0.025754,
+      -0.025768,
       1e-06,
-      0.009937
+      0.00994
     ],
     "inertia_about_com_kgm2": {
-      "ixx": 0.0018047576838089027,
-      "iyy": 0.002733943272674215,
-      "izz": 0.004390872646093356,
-      "ixy": -1.8950332290244496e-06,
-      "ixz": -6.725833250073488e-05,
-      "iyz": -5.74655376294121e-07
+      "ixx": 0.0018016127277352316,
+      "iyy": 0.0027306167962587694,
+      "izz": 0.00438443767662644,
+      "ixy": -1.8950305404551816e-06,
+      "ixz": -6.729438189180154e-05,
+      "iyz": -5.746447751380506e-07
     },
     "composition": [
       {
         "name": "frame",
-        "mass_kg": 0.092012,
+        "mass_kg": 0.091739,
         "com_m": [
-          -0.000949,
+          -0.000952,
           4e-06,
-          0.013333
+          0.013357
         ]
       },
       {
@@ -193,25 +193,25 @@
     "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly."
   },
   "inertial": {
-    "frame_mass_kg": 0.092012,
+    "frame_mass_kg": 0.091739,
     "frame_com_m": [
-      -0.000949,
+      -0.000952,
       4e-06,
-      0.013333
+      0.013357
     ],
     "frame_inertia_kgm2_about_origin": {
-      "ixx": 0.00021426169064373717,
-      "iyy": 0.00043669530606268715,
-      "izz": 0.0006273343300370057,
-      "ixy": 5.6341656630837044e-08,
-      "ixz": 1.7208983636153896e-06,
-      "iyz": 1.0623682719421591e-09
+      "ixx": 0.0002111159213937492,
+      "iyy": 0.0004335492892176707,
+      "izz": 0.0006210806333171412,
+      "ixy": 5.6349613953413215e-08,
+      "ixz": 1.7187613688156133e-06,
+      "iyz": 1.0720016579534453e-09
     }
   },
   "aero": {
     "projected_area_m2": {
-      "x": 0.021359,
-      "y": 0.035161,
+      "x": 0.021289,
+      "y": 0.035092,
       "z": 0.015965
     },
     "cd_flat_plate_estimate": 1.1,
@@ -325,9 +325,9 @@
       1.0
     ],
     "offset_from_com_m": [
-      0.025754,
+      0.025768,
       -1e-06,
-      0.018063
+      0.01806
     ],
     "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m; correct accel readings with a_imu = a_com + alpha x r + omega x (omega x r), r = offset rotated by the body attitude. MAGNETOMETER QUIRK: the MPU-9250s AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (see MPU-9250 datasheet)."
   },
