@@ -38,29 +38,40 @@ def teacher_act(obs, ext, scenario, radius):
     land_descend = (scenario == "land" and alt <= 1.4
                     and dist_xz <= max(1.0, 2.0 * radius))
     if scenario == "land" and not land_descend:
-        rel = rel + np.array([0.0, 1.2, 0.0])   # phase 1: above the pad
+        # phase 1: high transit while far (t2 gap-wall tops ~2.6-2.8m),
+        # descend into the pad corridor once nearly overhead
+        cruise = 3.5 if dist_xz > max(3.0, 3.0 * radius) else 1.2
+        rel = rel + np.array([0.0, cruise, 0.0])
         vmax = min(vmax, 1.2)
     v_des = np.clip(0.5 * rel, -vmax, vmax)
+    if scenario == "land" and not land_descend and dist_xz <= max(3.0, 3.0 * radius):
+        # corridor phase from the 3.5m cruise: slow the descent early so the
+        # land_descend gate (alt<=1.4, vy_des=-0.4) does not inherit 1.15 m/s
+        # of vertical momentum (touchdown vs limit is 0.5)
+        v_des[1] = max(float(v_des[1]), -0.6)
     if scenario == "hover_hold" and np.linalg.norm(rel) < 2.0 * radius:
         v_des = np.clip(0.4 * rel, -0.25, 0.25)  # brake and hold
     if land_descend:
         v_des = np.array([np.clip(0.6 * rel[0], -0.3, 0.3), 0.0,
                           np.clip(0.6 * rel[2], -0.3, 0.3)])
-    if scenario == "goto" and 1e-3 < d < 6.0:
+    if scenario in ("goto", "land") and not land_descend and 1e-3 < d < 6.0:
         # cap only the velocity component TOWARD the obstacle: fast sliding
-        # along walls stays allowed, gap passages stay possible
+        # along walls stays allowed, gap passages stay possible. Land phase-1
+        # transit gets the same protection (t2 land was 13/16 obstacle hits,
+        # all during transit at cruise alt)
         u = dvec / d
         allow = max(0.3, 0.6 * (d - 0.8))
         v_to = float(np.dot(v_des, u))
         if v_to > allow:
             v_des = v_des - (v_to - allow) * u
+
     # damping: 0.5 far, 1.0 near (half-damping limit-cycles at the target)
     damp = 0.5 if (float(np.linalg.norm(rel)) > 3.0
-                   and not (scenario == "goto" and d < 6.0)) else 1.0
+                   and not (scenario in ("goto", "land") and not land_descend and d < 6.0)) else 1.0
     a_des = np.clip(1.2 * (v_des - damp * vel), -2.0, 2.0)
     if 1e-3 < d < 3.5 and not land_descend:   # pad corridor stays clear
         a_des = a_des - 3.0 * (3.5 - d) / 3.5 * (dvec / d)
-    if scenario == "goto" and 1e-3 < d < 5.0:
+    if scenario in ("goto", "land") and not land_descend and 1e-3 < d < 5.0:
         # fixed-physics approach is faster (~4.2 m/s); brake actively for walls
         u = dvec / d
         closing = float(np.dot(vel, u))
