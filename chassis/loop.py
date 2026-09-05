@@ -50,14 +50,17 @@ End by printing two lines:
 MUTATION_SUMMARY_A <one sentence describing candidate a>
 MUTATION_SUMMARY_B <one sentence describing candidate b>"""
 
-def kill_codex():
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
+def kill_codex(proc=None):
+    """Kill only OUR codex session's process group (Popen uses start_new_session=True).
+    Global /proc sweeps are unsafe now: the astra probe daemon shares this box."""
+    if proc is not None:
         try:
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
-                if b"codex" in f.read():
-                    os.kill(int(pid), 9)
+            os.killpg(proc.pid, 9)
+            return
+        except Exception:
+            pass
+        try:
+            proc.kill()
         except Exception:
             pass
 
@@ -102,13 +105,13 @@ def run_generation():
         # process sits silent for 40+ minutes. Treat 20 min without any file
         # activity in /tmp/candidates or the repo top level as a hang: kill and
         # take the timeout path (which salvages written candidates).
-        proc = subprocess.Popen(codex_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=HERE)
+        proc = subprocess.Popen(codex_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=HERE, start_new_session=True)
         hard_deadline = time.time() + 3600
         gen_start = time.time()
         while proc.poll() is None:
             now = time.time()
             if now > hard_deadline:
-                kill_codex(); proc.wait()
+                kill_codex(proc); proc.wait()
                 raise subprocess.TimeoutExpired(codex_cmd, 3600)
             latest = gen_start  # a session that never writes runs to the hard timeout
             for root, _, files in os.walk("/tmp/candidates"):
@@ -125,12 +128,12 @@ def run_generation():
                         pass
             if now - latest > 1200:
                 print(f"[gen {gen}] codex stalled: no file activity for 20 min; killing session", flush=True)
-                kill_codex(); proc.wait()
+                kill_codex(proc); proc.wait()
                 raise subprocess.TimeoutExpired(codex_cmd, 3600)
             time.sleep(30)
         r = subprocess.CompletedProcess(codex_cmd, proc.returncode, *proc.communicate())
     except subprocess.TimeoutExpired:
-        kill_codex()  # subprocess only kills the direct child; node orphans linger
+        kill_codex(proc)  # process-group kill: takes the node orphans with it
         salvaged = [p for p in (f"/tmp/candidates/{base}{L}.py" for L in LETTERS) if os.path.exists(p)]
         if salvaged:
             # codex hung AFTER writing candidates (seen live: 40+ min no file activity) -
