@@ -70,8 +70,11 @@ pub const IMUSensorComponent = struct {
 
     // Static configuration (changeable by prefab)
     sample_rate_hz: u32 = 1000, // 1 kHz sampling rate
-    noise_gyro_std: f32 = 0.0015, // rad/s/√Hz  (≈0.08 °/s rms @1 kHz)
-    noise_accel_std: f32 = 0.02, // m/s²/√Hz    (≈0.6 mG rms @1 kHz)
+    // Noise densities tuned to MPU-9250 datasheet-typical (the board IMU):
+    // gyro 0.01 dps/rtHz = 1.75e-4 rad/s/rtHz; accel 300 ug/rtHz = 2.94e-3 m/s^2/rtHz.
+    // Bias walks kept as tunables (no direct datasheet number).
+    noise_gyro_std: f32 = 1.75e-4, // rad/s/√Hz  (MPU-9250 typ 0.01 dps/√Hz)
+    noise_accel_std: f32 = 2.94e-3, // m/s²/√Hz  (MPU-9250 typ 300 µg/√Hz)
     bias_walk_gyro: f32 = 2e-5, // rad/s/√s
     bias_walk_accel: f32 = 5e-4, // m/s²/√s
     pos_body: Vec3 = Vec3.init(0, 0, 0), // mount offset (B frame)
