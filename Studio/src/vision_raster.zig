@@ -29,6 +29,7 @@ pub const Camera = struct {
     hfov_deg: f32 = 75.0, // Pi Cam 3 standard-lens target (NAV_STACK decisions)
     mount_pos: Vec3, // body frame, meters
     mount_yaw: f32 = 0.0, // body frame, rad (0 = nose)
+    mount_pitch: f32 = 0.0, // body frame, rad about +Z (right); -pi/2 = straight down (ToF)
 
     pub fn focal(self: Camera) f32 {
         const w: f32 = @floatFromInt(self.width);
@@ -118,8 +119,12 @@ pub fn renderRow(scene: RasterScene, cam: Camera, body_pos: Vec3, body_quat: Qua
     const cx = 0.5 * @as(f32, @floatFromInt(cam.width));
     const cy = 0.5 * @as(f32, @floatFromInt(cam.height));
     // camera origin: body pose * mount offset, mount yaw folded in
-    const yaw_q = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), cam.mount_yaw);
-    const q = body_quat.multiply(yaw_q);
+    // NB: Math.from_axis_angle takes DEGREES (codebase convention); the
+    // Camera API is radians.
+    const r2d = 180.0 / std.math.pi;
+    const yaw_q = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), cam.mount_yaw * r2d);
+    const pitch_q = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), cam.mount_pitch * r2d);
+    const q = body_quat.multiply(yaw_q).multiply(pitch_q);
     const ro = body_pos.add(Vec3.rotate_by_quaternion(cam.mount_pos, body_quat));
     const v: f32 = (cy - @as(f32, @floatFromInt(row))) / f;
     for (0..cam.width) |col| {

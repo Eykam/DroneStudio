@@ -29,6 +29,7 @@ const std = @import("std");
 const Math = @import("core/Math.zig");
 const FC = @import("core/ecs/components/FlightController.zig");
 const CM = @import("core/ChassisManifest.zig");
+const VR = @import("vision_raster.zig");
 
 const bullet = @cImport({
     @cInclude("cbullet.h");
@@ -1084,6 +1085,50 @@ pub fn main() !void {
             world.obs_v4 = (on_v == .bool and on_v.bool);
             try stdout.print("{{\"ok\":true,\"obs_v4\":{}}}\n", .{world.obs_v4});
             try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "render")) {
+            // NAV_STACK build item D: on-demand depth+seg frame from the
+            // analytic scene (vision_raster.zig). Emits metric depth in mm
+            // (uint, 65535 = sky) + u8 seg class per pixel, row-major.
+            // Clean signal only - sensor noise is applied Python-side so
+            // experiments can vary noise models without a rebuild.
+            const vw: u32 = if (root.object.get("width")) |v| @intFromFloat(f32FromJson(v, 64)) else 64;
+            const vh: u32 = if (root.object.get("height")) |v| @intFromFloat(f32FromJson(v, 48)) else 48;
+            const hfov: f32 = f32FromJson(root.object.get("hfov_deg") orelse .null, 75.0);
+            const mx = f32FromJson(root.object.get("mx") orelse .null, 0.1);
+            const my = f32FromJson(root.object.get("my") orelse .null, 0.0);
+            const mz = f32FromJson(root.object.get("mz") orelse .null, 0.0);
+            const myaw = f32FromJson(root.object.get("yaw") orelse .null, 0.0);
+            const mpitch = f32FromJson(root.object.get("pitch") orelse .null, 0.0);
+            const robst = try alloc.alloc(VR.RasterObstacle, world.scene.obstacles.len);
+            for (world.scene.obstacles, 0..) |ob, i| robst[i] = .{ .center = ob.center, .radius = ob.radius };
+            const rscene = VR.RasterScene{
+                .ground_y = GROUND_Y,
+                .obstacles = robst,
+                .goal = world.scene.goal,
+                .goal_radius = world.scene.success_radius,
+            };
+            const cam = VR.Camera{
+                .width = vw, .height = vh, .hfov_deg = hfov,
+                .mount_pos = Vec3.init(mx, my, mz),
+                .mount_yaw = myaw, .mount_pitch = mpitch,
+            };
+            const npix: usize = @as(usize, vw) * @as(usize, vh);
+            const depth = try alloc.alloc(f32, npix);
+            const segb = try alloc.alloc(u8, npix);
+            VR.render(rscene, cam, world.bodyPos(), world.bodyQuat(),
+                      .{ .depth = depth, .seg = segb, .width = vw, .height = vh });
+            try stdout.print("{{\"w\":{d},\"h\":{d},\"depth\":[", .{ vw, vh });
+            for (depth, 0..) |dv, i| {
+                const mm: u32 = if (std.math.isInf(dv)) 65535 else @intFromFloat(@min(dv * 1000.0, 65534.0));
+                try stdout.print("{s}{d}", .{ if (i > 0) "," else "", mm });
+            }
+            try stdout.writeAll("],\"seg\":[");
+            for (segb, 0..) |sv, i| try stdout.print("{s}{d}", .{ if (i > 0) "," else "", sv });
+            try stdout.writeAll("]}\n");
+            try stdout_buf.flush();
+            alloc.free(robst);
+            alloc.free(depth);
+            alloc.free(segb);
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
             const arr = act_v.array.items;
