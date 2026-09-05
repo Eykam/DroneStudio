@@ -38,6 +38,9 @@ pub const ChassisManifest = struct {
         units: []const u8 = "meters",
         forward: []const u8 = "+X",
         up: []const u8 = "+Z",
+        // CAD pipeline emits <variant>.sim.glb alongside the pretty GLB:
+        // uncompressed (GLTF.zig-compatible), Z-up -> Y-up baked in.
+        sim_file: ?[]const u8 = null,
     },
     material: struct { name: []const u8, density_kg_m3: f64, e_mpa: f64 = 0, yield_mpa: f64 = 0 },
     dynamics: struct {
@@ -84,6 +87,12 @@ pub const ChassisManifest = struct {
     }
 
     /// Total rigid-body mass (frame + motors + payload), kg.
+    /// GLB to load for simulation: the uncompressed Y-up sim variant when
+    /// the CAD pipeline emitted one, else the primary geometry file.
+    pub fn simGeometryFile(self: *const ChassisManifest) []const u8 {
+        return self.geometry.sim_file orelse self.geometry.file;
+    }
+
     pub fn totalMassKg(self: *const ChassisManifest) f32 {
         return @floatCast(self.dynamics.total_mass_kg);
     }
@@ -145,7 +154,7 @@ test "parse 1.2 manifest: imu offset/quat + cameras" {
         \\{
         \\ "schema": "dronestudio.chassis/1.2",
         \\ "name": "v22-g21a",
-        \\ "geometry": {"file": "chassis.glb"},
+        \\ "geometry": {"file": "chassis.glb", "sim_file": "chassis.sim.glb"},
         \\ "material": {"name": "pla-cf", "density_kg_m3": 1240},
         \\ "dynamics": {"total_mass_kg": 1.1, "com_m": [-0.0257, 0.0, 0.0099],
         \\   "inertia_about_com_kgm2": {"ixx": 0.01, "iyy": 0.01, "izz": 0.02, "ixy": 0, "ixz": 0, "iyz": 0}},
@@ -173,4 +182,5 @@ test "parse 1.2 manifest: imu offset/quat + cameras" {
     const off = m.imuOffsetFromComM();
     try std.testing.expectApproxEqAbs(@as(f32, 0.025739), off[0], 1e-6);
     try std.testing.expectApproxEqAbs(@as(f32, 0.018061), off[2], 1e-6);
+    try std.testing.expectEqualStrings("chassis.sim.glb", m.simGeometryFile());
 }

@@ -41,24 +41,43 @@ pub fn spawn(
 ) !Core.EntityID {
     const root_tf = Transform.TransformComponent.init(alloc);
 
-    const drone_body_resource = try ecs.world.resource_manager.loadGLTFModelCached(
-        alloc,
-        "assets/drone/scene.gltf",
-    );
-    defer drone_body_resource.deinit();
-
     // Optional CAD chassis manifest (dronestudio.chassis/1.2), env-gated via
     // DRONE_CHASSIS_MANIFEST. When unset or unloadable, the hardcoded values
     // below are used unchanged.
     var manifest: ?std.json.Parsed(ChassisManifest.ChassisManifest) = null;
     defer if (manifest) |*m| m.deinit();
+    var model_path: []const u8 = "assets/drone/scene.gltf";
+    var model_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     if (std.posix.getenv("DRONE_CHASSIS_MANIFEST")) |mpath| {
         manifest = ChassisManifest.ChassisManifest.load(alloc, mpath) catch |err| blk: {
             std.debug.print("ChassisManifest: failed to load {s} ({}), using hardcoded drone params\n", .{ mpath, err });
             break :blk null;
         };
-        if (manifest) |*m| std.debug.print("ChassisManifest: loaded {s} (schema {s}, name {s})\n", .{ mpath, m.value.schema, m.value.name });
+        if (manifest) |*m| {
+            std.debug.print("ChassisManifest: loaded {s} (schema {s}, name {s})\n", .{ mpath, m.value.schema, m.value.name });
+            // Geometry: prefer geometry.sim_file (CAD's uncompressed Y-up
+            // sim GLB - no frame conversion needed on vertices) over the
+            // primary file; resolved relative to the manifest's directory.
+            const dir = std.fs.path.dirname(mpath) orelse ".";
+            if (std.fmt.bufPrint(&model_path_buf, "{s}/{s}", .{ dir, m.value.simGeometryFile() })) |p| {
+                model_path = p;
+            } else |_| {}
+        }
     }
+
+    // Visual model + collider source. Falls back to the bundled placeholder
+    // if the manifest GLB is missing or unparseable (sim must still boot).
+    const drone_body_resource = ecs.world.resource_manager.loadGLTFModelCached(
+        alloc,
+        model_path,
+    ) catch |err| blk: {
+        std.debug.print("Drone: failed to load {s} ({}), falling back to placeholder\n", .{ model_path, err });
+        break :blk try ecs.world.resource_manager.loadGLTFModelCached(
+            alloc,
+            "assets/drone/scene.gltf",
+        );
+    };
+    defer drone_body_resource.deinit();
 
     // Create visual model (no physics)
     var entities = try ecs.createEntitiesFromModel(drone_body_resource);
