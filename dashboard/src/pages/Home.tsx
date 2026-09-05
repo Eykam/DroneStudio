@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CircuitBoard, Box, Radar, CheckCircle2, XCircle, Star, ArrowRight, Bird } from "lucide-react";
+import { CircuitBoard, Box, Radar, Star, ArrowRight, Bird } from "lucide-react";
 import { fetchCadDesigns, fetchState } from "@/api";
 import { BRAND, BRAND_TAGLINE } from "@/brand";
 
@@ -39,9 +39,12 @@ export default function Home() {
   const records = ((stateQ.data?.records ?? []) as any[]).filter((r) => r && r.metrics && typeof r.metrics.success_rate === "number" && (r.kind == null || r.kind === "variant"));
   const best = records.length ? [...records].sort((a, b) => b.metrics.success_rate - a.metrics.success_rate)[0] : null;
 
+  const nav = useNavigate();
+
   const cardCls =
-    "group relative overflow-hidden rounded-xl border-border/60 bg-card/70 backdrop-blur transition-all duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5";
+    "group relative overflow-hidden rounded-xl border-border/60 bg-card/70 backdrop-blur transition-all duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 cursor-pointer flex flex-col";
   const iconChip = "inline-flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 shrink-0";
+  const openCls = "mt-auto inline-flex items-center gap-1 text-xs text-primary pt-3 group-hover:gap-2 transition-all";
 
   return (
     <div className="min-h-[calc(100dvh-7rem)] flex items-center justify-center">
@@ -52,115 +55,87 @@ export default function Home() {
         </div>
         <h1 className="text-3xl md:text-4xl font-bold tracking-tight">{BRAND}</h1>
         <p className="text-sm md:text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
-          {BRAND_TAGLINE} - one live view across the sim, EE, and CAD research loops. Everything on this page auto-refreshes.
+          {BRAND_TAGLINE} - one live view across the sim, EE, and CAD research loops.
         </p>
       </header>
 
       <div className="grid gap-4 md:gap-5 md:grid-cols-3 text-left">
         {/* SIM */}
-        <Card className={cardCls}>
+        <Card className={cardCls} onClick={() => nav("/sim")}>
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><span className={iconChip}><Radar className="h-4 w-4 text-primary" /></span> SIM</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              <span className={iconChip}><Radar className="h-4 w-4 text-primary" /></span> SIM
+            </CardTitle>
             <CardDescription className="text-xs">navigation policy research</CardDescription>
           </CardHeader>
-          <CardContent className="p-4 pt-1 space-y-2 text-sm">
+          <CardContent className="p-4 pt-1 flex flex-col flex-1 text-sm space-y-2">
             <div className="flex items-center gap-2 text-xs">
               <span className={`inline-block w-2 h-2 rounded-full ${streamLive ? "bg-emerald-500" : "bg-gray-600"}`} />
               <span className="text-muted-foreground">{streamLive ? "live policy streaming" : "watch channel off"}</span>
             </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Live policy</div>
-              <div className="font-mono">{tstat.live_policy?.name ?? "-"}</div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Training</div>
-              {tstat.training?.status === "running" ? (
-                <div className="font-mono flex items-center gap-2">
-                  {String(tstat.training.name ?? "run")}
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute h-full w-full rounded-full bg-emerald-400 opacity-60" />
-                    <span className="relative rounded-full h-2 w-2 bg-emerald-400" />
-                  </span>
-                </div>
-              ) : <div className="text-muted-foreground">idle</div>}
-            </div>
-            {best && (
-              <div className="text-xs text-muted-foreground">
-                best variant <span className="font-mono text-foreground">{best.id}</span> - {(best.metrics.success_rate * 100).toFixed(0)}% success
+            {tstat.training?.status === "running" && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                  <span className="relative rounded-full h-2 w-2 bg-emerald-400" />
+                </span>
+                <span className="font-mono text-xs">{String(tstat.training.name ?? "run")} training</span>
               </div>
             )}
-            <Link to="/sim" className="inline-flex items-center gap-1 text-xs text-primary hover:underline pt-1">
-              Open SIM <ArrowRight className="h-3 w-3" />
-            </Link>
+            {best && (
+              <div className="text-xs text-muted-foreground">
+                best <span className="font-mono text-foreground">{best.id}</span> - {(best.metrics.success_rate * 100).toFixed(0)}%
+              </div>
+            )}
+            <span className={openCls}>Open SIM <ArrowRight className="h-3 w-3" /></span>
           </CardContent>
         </Card>
 
         {/* EE */}
-        <Card className={cardCls}>
+        <Card className={cardCls} onClick={() => nav("/ee")}>
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><span className={iconChip}><CircuitBoard className="h-4 w-4 text-primary" /></span> EE</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              <span className={iconChip}><CircuitBoard className="h-4 w-4 text-primary" /></span> EE
+            </CardTitle>
             <CardDescription className="text-xs">board designs + verification</CardDescription>
           </CardHeader>
-          <CardContent className="p-4 pt-1 space-y-2 text-sm">
+          <CardContent className="p-4 pt-1 flex flex-col flex-1 text-sm space-y-2">
             <div className="flex items-center gap-2 text-xs">
               <span className={`inline-block w-2 h-2 rounded-full ${eeLive ? "bg-emerald-500" : "bg-gray-600"}`} />
               <span className="text-muted-foreground">
-                {eeLive ? `round in flight: ${eeProg.candidate ?? ""} (${eeProg.phase ?? "working"})`
-                        : eeProg?.candidate ? `last round ${eeProg.candidate} - ${eeProg.outcome ?? eeProg.status}` : "loop idle"}
+                {eeLive ? `round in flight: ${eeProg.candidate ?? ""}` : eeProg?.candidate ? `last round ${eeProg.candidate} - ${eeProg.outcome ?? eeProg.status}` : "loop idle"}
               </span>
             </div>
-            {board && latest ? (
-              <>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{board.name} - latest</div>
-                  <div className="font-mono flex items-center gap-2">
-                    v{latest.version} {latest.adopted && <Star className="h-3.5 w-3.5 text-yellow-400" />}
-                    {latest.score != null && <span className="text-xs text-muted-foreground">score {latest.score}</span>}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {latest.gates.map((g: any) => (
-                      <span key={g.gate} className="flex items-center gap-1 text-xs text-muted-foreground">
-                        {g.pass ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
-                        {g.gate}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground">{board.versions.length} version{board.versions.length === 1 ? "" : "s"} published</div>
-              </>
-            ) : <div className="text-muted-foreground text-xs">no boards published yet</div>}
-            <Link to="/ee" className="inline-flex items-center gap-1 text-xs text-primary hover:underline pt-1">
-              Open EE <ArrowRight className="h-3 w-3" />
-            </Link>
+            {board && latest && (
+              <div className="text-xs text-muted-foreground">
+                {board.name} <span className="font-mono text-foreground">v{latest.version}</span>
+                {latest.adopted && <Star className="inline h-3 w-3 text-yellow-400 ml-1 -mt-0.5" />}
+                {latest.score != null && <span> - score {latest.score}</span>}
+              </div>
+            )}
+            <span className={openCls}>Open EE <ArrowRight className="h-3 w-3" /></span>
           </CardContent>
         </Card>
 
         {/* CAD */}
-        <Card className={cardCls}>
+        <Card className={cardCls} onClick={() => nav("/cad")}>
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
           <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><span className={iconChip}><Box className="h-4 w-4 text-primary" /></span> CAD</CardTitle>
+            <CardTitle className="text-base flex items-center gap-2">
+              <span className={iconChip}><Box className="h-4 w-4 text-primary" /></span> CAD
+            </CardTitle>
             <CardDescription className="text-xs">chassis + mechanicals</CardDescription>
           </CardHeader>
-          <CardContent className="p-4 pt-1 space-y-2 text-sm">
+          <CardContent className="p-4 pt-1 flex flex-col flex-1 text-sm space-y-2">
             {latestCad ? (
-              <>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Latest design</div>
-                  <div className="font-mono">{latestCad.id}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {latestCad.metrics?.mass_g != null ? `${Number(latestCad.metrics.mass_g).toFixed(0)} g - ` : ""}
-                    {ago(latestCad.created_at)}
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground">{designs.length} design{designs.length === 1 ? "" : "s"} total</div>
-              </>
+              <div className="text-xs text-muted-foreground">
+                latest <span className="font-mono text-foreground">{latestCad.id}</span>
+                {latestCad.metrics?.mass_g != null && <span> - {Number(latestCad.metrics.mass_g).toFixed(0)} g</span>}
+              </div>
             ) : <div className="text-muted-foreground text-xs">no designs yet</div>}
-            <Link to="/cad" className="inline-flex items-center gap-1 text-xs text-primary hover:underline pt-1">
-              Open CAD <ArrowRight className="h-3 w-3" />
-            </Link>
+            <span className={openCls}>Open CAD <ArrowRight className="h-3 w-3" /></span>
           </CardContent>
         </Card>
       </div>
