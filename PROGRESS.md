@@ -228,3 +228,28 @@ GLB v2, zero required/used extensions (GLTF.zig-compatible), single mesh,
 no materials (as documented), Y-up confirmed numerically (Y span 49mm vs
 X/Z 262/235mm). Runtime parse + visual frame check still open for a
 desktop run.
+
+## dag10 (2026-09-05): yardstick change - land skim penalty
+
+**YARDSTICK CHANGE: dag10+ land numbers are NOT comparable to dag7-9.**
+Sim change (Studio/src/headless_main.zig): in the land scenario, holding a
+ground-skim hover (pos.y < GROUND_Y+0.15) for >=60 policy steps (~3s at
+20Hz) without touching down now ends the episode at -3.0. Previously
+parking at skim height cost only -0.01/step, which the m2 land probe
+showed was the learned false equilibrium (11/16 student census episodes
+parked at alt~0.00 vy~0 and never committed to touchdown; parking strictly
+dominated a -5 failed touchdown under the old economics).
+
+Teacher lever (terminal centering gate) REJECTED after bounded iteration:
+four gate variants (hold-until-dxz<=0.5r, stronger horizontal loop
+0.9/+-0.5, tightened entry 1.0r, latched hysteresis 1.5r) all scored 0/16
+on the teacher census. Step-trace diagnosis (diag_teacher.py): heldout
+tier-0 land cells use success_radius 0.5m, while the teacher's terminal
+horizontal loop limit-cycles at +-1m around the pad - any tight gate is
+inside the oscillation's dead zone; unlatched gates also mode-flickered
+(alt 1.4 boundary), alternating corridor descent (vy_des ~ -1.2) with the
+terminal hold into vertical porpoise crashes. Hysteresis stopped the
+crashes (1/16 off-pad) but the loop still cannot converge inside 0.5m, so
+episodes die to the new skim penalty while holding. Teacher terminal
+accuracy is a position-loop redesign problem of its own; the dag7-9
+integrator pilot remains the label source.

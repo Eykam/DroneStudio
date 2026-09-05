@@ -197,6 +197,7 @@ const World = struct {
     obs_v4: bool = false, // 27-dim: v3 layout + motor_v2 battery SoC (supersedes v3 when on)
     waypoint_idx: usize = 0, // T3: next waypoint to pass
     hold_steps: u32 = 0, // hover_hold consecutive in-radius policy steps
+    skim_steps: u32 = 0, // land: consecutive ground-skim policy steps (dag10)
     last_torque: [3]f32 = .{ 0, 0, 0 }, // PID torque output, body frame (telemetry)
 
     fn init(alloc: std.mem.Allocator) !*World {
@@ -293,6 +294,7 @@ const World = struct {
         self.dyn.m2_soc = 1.0;
         self.steps = 0;
         self.hold_steps = 0;
+        self.skim_steps = 0;
         self.waypoint_idx = 0;
         self.collided = false;
         self.succeeded = false;
@@ -561,6 +563,21 @@ const World = struct {
                 self.collided = true;
             }
             self.done = true;
+        }
+        // land skim penalty (dag10 yardstick change, 2026-09-05): a sustained
+        // ground-skim hover without touching down must not out-score a
+        // good-faith touchdown attempt (learned false equilibrium in dag7-9:
+        // park vy~0 at skim height, -0.01/step forever, never commit).
+        if (!self.done and scenario == .land) {
+            if (pos.y() < GROUND_Y + 0.15) {
+                self.skim_steps += 1;
+                if (self.skim_steps >= 60) { // ~3s at 20 policy Hz
+                    reward -= 3.0;
+                    self.done = true;
+                }
+            } else {
+                self.skim_steps = 0;
+            }
         }
         if (!self.done) {
             for (self.scene.obstacles) |ob| {
