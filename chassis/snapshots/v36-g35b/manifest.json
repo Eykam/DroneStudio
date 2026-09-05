@@ -1,0 +1,371 @@
+{
+  "schema": "dronestudio.chassis/1.2",
+  "name": "v36-g35b",
+  "geometry": {
+    "file": "v36-g35b.glb",
+    "units": "meters",
+    "forward": "+X",
+    "up": "+Z",
+    "sim_file": "v36-g35b.sim.glb",
+    "sim_file_note": "uncompressed (no KHR_mesh_quantization / EXT_meshopt_compression in extensionsRequired), Z-up -> Y-up root rotation baked in"
+  },
+  "material": {
+    "name": "PETG",
+    "density_kg_m3": 1240,
+    "e_mpa": 2100,
+    "yield_mpa": 50
+  },
+  "dynamics": {
+    "total_mass_kg": 0.52359,
+    "com_m": [
+      -0.025769,
+      1e-06,
+      0.009991
+    ],
+    "inertia_about_com_kgm2": {
+      "ixx": 0.0018019175999078577,
+      "iyy": 0.0027072732536490844,
+      "izz": 0.004362932713986389,
+      "ixy": -1.8997546423593544e-06,
+      "ixz": -6.914228303008183e-05,
+      "iyz": -5.740104640444564e-07
+    },
+    "composition": [
+      {
+        "name": "frame",
+        "mass_kg": 0.08959,
+        "com_m": [
+          -0.000363,
+          5e-06,
+          0.013742
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0288,
+        "com_m": [
+          0.106066,
+          0.106066,
+          0.00125
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0288,
+        "com_m": [
+          -0.106066,
+          0.106066,
+          0.00125
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0288,
+        "com_m": [
+          -0.106066,
+          -0.106066,
+          0.00125
+        ]
+      },
+      {
+        "name": "motor",
+        "mass_kg": 0.0288,
+        "com_m": [
+          0.106066,
+          -0.106066,
+          0.00125
+        ]
+      },
+      {
+        "name": "prop",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.106066,
+          0.106066,
+          0.03525
+        ]
+      },
+      {
+        "name": "prop",
+        "mass_kg": 0.004,
+        "com_m": [
+          -0.106066,
+          0.106066,
+          0.03525
+        ]
+      },
+      {
+        "name": "prop",
+        "mass_kg": 0.004,
+        "com_m": [
+          -0.106066,
+          -0.106066,
+          0.03525
+        ]
+      },
+      {
+        "name": "prop",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.106066,
+          -0.106066,
+          0.03525
+        ]
+      },
+      {
+        "name": "30.5mm FC+ESC stack (BLHELI_S, his hardware per repo assets/Drone/drone_esc_mount_30mm.stl)",
+        "mass_kg": 0.09,
+        "com_m": [
+          0.0,
+          0.0,
+          0.0265
+        ],
+        "source": "estimate - replace with his actual stack datasheet",
+        "mount": "stack"
+      },
+      {
+        "name": "4S 1300mAh LiPo (Tattu-class)",
+        "mass_kg": 0.18,
+        "com_m": [
+          -0.074,
+          0.0,
+          0.004
+        ],
+        "source": "user-confirmed 4S build 2026-09-04; capacity/mass still Tattu-class estimate until he names the battery model",
+        "mount": "deck"
+      },
+      {
+        "name": "Raspberry Pi Zero 2W",
+        "mass_kg": 0.011,
+        "com_m": [
+          0.056,
+          0.0,
+          0.004
+        ],
+        "source": "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/",
+        "mount": "nose"
+      },
+      {
+        "name": "Raspberry Pi Camera Module 3",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.079,
+          -0.028,
+          0.002
+        ],
+        "source": "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
+        "mount": "nose"
+      },
+      {
+        "name": "Raspberry Pi Camera Module 3",
+        "mass_kg": 0.004,
+        "com_m": [
+          0.079,
+          0.028,
+          0.002
+        ],
+        "source": "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
+        "mount": "nose"
+      },
+      {
+        "name": "MPU-9250 breakout (GY-9250)",
+        "mass_kg": 0.003,
+        "com_m": [
+          0.0,
+          0.0,
+          0.028
+        ],
+        "source": "estimate - generic GY-9250 module",
+        "mount": "stack"
+      },
+      {
+        "name": "Beitian BN-220 GPS",
+        "mass_kg": 0.0108,
+        "com_m": [
+          -0.1285,
+          0.0,
+          0.004
+        ],
+        "source": "https://grabcad.com/library/gps-beitian-bn-220-1 (bbox 22.0x20.0x6.9mm vs 22x20x6mm spec); mass from vendor listings, verify when he names his GPS",
+        "mount": "deck"
+      }
+    ],
+    "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly."
+  },
+  "inertial": {
+    "frame_mass_kg": 0.08959,
+    "frame_com_m": [
+      -0.000363,
+      5e-06,
+      0.013742
+    ],
+    "frame_inertia_kgm2_about_origin": {
+      "ixx": 0.00021174948721362557,
+      "iyy": 0.00040913778577397834,
+      "izz": 0.0005981790163532426,
+      "ixy": 5.285721619499133e-08,
+      "ixz": 2.575826334947845e-08,
+      "iyz": 1.2081559634127519e-09
+    }
+  },
+  "aero": {
+    "projected_area_m2": {
+      "x": 0.022321,
+      "y": 0.034417,
+      "z": 0.016479
+    },
+    "cd_flat_plate_estimate": 1.1,
+    "note": "linear drag ~ 0.5*rho_air*cd*area*v^2 per axis; rho_air=1.225"
+  },
+  "collision": {
+    "type": "convex_hull",
+    "fallback": "vhacd",
+    "max_hulls": 8
+  },
+  "motors": [
+    {
+      "id": 1,
+      "position_m": [
+        0.106066,
+        0.106066,
+        0.00125
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.0288,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 11.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); EMAX RS2205 clone - bench 989-1155g on 5045-class, 65mOhm, 4S"
+    },
+    {
+      "id": 2,
+      "position_m": [
+        -0.106066,
+        0.106066,
+        0.00125
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.0288,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 11.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); EMAX RS2205 clone - bench 989-1155g on 5045-class, 65mOhm, 4S"
+    },
+    {
+      "id": 3,
+      "position_m": [
+        -0.106066,
+        -0.106066,
+        0.00125
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "cw",
+      "mass_kg": 0.0288,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 11.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); EMAX RS2205 clone - bench 989-1155g on 5045-class, 65mOhm, 4S"
+    },
+    {
+      "id": 4,
+      "position_m": [
+        0.106066,
+        -0.106066,
+        0.00125
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "direction": "ccw",
+      "mass_kg": 0.0288,
+      "prop_diameter_m": 0.127,
+      "max_thrust_n": 11.0,
+      "time_constant_s": 0.04,
+      "drag_ratio": 0.015,
+      "kv": 2300,
+      "cells": 4,
+      "source": "AKK RS2205 2300KV (user motor, https://a.co/d/066TbARJ); EMAX RS2205 clone - bench 989-1155g on 5045-class, 65mOhm, 4S"
+    }
+  ],
+  "imu": {
+    "position_m": [
+      0.0,
+      0.0,
+      0.028
+    ],
+    "rotation_quat_xyzw": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "offset_from_com_m": [
+      0.025769,
+      -1e-06,
+      0.018009
+    ],
+    "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m; correct accel readings with a_imu = a_com + alpha x r + omega x (omega x r), r = offset rotated by the body attitude. MAGNETOMETER QUIRK: the MPU-9250s AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (see MPU-9250 datasheet)."
+  },
+  "cameras": [
+    {
+      "id": "pi_camera_3#left",
+      "lens_origin_m": [
+        0.084123,
+        -0.028,
+        0.0164
+      ],
+      "lens_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hfov_deg": 66.3,
+      "vfov_deg": 41.6
+    },
+    {
+      "id": "pi_camera_3#right",
+      "lens_origin_m": [
+        0.084123,
+        0.028,
+        0.0164
+      ],
+      "lens_axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "hfov_deg": 66.3,
+      "vfov_deg": 41.6
+    }
+  ],
+  "stack": {
+    "pattern_mm": 30.5,
+    "hole_dia_mm": 3.2,
+    "z_bottom_m": 0.00125
+  }
+}

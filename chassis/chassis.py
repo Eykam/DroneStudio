@@ -1,4 +1,4 @@
-"""Candidate A: chined monocoque keel and unified low stereo prow.
+"""Candidate B: lenticular torque spars with rising belly chines and hollow nacelle galleries.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -73,20 +73,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return -p.arm_sweep_mm * math.sin(math.pi * x / p.arm_length_mm)
 
     def section_wire(x, center, width, height, inner=False):
-        """Closed octagonal spar; 45-degree belly chines and pitched crown."""
+        """Faceted lenticular shell: deep belly chines and a broad shoulder."""
         root_blend = max(0.0, min(1.0, (75.0-x)/30.0))
         wall = p.arm_rib_thickness_mm + 0.10*root_blend
         half = width/2
         crown = min(p.arm_crown_width_mm/2, half-1.25*wall)
-        chamfer = min(1.65, 0.15*width)
-        shoulder = height-p.arm_roof_slope*(half-crown)
-        points = [(-half+chamfer,0), (half-chamfer,0),
-                  (half,chamfer), (half,shoulder), (crown,height),
-                  (-crown,height), (-half,shoulder), (-half,chamfer)]
+        keel = max(crown, half-0.22*height)
+        # The middle shoulder keeps material far from the lateral bending
+        # axis; deep belly and crown folds shorten the perimeter and carry
+        # torsional shear as a closed cell. Both slopes print without support.
+        points = [(-keel,0),(keel,0),(half,0.24*height),
+                  (half,0.66*height),(crown,height),(-crown,height),
+                  (-half,0.66*height),(-half,0.24*height)]
         if inner:
-            # Offset every face in its local normal; the extra 2% preserves
+            # Offset every face in its local normal; the extra 3.5% preserves
             # the minimum gauge through the longitudinal taper and sweep.
-            gauge = wall*1.02
+            gauge = wall*1.035
             lines = []
             for (y0,z0),(y1,z1) in zip(points,points[1:]+points[:1]):
                 dy,dz = y1-y0,z1-z0
@@ -130,15 +132,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # shallow tube; its roof descends continuously into the motor fairing.
         # The terminal depth never dips below the nacelle, removing a notch.
         span = profile_end-x0
+        # Section-area and biaxial beam-compliance sizing redistributes
+        # depth into the outer half-span, where the original taper was soft.
+        # Roots flare into the fuselage while axes and terminal heights stay fixed.
         spar_stations = [
-            (0.00, 15.0, 22.5),
-            (0.10, 15.0, 24.2),
-            (0.24, 14.6, 25.0),
-            (0.42, 12.5, 20.8),
-            (0.62, 10.3, 16.0),
-            (0.81, 9.2, 12.0),
-            (0.93, 9.2, 10.8),
-            (1.00, 9.2, 10.8),
+            (0.00, 15.05, 22.50),
+            (0.10, 15.65, 24.20),
+            (0.24, 15.40, 25.85),
+            (0.42, 13.50, 22.05),
+            (0.62, 11.50, 17.65),
+            (0.81, 10.15, 13.25),
+            (0.93, 9.20, 10.80),
+            (1.00, 9.20, 10.80),
         ]
         tube_sections = []
         for frac, nominal_width, nominal_height in spar_stations:
@@ -217,7 +222,34 @@ def build_chassis(p: ChassisParams) -> b.Part:
             ], close=True))
         pad = pad + b.Solid.make_loft(nacelle_sections, ruled=True)
 
+        # A pointed wiring gallery cores the falling motor fairing. Excluding
+        # the shaft and bolt collars leaves their full 1.2 mm radial walls.
+        gallery = []
+        for x, height in ((bridge_start+0.1, tip_height),
+                          (rib_end, tip_height),
+                          (L-center_boss_radius-0.2, 7.2)):
+            frac = (x-bridge_start)/(L-bridge_start)
+            center = bridge_center*(1-frac)
+            gallery.append(b.Wire.make_polygon([
+                (x,center-2.7,p.arm_rib_thickness_mm*1.04),
+                (x,center+2.7,p.arm_rib_thickness_mm*1.04),
+                (x,center,height-p.arm_rib_thickness_mm*1.6),
+            ],close=True))
+        pocket = b.Solid.make_loft(gallery,ruled=True)
+        for bx,radius in ((L-bolt_radius,bolt_boss_radius),(L,center_boss_radius)):
+            pocket = pocket - b.Pos(bx,0,-1)*b.Cylinder(radius,tip_height+2,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
         piece = arm + pad
+        for void in pocket.solids():
+            if void.volume>1.0:
+                piece = piece - void
+        # A bed-facing throat connects the gallery to the outside for wiring
+        # and drainage, avoiding a sealed secondary internal mesh surface.
+        drain_x = L-7.6
+        drain_y = bridge_center*(1-(drain_x-bridge_start)/(L-bridge_start))
+        piece = piece - b.Pos(drain_x,drain_y,-0.2)*b.Cylinder(
+            0.8,p.arm_rib_thickness_mm+0.7,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
         piece = piece.rotate(b.Axis.Z, ang)
         arms.append(piece)
     body = arms[0]
@@ -244,9 +276,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The lowered stack canopy and recessed battery remain accessible from
     # above; all transitions preserve the payloads' 2 mm service envelopes.
     stations = [
-        (-145.0, 26.0, 15.0, 12.0),
-        (-141.0, 31.0, 18.5, 18.0),
-        (-120.0, 31.0, 18.5, 18.0),
+        (-143.0, 29.4, 13.5, 22.0),
+        (-141.0, 30.4, 13.5, 23.0),
+        (-122.0, 30.4, 13.5, 23.0),
         (-114.0, 52.0, 41.5, 43.5),
         (-105.0, 50.2, 41.5, 41.7),
         (-56.0, 50.2, 41.5, 41.7),
@@ -255,8 +287,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
         (-24.0, 57.0, cockpit_h, 43.0),
         (24.0, 57.0, cockpit_h, 43.0),
         (38.0, 26.0, 35.6, 16.0),
-        (92.5, 26.0, 35.6, 16.0),
-        (94.8, 18.0, 30.0, 8.0),
+        (91.8, 26.0, 35.6, 16.0),
+        (93.2, 22.0, 34.0, 12.0),
     ]
     # Hold the payload shoulders while pulling the belly chines inward.
     # A wider dorsal opening lowers unused canopy skin above the upright Pi;
@@ -367,10 +399,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The upright Pi spine continues to the bed as an internal shear member;
     # the camera bay stays accessible from its dorsal opening.
     cheek_stations = [
-        (62.5, 82.0, 27.0, 72.0),
-        (65.0, 91.0, 29.0, 83.0),
-        (93.5, 91.0, 29.0, 83.0),
-        (95.4, 87.0, 27.0, 79.0),
+        (69.8, 89.0, 28.5, 78.0),
+        (71.3, 94.2, 28.8, 84.0),
+        (86.8, 94.2, 28.8, 84.0),
+        (88.5, 89.0, 28.5, 78.0),
     ]
     cheek_stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
@@ -382,12 +414,6 @@ def build_chassis(p: ChassisParams) -> b.Part:
     outer_hull = outer_hull + shell_envelopes[1][0]
     inner_hull = inner_hull + shell_envelopes[1][1]
     body = body + (outer_hull-inner_hull) + fairing
-    for camera_y in (-28.0*sy, 28.0*sy):
-        # Short first-layer seat rails tie each cheek's end bulkheads together.
-        seat = b.Pos(78.95*sx, camera_y, 0) * b.extrude(
-            b.Rectangle(31.65*sx, p.payload_rail_width_mm).face(), wall)
-        body = body + seat
-
     # Two first-layer longerons support the recessed payloads, tie the end
     # bulkheads to all four arm chines, and leave underside service access.
     # They also carry battery jolt loads into the central mounting ring.
@@ -401,7 +427,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # First-layer diagonal ties brace nose and tail against lateral sway.
     # Their triangular load paths replace shell thickening and sit below the
     # 2 mm service clearance of the recessed battery, Pi, GPS and cameras.
-    for root_x, end_x in ((-27.0, -144.0), (27.0, 94.0)):
+    for root_x, end_x in ((-27.0, -142.0), (27.0, 92.0)):
         for side in (-1, 1):
             ax, ay = root_x*sx, side*27.0*sy
             bx, by = end_x*sx, -side*11.0*sy
@@ -471,6 +497,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             1.6, p.arm_rib_thickness_mm + 0.6,
             align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN))
         body = body - throat.rotate(b.Axis.Z, math.degrees(math.atan2(my, mx)))
+    body = b.Part(children=body.solids())
     return b.Part(body.wrapped)
 
 if __name__ == "__main__":
