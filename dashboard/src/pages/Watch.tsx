@@ -315,7 +315,7 @@ function WatchPane({ sourceId, entry, single, subscribe, snapshot }: {
     return () => cancelAnimationFrame(raf);
   }, [single, view]);
 
-  const show3d = single && view === "3d";
+  const show3d = view === "3d";  // per-tile: every pane gets its own 2D/3D + camera controls
   return (
     <div className={`flex flex-col min-h-0 ${single ? "flex-1" : "border-b border-gray-800"}`}>
       <div className={`relative ${single ? "flex-1 min-h-0" : "h-[46vh] shrink-0"}`}>
@@ -326,7 +326,7 @@ function WatchPane({ sourceId, entry, single, subscribe, snapshot }: {
             <WatchScene3D sceneRef={sceneRef} frameRef={lastRef} trail3dRef={trail3d} mode={camMode} onPick={setChassisId} />
           </div>
         )}
-        {single && (
+        {(
           <div className="absolute top-2 right-2 flex gap-1 text-xs">
             <button onClick={() => setView("2d")}
               className={`px-2 py-1 rounded ${view === "2d" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300"}`}>2D</button>
