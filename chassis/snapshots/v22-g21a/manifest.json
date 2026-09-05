@@ -5,7 +5,9 @@
     "file": "v22-g21a.glb",
     "units": "meters",
     "forward": "+X",
-    "up": "+Z"
+    "up": "+Z",
+    "sim_file": "v22-g21a.sim.glb",
+    "sim_file_note": "uncompressed (no KHR_mesh_quantization / EXT_meshopt_compression in extensionsRequired), Z-up -> Y-up root rotation baked in"
   },
   "material": {
     "name": "PETG",
@@ -327,7 +329,7 @@
       -1e-06,
       0.018061
     ],
-    "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m. MAGNETOMETER QUIRK: the AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (MPU-9250 datasheet)."
+    "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m; correct accel readings with a_imu = a_com + alpha x r + omega x (omega x r), r = offset rotated by the body attitude. MAGNETOMETER QUIRK: the MPU-9250s AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (see MPU-9250 datasheet)."
   },
   "cameras": [
     {

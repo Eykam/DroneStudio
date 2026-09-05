@@ -56,6 +56,7 @@ def save_snapshot(record, out_base):
     os.makedirs(d, exist_ok=True)
     import shutil
     for src, dst in ((out_base + ".glb", "chassis.glb"), (out_base + ".step", "chassis.step"),
+                     (out_base + ".sim.glb", "chassis.sim.glb"),
                      (out_base + ".manifest.json", "manifest.json")):
         if os.path.exists(src):
             shutil.copy(src, os.path.join(d, dst))

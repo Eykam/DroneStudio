@@ -18,6 +18,9 @@ from the CAD B-rep (exact) plus an explicit payload model.
 - `schema`: "dronestudio.chassis/1.2"
 - `name`: variant id, matches the git commit / dashboard record
 - `geometry.file`: binary glTF (GLB), meters, +X forward, +Z up.
+  - `geometry.sim_file` (1.2): sim-ready GLB - NO quantized/meshopt required
+    extensions (the sim GLTF loader rejects those), Z-up -> Y-up root rotation
+    baked in. Use this for visual load; geometry.file stays the dashboard one.
   NOTE the axis-convention open question in INTEGRATION.md (sim is Y-up
   OpenGL-side; verify on first load against assets/drone/scene.gltf).
 - `material`: print material (PETG: density 1240 kg/m3, E 2100 MPa, yield 50 MPa)

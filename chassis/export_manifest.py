@@ -7,7 +7,7 @@ and aero (projected areas for drag), so the sim needs no derivation of its own.
 v1.2 adds: real imu pose (position + rotation quaternion + offset from CoM, for
 lever-arm correction of IMU readings) and camera lens poses + FOV.
 """
-import json, math
+import json, math, os
 import numpy as np
 import build123d as b
 from chassis import ChassisParams, build_chassis
@@ -133,10 +133,26 @@ def export(p: ChassisParams, out_base: str):
     # rotor discs + hubs at the prop plane
     cad_shapes += prop_shapes(p.motor_positions(), p.body_thickness_mm)
     if cad_shapes:
-        b.export_gltf(b.Compound(children=[part] + cad_shapes), out_base + ".glb", binary=True, linear_deflection=0.1, angular_deflection=0.5)
+        full_assembly = b.Compound(children=[part] + cad_shapes)
+        b.export_gltf(full_assembly, out_base + ".glb", binary=True, linear_deflection=0.1, angular_deflection=0.5)
     else:
+        full_assembly = part
         b.export_gltf(part, out_base + ".glb", binary=True)  # mm -> m on write
     _slim_glb(out_base + ".glb")
+    # Sim-ready variant (sibling request 2026-09-04): the sim GLTF loader rejects
+    # KHR_mesh_quantization / EXT_meshopt_compression as REQUIRED extensions, and
+    # build123d's raw gltf writer emits one primitive PER FACE (151k accessors -
+    # strict loaders choke). Route via STL + trimesh instead: single merged mesh,
+    # no required extensions, Z-up -> Y-up root rotation baked in. Colors are lost
+    # (dashboard GLB keeps them); the sim only needs the visual solid.
+    import trimesh as _tm
+    _tmp_stl = out_base + ".sim.tmp.stl"
+    b.export_stl(full_assembly, _tmp_stl)
+    _sc = _tm.load(_tmp_stl)
+    _sc.apply_scale(0.001)  # STL is mm; glTF is meters
+    _sc.apply_transform(_tm.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0]))  # Z-up -> Y-up
+    _sc.export(out_base + ".sim.glb")
+    os.remove(_tmp_stl)
 
 
     M, com, I_tot, items = compose_dynamics(part, p)
@@ -155,7 +171,9 @@ def export(p: ChassisParams, out_base: str):
     manifest = {
         "schema": "dronestudio.chassis/1.2",
         "name": out_base.split("/")[-1],
-        "geometry": {"file": out_base.split("/")[-1] + ".glb", "units": "meters", "forward": "+X", "up": "+Z"},
+        "geometry": {"file": out_base.split("/")[-1] + ".glb", "units": "meters", "forward": "+X", "up": "+Z",
+                     "sim_file": out_base.split("/")[-1] + ".sim.glb",
+                     "sim_file_note": "uncompressed (no KHR_mesh_quantization / EXT_meshopt_compression in extensionsRequired), Z-up -> Y-up root rotation baked in"},
         "material": {"name": "PETG", "density_kg_m3": 1240, "e_mpa": 2100, "yield_mpa": 50},
         "dynamics": {
             "total_mass_kg": round(M, 6),
