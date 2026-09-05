@@ -26,7 +26,32 @@ from t3_pilot import t3_dist, PHASES
 
 MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json"
 
-def teacher_act(obs, ext, scenario, radius):
+# Plant-matched teacher constants (T11). motor_v2's EM spin-up (~200-300ms)
+# porpoises the 40ms-lag tuning, so hover throttle and loop gains are gated
+# on the same env var the sim reads (env_sim._ensure_proc -> motor_v2 cmd).
+# Base-plant values stay bit-identical to the t4 lineage; m2 values were
+# swept by m2_teacher_tune.py (hover_hold success + vertical oscillation).
+M2 = bool(os.environ.get("AUTORESEARCH_MOTOR_V2"))
+HOVER_THR = -0.742 if M2 else -0.756   # m2: analytic under inflow+GE (T9)
+K_VTHR = 0.10 if M2 else 0.3           # m2 sweep (m2_teacher_tune): >=0.20 porpoises
+KP_ATT = 0.30 if M2 else 0.4           # m2 sweep winner (hover succ 0.667, osc 0.031)
+KD_ATT = 0.45 if M2 else 0.6
+# m2 land: the +1.2m near-pad cruise offset finds a hover equilibrium with
+# the slow vertical loop ~0.02m ABOVE the land_descend gate (alt<=1.4) and
+# parks there forever (SoC sag lifts the hover point). Smaller offset pushes
+# through the gate; slower terminal descent gives the laggy throttle time.
+LAND_CRUISE_NEAR = 0.6 if M2 else 1.2
+LAND_VY_DESCEND = -0.25 if M2 else -0.4
+# m2 terminal commit: REJECTED (m2_land_tune2): any pinned throttle either
+# creeps or hits the pad at -1.1 m/s (touchdown limit 0.5); SoC sag makes a
+# fixed value fragile. Replaced by the trim integrator below.
+LAND_COMMIT_THR = None
+
+def teacher_act(obs, ext, scenario, radius, state=None):
+    """state: optional per-episode dict (caller creates {} at reset). Under
+    motor_v2 it carries the vertical trim integrator (SoC sag drifts the
+    hover point); state=None keeps the stateless base-plant behavior
+    bit-identical for the t4 lineage."""
     rel = (obs[0:3] + obs[19:22]) * ext   # current-target rel, meters
     vel = obs[3:6] * 10.0                 # world vel, m/s (obs = v/10)
     gb = obs[6:9]
@@ -40,7 +65,7 @@ def teacher_act(obs, ext, scenario, radius):
     if scenario == "land" and not land_descend:
         # phase 1: high transit while far (t2 gap-wall tops ~2.6-2.8m),
         # descend into the pad corridor once nearly overhead
-        cruise = 3.5 if dist_xz > max(3.0, 3.0 * radius) else 1.2
+        cruise = 3.5 if dist_xz > max(3.0, 3.0 * radius) else LAND_CRUISE_NEAR
         rel = rel + np.array([0.0, cruise, 0.0])
         vmax = min(vmax, 1.2)
     v_des = np.clip(0.5 * rel, -vmax, vmax)
@@ -81,16 +106,28 @@ def teacher_act(obs, ext, scenario, radius):
     gx_des = np.clip(a_des[0] / 9.81, -0.30, 0.30)
     gz_des = np.clip(a_des[2] / 9.81, -0.30, 0.30)
     rates = obs[9:12]                     # obs scale (/10), as the v1/v3 pilots used
-    kp, kd = 0.4, 0.6                     # v14-proven pair (t3_pilot); kd=1.0 was the 11N fixture
+    kp, kd = KP_ATT, KD_ATT               # v14-proven pair (t3_pilot); kd=1.0 was the 11N fixture
     act0 = kp * (gz_des - gb[2]) - kd * rates[0]
     act2 = -kp * (gx_des - gb[0]) - kd * rates[2]
     if land_descend:
-        vy_des = -0.4
+        vy_des = LAND_VY_DESCEND
     elif scenario == "hover_hold":
         vy_des = np.clip(0.8 * rel[1], -0.8, 0.8)
     else:
         vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
-    thr = -0.756 + 0.3 * (vy_des - vel[1])
+    thr = HOVER_THR + K_VTHR * (vy_des - vel[1])
+    if M2 and state is not None and land_descend:
+        # vertical trim integrator (m2, terminal descent only): battery SoC
+        # sag drifts the hover throttle point over an episode (observed
+        # -0.742 -> -0.759), which parked the pure-P loop in false equilibria
+        # (land hover-stall 0.02m above the descend gate, then ~0.15m creep
+        # above the pad). Slow I-term (corner ~0.16 rad/s, well under the
+        # ~4 rad/s EM lag) absorbs the drift; clamped. Scoped to land_descend:
+        # running it in hover_hold let oscillation asymmetry rectify into the
+        # integrator and sink the drone (0.333 vs 0.667 succ without trim).
+        trim = float(state.get("trim", 0.0))
+        thr += trim
+        state["trim"] = float(np.clip(trim + 0.0008 * (vy_des - vel[1]), -0.12, 0.12))
     # bearing-seeking yaw (fixed flight stack supports closed-loop yaw now):
     # gently face the target; obs rel is yaw-frame so atan2 gives the
     # heading error directly. Disabled during precision land descent.
