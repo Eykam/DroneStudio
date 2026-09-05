@@ -1,4 +1,4 @@
-"""Candidate B: lenticular torque spars with rising belly chines and hollow nacelle galleries.
+"""Candidate A: folded battery-bay chines and a unified, vented stereo nose shell.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -413,7 +413,74 @@ def build_chassis(p: ChassisParams) -> b.Part:
     outer_hull, inner_hull = shell_envelopes[0]
     outer_hull = outer_hull + shell_envelopes[1][0]
     inner_hull = inner_hull + shell_envelopes[1][1]
-    body = body + (outer_hull-inner_hull) + fairing
+    # A vaulted cross-passage joins the stereo cavity through the Pi spine.
+    # Retain its end piers and pitched haunches so the high dorsal coaming
+    # grows from supported layers above the common camera service space.
+    cross_passage = b.Wire.make_polygon([
+        (72.5*sx,-13.5*sy,1.5), (86.0*sx,-13.5*sy,1.5),
+        (86.0*sx,-13.5*sy,22.5), (79.25*sx,-13.5*sy,31.0),
+        (72.5*sx,-13.5*sy,22.5),
+    ],close=True)
+    spine = fairing-b.Solid.extrude(b.Face(cross_passage),(0,27.0*sy,0))
+    shell = (outer_hull-inner_hull)+spine
+
+    # Fold the middle of each battery sidewall into an outward hollow chine.
+    # These shallow longitudinal corrugations brace the tall pack well
+    # without thickening its skin or encroaching on the service envelope.
+    # The steep lower and upper facets grow from the existing wall, so the
+    # belt prints in place; its cavity opens directly into the battery bay.
+    battery_width = next(w for x,w,h,c in stations if abs(x+105.0*sx)<1e-6)
+    zlo, zmid, zhi = 8.0, 15.0, 22.0
+    depth = 3.0*sy
+    def side_y(z):
+        return battery_width/2-draft*z
+    lower_slope = (side_y(zmid)+depth-(side_y(zlo)-0.1))/(zmid-zlo)
+    upper_slope = ((side_y(zhi)-0.1)-(side_y(zmid)+depth))/(zhi-zmid)
+    lower_c = side_y(zlo)-0.1-lower_slope*zlo
+    upper_c = side_y(zhi)-0.1-upper_slope*zhi
+    lower_ci = lower_c-wall*math.sqrt(1+lower_slope**2)
+    upper_ci = upper_c-wall*math.sqrt(1+upper_slope**2)
+    inner_peak_z = (upper_ci-lower_ci)/(lower_slope-upper_slope)
+    inner_peak_y = lower_slope*inner_peak_z+lower_ci
+    for side in (-1,1):
+        outer_wire = b.Wire.make_polygon([
+            (-104.0*sx, side*(side_y(zlo)-0.1), zlo),
+            (-104.0*sx, side*(side_y(zmid)+depth), zmid),
+            (-104.0*sx, side*(side_y(zhi)-0.1), zhi),
+        ],close=True)
+        shell = shell + b.Solid.extrude(b.Face(outer_wire),(47.0*sx,0,0))
+        low, high = zlo+wall, zhi-wall
+        inner_wire = b.Wire.make_polygon([
+            (-104.0*sx+wall,side*(side_y(low)-3.0),low),
+            (-104.0*sx+wall,side*(lower_slope*low+lower_ci),low),
+            (-104.0*sx+wall,side*inner_peak_y,inner_peak_z),
+            (-104.0*sx+wall,side*(upper_slope*high+upper_ci),high),
+            (-104.0*sx+wall,side*(side_y(high)-3.0),high),
+        ],close=True)
+        shell = shell - b.Solid.extrude(b.Face(inner_wire),(47.0*sx-2*wall,0,0))
+
+        # Small pointed vents leave continuous upper coamings, the new
+        # folded belt, and generous pillars between every opening. Their
+        # pitched heads close above 45 degrees without a horizontal bridge.
+        for cx,cz,hw,hh,y0 in [
+            (-96.0,31.5,5.5,6.5,18.5),
+            (-80.0,31.5,5.5,6.5,18.5),
+            (-64.0,31.5,5.5,6.5,18.5),
+            (-10.0,36.5,6.0,7.5,20.0),
+            (10.0,36.5,6.0,7.5,20.0),
+            (49.5,20.0,6.0,9.0,6.5),
+            (65.5,20.0,6.0,9.0,6.5),
+        ]:
+            opening = b.Wire.make_polygon([
+                ((cx-hw)*sx,side*y0*sy,cz),
+                (cx*sx,side*y0*sy,cz-hh),
+                ((cx+hw)*sx,side*y0*sy,cz),
+                (cx*sx,side*y0*sy,cz+hh),
+            ],close=True)
+            shell = shell - b.Solid.extrude(b.Face(opening),(0,side*14.0*sy,0))
+    # Boolean the apertures on the shell alone to retain the complete
+    # closed arm sections where they join the cabin's lower shoulders.
+    body = body + shell
     # Two first-layer longerons support the recessed payloads, tie the end
     # bulkheads to all four arm chines, and leave underside service access.
     # They also carry battery jolt loads into the central mounting ring.

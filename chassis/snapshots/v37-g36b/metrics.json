@@ -1,0 +1,202 @@
+{
+  "id": "cad-chassis-v37-g36b",
+  "kind": "cad.chassis.snapshot",
+  "parent_id": "cad-chassis-v36-g35b",
+  "name": "Chassis v37-g36b",
+  "ts": "2026-09-05T21:46:23.457190+00:00",
+  "glb_path": "snapshots/v37-g36b/chassis.glb",
+  "metrics": {
+    "mass_g": 89.0,
+    "all_up_mass_kg": 0.547,
+    "inertia": {
+      "ixx": 0.00194412,
+      "iyy": 0.0021415,
+      "izz": 0.00429348
+    },
+    "printability": {
+      "overhang": "1.29% of surface overhangs > 45.0deg (1461 mm^2)",
+      "wall_thickness": "0.00% of samples below 1.2 mm wall",
+      "prop_clearance": "212 mm vs 137 mm needed"
+    },
+    "fea": {
+      "hover_max": {
+        "max_von_mises_mpa": 3.8,
+        "max_disp_mm": 1.45,
+        "limit_mpa": 16.5,
+        "passed": true
+      },
+      "crash": {
+        "max_von_mises_mpa": 11.5,
+        "max_disp_mm": 4.36,
+        "limit_mpa": 16.5,
+        "passed": true
+      },
+      "torsion": {
+        "max_von_mises_mpa": 6.4,
+        "max_disp_mm": 2.21,
+        "limit_mpa": 24.0,
+        "passed": true
+      },
+      "pullout": {
+        "max_von_mises_mpa": 4.1,
+        "max_disp_mm": 1.46,
+        "limit_mpa": 16.5,
+        "passed": true
+      },
+      "cartwheel": {
+        "max_von_mises_mpa": 12.3,
+        "max_disp_mm": 4.35,
+        "limit_mpa": 30.0,
+        "passed": true
+      },
+      "battery_eject": {
+        "max_von_mises_mpa": 3.2,
+        "max_disp_mm": 0.16,
+        "limit_mpa": 30.0,
+        "passed": true
+      },
+      "modal": {
+        "modes_hz": [
+          163.3,
+          171.3,
+          209.4,
+          211.5,
+          223.2,
+          225.2,
+          251.7,
+          282.3
+        ],
+        "first_mode_hz": 163.3,
+        "min_first_mode_hz": 120.0,
+        "passed": true
+      },
+      "buckling": {
+        "load_factors": [
+          3840719000.0,
+          7276651000.0
+        ],
+        "first_factor": 3840719000.0,
+        "min_factor": 2.0,
+        "passed": true
+      },
+      "fatigue": {
+        "stress_amplitude_mpa": 1.1,
+        "endurance_limit_mpa": 10.0,
+        "assumption": "cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)",
+        "passed": true
+      },
+      "passed": true
+    },
+    "score": 1.0,
+    "hover_thrust_frac": 0.138
+  },
+  "notes": "all checks pass",
+  "variant": {
+    "id": "v37-g36b",
+    "parent_id": "v36-g35b",
+    "generation": 36,
+    "params": {
+      "arm_length_mm": 150.0,
+      "arm_width_mm": 9.2,
+      "arm_thickness_mm": 24.5,
+      "arm_root_width_mm": 14.0,
+      "arm_shell_root_width_mm": 16.2,
+      "arm_sweep_mm": 3.0,
+      "arm_roof_slope": 1.15,
+      "arm_crown_width_mm": 3.6,
+      "arm_height_falloff": 0.68,
+      "arm_tip_height_mm": 10.8,
+      "center_plate_len_mm": 242.0,
+      "center_plate_wid_mm": 68.0,
+      "top_plate_thickness_mm": 2.5,
+      "body_thickness_mm": 1.25,
+      "arm_rib_thickness_mm": 1.25,
+      "arm_rib_offset_mm": 3.3,
+      "arm_rib_root_mm": 19.0,
+      "body_fairing_height_mm": 46.5,
+      "body_fairing_draft_mm": 4.7,
+      "body_roof_slope": 1.1,
+      "body_roof_top_len_mm": 86.0,
+      "body_roof_top_wid_mm": 46.0,
+      "body_hatch_len_mm": 80.0,
+      "body_hatch_wid_mm": 40.0,
+      "payload_rail_width_mm": 1.4,
+      "body_corner_radius_mm": 12.0,
+      "motor_pad_thickness_mm": 4.6,
+      "motor_pad_dia_mm": 28.7,
+      "motor_boss_wall_mm": 1.2,
+      "motor_spoke_width_mm": 3.4,
+      "motor_hole_spacing_mm": 16.0,
+      "motor_hole_dia_mm": 3.2,
+      "motor_center_hole_dia_mm": 9.0,
+      "stack_spacing_mm": 30.5,
+      "stack_hole_dia_mm": 3.2,
+      "stack_standoff_dia_mm": 6.0,
+      "stack_standoff_height_mm": 24.5,
+      "camera_aperture_dia_mm": 10.0,
+      "fillet_radius_mm": 4.0,
+      "prop_dia_mm": 127.0,
+      "prop_clearance_mm": 10.0
+    },
+    "git_commit": "e24f7bb89728a304f6eb1f04ca1b17ff21c804e6"
+  },
+  "score": 1.0,
+  "evaluator": [
+    {
+      "name": "watertight",
+      "passed": true,
+      "detail": "watertight=True"
+    },
+    {
+      "name": "single_body",
+      "passed": true,
+      "detail": "1 bodies"
+    },
+    {
+      "name": "overhang",
+      "passed": true,
+      "detail": "1.29% of surface overhangs > 45.0deg (1461 mm^2)"
+    },
+    {
+      "name": "wall_thickness",
+      "passed": true,
+      "detail": "0.00% of samples below 1.2 mm wall"
+    },
+    {
+      "name": "prop_clearance",
+      "passed": true,
+      "detail": "212 mm vs 137 mm needed"
+    },
+    {
+      "name": "containment",
+      "passed": true,
+      "detail": "all components inside frame envelope + 2mm clearance, none embedded"
+    },
+    {
+      "name": "camera_fov",
+      "passed": true,
+      "detail": "2 cameras: lens forward, FOV pyramid clear"
+    },
+    {
+      "name": "imu_lever_arm",
+      "passed": true,
+      "detail": "IMU 15 mm from frame CoM (limit 60 mm)"
+    },
+    {
+      "name": "dfam",
+      "passed": true,
+      "detail": "watertight=True, wall p05=1.25mm (limit 1.2), min=0.25mm, support~28.4% of part (limit 30)"
+    },
+    {
+      "name": "hover_margin",
+      "passed": true,
+      "detail": "hover at 14% max thrust"
+    },
+    {
+      "name": "fea",
+      "passed": true,
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 3.8, \"max_disp_mm\": 1.45, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 11.5, \"max_disp_mm\": 4.36, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 6.4, \"max_disp_mm\": 2.21, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.1, \"max_disp_mm\": 1.46, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 12.3, \"max_disp_mm\": 4.35, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 3.2, \"max_disp_mm\": 0.16, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [163.3, 171.3, 209.4, 211.5, 223.2, 225.2, 251.7, 282.3], \"first_mode_hz\": 163.3, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [3840719000.0, 7276651000.0], \"first_factor\": 3840719000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.1, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
+    }
+  ],
+  "created_at": "2026-09-05T21:46:23.458790+00:00"
+}
