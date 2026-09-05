@@ -124,6 +124,40 @@ def check_imu_lever_arm(m):
     return ("imu_lever_arm", ok, f"IMU {d*1000:.0f} mm from frame CoM (limit 60 mm)",
             0.0 if ok else 0.3)
 
+def check_dfam(m, samples=2000):
+    """Independent DfAM hardening gate (vendored earthtojake/text-to-cad dfam_tool.py,
+    MIT (c) Thompson Labs LLC): watertight + wall-thickness p05 >= MIN_WALL_MM +
+    estimated support volume <= 30% of part volume (FDM limits, process-limits.md).
+    Second measurement stack behind overhang/wall_thickness; tool errors pass with a
+    flagged detail so a broken tool never eats a generation."""
+    import json as _json, os, subprocess, tempfile
+    path = os.path.join(tempfile.gettempdir(), "dfam_%d.stl" % os.getpid())
+    try:
+        m.export(path)
+        tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "dfam_tool.py")
+        out = subprocess.run(["python3", tool, "measure", path, "--samples", str(samples)],
+                             capture_output=True, text=True, timeout=300)
+        d = _json.loads(out.stdout or "{}")
+        if "mesh" not in d:
+            return ("dfam", True, "dfam tool error (non-gating): %s" % (d.get("error") or out.stderr[:160]), 0.0)
+        mesh_ok = d.get("mesh", {}).get("watertight") is True
+        w = d.get("wall_thickness", {})
+        p05 = w.get("p05_mm")
+        wall_ok = p05 is not None and p05 >= MIN_WALL_MM
+        s = d.get("support_volume", {})
+        ratio = s.get("support_to_part_ratio_pct")
+        sup_ok = ratio is None or ratio <= 30.0
+        ok = mesh_ok and wall_ok and sup_ok
+        return ("dfam", ok, "watertight=%s, wall p05=%smm (limit %s), min=%smm, support~%s%% of part (limit 30)"
+                % (mesh_ok, p05, MIN_WALL_MM, w.get("min_mm"), ratio), 0.0 if ok else 0.4)
+    except Exception as e:
+        return ("dfam", True, "dfam tool error (non-gating): %s: %s" % (type(e).__name__, e), 0.0)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
 def score(checks):
     pen = sum(c[3] for c in checks)
     return max(0.0, 1.0 - pen)

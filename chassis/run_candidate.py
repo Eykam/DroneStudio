@@ -22,6 +22,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     checks.append(containment.check_containment(part))
     checks.append(ev.check_camera_fov(m))
     checks.append(ev.check_imu_lever_arm(m))
+    checks.append(ev.check_dfam(m))
     props, _ = ev.mass_properties(m, params.motor_positions(), params.arm_length_mm)
     hover_ok = props["hover_thrust_frac"] < 0.65
     checks.append(("hover_margin", hover_ok, f"hover at {props['hover_thrust_frac']*100:.0f}% max thrust", 0.0 if hover_ok else 0.4))
