@@ -315,3 +315,35 @@ miss (dxz 3.25), 2 transit timeouts (alt 1.3-2.2, never reached the gate),
 2 slow-centering timeouts at alt 0.8-0.9. Terminal landing accuracy is
 fixed; approach-phase robustness is the next teacher item if land labels
 need more yield.
+
+## 2026-09-05 PM: dag11 null -> hybrid precision-land (user decision (a)+(b))
+
+dag11 (dag10 recipe, redesigned teacher labels): land_t0 = 0.0 all 24 rounds
+(goto_t0 climbs 0.562 -> 0.875-0.938 = teacher parity; mean plateau ~0.31-0.37;
+no champion, t4_best lineage untouched). Third independent null after dag10
+(BC reward-blind) and PPO-dag10 (residual RL collapses precision): the
+flat-MLP imitation pathway cannot express the terminal landing phase even
+from a 15/16 teacher. User call: (a) hybrid control + (b) land-specific
+training experiment in parallel.
+
+Hybrid (autoresearch/t4_hybrid.py): learned t4_live policy flies
+goto/hover/approach; scripted teacher position-PD (t4_pilot land branch) runs
+terminal descent. Handoff = teacher's own latch geometry (alt<=1.4 AND
+dxz<=max(0.75, 1.5r), release at alt>3.0 or dxz>3r, cold teacher state).
+Eval, seeds 620000+j tier-0 n=16, same student:
+  student alone : hover 0.500, goto 0.750, land 0.375
+  hybrid        : hover 0.500, goto 0.750, land 0.625  (handoffs 10/16,
+                  post-handoff 10/10)
+Zero cost to hover/goto; land +0.25. Widening the funnel (alt<=2.0/dxz<=1.5)
+was tried and REVERTED: engages the teacher outside its approach-FSM envelope
+-> latch flapping, land 0.438. Residual 6/16 fails = student lands 0.87-1.37m
+off-pad, never enters the funnel -> targeted by experiment (b).
+
+FINDING (needs attention, no action taken): /workspace/t4_best.json evals far
+below its tile label on the current binary/yardstick via canonical
+t4_common.eval_all (goto_t0 0.188, hover_t0 0.062, land_t0 0.125 vs label
+0.938/0.812/0.312). t4_live and t4_best_pre_omegafix both eval goto 0.938 /
+hover 0.688 through the same path, so the eval is healthy - the t4_best bake
+itself (03:03 UTC) is the anomaly. Live t4-yaw stream tile is visibly
+degraded (22/40 recent episodes vs t4-training 29/40). No tile flip, no
+promotion per standing hold; flagged for user decision.

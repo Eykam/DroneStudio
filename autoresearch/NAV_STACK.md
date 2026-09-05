@@ -117,3 +117,17 @@ GL_ARB_bindless_texture; no CPU rasterizer implements it
   ground truth for supervised signal during development); the estimator
   stays classical so it is testable against sim ground truth before the
   learned nav policy ever sees it.
+
+## Control architecture note (2026-09-05): scripted precision-land module
+
+The inner control loop is no longer pure-learned: terminal descent is a
+SCRIPTED controller (t4_pilot teacher position-PD) composed with the learned
+policy at the actuator level (autoresearch/t4_hybrid.py). Handoff boundary:
+engage alt<=1.4m AND dxz<=max(0.75, 1.5*pad_radius); release alt>3.0 or
+dxz>3r; cold module state at handoff. Implications for the vision stack:
+the down-cam/ToF landing aid must serve the scripted module's state
+estimate during terminal descent, not a learned policy - its inputs are
+metric (pad-relative dxz, alt), which matches the depth/seg renderer's
+metric output (1950mm from 2m verified). A vision-based pad detector can
+later replace the simulator's privileged dxz at the same boundary without
+changing the module's control law.
