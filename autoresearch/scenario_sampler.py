@@ -20,6 +20,10 @@ SCENARIOS = ("goto", "hover_hold", "land")
 MIX = (0.50, 0.25, 0.25)
 RADIUS_RANGE = {"goto": (1.5, 3.0), "hover_hold": (0.5, 1.5), "land": (0.3, 0.6)}
 HOLD_S = 4.0
+# Variable hover hold time (user ask 2026-09-04: "navigate to target and wait
+# for 1 min"). Sampled per-episode on its own stream so scenario/radius draws
+# stay put; log-uniform so short holds (cheap) dominate but 60s holds appear.
+HOLD_S_RANGE = (2.0, 60.0)
 MAX_TOUCHDOWN_VS = 0.5
 
 HELDOUT_BASE = {"goto": 77000, "hover_hold": 88000, "land": 99000}
@@ -40,7 +44,13 @@ def _rng(seed):
     return np.random.default_rng(np.uint64(seed) ^ np.uint64(0x5CE0))
 
 
-def sample_spec(seed, force_scenario=None):
+def hover_max_steps(hold_s, tier):
+    # transit budget (700 policy steps @20Hz covered 4s holds) + the extra hold
+    # time with 25% margin; 60s hold -> ~2100 steps
+    return int(700 + max(0.0, hold_s - 4.0) * 25)
+
+
+def sample_spec(seed, force_scenario=None, hold_s=None):
     """Deterministic scenario spec for an episode seed."""
     rng = _rng(seed)
     if force_scenario is None:
@@ -55,7 +65,9 @@ def sample_spec(seed, force_scenario=None):
         "success_radius": radius,
     }
     if scenario == "hover_hold":
-        spec["hold_s"] = HOLD_S
+        hrng = np.random.default_rng(np.uint64(seed) ^ np.uint64(0x401D))
+        lo, hi = HOLD_S_RANGE
+        spec["hold_s"] = hold_s if hold_s is not None else float(np.exp(hrng.uniform(np.log(lo), np.log(hi))))
     if scenario == "land":
         spec["max_touchdown_vs"] = MAX_TOUCHDOWN_VS
     return spec

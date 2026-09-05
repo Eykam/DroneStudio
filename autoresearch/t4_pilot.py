@@ -20,7 +20,7 @@ import sys, json, os, time
 sys.path.insert(0, "/workspace/DroneStudio/autoresearch")
 os.environ["AUTORESEARCH_OBS_V3"] = "1"
 import numpy as np
-from scenario_sampler import sample_spec, tier_dist
+from scenario_sampler import sample_spec, tier_dist, hover_max_steps
 from env_sim import make_sim_factory
 from t3_pilot import t3_dist, PHASES
 
@@ -135,7 +135,9 @@ def main():
                 spec = sample_spec(seed, force_scenario=sc)
                 if sc != "goto":
                     dist.n_waypoints = 0.0
-                tr = run_one(seed, dist, spec, 400 if sc == "goto" else 700)
+                tr = run_one(seed, dist, spec, 400 if sc == "goto"
+                            else hover_max_steps(spec.get("hold_s", 4.0), tier) if sc == "hover_hold"
+                            else 700)
                 if tr:
                     ks += 1
                     X += [t[0] for t in tr]; A += [t[1] for t in tr]

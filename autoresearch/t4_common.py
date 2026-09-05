@@ -17,7 +17,7 @@ os.environ["AUTORESEARCH_OBS_V3"] = "1"
 import numpy as np
 from policy import MLP as BCMlp
 from ppo import MLP, Adam, GaussianPolicy
-from scenario_sampler import sample_spec, sample_tier, tier_dist, heldout_cells_tiered
+from scenario_sampler import sample_spec, sample_tier, tier_dist, heldout_cells_tiered, hover_max_steps
 from env_sim import make_sim_factory
 from eval_scenarios import post_series
 from parallel_rollout import parallel_episodes
@@ -57,11 +57,15 @@ def eval_one(actor_flat, scenario, tier, seed):
     rng = np.random.default_rng(0)
     actor = MLP(rng, OBS_DIM, HID, ACT_DIM); actor.load(bc_to_actor_params(actor_flat))
     wp1, wp2 = unpack_wp(actor_flat)
+    hold_pin = None
+    if scenario == "hover_hold60":   # pinned long-hold probe cell
+        scenario, hold_pin = "hover_hold", 60.0
     dist = tier_dist(seed, tier)
-    spec = sample_spec(seed, force_scenario=scenario)
+    spec = sample_spec(seed, force_scenario=scenario, hold_s=hold_pin)
     if scenario != "goto":
         dist.n_waypoints = 0.0
-    max_steps = 600 if tier == 3 else (400 if scenario == "goto" else 700)
+    max_steps = 600 if tier == 3 else (400 if scenario == "goto"
+              else hover_max_steps(spec.get("hold_s", 4.0), tier) if scenario == "hover_hold" else 700)
     env = make_sim_factory(dist, max_steps=max_steps, dynamics=MANIFEST,
                            scenario_spec=spec)(seed)
     obs = env.reset()
@@ -75,11 +79,12 @@ def eval_one(actor_flat, scenario, tier, seed):
     return ok
 
 EVAL_CELLS = [("goto", 0), ("goto", 1), ("goto", 2), ("goto", 3),
-              ("hover_hold", 0), ("hover_hold", 2), ("land", 0), ("land", 2)]
+              ("hover_hold", 0), ("hover_hold", 2), ("hover_hold60", 0), ("land", 0), ("land", 2)]
 
 def eval_all(actor_flat, label):
     cells = heldout_cells_tiered()
-    args = [(actor_flat, sc, t, s) for (sc, t) in EVAL_CELLS for s in cells[(sc, t)]]
+    args = [(actor_flat, sc, t, s) for (sc, t) in EVAL_CELLS
+            for s in cells[("hover_hold", t) if sc == "hover_hold60" else (sc, t)]]
     res = parallel_episodes(eval_one, args)
     out, i = {}, 0
     for k in EVAL_CELLS:
