@@ -199,3 +199,21 @@ characterized band (sweep-edge artifacts >1.9 GHz excluded).
 
 gerber2ems bug report (drafted, covers the run4 corruption signature) is with
 the user for review before filing upstream.
+
+## 2026-09-05 ~06:16 UTC - dag9 (land curriculum + IC v1): land still 0.0, honest negative
+
+24 rounds, integrator labels, obs v4, IC v1 on all training episodes,
+near-pad density 4/10, dual eval (standard rest-start floors + IC read).
+
+Result: NO champion, floors never met. land_t0 = 0.0 in EVERY round again -
+neither the denser terminal-descent data (4/10) nor in-motion spawn variety
+moved land off zero. Best standard-eval mean 0.368 (r20), below dag8c best
+0.403. IC read runs 0.28-0.31 vs standard 0.31-0.37: a modest robustness
+gap on goto/hover, not a collapse.
+
+Interpretation: the false equilibrium (park vy~=0 just above pad) is not an
+initial-condition artifact. Next suspects: (a) integrator-teacher labels
+themselves encode the park behavior in terminal descent, (b) the land
+success criterion is unreachable from near-pad spawns under m2 dynamics,
+(c) student capacity. Recommend probing teacher behavior in terminal
+descent before more DAgger volume.
