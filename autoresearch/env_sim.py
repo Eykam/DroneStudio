@@ -80,6 +80,15 @@ class SimBinaryEnv(QuadNavEnv):
                 # pad at the goal point, altitude forced to ground level
                 scene["goal"][1] = 0.0
                 self.goal = np.array(scene["goal"], dtype=np.float64)
+            spr = self.scenario_spec.get("spawn_rel_goal")
+            if spr:
+                # terminal-descent curriculum spawn: near the pad, 0.3-3m up,
+                # +-spr horizontal offset; deterministic per episode seed
+                r = np.random.default_rng(np.uint64(self.seed) ^ np.uint64(0x5AAD))
+                dx, dz = r.uniform(-float(spr), float(spr), 2)
+                alt = float(np.exp(r.uniform(np.log(0.3), np.log(3.0))))
+                scene["spawn"] = [float(scene["goal"][0] + dx), alt, float(scene["goal"][2] + dz)]
+                self.spawn = np.array(scene["spawn"], dtype=np.float64)
         frw = float(os.environ.get("AUTORESEARCH_FACE_REWARD", "0") or 0)
         if frw:
             scene["face_reward_w"] = frw
