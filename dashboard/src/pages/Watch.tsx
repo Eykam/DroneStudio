@@ -62,58 +62,89 @@ const OUTCOME_COLOR = { success: "#2ecc71", crash: "#e74c3c", timeout: "#f1c40f"
 
 function drawSpark(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
   opts: { label: string; unit: string; vals: number[]; color: string }, eps: EpMetric[]) {
-  const pad = 10, labelH = 14;
-  ctx.fillStyle = "#8b95a5";
-  ctx.font = "10px system-ui";
-  ctx.fillText(opts.label, x + pad, y + labelH - 3);
-  const n = Math.min(opts.vals.length, 30);
+  const pad = 12, headH = 22, footH = 14, gutterR = 34;
+  // header: color key + label left, current value right
+  ctx.fillStyle = opts.color;
+  ctx.beginPath(); ctx.arc(x + pad - 4, y + 12, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#aab4c4";
+  ctx.font = "600 11px system-ui";
+  ctx.fillText(opts.label, x + pad + 4, y + 16);
+  const n = Math.min(opts.vals.length, 50);
   if (!n) {
     ctx.fillStyle = "#3a4356";
-    ctx.fillText("waiting for episodes", x + pad + 100, y + labelH - 3);
+    ctx.font = "11px system-ui";
+    ctx.fillText("waiting for episodes", x + pad + 4, y + 42);
     return;
   }
   const vals = opts.vals.slice(-n);
   const max = Math.max(...vals);
   const min = Math.min(...vals);
-  const span = max - min || max || 1e-6;
+  const span = max - min || Math.abs(max) || 1e-6;
   const lastV = vals[n - 1];
   const lastM = eps[eps.length - 1];
+  const fmtV = (v: number) => (opts.unit === "%" ? `${Math.round(v)}%` : `${v.toFixed(1)}${opts.unit}`);
+  const shown = fmtV(lastV);
+  ctx.font = "700 13px system-ui";
   ctx.fillStyle = OUTCOME_COLOR[lastM.outcome];
-  const shown = opts.unit === "%" ? `${Math.round(lastV)}%` : `${lastV.toFixed(1)}${opts.unit}`;
-  ctx.fillText(shown, x + w - 50, y + labelH - 3);
-  const cw = w - pad * 2, chh = h - labelH - 12;
-  const top = y + labelH + 2;
+  const sw = ctx.measureText(shown).width;
+  ctx.fillText(shown, x + w - pad - sw, y + 16);
+
+  const cw = w - pad - gutterR - 4, chh = h - headH - footH;
+  const top = y + headH;
   const px = (i: number) => x + pad + (n === 1 ? cw / 2 : (i * cw) / (n - 1));
   const py = (v: number) => top + chh * (1 - (v - min) / span);
-  ctx.strokeStyle = "#1a2230";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x + pad, top + chh);
-  ctx.lineTo(x + pad + cw, top + chh);
-  ctx.stroke();
+
+  // gridlines + y ticks at min / mid / max
+  ctx.font = "9px system-ui";
+  for (const [v, t] of [[min, 0], [(min + max) / 2, 0.5], [max, 1]] as [number, number][]) {
+    const gy = top + chh * (1 - t);
+    ctx.strokeStyle = t === 0 ? "#232c3d" : "#1a2230";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + pad, gy); ctx.lineTo(x + pad + cw, gy); ctx.stroke();
+    ctx.fillStyle = "#5b6678";
+    const lab = opts.unit === "%" ? `${Math.round(v)}` : v.toFixed(1);
+    ctx.fillText(lab, x + pad + cw + 5, gy + 3);
+  }
+
+  // line + gradient area fill
+  const grad = ctx.createLinearGradient(0, top, 0, top + chh);
+  grad.addColorStop(0, opts.color + "40");
+  grad.addColorStop(1, opts.color + "05");
   ctx.beginPath();
   vals.forEach((v, i) => (i ? ctx.lineTo(px(i), py(v)) : ctx.moveTo(px(0), py(v))));
   ctx.strokeStyle = opts.color;
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
   ctx.stroke();
   ctx.lineTo(px(n - 1), top + chh);
   ctx.lineTo(px(0), top + chh);
   ctx.closePath();
-  ctx.fillStyle = opts.color + "1a";
+  ctx.fillStyle = grad;
   ctx.fill();
+
+  // episode outcome ticks along the baseline
   for (let i = 0; i < n; i++) {
     const m = eps[eps.length - n + i];
     ctx.fillStyle = OUTCOME_COLOR[m.outcome];
-    ctx.globalAlpha = 0.75;
+    ctx.globalAlpha = 0.8;
     ctx.beginPath();
-    ctx.arc(px(i), top + chh, 1.5, 0, Math.PI * 2);
+    ctx.arc(px(i), top + chh + 4.5, 1.8, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+
+  // last-point ring
   ctx.fillStyle = opts.color;
-  ctx.beginPath();
-  ctx.arc(px(n - 1), py(lastV), 2.5, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.beginPath(); ctx.arc(px(n - 1), py(lastV), 3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "#0d1219";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(px(n - 1), py(lastV), 4.5, 0, Math.PI * 2); ctx.stroke();
+
+  // window note, bottom right
+  ctx.fillStyle = "#4a5468";
+  ctx.font = "9px system-ui";
+  const note = `last ${n} ep`;
+  ctx.fillText(note, x + w - pad - ctx.measureText(note).width, y + h - 3);
 }
 
 
@@ -316,8 +347,8 @@ function WatchPane({ sourceId, entry, single, subscribe, snapshot }: {
 
   const show3d = view === "3d";  // per-tile: every pane gets its own 2D/3D + camera controls
   return (
-    <div className={`flex flex-col min-h-0 ${single ? "flex-1" : "border-b border-gray-800"}`}>
-      <div className={`relative ${single ? "flex-1 min-h-0" : "h-[46vh] shrink-0"}`}>
+    <div className="flex flex-col min-h-0 rounded-lg border border-gray-800 bg-[#0b0f14] overflow-hidden">
+      <div className="relative flex-1 min-h-0">
         {!show3d ? (
           <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
         ) : (
@@ -362,7 +393,7 @@ function WatchPane({ sourceId, entry, single, subscribe, snapshot }: {
           </div>
         )}
       </div>
-      <div className={`${single ? "h-[150px] md:h-[180px]" : "h-[110px]"} shrink-0 border-t border-gray-800`}>
+      <div className={`${single ? "h-[190px] md:h-[220px]" : "h-[150px]"} shrink-0 border-t border-gray-800`}>
         <canvas ref={chartsRef} className="w-full h-full" />
       </div>
       <footer className="px-4 py-1.5 border-t border-gray-800 text-xs text-gray-400 flex flex-wrap gap-x-4 gap-y-1 shrink-0">
@@ -463,7 +494,7 @@ export default function Watch({ embedded = false }: { embedded?: boolean }) {
     });
 
   return (
-    <div className={`bg-[#0b0f14] text-gray-200 flex flex-col ${embedded ? (sel.length <= 1 ? "h-[calc(100dvh-10rem)] md:h-[calc(100dvh-9.5rem)] overflow-hidden" : "") : (sel.length <= 1 ? "h-screen overflow-hidden" : "min-h-screen")}`}>
+    <div className={`bg-[#0b0f14] text-gray-200 flex flex-col overflow-hidden ${embedded ? "h-[calc(100dvh-10rem)] md:h-[calc(100dvh-9.5rem)]" : "h-screen"}`}>
       {!embedded && (
       <header className="flex items-center justify-between px-4 py-2 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-3">
@@ -504,7 +535,7 @@ export default function Watch({ embedded = false }: { embedded?: boolean }) {
           );
         })}
       </div>
-      <div className={`flex-1 min-h-0 ${sel.length > 1 ? "grid md:grid-cols-2" : "flex flex-col"}`}>
+      <div className={`flex-1 min-h-0 grid gap-2 p-2 overflow-y-auto ${sel.length > 1 ? "md:grid-cols-2 auto-rows-[minmax(280px,1fr)]" : "grid-cols-1 auto-rows-[minmax(0,1fr)]"}`}>
         {sel.map((id) => (
           <WatchPane key={id} sourceId={id} entry={known.find((k) => k.id === id)}
             single={sel.length === 1} subscribe={subscribe} snapshot={snapshot} />
