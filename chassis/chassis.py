@@ -1,4 +1,4 @@
-"""Candidate A: swept stereo shoulders with a vaulted, shared avionics nose.
+"""Candidate B: broad-keel, six-sided wing spars with a lower tapered crown.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -73,18 +73,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return -p.arm_sweep_mm * math.sin(math.pi * x / p.arm_length_mm)
 
     def section_wire(x, center, width, height, inner=False):
-        """Faceted lenticular shell: deep belly chines and a broad shoulder."""
+        """Closed wing section: broad landing keel and continuous sloping webs."""
         root_blend = max(0.0, min(1.0, (75.0-x)/30.0))
         wall = p.arm_rib_thickness_mm + 0.10*root_blend
         half = width/2
         crown = min(p.arm_crown_width_mm/2, half-1.25*wall)
-        keel = max(crown, half-0.22*height)
-        # The middle shoulder keeps material far from the lateral bending
-        # axis; deep belly and crown folds shorten the perimeter and carry
-        # torsional shear as a closed cell. Both slopes print without support.
-        points = [(-keel,0),(keel,0),(half,0.24*height),
-                  (half,0.66*height),(crown,height),(-crown,height),
-                  (-half,0.66*height),(-half,0.24*height)]
+        keel = max(crown,0.45*half)
+        # A broad first-layer keel and two continuous inclined shear webs
+        # replace the octagon's tall vertical shoulders. The flatter, wider
+        # wing section keeps skin far from the lateral bending axis while
+        # reducing crown height and wetted perimeter. Both the lower chine
+        # and the internal roof remain steeper than 45 degrees.
+        points = [(-keel,0),(keel,0),(half,0.42*height),
+                  (crown,height),(-crown,height),(-half,0.42*height)]
         if inner:
             # Offset every face in its local normal; the extra 3.5% preserves
             # the minimum gauge through the longitudinal taper and sweep.
@@ -127,21 +128,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outline = b.fillet(outline.vertices(),p.fillet_radius_mm)
         arm = b.extrude(b.make_face(outline),p.body_thickness_mm)
 
-        # Hollow octagonal spars put depth just beyond the stack ring, where
-        # the cantilever begins. A slimmer outer span replaces the old broad
-        # shallow tube; its roof descends continuously into the motor fairing.
-        # The terminal depth never dips below the nacelle, removing a notch.
+        # The broadened wing-like root flows into a slender motor fairing.
+        # A section-area / biaxial-compliance study shifts skin from the tall
+        # crown to the broad lower flange and lateral shoulder. Preserve the
+        # inboard stack clearance, terminal height and fixed motor axes.
         span = profile_end-x0
-        # Section-area and biaxial beam-compliance sizing redistributes
-        # depth into the outer half-span, where the original taper was soft.
-        # Roots flare into the fuselage while axes and terminal heights stay fixed.
         spar_stations = [
             (0.00, 15.05, 22.50),
-            (0.10, 15.65, 24.20),
-            (0.24, 15.40, 25.85),
-            (0.42, 13.50, 22.05),
-            (0.62, 11.50, 17.65),
-            (0.81, 10.15, 13.25),
+            (0.10, 15.75, 24.14),
+            (0.24, 18.05, 23.48),
+            (0.42, 16.77, 20.30),
+            (0.62, 13.98, 17.54),
+            (0.81, 10.81, 13.45),
             (0.93, 9.20, 10.80),
             (1.00, 9.20, 10.80),
         ]
