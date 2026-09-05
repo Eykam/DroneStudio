@@ -40,7 +40,9 @@ class SimBinaryEnv(QuadNavEnv):
                 self._call({"cmd": "set_dynamics", "path": self.dynamics})
             if os.environ.get("AUTORESEARCH_MOTOR_V2"):
                 self._call({"cmd": "motor_v2", "on": True})
-            if os.environ.get("AUTORESEARCH_OBS_V3"):
+            if os.environ.get("AUTORESEARCH_OBS_V4"):
+                self._call({"cmd": "obs_v4", "on": True})
+            elif os.environ.get("AUTORESEARCH_OBS_V3"):
                 self._call({"cmd": "obs_v3", "on": True})
             elif os.environ.get("AUTORESEARCH_OBS_V2"):
                 self._call({"cmd": "obs_v2", "on": True})

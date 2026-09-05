@@ -193,6 +193,7 @@ const World = struct {
     done: bool = false,
     obs_v2: bool = false, // 19-dim yaw-relative obs (default off: 15-dim v1)
     obs_v3: bool = false, // 26-dim: v2 layout + T3 waypoint channels (supersedes v2 when on)
+    obs_v4: bool = false, // 27-dim: v3 layout + motor_v2 battery SoC (supersedes v3 when on)
     waypoint_idx: usize = 0, // T3: next waypoint to pass
     hold_steps: u32 = 0, // hover_hold consecutive in-radius policy steps
     last_torque: [3]f32 = .{ 0, 0, 0 }, // PID torque output, body frame (telemetry)
@@ -732,10 +733,27 @@ const World = struct {
             prog,
         };
     }
+
+    /// Observation v4: 27 floats. The first 26 are exactly obsV3; appended
+    /// is the motor_v2 battery state of charge in [0,1] (1.0 when the v1
+    /// plant is active). Exposes the SoC sag that drives hover/land trim
+    /// drift so feedforward students (and stateless teachers) can
+    /// compensate what the m2 teacher previously needed an integrator for.
+    fn obsV4(self: *World) [27]f32 {
+        const base = self.obsV3();
+        var out: [27]f32 = undefined;
+        for (base, 0..) |x, i| out[i] = x;
+        out[26] = self.dyn.m2_soc;
+        return out;
+    }
 };
 
 fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info: bool) !void {
-    if (w.obs_v3) {
+    if (w.obs_v4) {
+        const o = w.obsV4();
+        try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
+        for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
+    } else if (w.obs_v3) {
         const o = w.obsV3();
         try writer.print("{{\"obs\":[{d:.6}", .{o[0]});
         for (o[1..]) |x| try writer.print(",{d:.6}", .{x});
@@ -1040,6 +1058,11 @@ pub fn main() !void {
             const on_v = root.object.get("on") orelse continue;
             world.obs_v3 = (on_v == .bool and on_v.bool);
             try stdout.print("{{\"ok\":true,\"obs_v3\":{}}}\n", .{world.obs_v3});
+            try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "obs_v4")) {
+            const on_v = root.object.get("on") orelse continue;
+            world.obs_v4 = (on_v == .bool and on_v.bool);
+            try stdout.print("{{\"ok\":true,\"obs_v4\":{}}}\n", .{world.obs_v4});
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;

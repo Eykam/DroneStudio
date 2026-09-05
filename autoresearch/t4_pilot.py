@@ -116,6 +116,14 @@ def teacher_act(obs, ext, scenario, radius, state=None):
     else:
         vy_des = np.clip(0.8 * rel[1], -1.5, 1.5)
     thr = HOVER_THR + K_VTHR * (vy_des - vel[1])
+    # m2 obs v4 (27-dim): stateless SoC-feedforward trim. Fit from the
+    # integrator's equilibrium over 24 land episodes (m2_trim_calib.py):
+    # trim ~= -0.0061 - 0.0794*(1-soc), rmse 0.011. Replaces the integrator
+    # for imitation: feedforward is Markovian in obs, an MLP can learn it.
+    if M2 and len(obs) >= 27 and state is None:
+        soc_ff = float(np.clip(-0.0061 - 0.0794 * (1.0 - float(obs[26])), -0.12, 0.12))
+        if land_descend or scenario == "hover_hold":
+            thr += soc_ff
     if M2 and state is not None and scenario == "hover_hold":
         # hover-scoped micro-trim: same SoC false-equilibrium fix as the
         # land trim, but 3x slower and tightly clamped - the 0.0008/0.12
