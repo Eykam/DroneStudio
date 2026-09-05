@@ -28,6 +28,7 @@ REPORT = os.environ.get("STREAM_REPORT", os.path.join(HERE, "generations_report2
 FPS = float(os.environ.get("STREAM_FPS", "20"))
 RETRAIN_EPS = int(os.environ.get("STREAM_RETRAIN_EPS", "8"))
 POLICY_FLAT = os.environ.get("STREAM_POLICY_FLAT", "")  # flat-vector json: fly this policy, hot-reload on mtime change
+ARCH = os.environ.get("STREAM_ARCH", "")  # "t4" = t4_common HID-64 trunk + wp pathway
 MAX_STEPS = 200
 # multi-source /watch: this streamer's source id + picker metadata
 SOURCE = os.environ.get("STREAM_SOURCE", "default")
@@ -118,8 +119,22 @@ def main():
         if POLICY_FLAT and os.path.exists(POLICY_FLAT):
             mt = os.path.getmtime(POLICY_FLAT)
             if mt != policy_mtime[0]:
-                pol = MLP(obs_dim[0], SimBinaryEnv.ACT_DIM)
-                pol.set_flat(np.array(json.load(open(POLICY_FLAT)), dtype=np.float64))
+                flat = np.array(json.load(open(POLICY_FLAT)), dtype=np.float64)
+                if ARCH == "t4":
+                    import t4_common as P
+                    from ppo import MLP as PPOMlp
+                    actor = PPOMlp(np.random.default_rng(0), P.OBS_DIM, P.HID, P.ACT_DIM)
+                    actor.load(P.bc_to_actor_params(flat))
+                    wp1, wp2 = P.unpack_wp(flat)
+                    class _T4Pol:
+                        def act(self, obs):
+                            mu, _ = actor.forward(obs[None, :])
+                            wpmu, _ = P.wp_forward(obs[None, :], wp1, wp2)
+                            return np.tanh(mu[0] + wpmu[0])
+                    pol = _T4Pol()
+                else:
+                    pol = MLP(obs_dim[0], SimBinaryEnv.ACT_DIM)
+                    pol.set_flat(flat)
                 policy_mtime[0] = mt
                 print(f"loaded policy from {POLICY_FLAT}", flush=True)
                 return pol

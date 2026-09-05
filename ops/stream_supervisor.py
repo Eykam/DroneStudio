@@ -25,7 +25,11 @@ def launch(src):
     env["STREAM_LABEL"] = src.get("label", src["id"])
     env["STREAM_POLICY_FLAT"] = src["policy"]
     env["STREAM_POLICY_OBS"] = src.get("obs", "v1")
-    if src.get("obs_v2"):
+    if src.get("arch"):
+        env["STREAM_ARCH"] = src["arch"]
+    if src.get("obs_v3"):
+        env["AUTORESEARCH_OBS_V3"] = "1"
+    elif src.get("obs_v2"):
         env["AUTORESEARCH_OBS_V2"] = "1"
     if src.get("scenarios"):
         env["STREAM_SCENARIOS"] = "1"

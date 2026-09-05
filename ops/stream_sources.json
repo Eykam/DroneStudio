@@ -1,8 +1,48 @@
 [
-  {"id": "live-v1", "label": "Live policy (DAgger ladder)", "policy": "/workspace/bc_flat.json",
-   "obs": "v1, 15-dim", "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json"},
-  {"id": "ppo-v2", "label": "PPO warm-start candidate", "policy": "/workspace/bc_ppo_v2_best.json",
-   "obs": "v2, 19-dim", "obs_v2": true, "scenarios": true,
-   "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json",
-   "eval": {"goto": 0.938, "hover_hold": 0.875, "land": 0.5}}
+ {
+  "id": "live-v1",
+  "label": "Live policy (DAgger ladder)",
+  "policy": "/workspace/bc_flat.json",
+  "obs": "v1, 15-dim",
+  "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json"
+ },
+ {
+  "id": "ppo-v2",
+  "label": "PPO warm-start candidate",
+  "policy": "/workspace/bc_ppo_v2_best.json",
+  "obs": "v2, 19-dim",
+  "obs_v2": true,
+  "scenarios": true,
+  "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json",
+  "eval": {
+   "goto": 0.938,
+   "hover_hold": 0.875,
+   "land": 0.5
+  }
+ },
+ {
+  "id": "t4-yaw",
+  "label": "T4 yaw candidate (dag2_r4)",
+  "policy": "/workspace/t4_best.json",
+  "obs": "v3, 26-dim",
+  "obs_v3": true,
+  "scenarios": true,
+  "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json",
+  "eval": {
+   "goto": 0.938,
+   "hover_hold": 0.812,
+   "land": 0.312
+  },
+  "arch": "t4"
+ },
+ {
+  "id": "t4-training",
+  "label": "T4 training loop (live checkpoints)",
+  "policy": "/workspace/t4_live.json",
+  "obs": "v3, 26-dim",
+  "obs_v3": true,
+  "scenarios": true,
+  "dynamics": "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json",
+  "arch": "t4"
+ }
 ]
