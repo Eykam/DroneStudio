@@ -101,3 +101,29 @@ Completion -> report commit + PPO-vs-CEM on best variant (armed wake).
   because 0.0765 x 69.1N accidentally equals the v14 weight).
 - Teacher re-validated under v14-g13 + com + 11N: 1.0/1.0/1.0 (held-out,
   n=16); land touchdown mean 0.46 m/s (limit 0.5).
+
+## T13 dag7m2 - motor_v2-fidelity DAgger (2026-09-04 late)
+
+- Baseline first: t4_best (0.799 on v1 plant) = **0.083 mean under motor_v2**
+  (goto_t0 0.19 / hover_t0 0.06 / land_t0 0.13). The v1 deployment lineage
+  does not transfer to the calibrated RS2205 EM/battery plant. Series:
+  t4best-m2-baseline.
+- dag7m2: init t4_best, m2-native teacher anchor (20.8k samples, v1 demo
+  anchors dropped - v1 labels fight the m2 trim), 8 rounds x 30 eps,
+  m2-relative floors goto>=0.8/hover>=0.3/land>=0.35 (parent-approved
+  re-scope; v1 floors unreachable under m2 - even the teacher yields only
+  goto 0.938 / land 0.438 / hover ~0.35 there).
+- Result: NO round passed floors -> no best saved. goto_t0 climbed
+  0.375->0.812 (floor met by r5), hover_t0 0.125->0.375 (met), but
+  land_t0 stayed 0.0-0.06 across ALL rounds. Best mean 0.340 (r8).
+- Leading hypothesis: the m2 teacher land fix uses a land-scoped TRIM
+  INTEGRATOR (dc867e0) - internal state, actions non-Markovian in obs.
+  A feedforward MLP on obs v3 cannot imitate integrator memory from
+  (obs, action) pairs. Land fails because the imitable part of the teacher
+  is not what lands the drone under sag.
+- Options: (a) expose trim/SoC estimate in obs; (b) stateless m2 land
+  teacher (sag-compensated feedforward); (c) recurrent student; (d) more
+  rounds (weak - the representability gap is structural, not data volume).
+- Side fix: t4_dag6j2_best.json had been copied from the wrong campaign
+  prefix (run-1 r3, full-jitter, floors-failing); corrected to the true
+  dag6j2 r3 (mean 0.750). dag6j2.py copy line noted.
