@@ -42,6 +42,7 @@ pub const Frame = struct {
     seg: []u8,
     width: u32,
     height: u32,
+    rgb: ?[]u8 = null, // optional 3 bytes/px display shading (shade())
 };
 
 pub const RasterObstacle = struct { center: Vec3, radius: f32 };
@@ -53,7 +54,33 @@ pub const RasterScene = struct {
     goal_radius: f32, // rendered as a flat pad disc on the ground
 };
 
-const Hit = struct { t: f32, class: SegClass };
+const Hit = struct { t: f32, class: SegClass, n: Vec3 };
+
+/// Sun-lit lambert shade + distance fog -> display RGB for the scene panel.
+/// Visualization only; training consumes depth/seg, never this.
+fn mix3(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
+    return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
+}
+
+fn shade(hit: Hit, rd: Vec3) [3]u8 {
+    const sky = [3]f32{ 38.0, 50.0, 66.0 };
+    if (hit.class == .sky) {
+        const g = std.math.clamp(0.5 + 0.5 * rd.y(), 0.0, 1.0);
+        const c = mix3(.{ 26.0, 34.0, 46.0 }, .{ 92.0, 108.0, 126.0 }, g);
+        return .{ @intFromFloat(c[0]), @intFromFloat(c[1]), @intFromFloat(c[2]) };
+    }
+    const base: [3]f32 = switch (hit.class) {
+        .floor => .{ 150.0, 148.0, 142.0 },
+        .obstacle => .{ 92.0, 106.0, 124.0 },
+        .goal => .{ 30.0, 150.0, 84.0 },
+        .sky => unreachable,
+    };
+    const sun = Vec3.init(-0.4, 0.85, 0.35).normalize();
+    const lam = 0.35 + 0.65 * @max(0.0, hit.n.dot(sun));
+    const fog = 1.0 - @exp(-hit.t / 45.0);
+    const c = mix3(.{ base[0] * lam, base[1] * lam, base[2] * lam }, sky, fog * 0.55);
+    return .{ @intFromFloat(c[0]), @intFromFloat(c[1]), @intFromFloat(c[2]) };
+}
 
 fn raySphere(ro: Vec3, rd: Vec3, c: Vec3, r: f32) ?f32 {
     const oc = ro.sub(c);
@@ -88,18 +115,22 @@ fn rayDisc(ro: Vec3, rd: Vec3, y: f32, center: Vec3, r: f32) ?f32 {
 
 /// Cast one ray; returns the nearest hit (sky if none).
 pub fn castRay(scene: RasterScene, ro: Vec3, rd: Vec3) Hit {
-    var best: Hit = .{ .t = std.math.inf(f32), .class = .sky };
+    const up = Vec3.init(0, 1, 0);
+    var best: Hit = .{ .t = std.math.inf(f32), .class = .sky, .n = up };
     if (rayPlaneDown(ro, rd, scene.ground_y)) |t| {
-        if (t < best.t) best = .{ .t = t, .class = .floor };
+        if (t < best.t) best = .{ .t = t, .class = .floor, .n = up };
     }
     for (scene.obstacles) |ob| {
         if (raySphere(ro, rd, ob.center, ob.radius)) |t| {
-            if (t < best.t) best = .{ .t = t, .class = .obstacle };
+            if (t < best.t) {
+                const p = ro.add(rd.scale(t));
+                best = .{ .t = t, .class = .obstacle, .n = p.sub(ob.center).normalize() };
+            }
         }
     }
     // pad marker: disc slightly proud of the floor so it wins ties
     if (rayDisc(ro, rd, scene.ground_y + 0.01, scene.goal, scene.goal_radius)) |t| {
-        if (t < best.t) best = .{ .t = t, .class = .goal };
+        if (t < best.t) best = .{ .t = t, .class = .goal, .n = up };
     }
     return best;
 }
@@ -136,6 +167,12 @@ pub fn renderRow(scene: RasterScene, cam: Camera, body_pos: Vec3, body_quat: Qua
         const idx = row * cam.width + col;
         frame.depth[idx] = hit.t;
         frame.seg[idx] = @intFromEnum(hit.class);
+        if (frame.rgb) |rgb| {
+            const c = shade(hit, rd);
+            rgb[idx * 3] = c[0];
+            rgb[idx * 3 + 1] = c[1];
+            rgb[idx * 3 + 2] = c[2];
+        }
     }
 }
 

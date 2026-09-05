@@ -177,6 +177,17 @@ def main():
                       "pos": info.get("pos"), "quat": info.get("quat"),
                       "vel": info.get("vel"),
                       "reward": float(r), "done": bool(done)})
+                # vision (NAV_STACK item D): depth+seg from the episode API
+                # render command, every 4th policy step (5Hz) - the camera
+                # view of THIS live episode, not a replay. 64x48, ~1.5ms.
+                if env.steps % 4 == 0:
+                    try:
+                        vf = env._call({"cmd": "render", "width": 64, "height": 48})
+                        post({"type": "vision", "w": vf["w"], "h": vf["h"],
+                              "depth": vf["depth"], "seg": vf["seg"],
+                              "rgb": vf.get("rgb")})
+                    except Exception as ve:
+                        print("vision:", ve, flush=True)
                 time.sleep(max(0.0, dt - (time.time() - t0)))
             post({"type": "episode_end", "episode_id": ep_id,
                   "succeeded": bool(env.succeeded), "collided": bool(env.collided),

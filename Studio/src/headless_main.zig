@@ -1120,8 +1120,9 @@ pub fn main() !void {
             const npix: usize = @as(usize, vw) * @as(usize, vh);
             const depth = try alloc.alloc(f32, npix);
             const segb = try alloc.alloc(u8, npix);
+            const rgbb = try alloc.alloc(u8, npix * 3);
             VR.render(rscene, cam, world.bodyPos(), world.bodyQuat(),
-                      .{ .depth = depth, .seg = segb, .width = vw, .height = vh });
+                      .{ .depth = depth, .seg = segb, .width = vw, .height = vh, .rgb = rgbb });
             try stdout.print("{{\"w\":{d},\"h\":{d},\"depth\":[", .{ vw, vh });
             for (depth, 0..) |dv, i| {
                 const mm: u32 = if (std.math.isInf(dv)) 65535 else @intFromFloat(@min(dv * 1000.0, 65534.0));
@@ -1129,11 +1130,18 @@ pub fn main() !void {
             }
             try stdout.writeAll("],\"seg\":[");
             for (segb, 0..) |sv, i| try stdout.print("{s}{d}", .{ if (i > 0) "," else "", sv });
+                        // display shading, packed r<<16|g<<8|b (visualization only)
+            try stdout.writeAll("],\"rgb\":[");
+            for (0..npix) |pi| {
+                const pk: u32 = (@as(u32, rgbb[pi * 3]) << 16) | (@as(u32, rgbb[pi * 3 + 1]) << 8) | @as(u32, rgbb[pi * 3 + 2]);
+                try stdout.print("{s}{d}", .{ if (pi > 0) "," else "", pk });
+            }
             try stdout.writeAll("]}\n");
             try stdout_buf.flush();
             alloc.free(robst);
             alloc.free(depth);
             alloc.free(segb);
+            alloc.free(rgbb);
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
             const arr = act_v.array.items;
