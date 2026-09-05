@@ -109,8 +109,11 @@ def aero_areas(out_stl):
         areas[ax] = round(float(proj.sum()) / 2, 6)  # /2: front+back faces both counted
     return areas
 
-def export(p: ChassisParams, out_base: str):
-    part = build_chassis(p)
+def export(p: ChassisParams, out_base: str, part=None):
+    # part: pass the already-built geometry (run_candidate --source) so the
+    # STL/STEP/GLB/manifest reflect the candidate, not the repo chassis module.
+    if part is None:
+        part = build_chassis(p)
     b.export_stl(part, out_base + ".stl")
     rho = RHO_PETG
     vol_mm3 = part.volume

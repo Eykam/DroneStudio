@@ -13,7 +13,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     import build123d as b
     b.export_stl(part, out_base + ".stl")
     progress.set_stage("rendering", f"{variant_id}: exporting STEP/GLB/manifest")
-    em.export(params, out_base)  # STEP/GLB/manifest first: FEA consumes the STEP
+    em.export(params, out_base, part=part)  # STEP/GLB/manifest first: FEA consumes the STEP
     m = trimesh.load(out_base + ".stl", force='mesh')
     checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m)]
     ok_c, adj, need = params.check_prop_clearance()
