@@ -150,10 +150,13 @@ LIBRARY = {
 }
 
 ORIENTATIONS = {
-    # Pi Camera Module 3 STEP is modeled board-flat with the lens pointing +Z.
-    # Mount it lens-forward (+X, out through the nose aperture): rotate +90 deg about Y.
-    # User feedback 2026-09-04: cameras pointed downward and were obstructed.
-    "pi_camera_3": ("Y", 90.0),
+    # Pi Camera Module 3 STEP is modeled board-flat with the LENS POINTING -Z
+    # (lens-barrel solids sit at native z < -2mm, below the board face). To mount
+    # lens-forward (+X, out through the nose aperture): rotate -90 deg about Y.
+    # (+90 stands the board up but points the lens BACKWARD, -X; shipped that way
+    # in d69c9de - user reported cameras still wrong 2026-09-04. Verified against
+    # the actual STEP solid geometry: board at native z=-0.7..0, lens at z=-7.6..-3.)
+    "pi_camera_3": ("Y", -90.0),
 }
 
 CAMERA_SPEC = {
@@ -203,22 +206,46 @@ def placed_items():
 
 
 def camera_lens_poses():
-    """{placement_key: {origin_m, axis, hfov_deg, vfov_deg}} - lens point of each
-    placed camera: center of the board forward (+X) face after ORIENTATIONS.
-    Board dims permute under the +90 deg Y mount rotation: x-extent = old z-dim
-    (thickness), z-extent = old x-dim (board height)."""
+    """{placement_key: {origin_m, axis, hfov_deg, vfov_deg}} - REAL lens apex of
+    each placed camera, measured from the rotated STEP solids (never inferred
+    from bbox dims: the lens barrel is offset from the board bbox center).
+    Lens-barrel solids = native-z center < -2mm (they protrude from the board
+    face). Placement convention (cad_geometry): rotated shape centered in x/y,
+    bottom-aligned in z on the placement point. origin = lens front-face center;
+    axis = +X, the lens-forward mount direction enforced by ORIENTATIONS."""
+    import build123d as b
     out = {}
     for key, pos in placement().items():
         cname = key.split("#")[0]
         if cname not in CAMERA_SPEC:
             continue
         c = LIBRARY[cname]
-        thick = c.dims_m[2]   # along +X after rotation
-        height = c.dims_m[0]  # along +Z after rotation
-        spec = CAMERA_SPEC[cname]
-        out[key] = {"origin_m": [pos[0] + thick / 2, pos[1], pos[2] + height / 2],
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), c.step_path)
+        brep = path + ".brep"
+        if path not in _STEP_CACHE:
+            _STEP_CACHE[path] = b.import_brep(brep) if os.path.exists(brep) else b.import_step(path)
+        nat = _STEP_CACHE[path]
+        rot = _apply_orientation(cname, nat)
+        bb = rot.bounding_box()
+        cx, cy = (bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2
+        lens = [s for s in nat.solids()
+                if (s.bounding_box().min.Z + s.bounding_box().max.Z) / 2 < -2.0]
+        # keep the lens assembly only (barrel + housing): the two largest
+        # sub-board protrusions; tiny standoff/screw solids near board corners
+        # otherwise skew the lens center.
+        lens = sorted(lens, key=lambda s: s.volume, reverse=True)[:2]
+        spec = ORIENTATIONS.get(cname)
+        ax = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}[spec[0]]
+        rl = [s.rotate(b.Axis((0, 0, 0), ax), spec[1]) for s in lens]
+        fx = max(s.bounding_box().max.X for s in rl)
+        lcy = (min(s.bounding_box().min.Y for s in rl) + max(s.bounding_box().max.Y for s in rl)) / 2
+        lcz = (min(s.bounding_box().min.Z for s in rl) + max(s.bounding_box().max.Z for s in rl)) / 2
+        fov = CAMERA_SPEC[cname]
+        out[key] = {"origin_m": [(pos[0] * 1000 + fx - cx) / 1000,
+                                 (pos[1] * 1000 + lcy - cy) / 1000,
+                                 (pos[2] * 1000 + lcz - bb.min.Z) / 1000],
                     "axis": [1.0, 0.0, 0.0],
-                    "hfov_deg": spec["hfov_deg"], "vfov_deg": spec["vfov_deg"]}
+                    "hfov_deg": fov["hfov_deg"], "vfov_deg": fov["vfov_deg"]}
     return out
 
 
