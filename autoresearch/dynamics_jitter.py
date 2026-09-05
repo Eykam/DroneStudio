@@ -27,8 +27,14 @@ def _stream(seed):
     return np.random.default_rng(np.uint64(seed) ^ np.uint64(0xD7A1))
 
 
+def should_jitter(seed, mix):
+    """Deterministic per-seed coin flip for the jittered/base rollout mix."""
+    return bool(_stream(seed).uniform() < mix)
+
+
 def jitter_manifest(seed, base_path, out_dir=OUT_DIR):
     """Deterministic jittered copy of base manifest for this episode seed."""
+    scale = float(os.environ.get("AUTORESEARCH_DYN_JITTER_SCALE", "1.0"))
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "dyn_%d.json" % (np.uint64(seed) % (2**63),))
     if os.path.exists(out):
@@ -38,6 +44,7 @@ def jitter_manifest(seed, base_path, out_dir=OUT_DIR):
     r = _stream(seed)
 
     def u(tol):
+        tol *= scale
         return float(r.uniform(1.0 - tol, 1.0 + tol))
 
     dyn = m.get("dynamics", {})
@@ -50,7 +57,7 @@ def jitter_manifest(seed, base_path, out_dir=OUT_DIR):
                 inertia[k] *= u(INERTIA_TOL)
     com = dyn.get("com_m")
     if com and len(com) == 3:
-        dyn["com_m"] = [float(c + r.uniform(-COM_TOL_M, COM_TOL_M)) for c in com]
+        dyn["com_m"] = [float(c + r.uniform(-COM_TOL_M * scale, COM_TOL_M * scale)) for c in com]
     for mo in m.get("motors", []):
         if "max_thrust_n" in mo:
             mo["max_thrust_n"] *= u(MOTOR_THRUST_TOL)

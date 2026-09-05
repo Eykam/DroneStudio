@@ -178,3 +178,20 @@ thrust +/-4% independent, lag +/-25%, drag +/-15%, CoM +/-3mm. Deterministic
 per episode seed (own rng stream, atomic file writes for 24-worker safety).
 Teacher flies jittered airframes (goto succ 29 steps, seed 80000). Ranges
 are anchors pending bench sysid.
+
+### T11 - Track 2 dag6j run 1 + anchored jitter fix (2026-09-04 ~9:20 PM)
+
+dag6j run 1 (full-strength jitter, 100% of rollout episodes): all 8 rounds
+floors=False, no promotion, t4_best untouched. Final round mean 0.597
+(goto_t0 0.562 / hover_hold_t0 0.938 / land_t0 0.562) vs non-jittered dag5
+0.799 promoted at r2. Hover cells held all campaign (0.875-0.938); goto/land
+base-airframe precision collapsed. Full-strength domain randomization buys
+robustness at the cost of the precision the floors measure.
+
+Fix (dag6j2): standard anchor approach - AUTORESEARCH_DYN_JITTER_SCALE=0.5
+(half-strength draws) + AUTORESEARCH_DYN_JITTER_MIX=0.5 (deterministic
+per-seed flip; 51% jittered over 200 seeds, half-scale mass delta 0.57% vs
+full 2.02%). dynamics_jitter.py: should_jitter() + scale env. env_sim.py:
+mix gating in make_sim_factory. t4_dagger6j2.py: seeds 500000+, labels
+t4-dag6j2, outputs t4_dag6j2_r{k}.json / t4_dag6j2_best.json, t4_best.json
+still untouched, eval stays base-airframe for comparability.

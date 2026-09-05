@@ -12,7 +12,7 @@ identical scenarios - the comparison is dynamics-only.
 import os, json, subprocess
 import numpy as np
 from env_quad import QuadNavEnv
-from dynamics_jitter import jitter_manifest
+from dynamics_jitter import jitter_manifest, should_jitter
 
 BINARY = os.environ.get(
     "AUTORESEARCH_SIM_BIN",
@@ -135,8 +135,10 @@ def make_sim_factory(distribution, max_steps=200, binary=BINARY, dynamics=None,
     # each seed flies its own airframe (see dynamics_jitter.py). Off by
     # default - existing campaigns keep bit-identical dynamics.
     jitter = bool(os.environ.get("AUTORESEARCH_DYN_JITTER")) and dynamics and dynamics != "abstract"
+    mix = float(os.environ.get("AUTORESEARCH_DYN_JITTER_MIX", "1.0"))
     def factory(seed):
-        dyn = jitter_manifest(seed, dynamics) if jitter else dynamics
+        use_jitter = jitter and (mix >= 1.0 or should_jitter(seed, mix))
+        dyn = jitter_manifest(seed, dynamics) if use_jitter else dynamics
         return SimBinaryEnv(distribution, seed=seed, max_steps=max_steps, binary=binary,
                             dynamics=dyn, scenario_spec=scenario_spec)
     return factory
