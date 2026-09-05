@@ -101,6 +101,7 @@ const Scenario = enum { goto, hover_hold, land };
 
 const Scene = struct {
     spawn: Vec3,
+    spawn_vel: Vec3 = Vec3.zero(), // IC v1: initial linear velocity (default rest)
     goal: Vec3,
     obstacles: []Obstacle,
     extent: f32 = 40.0,
@@ -305,7 +306,8 @@ const World = struct {
         };
         bullet.cbtBodySetCenterOfMassTransform(self.body, @ptrCast(&t));
         const zero = [3]f32{ 0, 0, 0 };
-        bullet.cbtBodySetLinearVelocity(self.body, &zero);
+        const sv0 = [3]f32{ scene.spawn_vel.x(), scene.spawn_vel.y(), scene.spawn_vel.z() };
+        bullet.cbtBodySetLinearVelocity(self.body, &sv0);
         bullet.cbtBodySetAngularVelocity(self.body, &zero);
         bullet.cbtBodySetActivationState(self.body, bullet.CBT_ACTIVE_TAG);
         self.prev_dist = (if (scene.waypoints.len > 0) scene.waypoints[0] else scene.goal).sub(scene.spawn).length();
@@ -840,6 +842,7 @@ pub fn main() !void {
                 .goal = try vecFromJson(scene_v.object.get("goal").?),
                 .obstacles = &.{},
             };
+            if (scene_v.object.get("spawn_vel")) |sv| scene.spawn_vel = try vecFromJson(sv);
             if (scene_v.object.get("extent")) |e| scene.extent = f32FromJson(e, 40.0);
             if (scene_v.object.get("max_steps")) |m| scene.max_steps = @intFromFloat(f32FromJson(m, 250));
             if (scene_v.object.get("dynamics_noise")) |n| scene.dynamics_noise = f32FromJson(n, 0.05);

@@ -114,3 +114,32 @@ def heldout_cells_tiered():
         for t in TIERS:
             out[(s, t)] = [base + HELDOUT_TIER_STRIDE * t + i for i in range(HELDOUT_N)]
     return out
+
+
+def sample_initial_conditions(seed, spawn, goal):
+    """IC v1 (user steering 2026-09-04): rest AND in-motion starts.
+
+    None of the v1 scenes varied the initial conditions - spawn was fixed at
+    [0,2,0] with zero velocity. This samples: spawn jitter (+-3m horizontal,
+    +-1m vertical, floor 0.5m) for every episode; velocity: 35% exact rest,
+    65% in-motion with log-uniform speed 0.5-4 m/s directed along the
+    spawn->goal leg (+-60 deg yaw spread, vertical component +-0.5 of speed).
+    Deterministic per episode seed, so heldout evals stay comparable.
+    """
+    rng = np.random.default_rng(np.uint64(seed) ^ np.uint64(0x1C01))
+    jitter = np.array([rng.uniform(-3, 3), rng.uniform(-1, 1), rng.uniform(-3, 3)])
+    sp = np.asarray(spawn, dtype=np.float64) + jitter
+    sp[1] = max(sp[1], 0.5)
+    if rng.uniform() < 0.35:
+        return sp, np.zeros(3)
+    speed = float(np.exp(rng.uniform(np.log(0.5), np.log(4.0))))
+    leg = np.asarray(goal, dtype=np.float64) - sp
+    leg_h = np.array([leg[0], 0.0, leg[2]])
+    n = float(np.linalg.norm(leg_h))
+    dir_h = leg_h / n if n > 1e-6 else np.array([1.0, 0.0, 0.0])
+    yaw = rng.uniform(-np.pi / 3, np.pi / 3)
+    d = np.array([dir_h[0] * np.cos(yaw) - dir_h[2] * np.sin(yaw), 0.0,
+                  dir_h[0] * np.sin(yaw) + dir_h[2] * np.cos(yaw)])
+    vy = rng.uniform(-0.5, 0.5)
+    v = d * np.sqrt(max(1.0 - vy * vy, 0.1)) + np.array([0.0, vy, 0.0])
+    return sp, v * speed

@@ -71,6 +71,9 @@ class SimBinaryEnv(QuadNavEnv):
             "max_steps": int(self.max_steps),
             "dynamics_noise": float(self.dist.dynamics_noise),
         }
+        sv = getattr(self, "spawn_vel", None)
+        if sv is not None:
+            scene["spawn_vel"] = [float(x) for x in sv]
         if len(getattr(self, "waypoints", [])):
             scene["waypoints"] = [[float(x) for x in wp] for wp in self.waypoints]
         if self.scenario_spec:

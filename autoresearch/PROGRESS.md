@@ -127,3 +127,50 @@ Completion -> report commit + PPO-vs-CEM on best variant (armed wake).
 - Side fix: t4_dag6j2_best.json had been copied from the wrong campaign
   prefix (run-1 r3, full-jitter, floors-failing); corrected to the true
   dag6j2 r3 (mean 0.750). dag6j2.py copy line noted.
+
+
+## T15 - dag8c: land curriculum (near-pad terminal-descent spawns) - 2026-09-04 late
+
+dag8b closed the volume hypothesis (24 rounds, correct integrator labels, obs v4:
+land_t0 = 0.0 EVERY round; goto 0.938 / hover 0.375 climb fine). Probe showed a
+false equilibrium: student parks vy~=0, 0.1-0.5m above pad, zero crashes.
+
+dag8c = dag8b recipe + spawn curriculum: 3/10 collection episodes spawn in
+terminal descent (0.3-3m above pad, +-1.5m offset; env_sim scenario_spec key
+"spawn_rel_goal"). Integrator teacher lands 5/8 from these spawns (checked).
+
+RESULT (24 rounds, no champion - floors never met): land finally moved off zero
+- land_t0 0.062 at r15/r18/r19/r21, land_t2 0.25 at r21 - but collapsed back to
+0.0 by r22-24. Best mean 0.403 (r24) vs dag8b 0.361. goto_t0 0.875-0.938,
+hover_t0 0.31-0.44. READ: curriculum put terminal-descent data in the mix and
+land flickered, but 3/10 density and 24 rounds did not break the equilibrium.
+Next: dag9 combines the curriculum with IC v1 (below) and raises near-pad
+density; if land still stalls, the lever after that is a land reward shaping
+change (descent-progress shaping inside 1m), not more DAgger volume.
+
+## T16 - initial-condition randomization (IC v1) - user steering 2026-09-04
+
+User: "none of the training iterations/scenes start from the drone at rest -
+want real variety in initial conditions: starting position, velocity,
+acceleration, trajectory." Correct: spawn was FIXED at [0,2,0], velocity always
+zero, only goal/scene varied.
+
+Design (AUTORESEARCH_IC_V1=1, sampler-owned, deterministic per seed):
+- Every episode: spawn jitter +-3m horizontal, +-1m vertical (floor 0.5m).
+- 35% exact rest starts (zero velocity).
+- 65% in-motion: log-uniform speed 0.5-4 m/s, directed along the spawn->goal
+  leg (+-60deg yaw spread, vertical component +-0.5 of speed). "Acceleration/
+  trajectory" variety falls out of velocity x attitude x the controller's
+  transient; no separate accel knob (non-physical as an IC).
+- Heldout eval cells use fixed seeds, so ICs are deterministic there too -
+  but the eval DISTRIBUTION changes when IC is on. Floors stay gated on the
+  standard (rest-start) cells for cross-campaign comparability; IC eval is
+  reported as a secondary read in dag9.
+
+Implementation: scenario_sampler.sample_initial_conditions (own rng stream
+0x1C01), env_quad._sample_scene hook (gated on env flag), env_sim passes
+scene.spawn_vel, headless_main.zig Scene.spawn_vel (default zero - old scenes
+bit-identical), bullet.cbtBodySetLinearVelocity at reset. Verified: reset obs
+velocity channel = 2.0 m/s / 10 with spawn_vel [2,0,0] vs 0 without; velocity
+persists through steps. Binary swapped at /workspace/zig-out/bin/
+(previous preserved as dronestudio-headless.pre-icv1).

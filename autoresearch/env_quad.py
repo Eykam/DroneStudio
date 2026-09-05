@@ -21,6 +21,7 @@ thrust at ~20 Hz; the FAST LOOP (his PID, 500 Hz) tracks them. Semi-implicit
 Euler integration. Not Bullet-exact - documented approximation; the
 sim-backend milestone replaces dynamics wholesale.
 """
+import os
 import numpy as np
 from scene_schema import SceneDistribution
 
@@ -78,6 +79,7 @@ class QuadNavEnv:
 
     def __init__(self, distribution: SceneDistribution, seed=0, max_steps=200):
         self.dist = distribution
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.max_steps = max_steps  # policy steps
         self._sample_scene()
@@ -91,6 +93,11 @@ class QuadNavEnv:
                                            rng.uniform(-3, 5),
                                            d.goal_distance * np.sin(ang)])
         self.goal[1] = max(self.goal[1], 0.5)
+        if os.environ.get("AUTORESEARCH_IC_V1"):
+            from scenario_sampler import sample_initial_conditions
+            self.spawn, self.spawn_vel = sample_initial_conditions(self.seed, self.spawn, self.goal)
+        else:
+            self.spawn_vel = np.zeros(3)
         n_obs = int(d.obstacle_density * ext * ext / 25)
         centers = rng.uniform(-ext/2, ext/2, (max(n_obs, 1), 3))
         centers[:, 1] = np.abs(centers[:, 1]) * 0.3 + 0.5  # low altitude band
