@@ -107,7 +107,11 @@ def run_generation():
         # process sits silent for 40+ minutes. Treat 20 min without any file
         # activity in /tmp/candidates or the repo top level as a hang: kill and
         # take the timeout path (which salvages written candidates).
-        proc = subprocess.Popen(codex_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=HERE, start_new_session=True)
+        # stdout/stderr to FILES, not PIPE: an undrained 64KB pipe buffer blocks codex
+        # mid-session (zero file activity -> watchdog kill). Latent hang source.
+        codex_out = open(f"/tmp/codex_gen{gen}.out", "w")
+        codex_err = open(f"/tmp/codex_gen{gen}.err", "w")
+        proc = subprocess.Popen(codex_cmd, stdout=codex_out, stderr=codex_err, text=True, cwd=HERE, start_new_session=True)
         hard_deadline = time.time() + 3600
         gen_start = time.time()
         while proc.poll() is None:
@@ -141,7 +145,8 @@ def run_generation():
                 kill_codex(proc); proc.wait()
                 raise subprocess.TimeoutExpired(codex_cmd, 3600)
             time.sleep(30)
-        r = subprocess.CompletedProcess(codex_cmd, proc.returncode, *proc.communicate())
+        codex_out.close(); codex_err.close()
+        r = subprocess.CompletedProcess(codex_cmd, proc.returncode, "", open(f"/tmp/codex_gen{gen}.err").read())
     except subprocess.TimeoutExpired:
         kill_codex(proc)  # process-group kill: takes the node orphans with it
         salvaged = [p for p in (f"/tmp/candidates/{base}{L}.py" for L in LETTERS) if os.path.exists(p)]
