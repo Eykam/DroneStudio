@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { fetchCadDesigns, fetchState, logout, type CadDesign, type CadSnapshotRecord } from "@/api";
-import { Box, LogOut, FlaskConical, ChevronRight } from "lucide-react";
+import { fetchCadDesigns, fetchState, type CadDesign, type CadSnapshotRecord } from "@/api";
+import { ChevronRight } from "lucide-react";
 import CadViewer from "@/components/CadViewer";
 
 function lineageOf(d: CadDesign, all: CadDesign[]): CadDesign[] {
@@ -19,45 +17,52 @@ function lineageOf(d: CadDesign, all: CadDesign[]): CadDesign[] {
   return chain;
 }
 
-function MetricGrid({ title, obj }: { title: string; obj: Record<string, unknown> | undefined }) {
-  if (!obj || !Object.keys(obj).length) return null;
-  // Flatten one level of nested objects (FEA hover_max/crash blocks) and
-  // format values compactly - long arrays/strings must never blow out
-  // mobile width.
-  const rows: [string, unknown][] = [];
-  for (const [k, v] of Object.entries(obj)) {
-    if (v && typeof v === "object" && !Array.isArray(v)) {
-      for (const [sk, sv] of Object.entries(v as Record<string, unknown>)) rows.push([`${k} ${sk}`, sv]);
-    } else {
-      rows.push([k, v]);
-    }
-  }
-  const fmt = (v: unknown): string => {
-    if (typeof v === "number") return Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.001) ? v.toExponential(3) : String(Math.round(v * 10000) / 10000);
-    if (typeof v === "boolean") return String(v);
-    if (Array.isArray(v)) return v.length > 4 ? `[${v.slice(0, 4).join(",")} +${v.length - 4}]` : `[${v.join(",")}]`;
-    if (v && typeof v === "object") return "{...}";
-    const s = String(v);
-    return s.length > 42 ? s.slice(0, 42) + "…" : s;
-  };
+const fmt = (v: unknown): string => {
+  if (typeof v === "number") return Math.abs(v) >= 1000 || (v !== 0 && Math.abs(v) < 0.001) ? v.toExponential(3) : String(Math.round(v * 10000) / 10000);
+  if (typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.length > 4 ? `[${v.slice(0, 4).join(",")} +${v.length - 4}]` : `[${v.join(",")}]`;
+  if (v && typeof v === "object") return "{...}";
+  const s = String(v);
+  return s.length > 42 ? s.slice(0, 42) + "..." : s;
+};
+
+function KV({ k, v }: { k: string; v: unknown }) {
   return (
-    <div className="min-w-0">
-      <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{title}</div>
-      <dl className="grid grid-cols-1 gap-y-1 text-xs md:text-sm">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex justify-between gap-2 min-w-0">
-            <dt className="text-muted-foreground truncate shrink" title={k}>{k.replace(/_/g, " ")}</dt>
-            <dd className="font-mono text-right break-all max-w-[58%]" title={typeof v === "object" ? JSON.stringify(v) : String(v)}>{fmt(v)}</dd>
-          </div>
-        ))}
-      </dl>
+    <div className="flex justify-between gap-2 min-w-0">
+      <dt className="text-muted-foreground truncate shrink" title={k}>{k.replace(/_/g, " ")}</dt>
+      <dd className="font-mono text-right break-all max-w-[58%]" title={typeof v === "object" ? JSON.stringify(v) : String(v)}>{fmt(v)}</dd>
+    </div>
+  );
+}
+
+// One titled property group. Nested objects render as labeled sub-groups so
+// FEA load cases (hover_max, crash, ...) read as structured results, not a
+// flattened data dump.
+function PropGroup({ title, obj }: { title: string; obj: Record<string, unknown> | undefined }) {
+  if (!obj || !Object.keys(obj).length) return null;
+  const scalars = Object.entries(obj).filter(([, v]) => !v || typeof v !== "object" || Array.isArray(v));
+  const nested = Object.entries(obj).filter(([, v]) => v && typeof v === "object" && !Array.isArray(v));
+  return (
+    <div className="min-w-0 rounded-lg border border-border p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{title}</div>
+      {scalars.length > 0 && (
+        <dl className="grid grid-cols-1 gap-y-1 text-xs md:text-sm">
+          {scalars.map(([k, v]) => <KV key={k} k={k} v={v} />)}
+        </dl>
+      )}
+      {nested.map(([k, v]) => (
+        <div key={k} className="mt-2">
+          <div className="text-[11px] font-medium text-foreground/80 mb-1">{k.replace(/_/g, " ")}</div>
+          <dl className="grid grid-cols-1 gap-y-1 text-xs md:text-sm pl-2 border-l-2 border-border">
+            {Object.entries(v as Record<string, unknown>).map(([sk, sv]) => <KV key={sk} k={sk} v={sv} />)}
+          </dl>
+        </div>
+      ))}
     </div>
   );
 }
 
 export default function Cad() {
-  const nav = useNavigate();
-  const qc = useQueryClient();
   const { data, error } = useQuery({ queryKey: ["cad"], queryFn: fetchCadDesigns, refetchInterval: 15_000 });
   const stateQ = useQuery({ queryKey: ["state"], queryFn: fetchState, refetchInterval: 15_000 });
   const progQ = useQuery({
@@ -99,161 +104,135 @@ export default function Cad() {
   if (error) return <div className="p-8 text-red-400">Failed to load: {(error as Error).message}</div>;
   const chain = sel ? lineageOf(sel, designs) : [];
   const children = sel ? designs.filter((d) => d.parent_id === sel.id) : [];
+  const otherMetrics = sel ? Object.fromEntries(
+    Object.entries(sel.metrics).filter(([k]) => !["mass_g", "inertia", "printability", "fea"].includes(k))) : {};
 
   return (
-    <div className="min-h-screen p-3 md:p-8 max-w-6xl mx-auto space-y-4 md:space-y-6">
-      <header className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="text-base md:text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Box className="h-5 w-5 md:h-6 md:w-6 text-primary shrink-0" />
-            <span>DroneStudio - CAD / Mechanicals</span>
-          </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Chassis designs from the CAD researcher - auto-refresh 15s
-          </p>
-        </div>
-        <div className="flex items-center gap-1 shrink-0 mt-1">
-          <Link to="/">
-            <Button variant="ghost" size="sm"><FlaskConical className="h-4 w-4" /> <span className="hidden sm:inline">Research</span></Button>
-          </Link>
-          <Button variant="ghost" size="sm"
-            onClick={async () => { await logout(); await qc.invalidateQueries({ queryKey: ["me"] }); nav("/login"); }}>
-            <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign out</span>
-          </Button>
-        </div>
+    <div className="space-y-4">
+      <header>
+        <h1 className="text-xl md:text-2xl font-bold tracking-tight">CAD</h1>
+        <p className="text-xs md:text-sm text-muted-foreground mt-1">chassis designs from the CAD researcher - auto-refresh 15s</p>
       </header>
 
-      {progLive && (
-        <Card className="border-primary/50">
-          <CardContent className="p-3 md:p-4 flex items-center gap-3">
-            <span className="relative flex h-3 w-3 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-            </span>
-            <div className="text-xs md:text-sm min-w-0">
-              <span className="font-semibold">Working on {String(prog.design_id || "next revision")}</span>
-              {prog.stage && <span className="text-muted-foreground"> - {String(prog.stage)}</span>}
-              {prog.detail && <div className="text-muted-foreground truncate">{String(prog.detail)}</div>}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {!designs.length && (
-        <Card><CardContent className="p-6 text-sm text-muted-foreground">
-          No chassis designs yet. The CAD researcher pushes them to <code className="font-mono text-xs">POST /api/cad/designs</code> as they land.
-        </CardContent></Card>
-      )}
-
-      {sel && (
-        <Card>
-          <CardHeader className="p-3 md:p-6">
-            <CardTitle className="text-base md:text-lg">{sel.name || sel.id}</CardTitle>
-            <CardDescription className="text-xs md:text-sm">
-              {sel.id} - {new Date(sel.created_at).toLocaleString()} - {(sel.glb_bytes / 1024).toFixed(0)} KB
-              {sel.source ? ` - ${sel.source}` : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-3 md:p-6 pt-0 md:pt-0 space-y-4">
-            <div className="h-72 md:h-96">
-              {sel.glb_url ? (
-                <CadViewer key={sel.id} url={sel.glb_url} />
-              ) : (
-                <div className="h-full grid place-items-center rounded-lg border border-dashed border-border text-center p-4">
-                  <div className="text-sm text-muted-foreground">
-                    Geometry pending - snapshot received, GLB not uploaded yet.
-                    {(sel as any).glb_pending_path && (
-                      <div className="font-mono text-[11px] mt-2 break-all">on box: {(sel as any).glb_pending_path}</div>
-                    )}
-                  </div>
+      <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 md:items-start space-y-4 md:space-y-0">
+        {/* sidebar: live status + designs list */}
+        <div className="space-y-3 md:sticky md:top-6">
+          {progLive && (
+            <Card className="border-primary/50">
+              <CardContent className="p-3 flex items-center gap-3">
+                <span className="relative flex h-3 w-3 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+                </span>
+                <div className="text-xs md:text-sm min-w-0">
+                  <span className="font-semibold">Working on {String(prog.design_id || "next revision")}</span>
+                  {prog.stage && <span className="text-muted-foreground"> - {String(prog.stage)}</span>}
+                  {prog.detail && <div className="text-muted-foreground truncate">{String(prog.detail)}</div>}
                 </div>
-              )}
-            </div>
-
-            {/* lineage */}
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">lineage</div>
-              <div className="flex flex-wrap items-center gap-1">
-                {chain.map((d, i) => (
-                  <span key={d.id} className="flex items-center gap-1">
-                    {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
-                    <button onClick={() => setSelId(d.id)}
-                      className={`font-mono text-xs px-2 py-1 rounded border ${d.id === sel.id ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>
-                      {d.id}
-                    </button>
-                  </span>
+              </CardContent>
+            </Card>
+          )}
+          <Card>
+            <CardHeader className="p-3 pb-2">
+              <CardTitle className="text-sm">Designs</CardTitle>
+              <CardDescription className="text-xs">{designs.length} design{designs.length === 1 ? "" : "s"}, newest last</CardDescription>
+            </CardHeader>
+            <CardContent className="p-2 pt-0">
+              <div className="max-h-[320px] md:max-h-[calc(100dvh-16rem)] overflow-y-auto space-y-1.5 pr-1">
+                {!designs.length && (
+                  <div className="p-3 text-xs text-muted-foreground">
+                    No chassis designs yet. The CAD researcher pushes them to <code className="font-mono">POST /api/cad/designs</code> as they land.
+                  </div>
+                )}
+                {[...designs].reverse().map((d) => (
+                  <button key={d.id} onClick={() => setSelId(d.id)}
+                    className={`w-full text-left rounded-lg border p-2.5 ${sel?.id === d.id ? "border-primary bg-primary/5" : "border-border"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs">{d.id}</span>
+                      <span className="text-[11px] text-muted-foreground shrink-0">
+                        {d.metrics.mass_g != null ? `${Number(d.metrics.mass_g).toFixed(0)} g` : d.glb_url ? `${(d.glb_bytes / 1024).toFixed(0)} KB` : "pending"}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      {d.name && d.name !== d.id ? `${d.name} - ` : ""}{d.parent_id ? `from ${d.parent_id}` : "root"} - {new Date(d.created_at).toLocaleDateString()}
+                    </div>
+                  </button>
                 ))}
-                {children.length > 0 && (
-                  <span className="flex items-center gap-1">
-                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                    {children.map((ch) => (
-                      <button key={ch.id} onClick={() => setSelId(ch.id)}
-                        className="font-mono text-xs px-2 py-1 rounded border border-emerald-400/40 text-emerald-400 hover:bg-emerald-400/10">
-                        {ch.id}
-                      </button>
-                    ))}
-                  </span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* main: chassis viewer + properties */}
+        {sel && (
+          <Card className="min-w-0">
+            <CardHeader className="p-3 md:p-6">
+              <CardTitle className="text-base md:text-lg">{sel.name || sel.id}</CardTitle>
+              <CardDescription className="text-xs md:text-sm">
+                {sel.id} - {new Date(sel.created_at).toLocaleString()} - {(sel.glb_bytes / 1024).toFixed(0)} KB
+                {sel.source ? ` - ${sel.source}` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-3 md:p-6 pt-0 md:pt-0 space-y-4">
+              <div className="h-72 md:h-[52vh]">
+                {sel.glb_url ? (
+                  <CadViewer key={sel.id} url={sel.glb_url} />
+                ) : (
+                  <div className="h-full grid place-items-center rounded-lg border border-dashed border-border text-center p-4">
+                    <div className="text-sm text-muted-foreground">
+                      Geometry pending - snapshot received, GLB not uploaded yet.
+                      {(sel as any).glb_pending_path && (
+                        <div className="font-mono text-[11px] mt-2 break-all">on box: {(sel as any).glb_pending_path}</div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
-            </div>
 
-            {/* metrics */}
-            <div className="grid gap-4 md:grid-cols-2">
-              {(sel.metrics.mass_g != null || sel.metrics.inertia) && (
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">mass properties</div>
-                  <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs md:text-sm">
-                    {sel.metrics.mass_g != null && (
-                      <div className="flex justify-between gap-2">
-                        <dt className="text-muted-foreground">mass</dt>
-                        <dd className="font-mono">{Number(sel.metrics.mass_g).toFixed(1)} g</dd>
-                      </div>
-                    )}
-                    {sel.metrics.inertia && Object.entries(sel.metrics.inertia).map(([k, v]) => (
-                      <div key={k} className="flex justify-between gap-2">
-                        <dt className="text-muted-foreground">{k}</dt>
-                        <dd className="font-mono">{typeof v === "number" ? v.toExponential(3) : String(v)}</dd>
-                      </div>
-                    ))}
-                  </dl>
+              {/* lineage */}
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">lineage</div>
+                <div className="flex flex-wrap items-center gap-1">
+                  {chain.map((d, i) => (
+                    <span key={d.id} className="flex items-center gap-1">
+                      {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+                      <button onClick={() => setSelId(d.id)}
+                        className={`font-mono text-xs px-2 py-1 rounded border ${d.id === sel.id ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>
+                        {d.id}
+                      </button>
+                    </span>
+                  ))}
+                  {children.length > 0 && (
+                    <span className="flex items-center gap-1">
+                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      {children.map((ch) => (
+                        <button key={ch.id} onClick={() => setSelId(ch.id)}
+                          className="font-mono text-xs px-2 py-1 rounded border border-emerald-400/40 text-emerald-400 hover:bg-emerald-400/10">
+                          {ch.id}
+                        </button>
+                      ))}
+                    </span>
+                  )}
                 </div>
-              )}
-              <MetricGrid title="printability" obj={sel.metrics.printability as Record<string, unknown> | undefined} />
-              <MetricGrid title="FEA" obj={sel.metrics.fea as Record<string, unknown> | undefined} />
-              {Object.entries(sel.metrics)
-                .filter(([k]) => !["mass_g", "inertia", "printability", "fea"].includes(k))
-                .length > 0 && (
-                <MetricGrid title="other metrics" obj={Object.fromEntries(
-                  Object.entries(sel.metrics).filter(([k]) => !["mass_g", "inertia", "printability", "fea"].includes(k)))} />
-              )}
-            </div>
-            {sel.notes && <p className="text-xs md:text-sm text-muted-foreground">{sel.notes}</p>}
-          </CardContent>
-        </Card>
-      )}
+              </div>
 
-      <Card>
-        <CardHeader className="p-3 md:p-6"><CardTitle className="text-base md:text-lg">All designs</CardTitle>
-          <CardDescription className="text-xs md:text-sm">{designs.length} design{designs.length === 1 ? "" : "s"}, newest last</CardDescription></CardHeader>
-        <CardContent className="p-3 md:p-6 pt-0 md:pt-0 space-y-2">
-          {designs.map((d) => (
-            <button key={d.id} onClick={() => setSelId(d.id)}
-              className={`w-full text-left rounded-lg border p-3 ${sel?.id === d.id ? "border-primary bg-primary/5" : "border-border"}`}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-sm">{d.id}</span>
-                <span className="text-xs text-muted-foreground">
-                  {d.glb_url ? `${(d.glb_bytes / 1024).toFixed(0)} KB` : "no GLB yet"}
-                  {d.metrics.mass_g != null ? ` - ${Number(d.metrics.mass_g).toFixed(0)} g` : ""}
-                </span>
+              {/* properties, grouped and labeled */}
+              <div className="grid gap-3 md:grid-cols-2">
+                {(sel.metrics.mass_g != null || sel.metrics.inertia) && (
+                  <PropGroup title="mass properties" obj={{
+                    ...(sel.metrics.mass_g != null ? { mass: `${Number(sel.metrics.mass_g).toFixed(1)} g` } : {}),
+                    ...(sel.metrics.inertia ? { inertia: sel.metrics.inertia } : {}),
+                  }} />
+                )}
+                <PropGroup title="printability" obj={sel.metrics.printability as Record<string, unknown> | undefined} />
+                <PropGroup title="FEA" obj={sel.metrics.fea as Record<string, unknown> | undefined} />
+                {Object.keys(otherMetrics).length > 0 && <PropGroup title="other metrics" obj={otherMetrics} />}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {d.name && d.name !== d.id ? `${d.name} - ` : ""}{d.parent_id ? `derives from ${d.parent_id} - ` : "root design - "}
-                {new Date(d.created_at).toLocaleDateString()}
-              </div>
-            </button>
-          ))}
-        </CardContent>
-      </Card>
+              {sel.notes && <p className="text-xs md:text-sm text-muted-foreground">{sel.notes}</p>}
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

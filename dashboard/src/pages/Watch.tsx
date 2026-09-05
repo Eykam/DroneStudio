@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import WatchScene3D, { CamMode } from "../components/WatchScene3D";
 
 type Scene = {
@@ -378,7 +377,7 @@ function WatchPane({ sourceId, entry, single, subscribe, snapshot }: {
   );
 }
 
-export default function Watch() {
+export default function Watch({ embedded = false }: { embedded?: boolean }) {
   const [registry, setRegistry] = useState<SourceEntry[]>([]);
   const [liveIds, setLiveIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -464,17 +463,17 @@ export default function Watch() {
     });
 
   return (
-    <div className={`bg-[#0b0f14] text-gray-200 flex flex-col ${sel.length <= 1 ? "h-screen overflow-hidden" : "min-h-screen"}`}>
+    <div className={`bg-[#0b0f14] text-gray-200 flex flex-col ${embedded ? (sel.length <= 1 ? "h-[calc(100dvh-10rem)] md:h-[calc(100dvh-9.5rem)] overflow-hidden" : "") : (sel.length <= 1 ? "h-screen overflow-hidden" : "min-h-screen")}`}>
+      {!embedded && (
       <header className="flex items-center justify-between px-4 py-2 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-3">
-          <Link to="/" className="text-sm text-gray-400 hover:text-gray-200">&larr; Dashboard</Link>
           <h1 className="text-sm font-semibold">Live sim watch</h1>
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-block w-2 h-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`} />
           {connected ? "live" : "reconnecting"}
         </div>
-      </header>
+      </header>)}
       <div className="flex gap-2 px-3 py-2 overflow-x-auto border-b border-gray-800 shrink-0">
         {known.map((k) => {
           const on = sel.includes(k.id);

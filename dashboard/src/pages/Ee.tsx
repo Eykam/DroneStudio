@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { ArrowLeft, CircuitBoard, CheckCircle2, XCircle, Star } from "lucide-react";
+import { CircuitBoard, CheckCircle2, XCircle, Star, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import CadViewer from "@/components/CadViewer";
 
+type EeVerify = { kind: string; label?: string; name: string };
 type EeVersion = {
   version: number;
   created_at: string;
@@ -16,8 +16,25 @@ type EeVersion = {
   adopted: boolean;
   notes?: string;
   files: Record<string, string>;
+  verify?: EeVerify[];
 };
 type EeBoard = { id: string; name: string; created_at: string; versions: EeVersion[] };
+
+type EeProgress = {
+  status: string;            // working | done | idle
+  board_id?: string;
+  candidate?: string;
+  base?: string;
+  incumbent?: string;
+  incumbent_score?: number;
+  bar?: number;
+  phase?: string;            // authoring | gates | scoring | publish | done
+  gates?: { gate: string; pass: boolean | null; failures?: string[] }[];
+  score?: number | null;
+  outcome?: string;          // adopted | rejected | gate-fail
+  note?: string;
+  ts?: string;
+};
 
 type Diff = {
   from: number; to: number;
@@ -38,7 +55,17 @@ type Diff = {
 
 const fileUrl = (b: string, v: number, kind: string) =>
   `/api/ee/boards/${b}/versions/${v}/file?kind=${kind}`;
+const verifyUrl = (b: string, v: number, kind: string) =>
+  `/api/ee/boards/${b}/versions/${v}/verify?kind=${kind}`;
 
+const ago = (ts?: string) => {
+  if (!ts) return "";
+  const s = Math.max(0, (Date.now() - new Date(ts).getTime()) / 1000);
+  if (s < 60) return `${Math.floor(s)}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
 
 function PanZoom({ children, wrapClass }: { children: React.ReactNode; wrapClass: string }) {
   // wheel zoom around cursor + pointer-drag pan + pinch + double-click reset.
@@ -146,15 +173,90 @@ function ArtworkDiff({ board, from, to, layers }: { board: string; from: number;
   );
 }
 
+// Live round card: what the EE loop is doing RIGHT NOW - candidate in flight,
+// gates as they land, score against the adoption bar when it lands.
+function LiveRound({ prog }: { prog: EeProgress | null }) {
+  if (!prog || !prog.candidate) {
+    return (
+      <Card>
+        <CardHeader className="p-3 pb-1"><CardTitle className="text-sm">Research loop</CardTitle></CardHeader>
+        <CardContent className="p-3 pt-1 text-xs text-muted-foreground">No round state posted yet.</CardContent>
+      </Card>
+    );
+  }
+  const working = prog.status === "working";
+  const outcomeCls = prog.outcome === "adopted" ? "text-emerald-400" : prog.outcome ? "text-amber-400" : "";
+  return (
+    <Card className={working ? "border-primary/50" : ""}>
+      <CardHeader className="p-3 pb-1">
+        <CardTitle className="text-sm flex items-center gap-2">
+          {working && (
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
+            </span>
+          )}
+          {working ? "Round in flight" : "Last round"}
+          <span className="font-mono font-normal text-xs text-muted-foreground">{prog.candidate}</span>
+        </CardTitle>
+        <CardDescription className="text-xs">
+          {prog.phase ?? prog.status}{prog.ts ? ` - ${ago(prog.ts)}` : ""}
+          {prog.outcome && <span className={`ml-1 font-medium ${outcomeCls}`}>{prog.outcome}</span>}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-3 pt-1 space-y-2 text-xs">
+        {(prog.incumbent || prog.bar != null) && (
+          <div className="text-muted-foreground">
+            incumbent <span className="font-mono text-foreground">{prog.incumbent ?? "-"}</span>
+            {prog.incumbent_score != null && <span className="font-mono"> {prog.incumbent_score.toFixed(1)}</span>}
+            {prog.bar != null && <> - adoption bar <span className="font-mono text-foreground">{prog.bar.toFixed(1)}</span></>}
+          </div>
+        )}
+        {prog.base && prog.base !== prog.incumbent && (
+          <div className="text-muted-foreground">authoring base <span className="font-mono text-foreground">{prog.base}</span></div>
+        )}
+        {!!prog.gates?.length && (
+          <ul className="space-y-1">
+            {prog.gates.map((g) => (
+              <li key={g.gate} className="flex items-start gap-1.5">
+                {g.pass === null || g.pass === undefined
+                  ? <Loader2 className="h-3.5 w-3.5 mt-px animate-spin text-muted-foreground" />
+                  : g.pass ? <CheckCircle2 className="h-3.5 w-3.5 mt-px text-green-500" />
+                           : <XCircle className="h-3.5 w-3.5 mt-px text-red-500" />}
+                <span>
+                  {g.gate}
+                  {!!g.failures?.length && <span className="block text-red-400/80 font-mono text-[11px]">{g.failures[0]}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {prog.score != null && (
+          <div>
+            score <span className={`font-mono ${prog.bar != null && prog.score > prog.bar ? "text-emerald-400" : ""}`}>{prog.score.toFixed(1)}</span>
+            {prog.bar != null && <span className="text-muted-foreground font-mono"> / {prog.bar.toFixed(1)}</span>}
+          </div>
+        )}
+        {prog.note && <div className="text-muted-foreground">{prog.note}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Ee() {
   const boards = useQuery({
     queryKey: ["ee-boards"],
     queryFn: async () => (await (await fetch("/api/ee/boards", { credentials: "same-origin" })).json()).boards as EeBoard[],
     refetchInterval: 30_000,
   });
+  const progQ = useQuery({
+    queryKey: ["ee-progress"],
+    queryFn: async () => (await (await fetch("/api/ee/progress", { credentials: "same-origin" })).json()) as { current: EeProgress | null; rounds: EeProgress[] },
+    refetchInterval: 10_000,
+  });
   const [boardId, setBoardId] = useState<string | null>(null);
   const [ver, setVer] = useState<number | null>(null);
-  const [tab, setTab] = useState<"sch" | "pcb" | "3d" | "diff">("sch");
+  const [tab, setTab] = useState<"sch" | "pcb" | "3d" | "diff" | "tests">("sch");
   const [diffFrom, setDiffFrom] = useState<number | null>(null);
 
   const board = (boards.data || []).find((b) => b.id === boardId) || (boards.data || [])[0] || null;
@@ -174,12 +276,12 @@ export default function Ee() {
   });
 
   return (
-    <div className="min-h-screen p-4 md:p-6 space-y-4 max-w-6xl mx-auto">
-      <header className="flex items-center justify-between gap-2">
-        <h1 className="text-lg md:text-xl font-semibold flex items-center gap-2">
-          <CircuitBoard className="h-5 w-5" /> EE - versioned boards
+    <div className="space-y-4">
+      <header>
+        <h1 className="text-xl md:text-2xl font-bold tracking-tight flex items-center gap-2">
+          <CircuitBoard className="h-5 w-5 text-primary" /> EE
         </h1>
-        <Link to="/"><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /> Back</Button></Link>
+        <p className="text-xs md:text-sm text-muted-foreground mt-1">versioned board designs, live research rounds, verification tests</p>
       </header>
 
       {boards.data && boards.data.length === 0 && (
@@ -189,20 +291,46 @@ export default function Ee() {
         </CardContent></Card>
       )}
 
-      {boards.data && boards.data.length > 0 && (
-        <div className="flex gap-2 flex-wrap">
-          {boards.data.map((b) => (
-            <Button key={b.id} size="sm" variant={b.id === board?.id ? "default" : "outline"}
-              onClick={() => { setBoardId(b.id); setVer(null); setDiffFrom(null); }}>
-              {b.name} <span className="text-xs opacity-70">v{b.versions.length}</span>
-            </Button>
-          ))}
+      <div className="md:grid md:grid-cols-[300px_minmax(0,1fr)] md:gap-4 md:items-start space-y-4 md:space-y-0">
+        {/* sidebar */}
+        <div className="space-y-3 md:sticky md:top-6">
+          <LiveRound prog={progQ.data?.current ?? null} />
+          {boards.data && boards.data.length > 0 && (
+            <Card>
+              <CardHeader className="p-3 pb-2">
+                <CardTitle className="text-sm">Boards & versions</CardTitle>
+              </CardHeader>
+              <CardContent className="p-2 pt-0">
+                <div className="max-h-[280px] md:max-h-[calc(100dvh-26rem)] overflow-y-auto space-y-1.5 pr-1">
+                  {boards.data.map((b) => (
+                    <div key={b.id}>
+                      <button onClick={() => { setBoardId(b.id); setVer(null); setDiffFrom(null); }}
+                        className={`w-full text-left rounded-lg border p-2.5 ${b.id === board?.id ? "border-primary bg-primary/5" : "border-border"}`}>
+                        <div className="text-xs font-medium">{b.name}</div>
+                        <div className="text-[11px] text-muted-foreground">{b.versions.length} version{b.versions.length === 1 ? "" : "s"}</div>
+                      </button>
+                      {b.id === board?.id && (
+                        <div className="flex gap-1 flex-wrap mt-1.5 px-1">
+                          {[...b.versions].reverse().map((v) => (
+                            <button key={v.version} onClick={() => { setVer(v.version); setDiffFrom(null); }}
+                              className={`font-mono text-[11px] px-1.5 py-0.5 rounded border ${
+                                v.version === version?.version ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>
+                              v{v.version}{v.adopted && " *"}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
-      )}
 
-      {board && version && (
-        <>
-          <Card>
+        {/* main board view */}
+        {board && version && (
+          <Card className="min-w-0">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-3 flex-wrap">
                 <span>{board.name} - v{version.version}</span>
@@ -225,11 +353,11 @@ export default function Ee() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex gap-1 items-center flex-wrap">
-                {(["sch", "pcb", "3d", "diff"] as const).map((t) => (
+                {(["sch", "pcb", "3d", "diff", "tests"] as const).map((t) => (
                   <Button key={t} size="sm" variant={tab === t ? "default" : "ghost"}
                     onClick={() => setTab(t)}
-                    disabled={(t === "sch" && !version.files.sch_svg) || (t === "pcb" && !version.files.pcb_svg) || (t === "3d" && !version.files.glb) || (t === "diff" && !prev)}>
-                    {t === "sch" ? "Schematic" : t === "pcb" ? "Layout" : t === "3d" ? "3D" : "Diff"}
+                    disabled={(t === "sch" && !version.files.sch_svg) || (t === "pcb" && !version.files.pcb_svg) || (t === "3d" && !version.files.glb) || (t === "diff" && !prev) || (t === "tests" && !version.verify?.length)}>
+                    {t === "sch" ? "Schematic" : t === "pcb" ? "Layout" : t === "3d" ? "3D" : t === "diff" ? "Diff" : `Tests${version.verify?.length ? ` (${version.verify.length})` : ""}`}
                   </Button>
                 ))}
                 {tab === "diff" && prev && (
@@ -253,6 +381,26 @@ export default function Ee() {
               )}
               {tab === "3d" && version.files.glb && (
                 <div className="h-[60vh]"><CadViewer url={fileUrl(board.id, version.version, "glb")} /></div>
+              )}
+              {tab === "tests" && (
+                <div className="space-y-3">
+                  {!version.verify?.length && (
+                    <p className="text-xs text-muted-foreground">
+                      No verification artifacts on this version yet. SI/PI runs (S-parameter plots, impedance,
+                      field overlays, power-tree drops) attach here as the verification pipeline posts them.
+                    </p>
+                  )}
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {(version.verify ?? []).map((vf) => (
+                      <figure key={vf.kind} className="space-y-1 min-w-0">
+                        <figcaption className="text-xs text-muted-foreground">{vf.label || vf.kind}</figcaption>
+                        <PanZoom wrapClass="w-full">
+                          <img src={verifyUrl(board.id, version.version, vf.kind)} alt={vf.label || vf.kind} className="w-full rounded" draggable={false} />
+                        </PanZoom>
+                      </figure>
+                    ))}
+                  </div>
+                </div>
               )}
               {tab === "diff" && diff.data && (
                 <div className="grid md:grid-cols-2 gap-3 text-xs">
@@ -279,7 +427,7 @@ export default function Ee() {
                     rows={diff.data.fp_moved.map((f) => `${f.ref}: ${f.from.x},${f.from.y} -> ${f.to.x},${f.to.y}`)} tone="text-yellow-500" />
                   <DiffList title={`Rotated / flipped (${diff.data.fp_diff.fp_rotated.length + diff.data.fp_diff.fp_flipped.length})`}
                     rows={[...diff.data.fp_rotated.map((f) => `${f.ref}: rot ${f.from} -> ${f.to}`),
-                           ...diff.data.fp_diff.fp_flipped.map((f) => `${f.ref}: ${f.from} -> ${f.to} side`)]} tone="text-yellow-500" />
+                           ...diff.data.fp_flipped.map((f) => `${f.ref}: ${f.from} -> ${f.to} side`)]} tone="text-yellow-500" />
                 </div>
               )}
               {tab === "diff" && diff.data && diff.data.added_comps.length + diff.data.removed_comps.length + diff.data.changed_comps.length + diff.data.added_nets.length + diff.data.removed_nets.length === 0 && (
@@ -287,20 +435,8 @@ export default function Ee() {
               )}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Versions</CardTitle></CardHeader>
-            <CardContent className="flex gap-2 flex-wrap">
-              {[...board.versions].reverse().map((v) => (
-                <Button key={v.version} size="sm" variant={v.version === version.version ? "default" : "outline"}
-                  onClick={() => { setVer(v.version); setDiffFrom(null); }}>
-                  v{v.version} {v.adopted && "*"}
-                </Button>
-              ))}
-            </CardContent>
-          </Card>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

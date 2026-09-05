@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login } from "@/api";
+import { BRAND } from "@/brand";
 
 export default function Login() {
   const [pw, setPw] = useState("");
@@ -28,7 +29,7 @@ export default function Login() {
     <div className="min-h-screen grid place-items-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>DroneStudio Auto-Researcher</CardTitle>
+          <CardTitle>{BRAND}</CardTitle>
           <CardDescription>Private dashboard - enter your password</CardDescription>
         </CardHeader>
         <CardContent>

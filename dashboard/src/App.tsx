@@ -2,11 +2,12 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense } from "react";
 import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
+import Home from "./pages/Home";
+import Shell from "./components/Shell";
 
+const Sim = lazy(() => import("./pages/Sim"));
 const Cad = lazy(() => import("./pages/Cad"));
 const Ee = lazy(() => import("./pages/Ee"));
-const Watch = lazy(() => import("./pages/Watch"));
 
 export default function App() {
   const me = useQuery({
@@ -18,19 +19,17 @@ export default function App() {
     refetchInterval: 60_000,
   });
   if (me.isLoading) return <div className="min-h-screen grid place-items-center text-muted-foreground">Loading...</div>;
+  const authed = (el: React.ReactNode, fallback?: string) =>
+    me.data ? <Shell><Suspense fallback={fallback ? <div className="min-h-[40vh] grid place-items-center text-muted-foreground">{fallback}</div> : null}>{el}</Suspense></Shell>
+            : <Navigate to="/login" />;
   return (
     <Routes>
       <Route path="/login" element={me.data ? <Navigate to="/" /> : <Login />} />
-      <Route path="/" element={me.data ? <Dashboard /> : <Navigate to="/login" />} />
-      <Route path="/watch" element={me.data
-          ? <Suspense fallback={null}><Watch /></Suspense>
-          : <Navigate to="/login" />} />
-      <Route path="/cad" element={me.data
-        ? <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Loading CAD viewer...</div>}><Cad /></Suspense>
-        : <Navigate to="/login" />} />
-      <Route path="/ee" element={me.data
-        ? <Suspense fallback={<div className="min-h-screen grid place-items-center text-muted-foreground">Loading EE viewer...</div>}><Ee /></Suspense>
-        : <Navigate to="/login" />} />
+      <Route path="/" element={authed(<Home />)} />
+      <Route path="/sim" element={authed(<Sim />, "Loading SIM...")} />
+      <Route path="/watch" element={<Navigate to="/sim" replace />} />
+      <Route path="/cad" element={authed(<Cad />, "Loading CAD viewer...")} />
+      <Route path="/ee" element={authed(<Ee />, "Loading EE viewer...")} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );

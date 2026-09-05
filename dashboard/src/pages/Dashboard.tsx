@@ -1,12 +1,10 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { fetchState, logout, type ArchiveRecord } from "@/api";
+import { fetchState, type ArchiveRecord } from "@/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { FlaskConical, LogOut, Box, Play, CircuitBoard  } from "lucide-react";
 
 const MUTATOR_META: Record<string, { label: string; cls: string }> = {
   codex: { label: "ChatGPT", cls: "text-emerald-400" },
@@ -45,8 +43,6 @@ function ScenarioBar({ label, v }: { label: string; v: number | null }) {
 }
 
 export default function Dashboard() {
-  const nav = useNavigate();
-  const qc = useQueryClient();
   const { data, error } = useQuery({ queryKey: ["state"], queryFn: fetchState, refetchInterval: 10_000 });
   const currQ = useQuery({
     queryKey: ["curriculum-progress"],
@@ -117,34 +113,7 @@ export default function Dashboard() {
   const recent = [...records].reverse().slice(0, 60);
 
   return (
-    <div className="min-h-screen p-3 md:p-8 max-w-6xl mx-auto space-y-4 md:space-y-6">
-      <header className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="text-base md:text-2xl font-bold tracking-tight flex items-center gap-2">
-            <FlaskConical className="h-5 w-5 md:h-6 md:w-6 text-primary shrink-0" />
-            <span>DroneStudio Auto-Researcher</span>
-          </h1>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1">
-            Live loop state - auto-refresh 10s - updated {updated}
-          </p>
-        </div>
-        <div className="flex items-center gap-1 shrink-0 mt-1">
-          <Link to="/watch">
-            <Button variant="ghost" size="sm"><Play className="h-4 w-4" /> <span className="hidden sm:inline">Watch</span></Button>
-          </Link>
-          <Link to="/cad">
-            <Button variant="ghost" size="sm"><Box className="h-4 w-4" /> <span className="hidden sm:inline">CAD</span></Button>
-          </Link>
-          <Link to="/ee">
-            <Button variant="ghost" size="sm"><CircuitBoard className="h-4 w-4" /> <span className="hidden sm:inline">EE</span></Button>
-          </Link>
-          <Button variant="ghost" size="sm"
-            onClick={async () => { await logout(); await qc.invalidateQueries({ queryKey: ["me"] }); nav("/login"); }}>
-            <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign out</span>
-          </Button>
-        </div>
-      </header>
-
+    <div className="space-y-4 md:space-y-6">
       <Card>
         <CardHeader className="p-3 md:p-6 pb-2 md:pb-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">

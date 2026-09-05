@@ -593,6 +593,7 @@ app.get("/api/series", (c) => c.json(seriesStore));
 // renders for the viewer, gate verdicts and scores. Bearer-token ingest,
 // session-authed reads. History is append-only: a version, once published,
 // is never rewritten (a re-publish of the same version is a conflict).
+type EeVerify = { kind: string; label?: string; name: string };
 type EeVersion = {
   version: number;
   created_at: string;
@@ -603,6 +604,7 @@ type EeVersion = {
   adopted: boolean;
   notes?: string;
   files: Record<string, string>; // kind -> stored filename
+  verify?: EeVerify[];           // verification visuals attached post-publish (SI/PI)
 };
 type EeBoard = { id: string; name: string; created_at: string; versions: EeVersion[] };
 
@@ -816,6 +818,114 @@ app.get("/api/ee/boards/:id/diff", async (c) => {
 });
 
 app.use("/*", serveStatic({ root: "./dist" }));
+
+// --- EE research loop live progress -----------------------------------------
+// Box3's loop posts the round in flight (candidate, phase, gates as they
+// land, score vs the adoption bar) so the EE page shows work BEFORE a
+// candidate is adopted or rejected. Small ring of recent rounds for context.
+type EeProgress = {
+  status: string; candidate?: string; base?: string; incumbent?: string;
+  incumbent_score?: number; bar?: number; phase?: string;
+  gates?: { gate: string; pass: boolean | null; failures?: string[] }[];
+  score?: number | null; outcome?: string; note?: string; ts?: string;
+};
+let eeProgress: EeProgress | null = null;
+let eeRounds: EeProgress[] = [];
+const EE_PROGRESS_FILE = `${DATA_DIR}/ee_progress.json`;
+(async () => {
+  try {
+    const f = Bun.file(EE_PROGRESS_FILE);
+    if (await f.exists()) {
+      const d = await f.json();
+      eeProgress = d.current ?? null;
+      eeRounds = Array.isArray(d.rounds) ? d.rounds : [];
+    }
+  } catch {}
+})();
+async function saveEeProgress() {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = EE_PROGRESS_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify({ current: eeProgress, rounds: eeRounds }));
+  await fs.rename(tmp, EE_PROGRESS_FILE);
+}
+
+app.post("/api/ee/progress", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.status !== "string") {
+    return c.json({ error: "bad request: body must be an object with a status field" }, 400);
+  }
+  const prevCandidate = eeProgress?.candidate;
+  eeProgress = { ...body, ts: new Date().toISOString() };
+  // a finished round (or a superseded candidate) moves into the ring
+  if (body.status !== "working" || (prevCandidate && prevCandidate !== body.candidate)) {
+    if (prevCandidate) {
+      eeRounds.push({ ...eeProgress, candidate: prevCandidate } as EeProgress);
+    }
+    if (body.status !== "working") eeRounds.push(eeProgress);
+    eeRounds = eeRounds.slice(-30);
+  }
+  await saveEeProgress();
+  return c.json({ ok: true });
+});
+
+app.get("/api/ee/progress", eeAuthed, (c) => c.json({ current: eeProgress, rounds: eeRounds }));
+
+// --- EE verification visuals --------------------------------------------------
+// SI/PI artifacts (S-parameter plots, impedance, delay, overlays) attach to a
+// PUBLISHED version after the fact - test evidence, not design content, so
+// version immutability is preserved (only the verify list is appended).
+const VERIFY_CAP = 16 * 1024 * 1024;
+app.post("/api/ee/boards/:id/versions/:v/verify", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const id = safeId(c.req.param("id"));
+  const v = Number(c.req.param("v"));
+  if (!id || !Number.isInteger(v)) return c.json({ error: "bad request" }, 400);
+  let form: any;
+  try { form = await c.req.parseBody(); } catch { return c.json({ error: "expected multipart/form-data" }, 400); }
+  const kind = String(form["kind"] || "");
+  if (!/^[a-z0-9_]{1,40}$/.test(kind)) return c.json({ error: "kind must match ^[a-z0-9_]{1,40}$" }, 400);
+  const f = form["file"];
+  if (!(f instanceof File)) return c.json({ error: "file field required" }, 400);
+  if (f.size > VERIFY_CAP) return c.json({ error: "over size cap" }, 400);
+  const ext = f.type === "image/svg+xml" ? ".svg" : f.type === "image/jpeg" ? ".jpg" : ".png";
+  const boards = await loadEe();
+  const board = boards.find((b) => b.id === id);
+  const ver = board?.versions.find((x) => x.version === v);
+  if (!board || !ver) return c.json({ error: "version not found" }, 404);
+  const fs = await import("node:fs/promises");
+  const dir = `${EE_DIR}/${id}/v${v}`;
+  await fs.mkdir(dir, { recursive: true });
+  const name = `verify_${kind}${ext}`;
+  await Bun.write(`${dir}/${name}`, f);
+  ver.verify = (ver.verify ?? []).filter((x) => x.kind !== kind);
+  ver.verify.push({ kind, label: typeof form["label"] === "string" ? String(form["label"]).slice(0, 200) : undefined, name });
+  await saveEe(boards);
+  return c.json({ ok: true, kind });
+});
+
+app.get("/api/ee/boards/:id/versions/:v/verify", eeAuthed, async (c) => {
+  const id = safeId(c.req.param("id"));
+  const v = Number(c.req.param("v"));
+  const kind = String(c.req.query("kind") || "");
+  if (!id || !Number.isInteger(v) || !/^[a-z0-9_]{1,40}$/.test(kind)) return c.json({ error: "bad request" }, 400);
+  const ver = (await loadEe()).find((b) => b.id === id)?.versions.find((x) => x.version === v);
+  const entry = ver?.verify?.find((x) => x.kind === kind);
+  if (!entry) return c.json({ error: "not found" }, 404);
+  const f = Bun.file(`${EE_DIR}/${id}/v${v}/${entry.name}`);
+  if (!(await f.exists())) return c.json({ error: "artifact missing" }, 404);
+  const mime = entry.name.endsWith(".svg") ? "image/svg+xml" : entry.name.endsWith(".jpg") ? "image/jpeg" : "image/png";
+  return new Response(f, { headers: { "content-type": mime } });
+});
+
 app.get("*", serveStatic({ root: "./dist", path: "index.html" })); // SPA fallback
 
 console.log(`dashboard listening on :${PORT}`);
