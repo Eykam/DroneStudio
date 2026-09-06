@@ -1,0 +1,38 @@
+{
+  "schema": "dronestudio.harness/1.0",
+  "id": "ee-flight_to_ee-tof_xshut_ring",
+  "version": 1,
+  "boards": ["ee-flight", "ee-tof"],
+  "topology": "star (8 remote carriers, one harness each; user-locked: XSHUT address-select chain on the main board, no hub board, no mux chip)",
+  "endpoints": [
+    {"board": "ee-flight", "connector": "tof_ring_header", "ref": "J-TOF (SB5)",
+     "pins": [
+       {"pos": 1, "name": "3V3", "net": "+3V3", "wire_awg": 28},
+       {"pos": 2, "name": "GND", "net": "GND", "wire_awg": 28},
+       {"pos": 3, "name": "SCL", "net": "TOF_SCL", "wire_awg": 28},
+       {"pos": 4, "name": "SDA", "net": "TOF_SDA", "wire_awg": 28},
+       {"pos": 5, "name": "XSHUT[n]", "net": "TOF_XSHUT[n]", "wire_awg": 28},
+       {"pos": 6, "name": "INT[n]", "net": "TOF_INT[n]", "wire_awg": 28}
+     ]},
+    {"board": "ee-tof", "connector": "carrier_header", "ref": "J1 (per carrier, x8)",
+     "pins": [
+       {"pos": 1, "name": "3V3", "net": "+3V3"},
+       {"pos": 2, "name": "GND", "net": "GND"},
+       {"pos": 3, "name": "SCL", "net": "SCL"},
+       {"pos": 4, "name": "SDA", "net": "SDA"},
+       {"pos": 5, "name": "XSHUT", "net": "XSHUT"},
+       {"pos": 6, "name": "INT", "net": "INT"}
+     ]}
+  ],
+  "runs": [
+    {"net": "+3V3", "note": "shared rail to all 8 carriers"},
+    {"net": "GND", "note": "shared return; star point at main board"},
+    {"net": "TOF_SCL", "note": "shared bus; derate to <=100kHz I2C or I3C push-pull"},
+    {"net": "TOF_SDA", "note": "shared bus; series-R at driver"},
+    {"net": "TOF_XSHUT[1..8]", "note": "one per carrier - address-select chain"},
+    {"net": "TOF_INT[1..8]", "note": "one per carrier, optional"}
+  ],
+  "length_budget_mm": {"stub_max": 200, "note": "10-20cm center-to-shell stubs"},
+  "routing": {"style": "star", "owner_ME": "waypoints + containment", "notes": "route off ESC phase-node copper; see FLIGHT_PLAN EM scope"},
+  "em": {"bus_speed_limit": "I2C <=100kHz or I3C push-pull", "keep_out": ">=5mm from ESC SW nodes"}
+}
