@@ -251,3 +251,13 @@ commit pressure: sustained skim below ~0.15m without touchdown ends the
 episode with a penalty worse than a good-faith touchdown attempt, or a
 shaping bonus for plane-crossing within radius. Touching reward/scenario
 logic only - 500Hz physics untouched.
+
+## Vision Phase 1 (learned depth+seg) - v1 COMPLETE (2026-09-05 9:15 PM)
+
+30,720-frame ray-caster GT dataset (640 scenes, split by scene);
+1.10M-param multi-task UNet (vis_train.py). Held-out TEST (64 scenes):
+depth MAE 0.598m / RMSE 1.05m / delta<1.25 0.968; seg mIoU 0.9971
+(all classes >= 0.99). Latency 11.8ms single-core server CPU (proxy,
+not Pi 5). Dashboard /vision page live (poster: vis_dashboard_streamer.py).
+Late-run depth oscillation observed (best ep20 kept); next iter:
+sky mask + lower final lr. Sim2real caveat stands (primitives only).

@@ -131,3 +131,41 @@ metric (pad-relative dxz, alt), which matches the depth/seg renderer's
 metric output (1950mm from 2m verified). A vision-based pad detector can
 later replace the simulator's privileged dxz at the same boundary without
 changing the module's control law.
+
+## Learned vision workstream (user-directed 2026-09-05 8:15 PM)
+
+Direction (his words): learn depth + segmentation; end goal is SLAM
+on-device, with SLAM issuing setpoints the trained nav policy executes.
+Settles classical-vs-learned: learned, distilled from ray-caster GT.
+
+Phase 1 - learned depth+seg (v1 COMPLETE 9:15 PM):
+- Data: autoresearch/vis_gen_dataset.py - drives dronestudio-headless
+  JSONL (reset scene spec + render per pose). 30,720 frames @128x96,
+  640 scenes, split BY SCENE (512/64/64 train/val/test).
+  Gotchas encoded in-code: render yaw/pitch are RADIANS; seg classes
+  0 sky, 1 ground, 2 obstacle, 3 pad (probe-verified).
+- Model: autoresearch/vis_train.py - 1.10M-param multi-task UNet,
+  log-depth L1 + weighted 4-class CE, CPU torch (/workspace/venv-vision).
+- Held-out TEST (64 scenes, autoresearch/vis_eval.py): depth MAE 0.598m,
+  RMSE 1.05m, delta<1.25 0.968; seg mIoU 0.9971 (all classes >= 0.99).
+  val ~= test: no overfit, scene split held.
+- Latency: 11.8ms single-core server CPU (~85 fps). PROXY - not a Pi 5
+  measurement; benchmark on-device before any real-time claim.
+- Live view: dashboard /vision page (metrics curves + GT-vs-prediction
+  panels), fed by autoresearch/vis_dashboard_streamer.py - a log tailer +
+  checkpoint watcher that never touches the training process.
+- Known issue: late-epoch val depth oscillation (ep 23-24 collapse to
+  MAE ~6m while the ep-20 best sits at 0.6m). Next iteration: sky as a
+  separate classification mask so regression fits finite depth only;
+  lower final lr.
+- Sim2real: trained on analytic primitives; will NOT transfer to real
+  camera imagery without texture/lighting domain randomization
+  (SceneDistribution has the knobs; the rasterizer does not implement
+  them yet) plus real-data fine-tuning.
+
+Phase 2 - SLAM (next): monocular VO on learned metric depth + IMU
+fusion, evaluated vs sim GT trajectory (ATE/RPE); then mapping and
+goal/setpoint generation.
+Phase 3 - setpoint interface: SLAM pose + goal into the existing hybrid
+policy (learned goto/hover + scripted land module unchanged); on-device
+packaging last.
