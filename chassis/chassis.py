@@ -1,4 +1,4 @@
-"""Twin-arch structural cabin over a continuous, internally seated sensor hull.
+"""Swept six-facet arm monocoques with thin webs and a narrow structural crown.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -125,38 +125,51 @@ def build_chassis(p: ChassisParams) -> b.Part:
                   if 48.0 < x < 132.0 else 0.0)
         # The corrected 12.83 x 6.10 mm module window reaches slightly
         # farther down and sideways than the earlier optical package. A
-        # local 0.9 mm outward bow carries the closed spar past its lower
+        # local 1.9 mm outward bow carries the closed spar past its lower
         # corner; no arm is slit and the main-shell aperture stays minimal.
-        window_bypass = (0.9*math.sin(math.pi*(x-101.0)/30.0)**2
+        window_bypass = (1.9*math.sin(math.pi*(x-101.0)/30.0)**2
                          if 101.0 < x < 131.0 else 0.0)
         return (-p.arm_sweep_mm*math.sin(math.pi*x/p.arm_length_mm)
                 -bypass-window_bypass)
 
-    def section_wire(x, center, width, height, inner=False):
-        """Five-facet closed spar with an unbridged ridge and broad landing keel."""
-        root_blend = max(0.0, min(1.0, (75.0-x)/30.0))
-        wall = p.arm_rib_thickness_mm + 0.10*root_blend
+    def spar_profile(x, width, height):
+        """Six-facet section with a printable narrow crown and wide keel."""
+        transition = max(0.0,min(1.0,(x-75.0)/23.0))
         half = width/2
-        keel = max(p.arm_crown_width_mm/2, 0.52223*half)
-        # The broad shoulder moves upward into the lateral load path; two
-        # continuous pitched webs close at a ridge instead of a flat crown.
-        # That roof needs no internal bridge. Spanwise depth and plan taper
-        # recover vertical stiffness, while the broad keel prints on the bed.
-        # Lower the shoulder at the shallow motor end so even that roof
-        # retains the explicit >45-degree support-free slope constraint.
-        shoulder_z = min(0.58484*height,
-                         height-p.arm_roof_slope*half)
-        points = [(-keel,0),(keel,0),(half,shoulder_z),
-                  (0,height),(-half,shoulder_z)]
+        keel = max(p.arm_crown_width_mm/2, 0.60*half)
+        crown = 1.6-0.4*transition
+        shoulder = min(0.66*height, height-p.arm_roof_slope*(half-crown))
+        return [(-keel,0),(keel,0),(half,shoulder),
+                (crown,height),(-crown,height),(-half,shoulder)]
+
+    def section_wire(x, center, width, height, inner=False):
+        """Offset swept spar faces in 3D, including their spanwise gradients."""
+        points = spar_profile(x,width,height)
         if inner:
-            # Offset every face in its local normal; the extra 3.5% preserves
-            # the minimum gauge through the longitudinal taper and sweep.
-            gauge = wall*1.035
+            root_blend = max(0.0,min(1.0,(75.0-x)/30.0))
+            wall = max(1.22,p.arm_rib_thickness_mm-0.13)+0.10*root_blend
+            # The section's YZ normal alone underestimates wall thickness on
+            # the optical bypass. Include both adjacent loft spans and both
+            # endpoints of each face, then miter those true normal offsets.
+            # Only swept/tapered faces receive this extra material; the keel
+            # and narrow crown keep their minimum printable normal gauge.
+            neighbors = []
+            for left,right in zip(tube_sections,tube_sections[1:]):
+                if left[0]-1e-7 <= x <= right[0]+1e-7:
+                    neighbors.extend(n for n in (left,right) if abs(n[0]-x)>1e-7)
             lines = []
-            for (y0,z0),(y1,z1) in zip(points,points[1:]+points[:1]):
+            for index,((y0,z0),(y1,z1)) in enumerate(zip(points,points[1:]+points[:1])):
                 dy,dz = y1-y0,z1-z0
                 length = math.hypot(dy,dz)
                 ny,nz = -dz/length,dy/length
+                gradient = 0.0
+                for nx,ncenter,nwidth,nheight in neighbors:
+                    other = spar_profile(nx,nwidth,nheight)
+                    for j in (index,(index+1)%len(points)):
+                        delta_y = ncenter+other[j][0]-center-points[j][0]
+                        delta_z = other[j][1]-points[j][1]
+                        gradient = max(gradient,abs((ny*delta_y+nz*delta_z)/(nx-x)))
+                gauge = wall*max(1.035,1.01*math.sqrt(1+gradient*gradient))
                 lines.append((ny,nz,ny*y0+nz*z0+gauge))
             inset = []
             for (ay,az,ac),(by,bz,bc) in zip(lines[-1:]+lines[:-1],lines):
@@ -219,6 +232,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # and the optical bypass, tapering back to the original shallow
             # outer span before it enters the bottom of the optical window.
             height *= 1.0+0.16*max(0.0,min(1.0,(0.70-frac)/0.20))
+            # Trade a little apex height for a broader load-bearing crown;
+            # raised shoulders recover stiffness while reducing surface area.
+            height *= 0.95
+            free_span = max(0.0,min(1.0,(x-75.0)/23.0))
+            width *= 1.0-0.04*free_span
             if frac == 1.0:
                 width, height = p.arm_width_mm, p.arm_tip_height_mm
             tube_sections.append((x, sweep_center(x), width, height))
