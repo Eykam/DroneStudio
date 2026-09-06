@@ -133,10 +133,6 @@ LIBRARY = {
     "battery": Component(
         "CNHL Black Series 1300mAh 14.8V 4S 100C (stock 1301004BK)", 163.0, (0.074, 0.034, 0.0335), "box", "deck",
         "user-named battery 2026-09-06. Manufacturer specs: 33.5x34x74mm, 163g incl. wire+connector, XT60 + JST-XH balance, 12AWG (https://chinahobbyline.com/products/cnhl-black-series-1300mah-14-8v-4s-100c-lipo-battery-with-xt60-plug; vendor tolerance +/-1-5mm, +/-5g). Replaces 180g Tattu-class estimate."),
-    "pi_zero_2w": Component(
-        "Raspberry Pi Zero 2W", 11.0, (0.065, 0.030, 0.005), "box", "nose",
-        "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/",
-        step_path="parts/pizero2w.step"),  # GrabCAD community w/ 40-pin header, bbox 65.8x30.6x11.5mm - https://grabcad.com/library/raspberry-pi-zero-2-w-with-40-pin-male-connector-1
     "pi_camera_3": Component(
         "Raspberry Pi Camera Module 3", 4.0, (0.025, 0.024, 0.012), "box", "nose",
         "https://pip-assets.raspberrypi.com/categories/1207-design-files/documents/RP-008154-DS-1-camera-module-3-step.zip",
@@ -182,7 +178,6 @@ def _apply_orientation(cname, sh):
 DEFAULT_PLACEMENT = {
     "fc_esc_stack": [0.0, 0.0, 0.016],
     "battery": [0.0, 0.0, 0.045],
-    "pi_zero_2w": [0.030, -0.030, 0.010],
     "pi_camera_3#left": [0.083, -0.028, 0.002],  # user directive 2026-09-05: +4mm to nose apertures (was 0.079)
     "pi_camera_3#right": [0.083, 0.028, 0.002],
     "mpu9250": [0.0, 0.0, 0.022],
