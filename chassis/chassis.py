@@ -1,4 +1,4 @@
-"""Continuous enclosure with internal ToF seats and minimal optical apertures.
+"""Twin-arch structural cabin over a continuous, internally seated sensor hull.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -123,7 +123,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # spar now passes beside the beam instead of across its lower edge.
         bypass = (15.0*math.sin(math.pi*(x-48.0)/84.0)**2
                   if 48.0 < x < 132.0 else 0.0)
-        return -p.arm_sweep_mm*math.sin(math.pi*x/p.arm_length_mm)-bypass
+        # The corrected 12.83 x 6.10 mm module window reaches slightly
+        # farther down and sideways than the earlier optical package. A
+        # local 0.9 mm outward bow carries the closed spar past its lower
+        # corner; no arm is slit and the main-shell aperture stays minimal.
+        window_bypass = (0.9*math.sin(math.pi*(x-101.0)/30.0)**2
+                         if 101.0 < x < 131.0 else 0.0)
+        return (-p.arm_sweep_mm*math.sin(math.pi*x/p.arm_length_mm)
+                -bypass-window_bypass)
 
     def section_wire(x, center, width, height, inner=False):
         """Five-facet closed spar with an unbridged ridge and broad landing keel."""
@@ -598,14 +605,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(gill),(0,side*55,0))
 
-    # Remove unused upper-cabin skin between its corner posts and lower
-    # piers. The pointed vents leave 9 mm upper/lower belts and at least
-    # 11 mm between side openings; every remaining wall stays full gauge.
+    # Two large pitched service arches replace three small diamond vents.
+    # The remaining skin forms continuous dorsal/lower belts, end posts and
+    # a central shear pier. The 25:21 pitched lintels grow without support;
+    # the 26 mm sill clears the intact 22.5 mm common sensor enclosure.
+    # Keep the bed-founded cabin piers and all diagonal seat walls: those
+    # carry arm-root bending loads, whereas this upper panel is mostly skin.
     for side in (-1,1):
-        for vent_x in (-35.0,0.0,35.0):
+        for vent_x in (-27.5,27.5):
             opening = b.Wire.make_polygon([
-                (vent_x-9,side*20,45), (vent_x,side*20,32),
-                (vent_x+9,side*20,45), (vent_x,side*20,58),
+                (vent_x-16,side*20,26), (vent_x+16,side*20,26),
+                (vent_x+21,side*20,37), (vent_x,side*20,62),
+                (vent_x-21,side*20,37),
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(opening),(0,side*20,0))
     for vent_y in (-14.0,14.0):
