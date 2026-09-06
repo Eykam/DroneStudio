@@ -1,0 +1,663 @@
+{
+ "board_id": "ee-flight",
+ "candidate_id": "cand-097",
+ "method": "spec-exact primitives: per-package datasheet dims+typical mass (mass marked estimate); board = bbox area x 1.6mm FR4 1.85g/cm3 + 10%",
+ "mass_estimate": true,
+ "components": [
+  {
+   "ref": "R20",
+   "value": "100000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 42.0,
+   "y": 52.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C4",
+   "value": "470uF",
+   "package": "CP_Radial_D12.5mm_P5.00mm",
+   "side": "F",
+   "x": 79.5,
+   "y": 28.5,
+   "mass_g": 6.0
+  },
+  {
+   "ref": "D3",
+   "value": "B560C-13-F",
+   "package": "D_SMC",
+   "side": "F",
+   "x": 65.0,
+   "y": 38.0,
+   "mass_g": 0.3
+  },
+  {
+   "ref": "R11",
+   "value": "10200",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 70.0,
+   "y": 54.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R14",
+   "value": "221000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 57.5,
+   "y": 52.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C7",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 63.5,
+   "y": 43.4,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C34",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 101.5,
+   "y": 35.8,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "D2",
+   "value": "SMCJ18A",
+   "package": "D_SMC",
+   "side": "F",
+   "x": 47.5,
+   "y": 24.0,
+   "mass_g": 0.3
+  },
+  {
+   "ref": "C37",
+   "value": "1uF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 99.0,
+   "y": 48.2,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "U2",
+   "value": "TPS54560DDAR",
+   "package": "Texas_R-PDSO-G8_EP2.95x4.9mm_Mask2.4x3.1mm",
+   "side": "F",
+   "x": 65.0,
+   "y": 50.0,
+   "mass_g": 0.08
+  },
+  {
+   "ref": "L1",
+   "value": "10uH",
+   "package": "L_Coilcraft_XAL1010-XXX",
+   "side": "F",
+   "x": 76.5,
+   "y": 47.0,
+   "mass_g": 4.3
+  },
+  {
+   "ref": "Q3",
+   "value": "CSD18540Q5B",
+   "package": "TDSON-8-1",
+   "side": "F",
+   "x": 36.0,
+   "y": 39.0,
+   "mass_g": 0.1
+  },
+  {
+   "ref": "C43",
+   "value": "10nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 108.1,
+   "y": 63.55,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C40",
+   "value": "27pF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 95.7,
+   "y": 40.05,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C6",
+   "value": "10uF",
+   "package": "C_1210_3225Metric",
+   "side": "F",
+   "x": 57.5,
+   "y": 44.5,
+   "mass_g": 0.015
+  },
+  {
+   "ref": "L2",
+   "value": "2.2uH",
+   "package": "L_Coilcraft_XAL5030-XXX",
+   "side": "F",
+   "x": 72.0,
+   "y": 62.0,
+   "mass_g": 0.35
+  },
+  {
+   "ref": "U6",
+   "value": "MPU-9250",
+   "package": "QFN-24_3x3mm_P0.4mm_EP1.7x1.54mm",
+   "side": "F",
+   "x": 110.0,
+   "y": 60.0,
+   "mass_g": 0.03
+  },
+  {
+   "ref": "C10",
+   "value": "47uF",
+   "package": "C_1210_3225Metric",
+   "side": "F",
+   "x": 85.0,
+   "y": 46.0,
+   "mass_g": 0.015
+  },
+  {
+   "ref": "C38",
+   "value": "2.2uF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 110.8,
+   "y": 52.3,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C16",
+   "value": "3.3nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 82.0,
+   "y": 66.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "U4",
+   "value": "INA240A3PWR",
+   "package": "TSSOP-8_3x3mm_P0.65mm",
+   "side": "F",
+   "x": 48.0,
+   "y": 44.5,
+   "mass_g": 0.03
+  },
+  {
+   "ref": "C15",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 84.5,
+   "y": 62.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C11",
+   "value": "47uF",
+   "package": "C_1210_3225Metric",
+   "side": "F",
+   "x": 85.0,
+   "y": 50.0,
+   "mass_g": 0.015
+  },
+  {
+   "ref": "C42",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 96.0,
+   "y": 46.7,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C23",
+   "value": "10nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 51.0,
+   "y": 52.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C45",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 110.2,
+   "y": 64.099999,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "U3",
+   "value": "TPS62132RGTR",
+   "package": "VQFN-16-1EP_3x3mm_P0.5mm_EP1.68x1.68mm",
+   "side": "F",
+   "x": 78.0,
+   "y": 62.0,
+   "mass_g": 0.03
+  },
+  {
+   "ref": "R22",
+   "value": "10",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 50.5,
+   "y": 39.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C20",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 45.0,
+   "y": 55.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R23",
+   "value": "10",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 45.5,
+   "y": 39.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C33",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 103.9,
+   "y": 35.8,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R15",
+   "value": "26700",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 57.5,
+   "y": 55.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C8",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 65.0,
+   "y": 46.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "U1",
+   "value": "LM74700QDBVRQ1",
+   "package": "SOT-23-6",
+   "side": "F",
+   "x": 33.0,
+   "y": 53.0,
+   "mass_g": 0.015
+  },
+  {
+   "ref": "R10",
+   "value": "53600",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 73.0,
+   "y": 55.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C36",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 99.0,
+   "y": 46.7,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C1",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 26.0,
+   "y": 50.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "Q1",
+   "value": "CSD18540Q5B",
+   "package": "TDSON-8-1",
+   "side": "F",
+   "x": 36.0,
+   "y": 26.0,
+   "mass_g": 0.1
+  },
+  {
+   "ref": "C9",
+   "value": "47uF",
+   "package": "C_1210_3225Metric",
+   "side": "F",
+   "x": 85.0,
+   "y": 42.0,
+   "mass_g": 0.015
+  },
+  {
+   "ref": "R1",
+   "value": "0.0002",
+   "package": "R_Shunt_Isabellenhuette_BVR4026",
+   "side": "F",
+   "x": 48.0,
+   "y": 33.0,
+   "mass_g": 0.2
+  },
+  {
+   "ref": "J5",
+   "value": "SWD",
+   "package": "PinHeader_1x05_P2.54mm_Vertical",
+   "side": "F",
+   "x": 120.0,
+   "y": 40.0,
+   "mass_g": 0.5
+  },
+  {
+   "ref": "R30",
+   "value": "10000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 107.0,
+   "y": 35.6,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C39",
+   "value": "2.2uF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 116.5,
+   "y": 41.7,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R13",
+   "value": "16900",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 66.5,
+   "y": 57.65,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C17",
+   "value": "22uF",
+   "package": "C_0805_2012Metric",
+   "side": "F",
+   "x": 66.5,
+   "y": 62.5,
+   "mass_g": 0.006
+  },
+  {
+   "ref": "C5",
+   "value": "10uF",
+   "package": "C_1210_3225Metric",
+   "side": "F",
+   "x": 61.0,
+   "y": 44.5,
+   "mass_g": 0.015
+  },
+  {
+   "ref": "Q4",
+   "value": "CSD18540Q5B",
+   "package": "TDSON-8-1",
+   "side": "F",
+   "x": 36.0,
+   "y": 45.5,
+   "mass_g": 0.1
+  },
+  {
+   "ref": "C32",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 116.5,
+   "y": 39.9,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C13",
+   "value": "47pF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 66.0,
+   "y": 55.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "Q2",
+   "value": "CSD18540Q5B",
+   "package": "TDSON-8-1",
+   "side": "F",
+   "x": 36.0,
+   "y": 32.5,
+   "mass_g": 0.1
+  },
+  {
+   "ref": "R21",
+   "value": "20000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 42.0,
+   "y": 55.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "U5",
+   "value": "STM32F405RGT6",
+   "package": "LQFP-64_10x10mm_P0.5mm",
+   "side": "F",
+   "x": 108.0,
+   "y": 44.0,
+   "mass_g": 0.35
+  },
+  {
+   "ref": "R31",
+   "value": "10000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 96.0,
+   "y": 48.2,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "D1",
+   "value": "SMCJ18CA",
+   "package": "D_SMC",
+   "side": "F",
+   "x": 25.5,
+   "y": 44.0,
+   "mass_g": 0.3
+  },
+  {
+   "ref": "C14",
+   "value": "10uF",
+   "package": "C_0805_2012Metric",
+   "side": "F",
+   "x": 82.0,
+   "y": 62.5,
+   "mass_g": 0.006
+  },
+  {
+   "ref": "R24",
+   "value": "100",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 51.0,
+   "y": 48.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R33",
+   "value": "10000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 111.4,
+   "y": 55.8,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C44",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 113.3,
+   "y": 58.8,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R16",
+   "value": "100000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 74.0,
+   "y": 66.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C31",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 112.4,
+   "y": 52.3,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C21",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 48.0,
+   "y": 40.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "R32",
+   "value": "10000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 109.0,
+   "y": 53.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C18",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 63.5,
+   "y": 62.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C12",
+   "value": "4.7nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 64.0,
+   "y": 55.5,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C35",
+   "value": "4.7uF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 114.0,
+   "y": 52.3,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C3",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 39.5,
+   "y": 57.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C41",
+   "value": "27pF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 95.7,
+   "y": 43.15,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C2",
+   "value": "1uF",
+   "package": "C_0805_2012Metric",
+   "side": "F",
+   "x": 29.0,
+   "y": 53.0,
+   "mass_g": 0.006
+  },
+  {
+   "ref": "C30",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 105.5,
+   "y": 52.7,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "Y1",
+   "value": "8MHz",
+   "package": "Crystal_SMD_5032-2Pin_5.0x3.2mm",
+   "side": "F",
+   "x": 98.4,
+   "y": 41.6,
+   "mass_g": 0.035
+  },
+  {
+   "ref": "R12",
+   "value": "243000",
+   "package": "R_0603_1608Metric",
+   "side": "F",
+   "x": 61.0,
+   "y": 55.0,
+   "mass_g": 0.003
+  },
+  {
+   "ref": "C22",
+   "value": "100nF",
+   "package": "C_0603_1608Metric",
+   "side": "F",
+   "x": 46.0,
+   "y": 49.0,
+   "mass_g": 0.003
+  }
+ ],
+ "unknown_models": [],
+ "totals": {
+  "component_count": 72,
+  "components_g": 13.45,
+  "board_g": 18.29,
+  "pcba_g": 31.73
+ }
+}

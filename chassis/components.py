@@ -127,9 +127,9 @@ LIBRARY = {
         "5x4.5 3-blade prop (5045-class, AKK RS2205 recommended)", 4.0, (0.127, 0.127, 0.006), "cylinder-z", "motor_pad",
         "5045-class per AKK RS2205 2300KV specs (user motor 2026-09-04); specific prop model TBD"),
     "fc_esc_stack": Component(
-        "30.5mm FC+ESC stack (BLHELI_S, his hardware per repo assets/Drone/drone_esc_mount_30mm.stl)",
-        90.0, (0.036, 0.036, 0.020), "box", "stack",
-        "estimate - replace with his actual stack datasheet"),
+        "ee-flight single-board PCBA (CM4 + STM32F405 + 4x ESC + power tree)",
+        31.73, (0.108, 0.052, 0.022), "box", "stack",
+        "REAL board via pcba/1.0 contract: ee-flight v19 cand-097 (72 comps, SB1+SB2 populated, mass is spec-exact estimate; outline 108x52x1.635mm interim/unoptimized - SB6 targets stack-compatible shrink). GLB: parts/ee_flight_v19_pcba.glb. Pin ee-flight v19, re-pull on version bumps: https://dronestudio-dashboard-production.up.railway.app"),
     "battery": Component(
         "4S 1300mAh LiPo (Tattu-class)", 180.0, (0.075, 0.035, 0.035), "box", "deck",
         "user-confirmed 4S build 2026-09-04; capacity/mass still Tattu-class estimate until he names the battery model"),
@@ -146,8 +146,8 @@ LIBRARY = {
         "https://grabcad.com/library/gps-beitian-bn-220-1 (bbox 22.0x20.0x6.9mm vs 22x20x6mm spec); mass from vendor listings, verify when he names his GPS",
         step_path="parts/gps_bn220.step"),
     "mpu9250": Component(
-        "MPU-9250 breakout (GY-9250)", 3.0, (0.025, 0.015, 0.003), "box", "stack",
-        "estimate - generic GY-9250 module"),
+        "MPU-9250 breakout (GY-9250)", 0.0, (0.025, 0.015, 0.003), "box", "stack",
+        "mass zeroed 2026-09-05: IMU is U6 on the ee-flight PCBA (0.03g, carried in fc_esc_stack mass); entry kept for pose/lever-arm gate"),
     "vl53l9cx_breakout": Component(
         "VL53L9CX dToF breakout", 2.0, (0.020, 0.016, 0.005), "box", "perimeter",
         "ST VL53L9CX module OPTICAL LGA 12.1x5.1x4.5mm (ST part table, EE-verified 2026-09-05) on assumed 20x16x5mm custom carrier (2x M2); STEVAL-VL53L9 carrier exists but 30-week lead - custom breakout path, STEVAL data brief as reference schematic; EE owns final carrier dims"),
