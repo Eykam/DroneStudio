@@ -47,7 +47,27 @@ LAND_VY_DESCEND = -0.25 if M2 else -0.4
 # fixed value fragile. Replaced by the trim integrator below.
 LAND_COMMIT_THR = None
 
-def teacher_act(obs, ext, scenario, radius, state=None):
+
+def scene_yaw_frame(env, info):
+    """Obstacle centers/radii in the obs yaw frame, from env internals.
+    Teacher-only: labels may read the true scene; the policy stays
+    obs-limited. info carries world pos/quat from the headless backend."""
+    C = getattr(env, "obs_centers", None)
+    if C is None or not len(C):
+        return None
+    pos = np.array(info.get("pos", (0.0, 0.0, 0.0)), dtype=np.float64)
+    from env_quad import quat_rotate
+    # exact headless_main.zig convention: yaw from the rotated body-forward
+    # vector, then yawFrame(v) = (x*c - z*s, y, x*s + z*c)
+    q = np.array(info.get("quat", (0.0, 0.0, 0.0, 1.0)), dtype=np.float64)
+    fwd = quat_rotate(q, np.array([1.0, 0.0, 0.0]))
+    yaw = float(np.arctan2(-fwd[2], fwd[0]))
+    c, s2 = np.cos(yaw), np.sin(yaw)
+    R = np.array([[c, 0.0, -s2], [0.0, 1.0, 0.0], [s2, 0.0, c]])  # world -> yaw frame
+    rel = (np.asarray(C, dtype=np.float64) - pos) @ R.T
+    return rel, np.asarray(getattr(env, "obs_radii", np.zeros(len(C))), dtype=np.float64)
+
+def teacher_act(obs, ext, scenario, radius, state=None, scene=None):
     """state: optional per-episode dict (caller creates {} at reset). Under
     motor_v2 it carries the vertical trim integrator (SoC sag drifts the
     hover point); state=None keeps the stateless base-plant behavior
@@ -91,6 +111,48 @@ def teacher_act(obs, ext, scenario, radius, state=None):
     if land_descend:
         v_des = np.array([np.clip(0.6 * rel[0], -0.3, 0.3), 0.0,
                           np.clip(0.6 * rel[2], -0.3, 0.3)])
+    if scene is not None and scenario in ("goto", "land") and not land_descend and dist_xz > 3.0:
+        # long-range gap-aware steering (2026-09-06): scene = (C, radii),
+        # obstacle centers in the SAME yaw frame as obs. The nearest-obstacle
+        # potential field below is myopic (local safety only). Here, ALL
+        # blockers on the target line inside the look-ahead are projected to
+        # the nearest blocking plane, the widest passable gap (>=0.9m) is
+        # found, and v_des is aimed through the gap center while preserving
+        # along-track speed. Engages only beyond 3m (near-field stays tuned).
+        C, radii = scene
+        if len(C):
+            u_t = np.array([rel[0], rel[2]]) / max(dist_xz, 1e-6)
+            LA = min(dist_xz, 8.0)
+            pts = []
+            for cc, rr in zip(C, radii):
+                along = float(cc[0] * u_t[0] + cc[2] * u_t[1])
+                if along <= 0.3 or along >= LA:
+                    continue
+                cross = float(-cc[0] * u_t[1] + cc[2] * u_t[0])
+                if abs(cross) < rr + 1.4:
+                    pts.append((along, cross, float(rr)))
+            if pts and len(pts) <= 3:
+                # v4.2: density gate. v4.1's faster clearance profile crashed
+                # t2 (0.354 goto / 0.271 land vs 0.646/0.604 baseline); v4.0
+                # won sparse/mid fields but lost dense goto. Plan where
+                # planning is tractable (<=3 blockers on the line); defer to
+                # the reactive field in clutter.
+                plane = min(p_[0] for p_ in pts)
+                spans = sorted((p_[1] - p_[2] - 0.8, p_[1] + p_[2] + 0.8) for p_ in pts)
+                cands = []
+                cur = -6.0
+                for lo, hi in spans + [(6.0, 6.0)]:
+                    if lo - cur >= 0.9:
+                        cands.append((0.5 * (cur + lo), lo - cur))
+                    cur = max(cur, hi)
+                if cands:
+                    cands.sort(key=lambda g: (-g[1], abs(g[0])))
+                    gap_c = cands[0][0]
+                    u_p = np.array([-u_t[1], u_t[0]])
+                    v_al = float(np.clip(v_des[0] * u_t[0] + v_des[2] * u_t[1], 0.2, 2.0))
+                    v_gap = float(np.clip(gap_c / max(plane, 1.0), -1.0, 1.0)) * v_al
+                    nv = u_t * v_al + u_p * v_gap
+                    v_des[0], v_des[2] = float(nv[0]), float(nv[1])
     if scenario in ("goto", "land") and not land_descend and 1e-3 < d < 6.0:
         # cap only the velocity component TOWARD the obstacle: fast sliding
         # along walls stays allowed, gap passages stay possible. Land phase-1
