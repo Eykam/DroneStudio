@@ -1,4 +1,4 @@
-"""Candidate B: ridge-to-ring motor nacelles with pitched hollow skins.
+"""Candidate A: swept battery cheek blisters and a close-wrapped avionics fin.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -286,9 +286,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The lowered stack canopy and recessed battery remain accessible from
     # above; all transitions preserve the payloads' 2 mm service envelopes.
     stations = [
-        (-143.0, 29.4, 13.5, 22.0),
-        (-141.0, 30.4, 13.5, 23.0),
-        (-122.0, 30.4, 13.5, 23.0),
+        (-143.0, 28.6, 13.1, 23.0),
+        (-141.0, 29.0, 13.1, 24.0),
+        (-122.0, 29.0, 13.1, 24.0),
         (-114.0, 52.0, 41.5, 43.5),
         (-105.0, 50.2, 41.5, 41.7),
         (-56.0, 50.2, 41.5, 41.7),
@@ -442,58 +442,69 @@ def build_chassis(p: ChassisParams) -> b.Part:
     spine = fairing-b.Solid.extrude(b.Face(cross_passage),(0,27.0*sy,0))
     shell = (outer_hull-inner_hull)+spine
 
-    # Fold the middle of each battery sidewall into an outward hollow chine.
-    # These shallow longitudinal corrugations brace the tall pack well
-    # without thickening its skin or encroaching on the service envelope.
-    # The steep lower and upper facets grow from the existing wall, so the
-    # belt prints in place; its cavity opens directly into the battery bay.
+    # Taper the battery's stiffening blisters into the parent side skin.
+    # The folded cheek now has pointed fore/aft runouts instead of full-depth
+    # transverse end walls. Its hollow upper and lower facets carry pack-bay
+    # shear while all of the original 2 mm service space remains available.
     battery_width = next(w for x,w,h,c in stations if abs(x+105.0*sx)<1e-6)
     zlo, zmid, zhi = 8.0, 15.0, 22.0
-    depth = 3.0*sy
     def side_y(z):
         return battery_width/2-draft*z
-    lower_slope = (side_y(zmid)+depth-(side_y(zlo)-0.1))/(zmid-zlo)
-    upper_slope = ((side_y(zhi)-0.1)-(side_y(zmid)+depth))/(zhi-zmid)
-    lower_c = side_y(zlo)-0.1-lower_slope*zlo
-    upper_c = side_y(zhi)-0.1-upper_slope*zhi
-    lower_ci = lower_c-wall*math.sqrt(1+lower_slope**2)
-    upper_ci = upper_c-wall*math.sqrt(1+upper_slope**2)
-    inner_peak_z = (upper_ci-lower_ci)/(lower_slope-upper_slope)
-    inner_peak_y = lower_slope*inner_peak_z+lower_ci
+    blister_stations = [(-104.5,0.15),(-96.0,3.0),(-66.0,3.0),(-56.5,0.15)]
+    def blister_wire(x, depth, side, inner=False):
+        lower_slope = (side_y(zmid)+depth-(side_y(zlo)-0.1))/(zmid-zlo)
+        upper_slope = ((side_y(zhi)-0.1)-(side_y(zmid)+depth))/(zhi-zmid)
+        lower_c = side_y(zlo)-0.1-lower_slope*zlo
+        upper_c = side_y(zhi)-0.1-upper_slope*zhi
+        if inner:
+            # The 8.5 mm nose ramp adds an X component to each surface normal.
+            # A conservative normal offset keeps the lofted skin >=1.25 mm.
+            runout_gradient = 2.85*sy/(8.5*sx)
+            lower_ci = lower_c-wall*math.sqrt(1+lower_slope**2+runout_gradient**2)
+            upper_ci = upper_c-wall*math.sqrt(1+upper_slope**2+runout_gradient**2)
+            peak_z = (upper_ci-lower_ci)/(lower_slope-upper_slope)
+            peak_y = lower_slope*peak_z+lower_ci
+            low,high = zlo+wall,zhi-wall
+            profile = [(side_y(low)-3.0,low),
+                       (lower_slope*low+lower_ci,low),(peak_y,peak_z),
+                       (upper_slope*high+upper_ci,high),(side_y(high)-3.0,high)]
+        else:
+            profile = [(side_y(zlo)-0.1,zlo),
+                       (side_y(zmid)+depth,zmid),(side_y(zhi)-0.1,zhi)]
+        return b.Wire.make_polygon([(x*sx,side*y,z) for y,z in profile],close=True)
     for side in (-1,1):
-        outer_wire = b.Wire.make_polygon([
-            (-104.0*sx, side*(side_y(zlo)-0.1), zlo),
-            (-104.0*sx, side*(side_y(zmid)+depth), zmid),
-            (-104.0*sx, side*(side_y(zhi)-0.1), zhi),
-        ],close=True)
-        shell = shell + b.Solid.extrude(b.Face(outer_wire),(47.0*sx,0,0))
-        low, high = zlo+wall, zhi-wall
-        inner_wire = b.Wire.make_polygon([
-            (-104.0*sx+wall,side*(side_y(low)-3.0),low),
-            (-104.0*sx+wall,side*(lower_slope*low+lower_ci),low),
-            (-104.0*sx+wall,side*inner_peak_y,inner_peak_z),
-            (-104.0*sx+wall,side*(upper_slope*high+upper_ci),high),
-            (-104.0*sx+wall,side*(side_y(high)-3.0),high),
-        ],close=True)
-        shell = shell - b.Solid.extrude(b.Face(inner_wire),(47.0*sx-2*wall,0,0))
+        outer_blister = b.Solid.make_loft([
+            blister_wire(x,d*sy,side) for x,d in blister_stations],ruled=True)
+        inner_stations = list(blister_stations)
+        # At each pointed end the cavity fades inside the existing sidewall;
+        # stop short of the external tip to keep a continuous skin ligament.
+        inner_stations[0] = (-104.5+wall/sx,0.15+2.85*wall/(8.5*sx))
+        inner_stations[-1] = (-56.5-wall/sx,0.15+2.85*wall/(9.5*sx))
+        inner_blister = b.Solid.make_loft([
+            blister_wire(x,d*sy,side,True) for x,d in inner_stations],ruled=True)
+        shell = (shell+outer_blister)-inner_blister
 
         # Small pointed vents leave continuous upper coamings, the new
         # folded belt, and generous pillars between every opening. Their
         # pitched heads close above 45 degrees without a horizontal bridge.
         for cx,cz,hw,hh,y0 in [
-            (-96.0,31.5,5.5,6.5,18.5),
-            (-80.0,31.5,5.5,6.5,18.5),
-            (-64.0,31.5,5.5,6.5,18.5),
+            (-99.0,31.5,6.5,7.5,18.5),
+            (-83.0,31.5,6.5,7.5,18.5),
+            (-67.0,31.5,6.5,7.5,18.5),
+            (-51.0,31.5,6.5,7.5,18.5),
             (-10.0,36.5,6.0,7.5,20.0),
             (10.0,36.5,6.0,7.5,20.0),
             (49.5,20.0,6.0,9.0,6.5),
             (65.5,20.0,6.0,9.0,6.5),
         ]:
+            # Swept gills align their diagonal webs with the battery cheek.
+            # The widest roof run is 7.25 mm against a 7.5 mm rise (>45 deg).
+            skew = 0.75 if cx < -40.0 else 0.0
             opening = b.Wire.make_polygon([
                 ((cx-hw)*sx,side*y0*sy,cz),
-                (cx*sx,side*y0*sy,cz-hh),
+                ((cx+skew)*sx,side*y0*sy,cz-hh),
                 ((cx+hw)*sx,side*y0*sy,cz),
-                (cx*sx,side*y0*sy,cz+hh),
+                ((cx-skew)*sx,side*y0*sy,cz+hh),
             ],close=True)
             shell = shell - b.Solid.extrude(b.Face(opening),(0,side*14.0*sy,0))
     # Boolean the apertures on the shell alone to retain the complete
