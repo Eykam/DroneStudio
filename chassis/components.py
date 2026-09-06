@@ -131,8 +131,8 @@ LIBRARY = {
         31.73, (0.108, 0.052, 0.022), "box", "stack",
         "REAL board via pcba/1.0 contract: ee-flight v19 cand-097 (72 comps, SB1+SB2 populated, mass is spec-exact estimate; outline 108x52x1.635mm interim/unoptimized - SB6 targets stack-compatible shrink). GLB: parts/ee_flight_v19_pcba.glb. Pin ee-flight v19, re-pull on version bumps: https://dronestudio-dashboard-production.up.railway.app"),
     "battery": Component(
-        "4S 1300mAh LiPo (Tattu-class)", 180.0, (0.075, 0.035, 0.035), "box", "deck",
-        "user-confirmed 4S build 2026-09-04; capacity/mass still Tattu-class estimate until he names the battery model"),
+        "CNHL Black Series 1300mAh 14.8V 4S 100C (stock 1301004BK)", 163.0, (0.074, 0.034, 0.0335), "box", "deck",
+        "user-named battery 2026-09-06. Manufacturer specs: 33.5x34x74mm, 163g incl. wire+connector, XT60 + JST-XH balance, 12AWG (https://chinahobbyline.com/products/cnhl-black-series-1300mah-14-8v-4s-100c-lipo-battery-with-xt60-plug; vendor tolerance +/-1-5mm, +/-5g). Replaces 180g Tattu-class estimate."),
     "pi_zero_2w": Component(
         "Raspberry Pi Zero 2W", 11.0, (0.065, 0.030, 0.005), "box", "nose",
         "https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/",
