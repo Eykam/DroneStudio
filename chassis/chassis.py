@@ -1,4 +1,4 @@
-"""Candidate B: broad-keel, six-sided wing spars with a lower tapered crown.
+"""Candidate A: rising stereo cheek fairings with a low swept nose saddle.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -397,8 +397,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Their diagonal skins replace the blunt transverse cheek bulkhead and
     # carry stereo-nose side loads into the spine as a folded monocoque.
     # The full breadth is reached before either camera's 2 mm service box.
+    # The cheek deck rises only as it approaches the camera boards. Its
+    # low swept saddle removes the unused full-height wedge behind the
+    # stereo pair; the independent central spine still encloses the Pi.
+    # Reach the original full section before the cameras' aft service plane.
+    # Every side begins on the bed and the roof is pitched, with no bridge.
     cheek_stations = [
-        (56.0, 20.0, 28.5, 12.0),
+        (56.0, 20.0, 9.0, 12.0),
+        (64.5, 60.0, 15.5, 47.0),
         (71.3, 94.2, 28.8, 84.0),
         (86.8, 94.2, 28.8, 84.0),
         (88.5, 89.0, 28.5, 78.0),
