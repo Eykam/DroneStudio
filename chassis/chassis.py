@@ -1,4 +1,4 @@
-"""Candidate A: swept battery cheek blisters and a close-wrapped avionics fin.
+"""Candidate A: swept cheek pods with pitched cooling gills and a shared nose vault.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -414,13 +414,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # stereo pair; the independent central spine still encloses the Pi.
     # Reach the original full section before the cameras' aft service plane.
     # Every side begins on the bed and the roof is pitched, with no bridge.
+    # Pull the unoccupied aft wedges into distinct swept cheek pods. The
+    # intermediate shoulder wraps the cameras before their service envelope;
+    # the central avionics spine still carries the nose longitudinally.
     cheek_stations = [
-        (56.0, 20.0, 9.0, 12.0),
-        (64.5, 60.0, 15.5, 47.0),
+        (59.0, 20.0, 7.5, 12.0),
+        (64.5, 46.0, 12.0, 34.0),
+        (68.0, 76.0, 22.0, 64.0),
         (71.3, 94.2, 28.8, 84.0),
         (86.8, 94.2, 28.8, 84.0),
         (88.5, 89.0, 28.5, 78.0),
     ]
+    # Pull the unoccupied aft wedges into distinct swept cheek pods. The
+    # intermediate shoulder wraps the cameras before their service envelope;
+    # the central avionics spine still carries the nose longitudinally.
     cheek_stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
     cheek, cheek_roof = cabin_shell(cheek_stations)
@@ -507,6 +514,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 ((cx-skew)*sx,side*y0*sy,cz+hh),
             ],close=True)
             shell = shell - b.Solid.extrude(b.Face(opening),(0,side*14.0*sy,0))
+    # Recessed pointed cheek gills sit behind the camera boards, outside
+    # both sight-line pyramids. A continuous sill and dorsal brow frame each
+    # opening; the 1.4:1 pitched heads need no bridge or support material.
+    # Cutting across the swept wall exposes the common service vault without
+    # leaving a doubled partition inside the cheek.
+    for side in (-1, 1):
+        gill = b.Wire.make_polygon([
+            (63.0*sx,side*14.0*sy,12.5),
+            (66.5*sx,side*14.0*sy,7.5),
+            (70.0*sx,side*14.0*sy,12.5),
+            (66.5*sx,side*14.0*sy,17.5),
+        ],close=True)
+        shell = shell-b.Solid.extrude(b.Face(gill),(0,side*38.0*sy,0))
     # Boolean the apertures on the shell alone to retain the complete
     # closed arm sections where they join the cabin's lower shoulders.
     body = body + shell
