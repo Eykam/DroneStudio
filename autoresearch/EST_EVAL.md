@@ -20,3 +20,20 @@ full-pilot VO ATE 5-17m / 50-60m. NOT rendered VO.
 
 Zig: headless_main.zig gains fast_telemetry (default-off; per-fast-step GT
 omega/quat/filtered_thrust in step reply; physics untouched).
+
+## ppo_est: estimator-in-the-loop PPO retrain (2026-09-06)
+
+40 updates x 32 eps, warm start bc_ppo_v2_best, all episodes under estimated
+obs (synthetic-VO tier), selection on est-obs heldout cells with GT-goto
+regression floor (u0 0.938, floor 0.887). Wall ~9 min.
+
+- Heldout EST-obs: u0 goto 0.438 / hover 0 / land 0 -> best goto ~0.50,
+  hover/land 0.0 throughout. best_est_mean 0.188 (barely above u0 0.146).
+- Apples-to-apples eval cells (30 eps, seeds 10000+, EST+VO):
+  bc_ppo_est_best goto success 63.3% vs champion 53.3% (+10pts),
+  collision 16.7% (unchanged), final dist 9.4m.
+- HONEST NEGATIVE: light PPO (log_std 0.05, lr 1e-4, 40x32) barely moves
+  est-obs performance and actively erodes GT skill during training
+  (gt_goto 0.938 -> 0.688 on later updates; floors protected the ckpt).
+  hover/land 0% under est obs means zero reward signal there - needs
+  denser shaping, DAgger, or GT->est curriculum, not more of the same.
