@@ -66,6 +66,48 @@ class ChassisParams:
         need = self.prop_dia_mm + self.prop_clearance_mm
         return adjacent >= need, adjacent, need
 
+def _tof_seat_rear_pads(placements, arm_envelopes):
+    """Internal radius fillets on the NE/SW seats' rear service corners."""
+    from components import LIBRARY
+    pads = None
+    radius, overlap = 1.8, 0.2
+    for key, pos in placements.items():
+        if not key.startswith('vl53l9cx_breakout#'):
+            continue
+        cx, cy, z0 = (v*1000 for v in pos)
+        if cx*cy <= 1:
+            continue
+        dx, dy, dz = (v*1000 for v in LIBRARY[key.split('#')[0]].dims_m)
+        sx, sy = math.copysign(1,cx), math.copysign(1,cy)
+        rx, ry = cx-sx*(dx/2+2), cy-sy*(dy/2+2)
+        bottom = z0-2.1  # overlap the existing 1.6 mm blind seat floor
+        def point(u,v):
+            return (rx+sx*u,ry+sy*v,bottom)
+        a,c,d = point(-overlap,-overlap),point(radius,-overlap),point(radius,0)
+        f,g = point(0,radius),point(-overlap,radius)
+        mid = radius*(1-1/math.sqrt(2))
+        wire = b.Wire([
+            b.Edge.make_line(a,c),b.Edge.make_line(c,d),
+            b.Edge.make_three_point_arc(d,point(mid,mid),f),
+            b.Edge.make_line(f,g),b.Edge.make_line(g,a),
+        ])
+        # The 1.8 mm tangent radius rounds only the empty service corner.
+        # Minimum separation from the real carrier corner exceeds 2.0 mm.
+        # The seat floor supports the fillet's entire underside.
+        zone = b.Solid.extrude(b.Face(wire),(0,0,30-bottom))
+        # Small bed-founded pads close the thin rear wall/floor intersection
+        # where the same seats join the spar. Keep both the radius fillet
+        # and this root junction reinforcement within the old spar envelope.
+        root_pad = b.Pos(cx-sx*0.6,ry-sy*2.2,0)*b.Box(3.2,2.6,3.2,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+        zone = zone+root_pad
+        for envelope in arm_envelopes:
+            pad = zone & envelope
+            if pad is None or pad.volume < 1e-7:
+                continue
+            pads = pad if pads is None else pads+pad
+    return pads
+
 def build_chassis(p: ChassisParams) -> b.Part:
     # Read placement once: long CAD Booleans must use one coherent layout
     # even if a separate optimization process updates placement.json.
@@ -118,6 +160,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
 
     arms = []
     arm_cavities = []
+    arm_envelopes = []
     for (mx, my) in p.motor_positions():
         ang = math.degrees(math.atan2(my, mx))
         # A swept, root-flared lower chine gives a broad printable first layer.
@@ -190,6 +233,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             ruled=True,
         )
         arm_cavities.append(cavity.rotate(b.Axis.Z, ang))
+        arm_envelopes.append(outer.rotate(b.Axis.Z, ang))
         arm = arm + (outer - cavity)
 
         # Close the high-shear motor end of the monocoque with one perimeter-
@@ -765,6 +809,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
         body = body-passage
     for service in spar_services:
         body = body-service
+    # Relieve the rear corner on the two highly loaded diagonal seats.
+    # The radius fillets are clipped to the original spar exterior,
+    # retain >2 mm carrier clearance, and grow from the existing seat floors.
+    body = body + _tof_seat_rear_pads(placements, arm_envelopes)
     # A single upward-open service cut clears any overlapping sensor coaming
     # or older internal partition from the real board's complete 2 mm box.
     board_service = b.Pos(board_x,board_y,board_z-2.0)*b.Box(
