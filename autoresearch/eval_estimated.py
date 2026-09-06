@@ -49,6 +49,7 @@ class EstEnv(SimBinaryEnv):
 
     def reset(self):
         obs = super().reset()
+        self.last_gt_obs = obs
         if not self.estimated:
             return obs
         self.imu = SimIMU(MPU9250_SPEC, seed=self.est_seed)
@@ -81,6 +82,7 @@ class EstEnv(SimBinaryEnv):
             return super().step(action)
         a = np.clip(np.asarray(action, dtype=np.float64), -1, 1)
         resp = self._call({"cmd": "step", "action": [float(x) for x in a]})
+        self.last_gt_obs = np.array(resp["obs"], dtype=np.float64)
         info = resp.get("info", {})
         self.last_info = info
         self.steps = int(info.get("steps", self.steps + 1))
