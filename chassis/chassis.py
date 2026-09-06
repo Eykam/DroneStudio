@@ -1,4 +1,4 @@
-"""Candidate B: swept ridge-vault spars and recessed motor-spoke webs.
+"""Candidate B: ridge-to-ring motor nacelles with pitched hollow skins.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -207,26 +207,30 @@ def build_chassis(p: ChassisParams) -> b.Part:
             )
         pad = pad.locate(b.Pos(L, 0, 0))
 
-        # A descending nacelle fairing closes the tube at full depth through
-        # the inboard bolt, then sheds height toward the shaft boss.  Its roof
-        # follows the falling bending moment instead of carrying a solid,
-        # full-height block all the way across the motor center.  The belly
-        # stays on the plate, and the four bolt locations remain unchanged.
+        # Continue the spar's pointed crown into a tapering motor nacelle.
+        # A pitched five-face exterior replaces the old solid rectangular
+        # shoulder: the root ridge becomes a flat annular landing only at the
+        # shaft boss. Material stays along the two shear webs and lower keel,
+        # reducing motor-end mass without thinning any boss or arm skin.
         bridge_start = rib_end - 2*p.arm_rib_thickness_mm
         bridge_center = sweep_center(bridge_start)
         nacelle_sections = []
         for x, height in ((bridge_start, tip_height),
                           (rib_end, tip_height),
                           (L, p.motor_pad_thickness_mm)):
-            frac = (x - bridge_start)/(L - bridge_start)
+            frac = (x-bridge_start)/(L-bridge_start)
             center = bridge_center*(1-frac)
-            half_width = p.arm_width_mm/2*(1-frac) + center_boss_radius*frac
+            half_width = p.arm_width_mm/2*(1-frac)+center_boss_radius*frac
+            # The first two sections retain a fully pitched crown. At the
+            # terminal shaft ring the roof spreads onto the motor seating plane.
+            roof_rise = p.arm_roof_slope*half_width*(1.0 if x<=rib_end else 0.0)
+            shoulder = height-roof_rise
             nacelle_sections.append(b.Wire.make_polygon([
-                (x, center-half_width, 0), (x, center+half_width, 0),
-                (x, center+half_width, height),
-                (x, center-half_width, height),
-            ], close=True))
-        pad = pad + b.Solid.make_loft(nacelle_sections, ruled=True)
+                (x,center-half_width,0),(x,center+half_width,0),
+                (x,center+half_width,shoulder),(x,center,height),
+                (x,center-half_width,shoulder),
+            ],close=True))
+        pad = pad + b.Solid.make_loft(nacelle_sections,ruled=True)
 
         # A pointed wiring gallery cores the falling motor fairing. Excluding
         # the shaft and bolt collars leaves their full 1.2 mm radial walls.
