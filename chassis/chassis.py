@@ -1,4 +1,4 @@
-"""Swept four-bay cabin truss with a three-opening forward service bulkhead.
+"""Narrow eight-facet swept spars and three-cell internal carrier bridges.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -133,14 +133,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 -bypass-window_bypass)
 
     def spar_profile(x, width, height):
-        """Six-facet section with a printable narrow crown and wide keel."""
+        """Eight-facet closed section with a broad keel and pitched crown."""
         transition = max(0.0,min(1.0,(x-75.0)/23.0))
         half = width/2
-        keel = max(p.arm_crown_width_mm/2, 0.60*half)
+        # A short lower chine moves the side webs outward sooner, putting
+        # material on useful bending flanges rather than along a long taper.
+        # The narrower plan retains lateral stiffness through its broad keel.
+        keel = max(p.arm_crown_width_mm/2, 0.80*half)
         crown = 1.6-0.4*transition
-        shoulder = min(0.66*height, height-p.arm_roof_slope*(half-crown))
-        return [(-keel,0),(keel,0),(half,shoulder),
-                (crown,height),(-crown,height),(-half,shoulder)]
+        chine = 0.15*height
+        shoulder = min(0.72*height, height-p.arm_roof_slope*(half-crown))
+        return [(-keel,0),(keel,0),(half,chine),(half,shoulder),
+                (crown,height),(-crown,height),(-half,shoulder),(-half,chine)]
 
     def section_wire(x, center, width, height, inner=False):
         """Offset swept spar faces in 3D, including their spanwise gradients."""
@@ -237,6 +241,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
             height *= 0.95
             free_span = max(0.0,min(1.0,(x-75.0)/23.0))
             width *= 1.0-0.04*free_span
+            # Redistribute width into depth through the loaded span, then
+            # return smoothly to the existing motor nacelle. The optical
+            # bypass and all four motor positions keep their original axes.
+            taper = max(0.0,min(1.0,(132.0-x)/22.0))
+            width *= 1.0-0.18*taper
+            height *= 1.0+0.04*max(0.0,min(1.0,(0.94-frac)/0.20))
+            crest = max(0.0,min(1.0,(x-53.0)/14.0,(110.0-x)/22.0))
+            height += 2.0*crest
             if frac == 1.0:
                 width, height = p.arm_width_mm, p.arm_tip_height_mm
             tube_sections.append((x, sweep_center(x), width, height))
@@ -614,6 +626,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
     shoulder_void = (inner_hull.moved(b.Pos(0,.6,0)) &
                      inner_hull.moved(b.Pos(0,-.6,0)))
     shell = shell+((outer_hull-shoulder_void) & band)
+    # A four-millimetre lap backs the acute aft battery roof fold, where
+    # crash bending concentrates stress. Clip it to the existing hull and
+    # keep it above the complete battery service box; no exterior grows.
+    aft_lap_zone = b.Pos(-105.0*sx,0,39.6)*b.Box(4.0,60.0,6.0,
+        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+    aft_lap_void = (inner_hull.moved(b.Pos(0,0.5,0)) &
+                    inner_hull.moved(b.Pos(0,-0.5,0)))
+    shell = shell+((outer_hull-aft_lap_void) & aft_lap_zone)
     # Long pitched battery gills remove panel area between the bed-founded
     # piers. Their 11:9.6 lintels and continuous 3 mm roof belt stay printable.
     for side in (-1,1):
@@ -735,27 +755,32 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 rail_zones = zone if rail_zones is None else rail_zones+zone
             mount = mount & rail_zones
         if diagonal:
-            # Two pitched corbels close beneath a 1.6 mm blind floor.
-            # The tiny final ridge spans <0.5 mm; each underside rises more
-            # than its horizontal run. The vertical perimeter is also the
-            # reinforcing rib that transfers seat loads into the spar webs.
+            # Three parallel underside vaults hollow the wide sensor-seat
+            # haunches. Two 1.3 mm webs rise from the print bed and support
+            # every valley, leaving a continuous 1.6 mm blind carrier floor.
+            # The full peripheral spar ribs and upper carrier guides persist.
             floor_z = z0-2.0
             floor_gauge = 1.6
             apex_z = floor_z-floor_gauge
-            # Intersect a constant-pitch vault with the irregular footprint.
-            # This keeps a 1.1:1 underside everywhere without filling the
-            # rectangular seat to the depth required only at its front ears.
             vault_half = (apex_z+0.2)/1.1
             vault_x = max(abs(x*ux+y*uy) for x,y in outer_footprint)+2
             vx,vy = cx-vault_x*ux,cy-vault_x*uy
-            vault = b.Wire.make_polygon([
-                (vx-tx*vault_half,vy-ty*vault_half,-0.2),
-                (vx+tx*vault_half,vy+ty*vault_half,-0.2),
-                (vx,vy,apex_z),
-            ],close=True)
-            # Align the ridge with the spar so wires can enter through both
-            # end ribs while the transverse roof stays steeper than 45 deg.
-            vault_tool = b.Solid.extrude(b.Face(vault),(2*vault_x*ux,2*vault_x*uy,0))
+            vault_tool = None
+            for center_t,t0,t1 in ((-8.0,-40.0,-4.65),
+                                    (0.0,-3.35,3.35),
+                                    (8.0,4.65,40.0)):
+                vault = b.Wire.make_polygon([
+                    (vx+tx*(center_t-vault_half),vy+ty*(center_t-vault_half),-.2),
+                    (vx+tx*(center_t+vault_half),vy+ty*(center_t+vault_half),-.2),
+                    (vx+tx*center_t,vy+ty*center_t,apex_z),
+                ],close=True)
+                chamber = b.Solid.extrude(b.Face(vault),(2*vault_x*ux,2*vault_x*uy,0))
+                divider = b.Wire.make_polygon([
+                    (vx+tx*t0,vy+ty*t0,-.3),(vx+tx*t1,vy+ty*t1,-.3),
+                    (vx+tx*t1,vy+ty*t1,30),(vx+tx*t0,vy+ty*t0,30),
+                ],close=True)
+                chamber = chamber & b.Solid.extrude(b.Face(divider),(2*vault_x*ux,2*vault_x*uy,0))
+                vault_tool = chamber if vault_tool is None else vault_tool+chamber
             underside = inner_seat & vault_tool
             saddle = b.Solid.extrude(b.Face(pocket_wire(outer_footprint,0)),
                                      (0,0,floor_z))-underside
