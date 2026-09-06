@@ -1,4 +1,4 @@
-"""Candidate A: rising stereo cheek fairings with a low swept nose saddle.
+"""Candidate B: swept ridge-vault spars and recessed motor-spoke webs.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -73,19 +73,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return -p.arm_sweep_mm * math.sin(math.pi * x / p.arm_length_mm)
 
     def section_wire(x, center, width, height, inner=False):
-        """Closed wing section: broad landing keel and continuous sloping webs."""
+        """Five-facet closed spar with an unbridged ridge and broad landing keel."""
         root_blend = max(0.0, min(1.0, (75.0-x)/30.0))
         wall = p.arm_rib_thickness_mm + 0.10*root_blend
         half = width/2
-        crown = min(p.arm_crown_width_mm/2, half-1.25*wall)
-        keel = max(crown,0.45*half)
-        # A broad first-layer keel and two continuous inclined shear webs
-        # replace the octagon's tall vertical shoulders. The flatter, wider
-        # wing section keeps skin far from the lateral bending axis while
-        # reducing crown height and wetted perimeter. Both the lower chine
-        # and the internal roof remain steeper than 45 degrees.
-        points = [(-keel,0),(keel,0),(half,0.42*height),
-                  (crown,height),(-crown,height),(-half,0.42*height)]
+        keel = max(p.arm_crown_width_mm/2, 0.52223*half)
+        # The broad shoulder moves upward into the lateral load path; two
+        # continuous pitched webs close at a ridge instead of a flat crown.
+        # That roof needs no internal bridge. Spanwise depth and plan taper
+        # recover vertical stiffness, while the broad keel prints on the bed.
+        # Lower the shoulder at the shallow motor end so even that roof
+        # retains the explicit >45-degree support-free slope constraint.
+        shoulder_z = min(0.58484*height,
+                         height-p.arm_roof_slope*half)
+        points = [(-keel,0),(keel,0),(half,shoulder_z),
+                  (0,height),(-half,shoulder_z)]
         if inner:
             # Offset every face in its local normal; the extra 3.5% preserves
             # the minimum gauge through the longitudinal taper and sweep.
@@ -128,20 +130,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outline = b.fillet(outline.vertices(),p.fillet_radius_mm)
         arm = b.extrude(b.make_face(outline),p.body_thickness_mm)
 
-        # The broadened wing-like root flows into a slender motor fairing.
-        # A section-area / biaxial-compliance study shifts skin from the tall
-        # crown to the broad lower flange and lateral shoulder. Preserve the
-        # inboard stack clearance, terminal height and fixed motor axes.
+        # A ridge-vault wing narrows sooner outside its broad root shoulder.
+        # The deep root stays below the FC; the outboard crown grows only where
+        # needed to retain vertical bending stiffness after removing the flat
+        # roof flange. All motor axes and terminal load-transfer depths persist.
         span = profile_end-x0
         spar_stations = [
-            (0.00, 15.05, 22.50),
-            (0.10, 15.75, 24.14),
-            (0.24, 18.05, 23.48),
-            (0.42, 16.77, 20.30),
-            (0.62, 13.98, 17.54),
-            (0.81, 10.81, 13.45),
-            (0.93, 9.20, 10.80),
-            (1.00, 9.20, 10.80),
+            (0.00, 15.050, 22.500),
+            (0.10, 15.805, 24.241),
+            (0.24, 17.801, 23.919),
+            (0.42, 16.027, 20.921),
+            (0.62, 13.472, 18.147),
+            (0.81, 10.693, 14.362),
+            (0.93, 9.200, 10.800),
+            (1.00, 9.200, 10.800),
         ]
         tube_sections = []
         for frac, nominal_width, nominal_height in spar_stations:
@@ -181,13 +183,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         bolt_boss_radius = p.motor_hole_dia_mm / 2 + p.motor_boss_wall_mm
         center_boss_radius = p.motor_center_hole_dia_mm / 2 + p.motor_boss_wall_mm
         spoke_length = 2 * (bolt_radius + bolt_boss_radius)
+        # Recess the connecting webs below the annular mounting seats. The
+        # four full-height bolt collars and shaft ring locate the motor; these
+        # short webs transmit load at the first-layer keel. This takes mass off
+        # the arm tips without cutting a lateral slot or an enclosed overhang.
+        web_height = max(2*p.arm_rib_thickness_mm,
+                         0.54*p.motor_pad_thickness_mm)
         pad = b.extrude(
             b.Rectangle(spoke_length, p.motor_spoke_width_mm).face(),
-            p.motor_pad_thickness_mm,
+            web_height,
         )
         pad = pad + b.extrude(
             b.Rectangle(p.motor_spoke_width_mm, spoke_length).face(),
-            p.motor_pad_thickness_mm,
+            web_height,
         )
         pad = pad + b.extrude(
             b.Circle(center_boss_radius).face(), p.motor_pad_thickness_mm
