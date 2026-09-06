@@ -196,6 +196,9 @@ const World = struct {
     obs_v2: bool = false, // 19-dim yaw-relative obs (default off: 15-dim v1)
     obs_v3: bool = false, // 26-dim: v2 layout + T3 waypoint channels (supersedes v2 when on)
     obs_v4: bool = false, // 27-dim: v3 layout + motor_v2 battery SoC (supersedes v3 when on)
+    fast_telemetry: bool = false, // capture per-fast-step GT (omega, quat, filtered_thrust) for estimator-in-the-loop eval
+    fast_buf: [FAST_PER_POLICY][8]f32 = undefined,
+    fast_n: usize = 0,
     waypoint_idx: usize = 0, // T3: next waypoint to pass
     hold_steps: u32 = 0, // hover_hold consecutive in-radius policy steps
     skim_steps: u32 = 0, // land: consecutive ground-skim policy steps (dag10)
@@ -290,6 +293,7 @@ const World = struct {
         self.rate_ctrl.reset();
         self.filtered_rates = .{ 0, 0, 0 };
         self.filtered_thrust = 0;
+        self.fast_n = 0;
         self.dyn.motor_lag_state = .{ 0, 0, 0, 0 };
         self.dyn.m2_omega = .{ 0, 0, 0, 0 };
         self.dyn.m2_soc = 1.0;
@@ -486,9 +490,16 @@ const World = struct {
             std.math.clamp(action[2], -1.0, 1.0) * MAX_RATES[2],
         };
         const thrust_cmd = (std.math.clamp(action[3], -1.0, 1.0) + 1.0) / 2.0 * self.dyn.max_thrust;
+        self.fast_n = 0;
         for (0..FAST_PER_POLICY) |_| {
             if (self.done) break;
             self.fastStep(desired, thrust_cmd);
+            if (self.fast_telemetry and self.fast_n < FAST_PER_POLICY) {
+                const om_t = self.bodyOmega();
+                const q_t = self.bodyQuat();
+                self.fast_buf[self.fast_n] = .{ om_t.x(), om_t.y(), om_t.z(), q_t.data[0], q_t.data[1], q_t.data[2], q_t.data[3], self.filtered_thrust };
+                self.fast_n += 1;
+            }
         }
         self.steps += 1;
 
@@ -804,6 +815,14 @@ fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info:
             q4.data[0], q4.data[1], q4.data[2], q4.data[3],
             v3.x(), v3.y(), v3.z(),
         });
+    }
+    if (w.fast_telemetry) {
+        try writer.writeAll(",\"fast\":[");
+        for (w.fast_buf[0..w.fast_n], 0..) |row, i| {
+            if (i > 0) try writer.writeAll(",");
+            try writer.print("[{d:.5},{d:.5},{d:.5},{d:.5},{d:.5},{d:.5},{d:.5},{d:.5}]", .{ row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7] });
+        }
+        try writer.writeAll("]");
     }
     try writer.writeAll("}\n");
     try writer.context.flush();
@@ -1142,6 +1161,11 @@ pub fn main() !void {
             alloc.free(depth);
             alloc.free(segb);
             alloc.free(rgbb);
+        } else if (std.mem.eql(u8, cmd, "fast_telemetry")) {
+            const on_v = root.object.get("on") orelse continue;
+            world.fast_telemetry = (on_v == .bool and on_v.bool);
+            try stdout.print("{{\"ok\":true,\"fast_telemetry\":{}}}\n", .{world.fast_telemetry});
+            try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
             const arr = act_v.array.items;
