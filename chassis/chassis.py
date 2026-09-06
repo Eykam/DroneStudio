@@ -1,4 +1,4 @@
-"""Candidate A: low folded battery chines with three large swept service gills.
+"""Forward stereo pockets, blind spar ToF seats and ee-flight v19 service cabin.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -28,9 +28,9 @@ class ChassisParams:
     center_plate_wid_mm: float = 68.0
     top_plate_thickness_mm: float = 2.5
     body_thickness_mm: float = 1.25     # structural skin; all faces use normal offsets
-    arm_rib_thickness_mm: float = 1.25  # >=1.20 mm normal to the default sloping crown
+    arm_rib_thickness_mm: float = 1.35  # normal spar skin, including local recess load paths
     arm_rib_offset_mm: float = 3.3      # retained for parameter-file compatibility
-    arm_rib_root_mm: float = 19.0
+    arm_rib_root_mm: float = 19.75     # 2 mm Pi service gap at the open spar root
     body_fairing_height_mm: float = 46.5 # stack canopy follows the recessed mounting ring
     body_fairing_draft_mm: float = 4.7   # inward side inset at the stack shoulder
     body_roof_slope: float = 1.10       # support-free inner canopy faces (>45 deg)
@@ -67,6 +67,12 @@ class ChassisParams:
         return adjacent >= need, adjacent, need
 
 def build_chassis(p: ChassisParams) -> b.Part:
+    # Read placement once: long CAD Booleans must use one coherent layout
+    # even if a separate optimization process updates placement.json.
+    from components import LIBRARY, placement as _placement, tof_lens_poses, camera_lens_poses
+    placements = _placement()
+    tof_poses = tof_lens_poses()
+    camera_poses = camera_lens_poses()
     def sweep_center(x):
         # Both endpoints remain on the fixed motor radial.  Bowing the middle of
         # every arm produces a subtle pinwheel sweep without moving a motor axis.
@@ -106,6 +112,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return b.Wire.make_polygon([(x,center+y,z) for y,z in points],close=True)
 
     arms = []
+    arm_cavities = []
     for (mx, my) in p.motor_positions():
         ang = math.degrees(math.atan2(my, mx))
         # A swept, root-flared lower chine gives a broad printable first layer.
@@ -155,6 +162,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 width, height = p.arm_width_mm, p.arm_tip_height_mm
             tube_sections.append((x, sweep_center(x), width, height))
         tip_height = tube_sections[-1][3]
+        def tube_center_at(x):
+            # The loft uses straight segments between its sweep stations.
+            # Every overlapping motor-end face must use that same centerline;
+            # evaluating the sine again leaves micron-scale Boolean slivers.
+            for left, right in zip(tube_sections, tube_sections[1:]):
+                if x <= right[0]:
+                    f = (x-left[0])/(right[0]-left[0])
+                    return left[1]+f*(right[1]-left[1])
+            return tube_sections[-1][1]
         outer = b.Solid.make_loft(
             [section_wire(*section) for section in tube_sections], ruled=True
         )
@@ -162,6 +178,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             [section_wire(*section, inner=True) for section in tube_sections],
             ruled=True,
         )
+        arm_cavities.append(cavity.rotate(b.Axis.Z, ang))
         arm = arm + (outer - cavity)
 
         # Close the high-shear motor end of the monocoque with one perimeter-
@@ -170,9 +187,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # stress where the arm flows into the motor nacelle.
         cap_x = rib_end - p.arm_rib_thickness_mm
         end_diaphragm = b.Solid.make_loft([
-            section_wire(cap_x, sweep_center(cap_x),
+            section_wire(cap_x, tube_center_at(cap_x),
                          p.arm_width_mm, tip_height),
-            section_wire(rib_end, sweep_center(rib_end),
+            section_wire(rib_end, tube_center_at(rib_end),
                          p.arm_width_mm, tip_height),
         ], ruled=True)
         arm = arm + end_diaphragm
@@ -213,13 +230,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # shaft boss. Material stays along the two shear webs and lower keel,
         # reducing motor-end mass without thinning any boss or arm skin.
         bridge_start = rib_end - 2*p.arm_rib_thickness_mm
-        bridge_center = sweep_center(bridge_start)
+        bridge_center = tube_center_at(bridge_start)
+        def nacelle_center_at(x):
+            if x <= rib_end:
+                return tube_center_at(x)
+            return tube_center_at(rib_end)*(L-x)/(L-rib_end)
         nacelle_sections = []
         for x, height in ((bridge_start, tip_height),
                           (rib_end, tip_height),
                           (L, p.motor_pad_thickness_mm)):
             frac = (x-bridge_start)/(L-bridge_start)
-            center = bridge_center*(1-frac)
+            center = nacelle_center_at(x)
             half_width = p.arm_width_mm/2*(1-frac)+center_boss_radius*frac
             # The first two sections retain a fully pitched crown. At the
             # terminal shaft ring the roof spreads onto the motor seating plane.
@@ -239,7 +260,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
                           (rib_end, tip_height),
                           (L-center_boss_radius-0.2, 7.2)):
             frac = (x-bridge_start)/(L-bridge_start)
-            center = bridge_center*(1-frac)
+            center = nacelle_center_at(x)
             gallery.append(b.Wire.make_polygon([
                 (x,center-2.7,p.arm_rib_thickness_mm*1.04),
                 (x,center+2.7,p.arm_rib_thickness_mm*1.04),
@@ -256,7 +277,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # A bed-facing throat connects the gallery to the outside for wiring
         # and drainage, avoiding a sealed secondary internal mesh surface.
         drain_x = L-7.6
-        drain_y = bridge_center*(1-(drain_x-bridge_start)/(L-bridge_start))
+        drain_y = nacelle_center_at(drain_x)
         piece = piece - b.Pos(drain_x,drain_y,-0.2)*b.Cylinder(
             0.8,p.arm_rib_thickness_mm+0.7,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
@@ -307,6 +328,29 @@ def build_chassis(p: ChassisParams) -> b.Part:
     draft = 0.035 * p.body_fairing_draft_mm / 4.7
     stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                 for x, w, h, c in stations]
+    # Size the cabin from the live PCBA, whose placement z is its bottom.
+    # The v19 board at z=41.5 needs x +/-56, y +/-28, z=39.5..65.5
+    # service space. The shoulder extends 1.5 mm above that complete box;
+    # a normal-gauge pitched coaming leaves an open, printable dorsal hatch.
+    board = LIBRARY['fc_esc_stack']
+    board_x, board_y, board_z = (v*1000 for v in placements['fc_esc_stack'])
+    board_dx, board_dy, board_dz = (v*1000 for v in board.dims_m)
+    board_top = board_z+board_dz+2.0
+    board_shoulder = board_top+1.5
+    board_half_length = board_dx/2+4.0
+    board_half_width = abs(board_y)+board_dy/2+2.0
+    cabin_width = max(64.2*sy, 2*(board_half_width+draft*board_top
+                                  +wall*math.sqrt(1+draft*draft)+0.5))
+    cabin_crown = 2*(board_half_width+1.1)
+    board_aft, board_front = board_x-board_half_length, board_x+board_half_length
+    stations = [s for s in stations if s[0] < board_aft-7 or s[0] > board_front+15]
+    stations += [
+        (board_aft-7, 48.0*sy, 41.5, 40.0*sy),
+        (board_aft, cabin_width, board_shoulder, cabin_crown),
+        (board_front, cabin_width, board_shoulder, cabin_crown),
+        (board_front+15, 25.0*sy, 35.6, 16.0*sy),
+    ]
+    stations.sort()
     shell_envelopes = []
 
     def cabin_shell(stations):
@@ -428,7 +472,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Pull the unoccupied aft wedges into distinct swept cheek pods. The
     # intermediate shoulder wraps the cameras before their service envelope;
     # the central avionics spine still carries the nose longitudinally.
-    cheek_stations = [(x*sx, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
+    # The camera placements advanced 4 mm; translate their complete seat vault.
+    cheek_stations = [(x*sx+4.0, (w-2*(old_draft-draft)*h)*sy, h, c*sy)
                       for x, w, h, c in cheek_stations]
     cheek, cheek_roof = cabin_shell(cheek_stations)
     roof_z = max(roof_z, cheek_roof)
@@ -442,9 +487,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # 1.6+ mm crown ligament: the two haunches close at >45 degrees, so the
     # dorsal coaming remains supported while the shared bay opens for service.
     cross_passage = b.Wire.make_polygon([
-        (57.5*sx,-13.5*sy,1.5), (86.0*sx,-13.5*sy,1.5),
-        (86.0*sx,-13.5*sy,19.0), (71.75*sx,-13.5*sy,35.5),
-        (57.5*sx,-13.5*sy,19.0),
+        (57.5*sx+4.0,-13.5*sy,1.5), (86.0*sx+4.0,-13.5*sy,1.5),
+        (86.0*sx+4.0,-13.5*sy,19.0), (71.75*sx+4.0,-13.5*sy,35.5),
+        (57.5*sx+4.0,-13.5*sy,19.0),
     ],close=True)
     spine = fairing-b.Solid.extrude(b.Face(cross_passage),(0,27.0*sy,0))
     shell = (outer_hull-inner_hull)+spine
@@ -525,15 +570,280 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # leaving a doubled partition inside the cheek.
     for side in (-1, 1):
         gill = b.Wire.make_polygon([
-            (63.0*sx,side*14.0*sy,12.5),
-            (66.5*sx,side*14.0*sy,7.5),
-            (70.0*sx,side*14.0*sy,12.5),
-            (66.5*sx,side*14.0*sy,17.5),
+            (63.0*sx+4.0,side*14.0*sy,12.5),
+            (66.5*sx+4.0,side*14.0*sy,7.5),
+            (70.0*sx+4.0,side*14.0*sy,12.5),
+            (66.5*sx+4.0,side*14.0*sy,17.5),
         ],close=True)
         shell = shell-b.Solid.extrude(b.Face(gill),(0,side*38.0*sy,0))
+    # Recessed ToF carriers follow the actual, axis-aligned board envelopes;
+    # only the optical port rotates to the placement's radial bearing.
+    # Diagonal seats include a closed, ribbed spar saddle. Their blind service
+    # cuts apply to the joined spar and shell and retain a >=1.6 mm floor.
+    spar_services = []
+    spar_vaults = []
+    coaming_trims = []
+
+    def convex_outline(points):
+        points = sorted(set(points))
+        def cross(a, c, d):
+            return (c[0]-a[0])*(d[1]-a[1])-(c[1]-a[1])*(d[0]-a[0])
+        halves = []
+        for sequence in (points, list(reversed(points))):
+            half = []
+            for point in sequence:
+                while len(half) >= 2 and cross(half[-2], half[-1], point) <= 0:
+                    half.pop()
+                half.append(point)
+            halves.append(half[:-1])
+        return halves[0]+halves[1]
+
+    def outset_outline(points, gauge):
+        lines = []
+        for a, c in zip(points, points[1:]+points[:1]):
+            dx, dy = c[0]-a[0], c[1]-a[1]
+            length = math.hypot(dx, dy)
+            nx, ny = dy/length, -dx/length
+            lines.append((nx, ny, nx*a[0]+ny*a[1]+gauge))
+        result = []
+        for a, c in zip(lines[-1:]+lines[:-1], lines):
+            det = a[0]*c[1]-c[0]*a[1]
+            result.append(((a[2]*c[1]-c[2]*a[1])/det,
+                           (a[0]*c[2]-c[0]*a[2])/det))
+        return result
+
+    for key, pos in placements.items():
+        if key not in tof_poses:
+            continue
+        cx, cy, z0 = (v*1000 for v in pos)
+        diagonal = abs(cx) > 1 and abs(cy) > 1
+        # Construct opposing saddles from the same half-plane to avoid OCCT
+        # tolerance slivers at mirrored, coincident spar/corbel intersections.
+        half_turn = diagonal and cx < 0
+        if half_turn:
+            cx,cy = -cx,-cy
+        dx, dy, dz = (v*1000 for v in LIBRARY[key.split('#')[0]].dims_m)
+        hx, hy = dx/2+2.0, dy/2+2.0
+        angle = math.atan2(cy, cx)
+        ux, uy = math.cos(angle), math.sin(angle)
+        tx, ty = -uy, ux
+        front = abs(ux)*hx+abs(uy)*hy
+        # A short flat facet faces the sensor even at a diagonal bearing.
+        # The complete service rectangle remains inside this convex pocket.
+        outline_points = [
+            (-hx,-hy), (hx,-hy), (hx,hy), (-hx,hy),
+            (front*ux-4.5*tx, front*uy-4.5*ty),
+            (front*ux+4.5*tx, front*uy+4.5*ty),
+        ]
+        shared_payload = ('pi_zero_2w' if key.endswith('#n') else
+                          'gps' if key.endswith('#s') else None)
+        shared_bb = None
+        if shared_payload is not None:
+            # Only the oriented envelope is needed; avoid calculating the CAD
+            # model's inertia every time a seat is built.
+            from components import _apply_orientation
+            from pathlib import Path
+            import components
+            spec = LIBRARY[shared_payload]
+            path = Path(components.__file__).parent / spec.step_path
+            brep = Path(str(path)+'.brep')
+            shape = b.import_brep(str(brep)) if brep.exists() else b.import_step(str(path))
+            shape = _apply_orientation(shared_payload, shape)
+            bb = shape.bounding_box()
+            sp = placements[shared_payload]
+            offset = b.Vector(sp[0]*1000-(bb.min.X+bb.max.X)/2,
+                              sp[1]*1000-(bb.min.Y+bb.max.Y)/2,
+                              sp[2]*1000-bb.min.Z)
+            shared_bb = shape.moved(b.Location(offset)).bounding_box()
+        if shared_payload == 'gps':
+            # The GPS sits below this board. Wrap both service envelopes
+            # from the bed instead of bridging a flat cut above the GPS.
+            outline_points.extend([
+                (x-cx,y-cy)
+                for x in (shared_bb.min.X-2,shared_bb.max.X+2)
+                for y in (shared_bb.min.Y-2,shared_bb.max.Y+2)
+            ])
+        footprint = convex_outline(outline_points)
+        front = max(x*ux+y*uy for x,y in footprint)
+        seat_wall = max(wall, 2.2) if diagonal else wall
+        outer_footprint = outset_outline(footprint, seat_wall)
+        def pocket_wire(points, z):
+            return b.Wire.make_polygon([(cx+x,cy+y,z) for x,y in points], close=True)
+        top = z0+dz+3.5
+        outer_seat = b.Solid.extrude(b.Face(pocket_wire(outer_footprint,0)), (0,0,top))
+        inner_seat = b.Solid.extrude(b.Face(pocket_wire(footprint,-0.2)), (0,0,top+0.4))
+        mount = outer_seat-inner_seat
+        if diagonal:
+            # Two pitched corbels close beneath a 1.6 mm blind floor.
+            # The tiny final ridge spans <0.5 mm; each underside rises more
+            # than its horizontal run. The vertical perimeter is also the
+            # reinforcing rib that transfers seat loads into the spar webs.
+            floor_z = z0-2.0
+            floor_gauge = 1.6
+            apex_z = floor_z-floor_gauge
+            # Intersect a constant-pitch vault with the irregular footprint.
+            # This keeps a 1.1:1 underside everywhere without filling the
+            # rectangular seat to the depth required only at its front ears.
+            vault_half = (apex_z+0.2)/1.1
+            vault_x = max(abs(x*ux+y*uy) for x,y in outer_footprint)+2
+            vx,vy = cx-vault_x*ux,cy-vault_x*uy
+            vault = b.Wire.make_polygon([
+                (vx-tx*vault_half,vy-ty*vault_half,-0.2),
+                (vx+tx*vault_half,vy+ty*vault_half,-0.2),
+                (vx,vy,apex_z),
+            ],close=True)
+            # Align the ridge with the spar so wires can enter through both
+            # end ribs while the transverse roof stays steeper than 45 deg.
+            vault_tool = b.Solid.extrude(b.Face(vault),(2*vault_x*ux,2*vault_x*uy,0))
+            underside = inner_seat & vault_tool
+            saddle = b.Solid.extrude(b.Face(pocket_wire(outer_footprint,0)),
+                                     (0,0,floor_z))-underside
+            # The existing gallery is re-opened through this pitched vault
+            # after the shell and spars join; no flat internal ceiling is cut.
+            zone = b.Solid.extrude(b.Face(pocket_wire(outer_footprint,-.2)),(0,0,100))
+            if half_turn:
+                zone = zone.rotate(b.Axis.Z,180)
+                vault_tool = vault_tool.rotate(b.Axis.Z,180)
+            spar_vaults.append((zone,vault_tool))
+            mount = mount+saddle
+        # Two ledges finish 2 mm below the board. Their 2.2:2 undersides
+        # grow from the vertical walls without a suspended floor or bridge.
+        for side in (-1,1):
+            if shared_payload == 'gps' or diagonal:
+                # The stacked service volumes leave no space for a floor;
+                # this shared pocket retains bottom access like the cameras.
+                continue
+            ledge = b.Wire.make_polygon([
+                (cx+side*hx,cy-hy,z0-4.2),
+                (cx+side*(hx+0.15),cy-hy,z0-2.0),
+                (cx+side*(hx-2.0),cy-hy,z0-2.0),
+            ],close=True)
+            mount = mount+b.Solid.extrude(b.Face(ledge),(0,2*hy,0))
+        # Pointed skirt windows save material below the board recess. Both
+        # the skirt-window heads and sensor-port head rise faster than 1:1.
+        for a,c in zip(footprint,footprint[1:]+footprint[:1]):
+            ex,ey = c[0]-a[0],c[1]-a[1]
+            length = math.hypot(ex,ey)
+            if length < 9.0:
+                continue
+            ex,ey = ex/length,ey/length
+            nx,ny = ey,-ex
+            hw = min(4.5,(length-3.0)/2)
+            if diagonal:
+                hw = min(hw,(z0-3.6-5.5)/1.1)
+            x,y = cx+(a[0]+c[0])/2,cy+(a[1]+c[1])/2
+            window = b.Wire.make_polygon([
+                (x-ex*hw-nx*.2,y-ey*hw-ny*.2,5.5),
+                (x-nx*.2,y-ny*.2,5.5-hw*1.1),
+                (x+ex*hw-nx*.2,y+ey*hw-ny*.2,5.5),
+                (x-nx*.2,y-ny*.2,5.5+hw*1.1),
+            ],close=True)
+            mount = mount-b.Solid.extrude(b.Face(window),(nx*(wall+1),ny*(wall+1),0))
+        # Preserve the original wiring galleries through the added coaming;
+        # a transverse mount wall must not seal an existing hollow spar.
+        for arm_cavity in arm_cavities:
+            if not diagonal:
+                mount = mount-arm_cavity
+        # The nose and tail coamings share their bays with the Pi and GPS.
+        # Keep those existing payloads' complete 2 mm service envelopes free.
+        if shared_payload is not None:
+            bb = shared_bb
+            size = bb.max-bb.min+b.Vector(4,4,4)
+            service_box = b.Pos(bb.min.X-2,bb.min.Y-2,bb.min.Z-2)*b.Box(
+                size.X,size.Y,size.Z,align=(b.Align.MIN,b.Align.MIN,b.Align.MIN))
+            mount = mount-service_box
+        if not mount.is_valid:
+            raise ValueError(f'Invalid ToF seat: {key}')
+        if half_turn:
+            mount = mount.rotate(b.Axis.Z,180)
+        shell = shell+mount
+        # Open upward for installation; this cut clears existing bulkheads
+        # as well as the new coaming, with no enclosed horizontal ceiling.
+        service = b.Solid.extrude(b.Face(pocket_wire(footprint,z0-2.0)),
+                                  (0,0,max(100.0,roof_z+10)))
+        if half_turn:
+            service = service.rotate(b.Axis.Z,180)
+        shell = shell-service
+        if diagonal:
+            spar_services.append(service)
+            # Above the seat rim, remove the thin remnant of the cabin skin
+            # behind the service cut. The full 1.6 mm seat wall and floor
+            # remain below this opening; no doubled foil runs up the canopy.
+            trim = b.Pos(cx,cy,top)*b.Box(2*hx,2*hy+4,100,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+            if half_turn:
+                trim = trim.rotate(b.Axis.Z,180)
+            coaming_trims.append(trim)
+        oz = tof_poses[key]['origin_m'][2]*1000
+        px,py = cx+ux*(front-.2),cy+uy*(front-.2)
+        hw = 3.0
+        port = b.Wire.make_polygon([
+            (px-tx*hw,py-ty*hw,oz), (px,py,oz-hw*1.1),
+            (px+tx*hw,py+ty*hw,oz), (px,py,oz+hw*1.1),
+        ],close=True)
+        optical_cut = b.Solid.extrude(b.Face(port),(ux*(seat_wall+1),uy*(seat_wall+1),0))
+        if half_turn:
+            optical_cut = optical_cut.rotate(b.Axis.Z,180)
+        shell = shell-optical_cut
+        if abs(cx) < 1e-6 and abs(cy) > 1:
+            # Bed-founded ties attach the two lateral seats to the cabin.
+            side = 1 if cy > 0 else -1
+            for sign in (-1,1):
+                ax,ay = sign*8.0*sy,side*24.0*sy
+                bx,by = cx+sign*(hx+wall/2),cy-side*(hy+wall/2)
+                length = math.hypot(bx-ax,by-ay)
+                ox,oy = -(by-ay)/length*p.payload_rail_width_mm/2,(bx-ax)/length*p.payload_rail_width_mm/2
+                tie = b.Wire.make_polygon([
+                    (ax+ox,ay+oy,0),(bx+ox,by+oy,0),
+                    (bx-ox,by-oy,0),(ax-ox,ay-oy,0),
+                ],close=True)
+                shell = shell+b.Solid.extrude(b.Face(tie),(0,0,max(wall,z0-4.2)))
+
     # Boolean the apertures on the shell alone to retain the complete
     # closed arm sections where they join the cabin's lower shoulders.
     body = body + shell
+    # The enlarged cabin crosses the old wiring galleries. Remove those
+    # internal partitions from the joined hull so the existing drains still
+    # reach the complete span. Restrict this to the cabin region, preserving
+    # the original high-shear motor-end diaphragms and nacelle galleries.
+    gallery_limit = b.Cylinder(95,50,
+        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+    for cavity in arm_cavities:
+        passage = cavity & gallery_limit
+        for zone,vault in spar_vaults:
+            # Within a recess, the wiring roof follows the printable vault
+            # beneath its 1.6 mm floor. Elsewhere retain the full spar cavity.
+            local = passage & zone
+            if local is not None and local.volume > 1e-7:
+                passage = (passage-zone)+(local & vault)
+        body = body-passage
+    for service in spar_services:
+        body = body-service
+    # A single upward-open service cut clears any overlapping sensor coaming
+    # or older internal partition from the real board's complete 2 mm box.
+    board_service = b.Pos(board_x,board_y,board_z-2.0)*b.Box(
+        board_dx+4,board_dy+4,max(100.0,roof_z-board_z+4),
+        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+    body = body-board_service
+    for trim in coaming_trims:
+        body = body-trim
+    # Keep the complete camera service rectangles free of the expanded
+    # cabin/cheek junction. Both pockets remain open for vertical insertion.
+    from components import _apply_orientation
+    for key,pos in placements.items():
+        if not key.startswith('pi_camera_3#'):
+            continue
+        from pathlib import Path
+        import components
+        path = Path(components.__file__).parent/LIBRARY['pi_camera_3'].step_path
+        brep = Path(str(path)+'.brep')
+        camera = b.import_brep(str(brep)) if brep.exists() else b.import_step(str(path))
+        camera = _apply_orientation('pi_camera_3',camera)
+        bb = camera.bounding_box()
+        camera_service = b.Pos(pos[0]*1000,pos[1]*1000,pos[2]*1000-2)*b.Box(
+            bb.size.X+4,bb.size.Y+4,100,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+        body = body-camera_service
     # Two first-layer longerons support the recessed payloads, tie the end
     # bulkheads to all four arm chines, and leave underside service access.
     # They also carry battery jolt loads into the central mounting ring.
@@ -573,8 +883,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Half-angles = Camera Module 3 spec (66.3h x 41.6v deg) + 1 deg margin, so no
     # frame material sits inside the field of view - evaluate.py:check_camera_fov
     # gates exactly this. Pyramid ceiling slopes down at ~22 deg: printable, no supports.
-    from components import camera_lens_poses as _clp
-    for _key, _pose in _clp().items():
+    for _key, _pose in camera_poses.items():
         _ox, _oy, _oz = (v * 1000 for v in _pose["origin_m"])
         _hh = math.tan(math.radians(_pose["hfov_deg"] / 2 + 1.0))
         _vh = math.tan(math.radians(_pose["vfov_deg"] / 2 + 1.0))
@@ -613,10 +922,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # enclosed air pockets no longer create separate internal STL surfaces.
     for mx, my in p.motor_positions():
         x = 45.0
+        ang = math.degrees(math.atan2(my,mx))
+        # Bed-founded annular ribs round out the high-shear drain junction;
+        # the bore stays open through their full height into the gallery.
+        drain_rib = b.Pos(x,sweep_center(x),0)*b.Cylinder(3.2,3.2,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+        body = body+drain_rib.rotate(b.Axis.Z,ang)
         throat = b.Pos(x, sweep_center(x), -0.2) * b.Cylinder(
-            1.6, p.arm_rib_thickness_mm + 0.6,
+            1.6, max(p.arm_rib_thickness_mm + 0.6,3.6),
             align=(b.Align.CENTER, b.Align.CENTER, b.Align.MIN))
-        body = body - throat.rotate(b.Axis.Z, math.degrees(math.atan2(my, mx)))
+        body = body - throat.rotate(b.Axis.Z,ang)
+    # Mitered ribs can trap tiny closed air wedges where three skins meet.
+    # Fill only those sub-150 mm3 wedges; the open wiring galleries remain
+    # hollow. This also removes fragile internal slivers from the print.
+    for boundary in list(body.shells()):
+        enclosed = b.Solid(boundary)
+        if 0 < enclosed.volume < 150:
+            body = body+enclosed
+    if not body.is_valid or len(body.solids()) != 1:
+        raise ValueError('The chassis must be one valid solid')
     body = b.Part(children=body.solids())
     return b.Part(body.wrapped)
 
