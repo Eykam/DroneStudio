@@ -151,9 +151,6 @@ LIBRARY = {
     "vl53l9cx_breakout": Component(
         "VL53L9CX dToF breakout", 2.0, (0.020, 0.016, 0.005), "box", "perimeter",
         "ST VL53L9CX module OPTICAL LGA 12.1x5.1x4.5mm (ST part table, EE-verified 2026-09-05) on assumed 20x16x5mm custom carrier (2x M2); STEVAL-VL53L9 carrier exists but 30-week lead - custom breakout path, STEVAL data brief as reference schematic; EE owns final carrier dims"),
-    "tof_hub": Component(
-        "ToF hub/mux board", 4.0, (0.025, 0.025, 0.006), "box", "deck",
-        "assumed I2C mux/carrier for the 8x single-address VL53L9CX ring; EE owns design (shared-constraints handoff)"),
 }
 
 ORIENTATIONS = {
@@ -201,7 +198,6 @@ DEFAULT_PLACEMENT = {
     "vl53l9cx_breakout#sw":  [-0.045, -0.045, 0.014],
     "vl53l9cx_breakout#w":   [ 0.000, -0.048, 0.014],
     "vl53l9cx_breakout#nw":  [ 0.045, -0.045, 0.014],
-    "tof_hub": [0.0, 0.0, 0.034],  # deck center above IMU
 }
 
 def placement():
