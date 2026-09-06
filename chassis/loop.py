@@ -45,7 +45,7 @@ Write each candidate as a COMPLETE drop-in replacement of chassis.py (same inter
   /tmp/candidates/{base_variant}b.py
 Do NOT edit chassis.py itself - treat it as the read-only reference implementation of the current best. Read it first.
 The two candidates must take genuinely different design directions (e.g. one reworks the fuselage/shell strategy, the other reworks arm sections/roots or mass distribution) - NOT two parameter nudges of one idea. Each should visibly advance the DJI/Anduril-inspired form factor from INSPIRATION.md - incremental but real steps.
-placement.json may be edited to move components (the edit is shared by all three candidates; x/y/z in meters, z = component bottom).
+placement.json may be edited to move components (the edit is shared by all three candidates; x/y/z in meters, z = component bottom) EXCEPT the pinned user-directive keys (vl53l9cx_breakout#n/ne/e/se/s/sw/w/nw, pi_camera_3#left/right) - components.py FIXED_PLACEMENT_KEYS ignores json overrides for those; do not waste mutations moving them.
 Verify EACH candidate builds before finishing. For each file F in /tmp/candidates/{base_variant}a.py /tmp/candidates/{base_variant}b.py run:
   python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(sys.argv[1],sys.argv[2]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); p=m.ChassisParams(); part=m.build_chassis(p); print(round(part.volume,1))" F F
 (a file named e.g. v18-g17a.py is not importable as a module name - the importlib form above is required)

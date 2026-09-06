@@ -183,8 +183,8 @@ DEFAULT_PLACEMENT = {
     "fc_esc_stack": [0.0, 0.0, 0.016],
     "battery": [0.0, 0.0, 0.045],
     "pi_zero_2w": [0.030, -0.030, 0.010],
-    "pi_camera_3#left": [0.035, -0.030, 0.012],
-    "pi_camera_3#right": [0.035, 0.030, 0.012],
+    "pi_camera_3#left": [0.083, -0.028, 0.002],  # user directive 2026-09-05: +4mm to nose apertures (was 0.079)
+    "pi_camera_3#right": [0.083, 0.028, 0.002],
     "mpu9250": [0.0, 0.0, 0.022],
     "gps": [-0.045, 0.0, 0.045],  # rear deck, typical FPV GPS perch
     # VL53L9CX 360-degree ring (user directive 2026-09-05): 8 breakouts at 45 deg
@@ -200,10 +200,25 @@ DEFAULT_PLACEMENT = {
     "vl53l9cx_breakout#nw":  [ 0.045, -0.045, 0.014],
 }
 
+# User-directive fixed placements (2026-09-05): the exact 45-degree ToF ring
+# bearings and the nose-hole camera positions (+4mm) are REQUIREMENTS, not
+# optimization variables. placement.json (the codex mutation surface) may move
+# anything else but may NOT override these keys - gen-46/47 drift (cameras back
+# to 0.079, asymmetric carrier ring) showed the prompt alone does not hold them.
+FIXED_PLACEMENT_KEYS = frozenset({
+    "vl53l9cx_breakout#n", "vl53l9cx_breakout#ne", "vl53l9cx_breakout#e",
+    "vl53l9cx_breakout#se", "vl53l9cx_breakout#s", "vl53l9cx_breakout#sw",
+    "vl53l9cx_breakout#w", "vl53l9cx_breakout#nw",
+    "pi_camera_3#left", "pi_camera_3#right",
+})
+
 def placement():
     p = dict(DEFAULT_PLACEMENT)
     if os.path.exists("placement.json"):
-        p.update(json.load(open("placement.json")))
+        overrides = json.load(open("placement.json"))
+        for k in FIXED_PLACEMENT_KEYS:
+            overrides.pop(k, None)
+        p.update(overrides)
     return p
 
 def placed_items():
