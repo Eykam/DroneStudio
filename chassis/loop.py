@@ -263,7 +263,20 @@ if __name__ == "__main__":
         print("another loop.py holds /work/loop.lock; exiting", flush=True)
         sys.exit(0)
     progress.start_heartbeat()
+    # per-batch component-set freeze check (2026-09-05): eval consistency needs
+    # components.py stable within a batch; mid-batch edits (e.g. the v19 PCBA
+    # swap, which mixed mass bases inside gen 46) get a loud non-gating warning.
+    # placement.json is EXCLUDED - it is the sanctioned codex mutation surface.
+    import hashlib
+    def _basis_hash():
+        return hashlib.sha256(open("components.py", "rb").read()).hexdigest()[:12]
+    _basis = _basis_hash()
+    print(f"[freeze] batch component-set basis { _basis }", flush=True)
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     for _ in range(n):
+        _now = _basis_hash()
+        if _now != _basis:
+            print(f"[freeze] WARNING: components.py changed mid-batch ({_basis} -> {_now}); evals in this batch used mixed mass bases", flush=True)
+            _basis = _now
         run_generation()
     progress.idle(f"batch done: best {load_state()['best_variant']}")
