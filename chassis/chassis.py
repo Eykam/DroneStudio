@@ -714,11 +714,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
         if half_turn:
             service = service.rotate(b.Axis.Z,180)
         spar_services.append(service)
-        # Only 13.1 x 6.1 mm reaches the outer surface: the 12.1 x 5.1 mm
-        # optical module plus 1 mm total clearance. The 2.45 mm top ligament
+        # Only 13.9 x 7.2 mm reaches the outer surface: the VL53L9CX body
+        # 12.83 x 6.10 mm (ST DS14879 Rev 7 Fig 23, +tol) plus 1 mm total
+        # clearance. Supersedes stale 12.1 x 5.1 package metadata. The 2.45 mm top ligament
         # and 1.22 mm parent wall remain continuous around the optical rim.
         oz = tof_poses[key]['origin_m'][2]*1000
-        hw,hh = 13.1/2,6.1/2
+        hw,hh = 13.9/2,7.2/2
         port = b.Wire.make_polygon([
             (cx-tx*hw,cy-ty*hw,oz-hh), (cx+tx*hw,cy+ty*hw,oz-hh),
             (cx+tx*hw,cy+ty*hw,oz+hh), (cx-tx*hw,cy-ty*hw,oz+hh),

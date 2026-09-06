@@ -146,7 +146,7 @@ LIBRARY = {
         "mass zeroed 2026-09-05: IMU is U6 on the ee-flight PCBA (0.03g, carried in fc_esc_stack mass); entry kept for pose/lever-arm gate"),
     "vl53l9cx_breakout": Component(
         "VL53L9CX dToF breakout", 2.0, (0.020, 0.016, 0.005), "box", "perimeter",
-        "ST VL53L9CX module OPTICAL LGA 12.1x5.1x4.5mm (ST part table, EE-verified 2026-09-05) on assumed 20x16x5mm custom carrier (2x M2); STEVAL-VL53L9 carrier exists but 30-week lead - custom breakout path, STEVAL data brief as reference schematic; EE owns final carrier dims"),
+        "ST VL53L9CX module OPTICAL LGA body 12.83x6.10x4.64mm +/-0.06/0.04/0.06 (ST DS14879 Rev 7 Fig 23, EE correction 2026-09-06 - supersedes stale 12.1x5.1x4.5 metadata) on assumed 20x16x5mm custom carrier (2x M2); STEVAL-VL53L9 carrier exists but 30-week lead - custom breakout path, STEVAL data brief as reference schematic; EE owns final carrier dims"),
 }
 
 ORIENTATIONS = {
