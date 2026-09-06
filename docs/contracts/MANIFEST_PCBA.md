@@ -22,4 +22,4 @@ outline; roll totals.pcba_g into the mass budget; containment re-verifies.
 SIM consumption: board mass feeds chassis inertials when the flight board is
 in the loop (today: informational).
 Pinning: consumers record (board_id, version); the orchestrator announces
-bumps. ee-flight v19 = first dronestudio.pcba/1.0 (pcba_g ~31.73g est).
+bumps. ee-flight v19 is the proto-1.0 (pcba_g ~31.73g est, no schema field); v20+ declares schema dronestudio.pcba/1.0 with outline + holes.
