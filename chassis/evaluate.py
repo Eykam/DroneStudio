@@ -64,14 +64,21 @@ def mass_properties(m, motor_positions_mm, arm_length_mm):
     # unit care: mm^4 * kg/mm^3 = kg*mm -> convert kg*mm^2? moment_inertia is integral r^2 dV -> mm^5? No:
     # trimesh moment_inertia: integral of r^2 dV over volume -> units mm^5. physical I = rho[kg/mm^3] * mm^5 -> kg*mm^2; x1e-6 -> kg*m^2
     I_frame = I_frame_mm4 * RHO_PETG * 1e-6
-    MOTOR_KG, STACK_KG, BATTERY_KG, ELEC_KG = 0.032, 0.090, 0.180, 0.060
+    # 2026-09-06 (parent follow-up): mass basis from components.py real part
+    # masses instead of hardcoded aggregates - the stale constants
+    # (BATTERY_KG=0.180 vs real CNHL 0.163, STACK 0.090 vs real v19 0.0317)
+    # made all_up_mass_kg fictitious. Now sums the live placement map + 4
+    # parametric motors, matching the export_manifest basis.
+    from components import LIBRARY as _LIB, placement as _placement
+    MOTOR_KG = _LIB["motor"].mass_g/1000.0
+    placed_kg = sum(_LIB[k.split("#")[0]].mass_g for k in _placement())/1000.0
     a = arm_length_mm / math.sqrt(2)
     I_motors = np.zeros((3,3))
     for (mx, my) in motor_positions_mm:
         r2x, r2y, r2z = (my**2)*1e-6, (mx**2)*1e-6, (mx**2+my**2)*1e-6
         I_motors += MOTOR_KG*np.diag([r2x, r2y, r2z])
-    I_pay = (STACK_KG+BATTERY_KG+ELEC_KG)*np.diag([(0.03**2),(0.03**2),(0.05**2)])
-    total_mass = frame_mass_kg + 4*MOTOR_KG + STACK_KG + BATTERY_KG + ELEC_KG
+    I_pay = placed_kg*np.diag([(0.03**2),(0.03**2),(0.05**2)])
+    total_mass = frame_mass_kg + 4*MOTOR_KG + placed_kg
     I_total = I_frame + I_motors + I_pay
     return {
         "frame_mass_g": round(frame_mass_kg*1000,1),
