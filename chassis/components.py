@@ -145,8 +145,8 @@ LIBRARY = {
         "MPU-9250 breakout (GY-9250)", 0.0, (0.025, 0.015, 0.003), "box", "stack",
         "mass zeroed 2026-09-05: IMU is U6 on the ee-flight PCBA (0.03g, carried in fc_esc_stack mass); entry kept for pose/lever-arm gate"),
     "vl53l9cx_breakout": Component(
-        "VL53L9CX dToF breakout", 2.0, (0.020, 0.016, 0.005), "box", "perimeter",
-        "ST VL53L9CX module OPTICAL LGA body 12.83x6.10x4.64mm +/-0.06/0.04/0.06 (ST DS14879 Rev 7 Fig 23, EE correction 2026-09-06 - supersedes stale 12.1x5.1x4.5 metadata) on assumed 20x16x5mm custom carrier (2x M2); STEVAL-VL53L9 carrier exists but 30-week lead - custom breakout path, STEVAL data brief as reference schematic; EE owns final carrier dims"),
+        "VL53L9CX dToF breakout", 2.0, (0.0228, 0.0228, 0.0155), "box", "perimeter",
+        "REAL ee-tof v2 carrier (TOF6, released, DRC-zero, consumed 2026-09-06): board 15x20x1.0mm, U1 VL53L9CX body 12.83x6.10x4.64 (DS14879 Rev 7), J1 2x4 2.54mm vertical header (front, 8.54mm tall), J2 Hirose FH12 FFC (back, 2.0mm), assembly radial span 11.54mm; H1/H2 NPTH 2.2mm with 4.5mm sacred disks extending 0.25mm past board sides / 0.65mm past mount edge. Envelope 22.8x22.8x15.5 covers all 8 bearings (diagonal projection (20.65+11.54)/sqrt2=22.77). Orientation: board Y tangential (mount-end holes), board X vertical with X=15 edge DOWN (optical axes at board X=11.6 -> lens z = placement z + 3.4mm). Mass 2.0g UNMEASURED estimate (EE: no defensible mass source yet). Sources: geometry_tof001.json (ee-tof.geometry.v1 released) + ee_tof_carrier.step (board sha256 d929d57f)"),
 }
 
 ORIENTATIONS = {
@@ -185,14 +185,14 @@ DEFAULT_PLACEMENT = {
     # VL53L9CX 360-degree ring (user directive 2026-09-05): 8 breakouts at 45 deg
     # bearing spacing, recessed at the shell, sensor facing radially outward
     # (55x42 deg FoV -> ~10 deg overlaps). z = board bottom.
-    "vl53l9cx_breakout#n":   [ 0.088,  0.000, 0.014],
-    "vl53l9cx_breakout#ne":  [ 0.045,  0.045, 0.014],
-    "vl53l9cx_breakout#e":   [ 0.000,  0.048, 0.014],
-    "vl53l9cx_breakout#se":  [-0.045,  0.045, 0.014],
-    "vl53l9cx_breakout#s":   [-0.130,  0.000, 0.014],
-    "vl53l9cx_breakout#sw":  [-0.045, -0.045, 0.014],
-    "vl53l9cx_breakout#w":   [ 0.000, -0.048, 0.014],
-    "vl53l9cx_breakout#nw":  [ 0.045, -0.045, 0.014],
+    "vl53l9cx_breakout#n":   [ 0.088,  0.000, 0.0135],
+    "vl53l9cx_breakout#ne":  [ 0.045,  0.045, 0.0135],
+    "vl53l9cx_breakout#e":   [ 0.000,  0.048, 0.0135],
+    "vl53l9cx_breakout#se":  [-0.045,  0.045, 0.0135],
+    "vl53l9cx_breakout#s":   [-0.130,  0.000, 0.0135],
+    "vl53l9cx_breakout#sw":  [-0.045, -0.045, 0.0135],
+    "vl53l9cx_breakout#w":   [ 0.000, -0.048, 0.0135],
+    "vl53l9cx_breakout#nw":  [ 0.045, -0.045, 0.0135],
 }
 
 # User-directive fixed placements (2026-09-05): the exact 45-degree ToF ring
@@ -242,7 +242,7 @@ def tof_lens_poses():
         if cname not in TOF_SPEC:
             continue
         ang = math.atan2(pos[1], pos[0])
-        out[key] = {"origin_m": [pos[0], pos[1], pos[2] + 0.003],
+        out[key] = {"origin_m": [pos[0], pos[1], pos[2] + 0.0034],
                     "axis": [round(math.cos(ang), 4), round(math.sin(ang), 4), 0.0],
                     **TOF_SPEC[cname]}
     return out
