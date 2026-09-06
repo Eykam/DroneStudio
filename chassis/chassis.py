@@ -1,4 +1,4 @@
-"""Three-bay pitched service cabin with load-following internal sensor-seat ribs.
+"""Swept four-bay cabin truss with a three-opening forward service bulkhead.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -624,23 +624,29 @@ def build_chassis(p: ChassisParams) -> b.Part:
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(gill),(0,side*55,0))
 
-    # Three pitched bays turn the tall cabin side into a light folded frame.
-    # The two intermediate piers continue into the broad arm-root region;
-    # uninterrupted sill and dorsal belts tie all three bays to the end walls.
-    # Each 18:16 lintel prints from both sides without a flat ceiling, while
-    # the 26 mm sill preserves the complete common ToF enclosure below it.
+    # Four swept service bays leave narrow inclined load paths from the
+    # continuous lower sill to the dorsal belt. Shorter pitched lintels
+    # remove the heavy triangular haunches of the former three-bay cabin.
+    # The 14:12.1 closing roof is support-free; each inclined pier has more
+    # than 3 mm of width and still joins a 1.22 mm normal-gauge shell.
     for side in (-1,1):
-        for vent_x in (-36.0,0.0,36.0):
+        for vent_x in (-40.95,-13.65,13.65,40.95):
             opening = b.Wire.make_polygon([
-                (vent_x-16,side*20,26), (vent_x+16,side*20,26),
-                (vent_x+16,side*20,45), (vent_x,side*20,63),
-                (vent_x-16,side*20,45),
+                (vent_x-12.1,side*20,26), (vent_x+12.1,side*20,26),
+                (vent_x+14.1,side*20,50), (vent_x+2,side*20,64),
+                (vent_x-10.1,side*20,50),
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(opening),(0,side*20,0))
-    for vent_y in (-14.0,14.0):
+    # Carry the lighter pitched architecture around the front bulkhead.
+    # Three narrow openings keep four full-height piers and a continuous
+    # upper belt, removing broad diamond haunches above the forward bay.
+    for vent_y in (-18.0,0.0,18.0):
         opening = b.Wire.make_polygon([
-            (board_front-2,vent_y-10,44), (board_front-2,vent_y,29),
-            (board_front-2,vent_y+10,44), (board_front-2,vent_y,59),
+            (board_front-2,vent_y-6.8,30),
+            (board_front-2,vent_y+6.8,30),
+            (board_front-2,vent_y+6.8,50),
+            (board_front-2,vent_y,62),
+            (board_front-2,vent_y-6.8,50),
         ],close=True)
         shell = shell-b.Solid.extrude(b.Face(opening),(4,0,0))
 

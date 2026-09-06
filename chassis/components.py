@@ -37,6 +37,14 @@ def cad_geometry(key, pos_m):
                 pass
         _STEP_CACHE[path] = sh
     src = _apply_orientation(key.split("#")[0], _STEP_CACHE[path])
+    if key.split("#")[0] == "vl53l9cx_breakout":
+        # Per-bearing mount (2026-09-06, ee-tof v2 real carrier): board +Z (module
+        # face) -> radially outward at the placement bearing; board +X -> -Z
+        # (X=15 edge down, optical axes at board X=11.6 -> placement z + 3.4mm);
+        # board +Y -> CCW tangential. R_y(+90) maps X->-Z,Z->+X; R_z(bearing) aims it.
+        import math as _m
+        _ang = _m.degrees(_m.atan2(pos_m[1], pos_m[0]))
+        src = src.rotate(b.Axis((0, 0, 0), (0, 1, 0)), 90.0).rotate(b.Axis((0, 0, 0), (0, 0, 1)), _ang)
     bb = src.bounding_box()
     cx, cy = (bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2
     sh = src.moved(b.Location((pos_m[0] * 1000 - cx, pos_m[1] * 1000 - cy,
@@ -146,7 +154,8 @@ LIBRARY = {
         "mass zeroed 2026-09-05: IMU is U6 on the ee-flight PCBA (0.03g, carried in fc_esc_stack mass); entry kept for pose/lever-arm gate"),
     "vl53l9cx_breakout": Component(
         "VL53L9CX dToF breakout", 2.0, (0.0228, 0.0228, 0.0155), "box", "perimeter",
-        "REAL ee-tof v2 carrier (TOF6, released, DRC-zero, consumed 2026-09-06): board 15x20x1.0mm, U1 VL53L9CX body 12.83x6.10x4.64 (DS14879 Rev 7), J1 2x4 2.54mm vertical header (front, 8.54mm tall), J2 Hirose FH12 FFC (back, 2.0mm), assembly radial span 11.54mm; H1/H2 NPTH 2.2mm with 4.5mm sacred disks extending 0.25mm past board sides / 0.65mm past mount edge. Envelope 22.8x22.8x15.5 covers all 8 bearings (diagonal projection (20.65+11.54)/sqrt2=22.77). Orientation: board Y tangential (mount-end holes), board X vertical with X=15 edge DOWN (optical axes at board X=11.6 -> lens z = placement z + 3.4mm). Mass 2.0g UNMEASURED estimate (EE: no defensible mass source yet). Sources: geometry_tof001.json (ee-tof.geometry.v1 released) + ee_tof_carrier.step (board sha256 d929d57f)"),
+        "REAL ee-tof v2 carrier (TOF6, released, DRC-zero, consumed 2026-09-06): board 15x20x1.0mm, U1 VL53L9CX body 12.83x6.10x4.64 (DS14879 Rev 7), J1 2x4 2.54mm vertical header (front, 8.54mm tall), J2 Hirose FH12 FFC (back, 2.0mm), assembly radial span 11.54mm; H1/H2 NPTH 2.2mm with 4.5mm sacred disks extending 0.25mm past board sides / 0.65mm past mount edge. Envelope 22.8x22.8x15.5 covers all 8 bearings (diagonal projection (20.65+11.54)/sqrt2=22.77). Orientation: board Y tangential (mount-end holes), board X vertical with X=15 edge DOWN (optical axes at board X=11.6 -> lens z = placement z + 3.4mm). Mass 2.0g UNMEASURED estimate (EE: no defensible mass source yet). Sources: geometry_tof001.json (ee-tof.geometry.v1 released) + ee_tof_carrier.step (board sha256 d929d57f)",
+        step_path="parts/ee_tof_carrier.step"),
 }
 
 ORIENTATIONS = {
