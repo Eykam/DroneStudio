@@ -1,4 +1,4 @@
-"""Narrow eight-facet swept spars and three-cell internal carrier bridges.
+"""Chevron-pier cabin with close-pitched battery gills and a continuous sill.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -248,7 +248,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             width *= 1.0-0.18*taper
             height *= 1.0+0.04*max(0.0,min(1.0,(0.94-frac)/0.20))
             crest = max(0.0,min(1.0,(x-53.0)/14.0,(110.0-x)/22.0))
-            height += 2.0*crest
+            height += 2.6*crest
             if frac == 1.0:
                 width, height = p.arm_width_mm, p.arm_tip_height_mm
             tube_sections.append((x, sweep_center(x), width, height))
@@ -615,7 +615,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # and battery coamings into the arm roots and lower longerons. Keep only
     # these narrow piers instead of a full-height doubled inner fuselage.
     for pier_x in (-100.0,-78.0,-25.0,25.0):
-        zone = b.Pos(pier_x,0,0)*b.Box(6.0,100,24.5,
+        pier_width = 4.0 if pier_x < -50 else 6.0
+        zone = b.Pos(pier_x,0,0)*b.Box(pier_width,100,24.5,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
         shell = shell+(fairing & zone)
     # Reinforce the inside of the steep battery-to-board shoulder. Its
@@ -634,39 +635,42 @@ def build_chassis(p: ChassisParams) -> b.Part:
     aft_lap_void = (inner_hull.moved(b.Pos(0,0.5,0)) &
                     inner_hull.moved(b.Pos(0,-0.5,0)))
     shell = shell+((outer_hull-aft_lap_void) & aft_lap_zone)
-    # Long pitched battery gills remove panel area between the bed-founded
-    # piers. Their 11:9.6 lintels and continuous 3 mm roof belt stay printable.
+    # Three close-pitched gills follow the recessed battery. Their short
+    # roofs remove unused upper panel area while keeping the continuous
+    # lower sill, aft fold lap, and battery-to-cabin shoulder intact.
     for side in (-1,1):
-        for cx in (-99.0,-78.0):
+        for cx in (-101.5,-82.5,-63.5):
             gill = b.Wire.make_polygon([
-                (cx-9.6,side*18.5,28), (cx,side*18.5,24.5),
-                (cx+9.6,side*18.5,28), (cx,side*18.5,39.0),
+                (cx-8.0,side*18.5,25.0), (cx+8.0,side*18.5,25.0),
+                (cx+9.0,side*18.5,30.1), (cx+1.0,side*18.5,39.7),
+                (cx-7.0,side*18.5,30.1),
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(gill),(0,side*55,0))
 
-    # Four swept service bays leave narrow inclined load paths from the
-    # continuous lower sill to the dorsal belt. Shorter pitched lintels
-    # remove the heavy triangular haunches of the former three-bay cabin.
-    # The 14:12.1 closing roof is support-free; each inclined pier has more
-    # than 3 mm of width and still joins a 1.22 mm normal-gauge shell.
+    # Six raked arches put the coaming material into opposed diagonal piers.
+    # Their chevron pattern braces the dorsal belt longitudinally; the short
+    # pitched roofs close without supports. All cuts stay above the common
+    # sensor shell, preserving each internal seat and its small optical port.
+    # Paired piers keep at least 2.8 mm in-plane width and 1.22 mm normal skin.
     for side in (-1,1):
-        for vent_x in (-40.95,-13.65,13.65,40.95):
+        for vent_x in (-45.5,-27.3,-9.1,9.1,27.3,45.5):
+            rake = -1.4 if vent_x < 0 else 1.4
             opening = b.Wire.make_polygon([
-                (vent_x-12.1,side*20,26), (vent_x+12.1,side*20,26),
-                (vent_x+14.1,side*20,50), (vent_x+2,side*20,64),
-                (vent_x-10.1,side*20,50),
+                (vent_x-7.7,side*20,24.8), (vent_x+7.7,side*20,24.8),
+                (vent_x+7.7+rake,side*20,55.5),
+                (vent_x+rake,side*20,64.8),
+                (vent_x-7.7+rake,side*20,55.5),
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(opening),(0,side*20,0))
-    # Carry the lighter pitched architecture around the front bulkhead.
-    # Three narrow openings keep four full-height piers and a continuous
-    # upper belt, removing broad diamond haunches above the forward bay.
-    for vent_y in (-18.0,0.0,18.0):
+    # Four matching peaked windows complete the light, continuous coaming
+    # around the forward bulkhead; narrow piers link its sill and roof belt.
+    for vent_y in (-21.0,-7.0,7.0,21.0):
         opening = b.Wire.make_polygon([
-            (board_front-2,vent_y-6.8,30),
-            (board_front-2,vent_y+6.8,30),
-            (board_front-2,vent_y+6.8,50),
-            (board_front-2,vent_y,62),
-            (board_front-2,vent_y-6.8,50),
+            (board_front-2,vent_y-5.6,28.0),
+            (board_front-2,vent_y+5.6,28.0),
+            (board_front-2,vent_y+5.6,57.0),
+            (board_front-2,vent_y,64.0),
+            (board_front-2,vent_y-5.6,57.0),
         ],close=True)
         shell = shell-b.Solid.extrude(b.Face(opening),(4,0,0))
 
