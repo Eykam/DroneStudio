@@ -1,4 +1,4 @@
-"""Candidate A: swept cheek pods with pitched cooling gills and a shared nose vault.
+"""Candidate A: low folded battery chines with three large swept service gills.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -454,19 +454,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # transverse end walls. Its hollow upper and lower facets carry pack-bay
     # shear while all of the original 2 mm service space remains available.
     battery_width = next(w for x,w,h,c in stations if abs(x+105.0*sx)<1e-6)
-    zlo, zmid, zhi = 8.0, 15.0, 22.0
+    # Put the battery shear belt lower on the fuselage and deepen its fold.
+    # This preserves a continuous tray-to-stack load path while making room
+    # for three large pitched service gills and their wider diagonal pillars.
+    # The 6 mm rise / 3.6 mm projection is self-supporting on the build plate.
+    zlo, zmid, zhi = 4.0, 10.0, 16.0
     def side_y(z):
         return battery_width/2-draft*z
-    blister_stations = [(-104.5,0.15),(-96.0,3.0),(-66.0,3.0),(-56.5,0.15)]
+    blister_stations = [(-109.0,0.15),(-98.0,3.6),(-63.0,3.6),(-48.5,0.15)]
     def blister_wire(x, depth, side, inner=False):
         lower_slope = (side_y(zmid)+depth-(side_y(zlo)-0.1))/(zmid-zlo)
         upper_slope = ((side_y(zhi)-0.1)-(side_y(zmid)+depth))/(zhi-zmid)
         lower_c = side_y(zlo)-0.1-lower_slope*zlo
         upper_c = side_y(zhi)-0.1-upper_slope*zhi
         if inner:
-            # The 8.5 mm nose ramp adds an X component to each surface normal.
+            # The 11 mm runout adds an X component to each surface normal.
             # A conservative normal offset keeps the lofted skin >=1.25 mm.
-            runout_gradient = 2.85*sy/(8.5*sx)
+            runout_gradient = 3.45*sy/(11.0*sx)
             lower_ci = lower_c-wall*math.sqrt(1+lower_slope**2+runout_gradient**2)
             upper_ci = upper_c-wall*math.sqrt(1+upper_slope**2+runout_gradient**2)
             peak_z = (upper_ci-lower_ci)/(lower_slope-upper_slope)
@@ -485,27 +489,27 @@ def build_chassis(p: ChassisParams) -> b.Part:
         inner_stations = list(blister_stations)
         # At each pointed end the cavity fades inside the existing sidewall;
         # stop short of the external tip to keep a continuous skin ligament.
-        inner_stations[0] = (-104.5+wall/sx,0.15+2.85*wall/(8.5*sx))
-        inner_stations[-1] = (-56.5-wall/sx,0.15+2.85*wall/(9.5*sx))
+        inner_stations[0] = (-109.0+wall/sx,0.15+3.45*wall/(11.0*sx))
+        inner_stations[-1] = (-48.5-wall/sx,0.15+3.45*wall/(14.5*sx))
         inner_blister = b.Solid.make_loft([
             blister_wire(x,d*sy,side,True) for x,d in inner_stations],ruled=True)
         shell = (shell+outer_blister)-inner_blister
 
-        # Small pointed vents leave continuous upper coamings, the new
-        # folded belt, and generous pillars between every opening. Their
-        # pitched heads close above 45 degrees without a horizontal bridge.
+        # Three elongated gills leave a 2.75 mm minimum dorsal ligament,
+        # 2.5 mm end-to-end pillars, and a continuous deep lower chine.
+        # The 10.75 mm pitched rise exceeds the longest 10 mm roof run;
+        # broader openings replace unstressed skin without thinning a wall.
         for cx,cz,hw,hh,y0 in [
-            (-99.0,31.5,6.5,7.5,18.5),
-            (-83.0,31.5,6.5,7.5,18.5),
-            (-67.0,31.5,6.5,7.5,18.5),
-            (-51.0,31.5,6.5,7.5,18.5),
+            (-99.0,28.75,9.25,10.75,18.5),
+            (-78.0,28.75,9.25,10.75,18.5),
+            (-57.0,28.75,9.25,10.75,18.5),
             (-10.0,36.5,6.0,7.5,20.0),
             (10.0,36.5,6.0,7.5,20.0),
             (49.5,20.0,6.0,9.0,6.5),
             (65.5,20.0,6.0,9.0,6.5),
         ]:
             # Swept gills align their diagonal webs with the battery cheek.
-            # The widest roof run is 7.25 mm against a 7.5 mm rise (>45 deg).
+            # The widest battery-gill roof run is 10 mm with a 10.75 mm rise.
             skew = 0.75 if cx < -40.0 else 0.0
             opening = b.Wire.make_polygon([
                 ((cx-hw)*sx,side*y0*sy,cz),
