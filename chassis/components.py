@@ -1,3 +1,4 @@
+import math
 """Component library: REAL parts with sourced masses/dims.
 
 Each entry: datasheet/mfr-grounded mass + bounding dims, source URL.
@@ -147,6 +148,12 @@ LIBRARY = {
     "mpu9250": Component(
         "MPU-9250 breakout (GY-9250)", 3.0, (0.025, 0.015, 0.003), "box", "stack",
         "estimate - generic GY-9250 module"),
+    "vl53l9cx_breakout": Component(
+        "VL53L9CX dToF breakout", 2.0, (0.020, 0.016, 0.005), "box", "perimeter",
+        "ST VL53L9CX module 12.8x6.1x4.6mm on assumed 20x16x5mm carrier (2x M2); EE owns final breakout dims - evaluation part, no vendor breakout exists yet (st.com VL53L9CX)"),
+    "tof_hub": Component(
+        "ToF hub/mux board", 4.0, (0.025, 0.025, 0.006), "box", "deck",
+        "assumed I2C mux/carrier for the 8x single-address VL53L9CX ring; EE owns design (shared-constraints handoff)"),
 }
 
 ORIENTATIONS = {
@@ -183,6 +190,18 @@ DEFAULT_PLACEMENT = {
     "pi_camera_3#right": [0.035, 0.030, 0.012],
     "mpu9250": [0.0, 0.0, 0.022],
     "gps": [-0.045, 0.0, 0.045],  # rear deck, typical FPV GPS perch
+    # VL53L9CX 360-degree ring (user directive 2026-09-05): 8 breakouts at 45 deg
+    # bearing spacing, recessed at the shell, sensor facing radially outward
+    # (55x42 deg FoV -> ~10 deg overlaps). z = board bottom.
+    "vl53l9cx_breakout#n":   [ 0.088,  0.000, 0.014],
+    "vl53l9cx_breakout#ne":  [ 0.045,  0.045, 0.014],
+    "vl53l9cx_breakout#e":   [ 0.000,  0.048, 0.014],
+    "vl53l9cx_breakout#se":  [-0.045,  0.045, 0.014],
+    "vl53l9cx_breakout#s":   [-0.130,  0.000, 0.014],
+    "vl53l9cx_breakout#sw":  [-0.045, -0.045, 0.014],
+    "vl53l9cx_breakout#w":   [ 0.000, -0.048, 0.014],
+    "vl53l9cx_breakout#nw":  [ 0.045, -0.045, 0.014],
+    "tof_hub": [0.0, 0.0, 0.034],  # deck center above IMU
 }
 
 def placement():
@@ -204,6 +223,23 @@ def placed_items():
                     "mount": c.mount})
     return out
 
+
+
+TOF_SPEC = {"vl53l9cx_breakout": {"hfov_deg": 55.0, "vfov_deg": 42.0}}
+
+def tof_lens_poses():
+    """{placement_key: {origin_m, axis, hfov_deg, vfov_deg}} for the VL53L9CX ring.
+    Axis = radially outward from frame origin in XY at the placement bearing."""
+    out = {}
+    for key, pos in placement().items():
+        cname = key.split("#")[0]
+        if cname not in TOF_SPEC:
+            continue
+        ang = math.atan2(pos[1], pos[0])
+        out[key] = {"origin_m": [pos[0], pos[1], pos[2] + 0.003],
+                    "axis": [round(math.cos(ang), 4), round(math.sin(ang), 4), 0.0],
+                    **TOF_SPEC[cname]}
+    return out
 
 def camera_lens_poses():
     """{placement_key: {origin_m, axis, hfov_deg, vfov_deg}} - REAL lens apex of
