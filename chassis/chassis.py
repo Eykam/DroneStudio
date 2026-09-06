@@ -1,4 +1,4 @@
-"""Swept six-facet arm monocoques with thin webs and a narrow structural crown.
+"""Three-bay pitched service cabin with load-following internal sensor-seat ribs.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -614,27 +614,27 @@ def build_chassis(p: ChassisParams) -> b.Part:
     shoulder_void = (inner_hull.moved(b.Pos(0,.6,0)) &
                      inner_hull.moved(b.Pos(0,-.6,0)))
     shell = shell+((outer_hull-shoulder_void) & band)
-    # Upper battery access gills keep diagonal pillars and a continuous rim.
+    # Long pitched battery gills remove panel area between the bed-founded
+    # piers. Their 11:9.6 lintels and continuous 3 mm roof belt stay printable.
     for side in (-1,1):
         for cx in (-99.0,-78.0):
             gill = b.Wire.make_polygon([
-                (cx-8.5,side*18.5,30), (cx,side*18.5,25),
-                (cx+8.5,side*18.5,30), (cx,side*18.5,39.0),
+                (cx-9.6,side*18.5,28), (cx,side*18.5,24.5),
+                (cx+9.6,side*18.5,28), (cx,side*18.5,39.0),
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(gill),(0,side*55,0))
 
-    # Two large pitched service arches replace three small diamond vents.
-    # The remaining skin forms continuous dorsal/lower belts, end posts and
-    # a central shear pier. The 25:21 pitched lintels grow without support;
-    # the 26 mm sill clears the intact 22.5 mm common sensor enclosure.
-    # Keep the bed-founded cabin piers and all diagonal seat walls: those
-    # carry arm-root bending loads, whereas this upper panel is mostly skin.
+    # Three pitched bays turn the tall cabin side into a light folded frame.
+    # The two intermediate piers continue into the broad arm-root region;
+    # uninterrupted sill and dorsal belts tie all three bays to the end walls.
+    # Each 18:16 lintel prints from both sides without a flat ceiling, while
+    # the 26 mm sill preserves the complete common ToF enclosure below it.
     for side in (-1,1):
-        for vent_x in (-27.5,27.5):
+        for vent_x in (-36.0,0.0,36.0):
             opening = b.Wire.make_polygon([
                 (vent_x-16,side*20,26), (vent_x+16,side*20,26),
-                (vent_x+21,side*20,37), (vent_x,side*20,62),
-                (vent_x-21,side*20,37),
+                (vent_x+16,side*20,45), (vent_x,side*20,63),
+                (vent_x-16,side*20,45),
             ],close=True)
             shell = shell-b.Solid.extrude(b.Face(opening),(0,side*20,0))
     for vent_y in (-14.0,14.0):
@@ -704,6 +704,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer_seat = b.Solid.extrude(b.Face(pocket_wire(outer_footprint,0)), (0,0,top))
         inner_seat = b.Solid.extrude(b.Face(pocket_wire(footprint,-0.2)), (0,0,top+0.4))
         mount = outer_seat-inner_seat
+        if diagonal:
+            # The carrier needs a thin internal guide lip, not a 2.2 mm
+            # wall around every unloaded edge. Retain the full-gauge ribs
+            # wherever the seat intersects a spar, and keep the original
+            # blind floor and printable vault below the carrier unchanged.
+            guide_footprint = outset_outline(footprint, wall)
+            guide = b.Solid.extrude(b.Face(pocket_wire(guide_footprint,0)),
+                                   (0,0,top))-inner_seat
+            for envelope in arm_envelopes:
+                rib = mount & envelope
+                if rib is not None and rib.volume > 1e-7:
+                    guide = guide+rib
+            mount = guide
         if not diagonal and shared_payload is None and not key.endswith('#n'):
             # The lateral carriers need only the two PCB-edge rails and their
             # pitched ledges. The forward seat retains its side braces to
