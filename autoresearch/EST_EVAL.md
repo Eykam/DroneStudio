@@ -91,3 +91,49 @@ Gate fix (mounted dirs + boresight-down mount) applied to fusion_chained_g.py; i
 - GT-depth + live ToF: ATE 36.2 (max 133.4), yRMSE 3.65, att 26.5, RPE 0.80
 - v11-depth + live ToF: ATE 38.6 (max 92.4), yRMSE 1.63, att 22.4, RPE 0.88
 With the altimeter live, predicted-depth fusion MATCHES GT-depth fusion (better yRMSE/att, no catastrophic scene). The inert-ToF "v11 degrades fusion" read was an artifact. Note: ToF worsened GT-depth ATE vs inert (30.2->36.2) - the fusion gates were tuned without ToF; retuning queued behind training tracks.
+
+## DAgger v4 (2026-09-06/07) - recipe fix test: lr 1e-3, 300 iters, 8/32 GT-anchor episodes
+
+Recipe hypothesis: prior DAgger variants destroyed the BC warm start in one iteration
+(lr 3e-3 x 1500). v4 lowered lr to 1e-3, cut train iters to 300, and mixed 8 GT-anchor
+passthrough episodes into each 32-episode aggregation round. 14 iterations, wall 661s.
+
+Result: NEGATIVE on the headline, partial on the mechanism.
+- EST arm: hover_hold 0.0 and land 0.0 on ALL 14 iterations (goto 0.50-0.88).
+  Est-obs hover/land remains unlocked after seven recipe families
+  (ppo_est, anneal, dagger v1-v3, shaped, ramp, v3/hist, v4-recipe-fix).
+- GT arm: no catastrophic collapse (hover 0.125-0.625 band, land up to 0.75 at i10),
+  vs prior variants collapsing hover to ~0.188 in one iter. The gentle recipe DOES
+  preserve skill. But floors_ok=False on every iteration - never held all three GT
+  arms above the gt0-0.05 floors simultaneously (goto dipped below 0.887 most iters).
+- best_mean=0.292 (iter1). Best checkpoint: results/bc_est_dag_v4_best.json.
+
+Conclusion: recipe collapse is fixable but is NOT the wall for est hover/land.
+With GT-anchor data, a working altimeter (ToF fix), uncertainty channels (v3 obs),
+history stacking (K=4, negative), and a competent teacher (100/87.5/100), the est-obs
+student still gets 0% on hover/land. Remaining hypotheses: (a) est-obs hover/land
+needs closed-loop correction authority the BC/DAgger action space does not express
+(residual/hybrid control), (b) the EKF estimate distribution under hover/land has
+shift that BC cannot mimic from aggregated state-action pairs (needs on-policy RL
+with a reward that survives estimation noise), or (c) eval-cell geometry for
+hover/land is out-of-distribution for the aggregated dataset.
+
+## Fusion gate sweep (2026-09-07) - 9 configs, 12 scenes, GT depth, live ToF
+
+Full results: results/fusion_gate_sweep.json. Baseline (inno25, tgate2, safloor.15,
+reanchor20): ATE 39.4 / max 141.9 / yRMSE 3.89 / att 27.4 / RPE 0.824.
+
+| config        | ATE   | maxATE | yRMSE | att  | RPE  |
+|---------------|-------|--------|-------|------|------|
+| baseline      | 39.40 | 141.87 | 3.887 | 27.4 | 0.824 |
+| inno15        | 30.56 |  68.95 | 2.032 | 23.7 | 0.889 |
+| inno40        | 34.49 |  90.09 | 3.221 | 27.0 | 0.892 |
+| tgate1.0      | 36.98 | 126.15 | 4.252 | 26.0 | 0.850 |
+| tgate4.0      | 31.34 |  67.40 | 1.362 | 21.7 | 0.738 |
+| safloor.05    | 41.01 | 139.21 | 4.670 | 27.4 | 0.840 |
+| safloor.30    | 32.27 |  90.74 | 1.326 | 22.4 | 0.750 |
+| reanchor12    | 36.00 |  88.72 | 1.995 | 23.8 | 0.838 |
+| reanchor30    | 25.75 |  38.65 | 1.315 | 19.9 | 0.701 |
+
+reanchor30 dominates on every metric (ATE -35%, max ATE -73%, no metric worse).
+NOT adopted as default - awaiting parent decision.
