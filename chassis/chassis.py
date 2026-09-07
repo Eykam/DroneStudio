@@ -1,9 +1,9 @@
-"""v70-g69a: low twin-shoulder canopy with a continuous service channel.
+"""v71-g70a: raked wedge canopy with continuous pitched shoulder longerons.
 
-A pair of lower canopy shoulders replaces the tall closed dorsal crest
-over avionics. Their full-normal-offset skins return into the original
-optical ring and rear hip; a continuous central access channel saves high
-shell material while retaining both pitched load paths over the CM4 bay.
+The cockpit shoulder planes descend toward the nose service portal,
+removing the tall forward crown and bringing the upper fuselage into a
+longitudinal wedge. True plane-normal skins retain the printable gauge;
+the carrier hoods, camera apertures, aft battery hip and arm boxes persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -508,18 +508,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
     outer=outer & (roof_outers[0]+roof_outers[1])
     inner=inner & (roof_inners[0]+roof_inners[1])
-    # Lower the dorsal roof to the actual CM4 clearance envelope. Both
-    # shoulder faces rise continuously inward from the existing shell,
-    # so they print from the perimeter without floating inner eaves.
-    # A 102 mm virtual apex preserves the optical-ring roof intersections;
-    # the extended central service slot removes the apex itself.
-    # Normal offsets keep the structural skin above the 1.2 mm floor.
+    # Rake both cockpit shoulders toward the forward service portal.
+    # Their intersection with the original aft hip forms a wedge instead
+    # of a constant-height dorsal extrusion. Each shoulder still grows
+    # inward at 1.12:1 from the perimeter; the longitudinal rake does not
+    # create an unsupported inner eave or a horizontal bridging panel.
+    # The full forward CM4 service corner (X=56,Y=28), including the
+    # thin portal jamb, retains over 0.8 mm clearance above the 61.2 mm
+    # service volume. The bay cut therefore cannot leave a flat underside
+    # where it meets these shoulders.
+    roof_rake=0.065/sx
     for roof_side in (-1,1):
-        pl=b.Plane(origin=(0,0,102.0),z_dir=(0,roof_side*1.12,1))
+        pl=b.Plane(origin=(0,0,99.0),
+                   z_dir=(roof_rake,roof_side*1.12,1))
         half=pl*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         outer=outer & half
-        drop=wall*1.025*math.sqrt(1+1.12**2)
+        drop=wall*1.025*math.sqrt(1+1.12**2+roof_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     outer_hull=outer&outer_plan; inner_hull=inner&inner_plan
     shell=outer_hull-inner_hull
@@ -592,9 +597,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Preserve the lower sidewall, every optical facet and all bezel lands.
     rim=outer_plan-prism(offset(perimeter,-2.0),0,150)
     # Lower the rim cutoff with the eaves, preserving its 2 mm plan width.
-    # Cap the rim at the shoulder: concave plan corners must not retain
-    # tall patches of the hip roof above the intended continuous band.
-    rim=rim & box(0,0,0,350,250,p.ring_roof_cut_z_mm-5.0)
+    # Terminate the rim at the pitched shoulder: remove the narrow
+    # cantilevered returns at the two waist corners. The full carrier
+    # hoods and swept shear bands remain independent of this lower rim.
+    rim=rim & box(0,0,0,350,250,p.ring_roof_cut_z_mm-6.0)
     protected=protected+rim
     upper_tool=box(0,0,p.ring_roof_cut_z_mm-8.5,350,250,110)-protected
     shell=shell-upper_tool
@@ -860,7 +866,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # The larger outer radius removes a tiny acute return at the
             # crash-load junction; the inboard connector-side radii retain
             # their original clearance. Clip every pad to the closed spar.
-            radius=2.4 if radial_sign > 0 else 1.8
+            # A broader connector-side inboard return spreads the roof
+            # load without a near-tangent lip on the spar's inner pitch.
+            # Stop 0.2 mm short of the FFC passage; the screw-ear-side
+            # return retains its original radius and pilot clearance.
+            radius=2.4 if radial_sign > 0 or sign < 0 else 1.8
             overlap=.2
             a,c,d=point(-overlap,-overlap),point(radius,-overlap),point(radius,0)
             f,g=point(0,radius),point(-overlap,radius)
