@@ -11,7 +11,7 @@ from sensors.base import SimEnvironment
 from fusion_v0 import rot_to_quat, NOISE, G
 
 def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=0,
-        inno_deg_per_fr=25.0, t_gate_per_fr=2.0, sa_floor=0.15, reanchor_deg=20.0):
+        inno_deg_per_fr=25.0, t_gate_per_fr=2.0, sa_floor=0.15, reanchor_deg=30.0):
     f, cx, cy = K
     n = len(dep)
     gt_p = meta[:,1:4]
