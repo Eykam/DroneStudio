@@ -19,7 +19,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     ok_c, adj, need = params.check_prop_clearance()
     checks.append(("prop_clearance", ok_c, f"{adj:.0f} mm vs {need:.0f} mm needed", 0.0 if ok_c else 0.5))
     import containment
-    checks.append(containment.check_containment(part))
+    checks.append(containment.check_containment(part=part, mesh=m))
     checks.append(ev.check_camera_fov(m))
     checks.append(ev.check_imu_lever_arm(m))
     checks.append(ev.check_dfam(m))
