@@ -50,3 +50,12 @@ Champion (bc_ppo_v2_best, GT-trained):
 Read: est obs are NOT control-sufficient for hover/land - the champion holds 50%/42% on GT obs and collapses to 0%/0% on est obs. Hover drift ~2x goto (weak VO aiding at low translation). Residual GT-obs skill gap also real (50%/42%, land collisions 50% even on GT).
 
 Confound note: bc_ppo_est_best cannot hover/land even on GT obs (8.3%/0%) - ppo_est training atrophied GT hover/land skill; its earlier diagnostic (diag_observability_estbest.json) is policy-confounded.
+
+## Noise-ramp curriculum (2026-09-06, ppo_est_ramp.py) - NEGATIVE on hover/land
+
+Parent GO 17:41. From champion bc_ppo_v2_best; noise scale 0.25x -> 1.0x over u1-u20, hold to u40; 24 est-obs (8/8/8) + 8 GT hover/land rehearsal per update; dense shaped reward; eval at 1.0x on heldout cells (16 eps/scenario).
+
+- EST hover/land: 0.0% at ALL 40 updates (0/640 eval eps), including ns=0.25-0.55 where hover drift is sub-meter. Hover is not learnable under est obs even at quarter noise: the wall is structural, not noise magnitude.
+- GT rehearsal failed to defend: GT hover 68.8% -> 6.2% (monotonic decay), GT land noisy 18.8-43.8%, GT goto held 93.8% to u39 (87.5% at u40). floors_ok=False on 38/40 updates.
+- What worked: est goto 43.8% -> 62.5% with GT goto intact. Best ckpt results/bc_ppo_est_ramp_best.json (mean 0.208, floors-ok update). Log: results/est_eval/ppo_est_ramp.log.
+- Five recipes now at exactly 0% est hover/land: ppo_est, anneal, dagger, shaped, ramp. Next levers proposed to parent: est-obs vector redesign (uncertainty/innovation channels), GT specialist distillation, or block on real VO/depth track.
