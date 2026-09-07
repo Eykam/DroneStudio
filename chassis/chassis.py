@@ -1,9 +1,9 @@
-"""v68-g67a: low-shoulder monocoque with a waisted battery turtledeck.
+"""v69-g68a: tapered dorsal access coamings and relieved folded deck rails.
 
-Lower continuous chines reduce sidewall area around the pinned optical ring.
-A double-raked canopy follows the recessed battery and rises into the CM4
-spine; the roof remains a normally-offset structural sheet, with continuous
-sills, swept ties, enclosed carrier seats and the original arm load paths.
+A long, tapered battery service opening removes unloaded high canopy
+skin while retaining continuous swept coamings above the recessed bay.
+Paired narrow reliefs lighten the avionics saddle folds between its deep
+piers; the bearing crests, IMU landing and enclosed optical ring persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -510,7 +510,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
     inner=inner & (roof_inners[0]+roof_inners[1])
     outer_hull=outer&outer_plan; inner_hull=inner&inner_plan
     shell=outer_hull-inner_hull
-    shell=shell-box(-68.0,0,37.2,78.0,12.0,100)
+    # Flared access shoulders follow the battery bay instead of carrying
+    # a uniform narrow slot through surplus dorsal skin. The 12 mm ends
+    # keep the nose/tail cross ties; the broad middle admits fingers and
+    # battery leads while leaving both continuous canopy edge chords.
+    # Close the flare before the flight-board envelope: its aft canopy
+    # shoulders keep their complete original coverage over the CM4 bay.
+    hatch=[(-107.0,-6.0),(-91.0,-9.8),(-63.0,-9.8),(-57.0,-6.0),
+           (-29.0,-6.0),(-29.0,6.0),(-57.0,6.0),(-63.0,9.8),
+           (-91.0,9.8),(-107.0,6.0)]
+    shell=shell-prism(hatch,37.2,100)
     shell=shell-box(28.0,0,34.0,56.0,54.6,110)
 
     # A continuous lower roof strip follows the unchanged shell line.
@@ -831,7 +840,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
         cx,cy,z0,angle=carrier_mount_frame(pos)
         for radial_sign,sign in ((-1,-1),(-1,1),(1,-1),(1,1)):
             def point(u,v): return (radial_sign*(6.07-u),sign*(10.6-v),0.0)
-            radius=1.8; overlap=.2
+            # Spread the outer carrier/spar corner into the pitched web.
+            # The larger outer radius removes a tiny acute return at the
+            # crash-load junction; the inboard connector-side radii retain
+            # their original clearance. Clip every pad to the closed spar.
+            radius=2.4 if radial_sign > 0 else 1.8
+            overlap=.2
             a,c,d=point(-overlap,-overlap),point(radius,-overlap),point(radius,0)
             f,g=point(0,radius),point(-overlap,radius)
             mid=radius*(1-1/math.sqrt(2))
@@ -968,6 +982,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
             (fx+x+half,fy-28,2.0),(fx+x+half+lean,fy-28,shoulder),
             (fx+x+lean,fy-28,apex),(fx+x-half+lean,fy-28,shoulder)],close=True)
         deck=deck-b.Solid.extrude(b.Face(arch),(0,56,0))
+    # Paired rows of short slots lighten the folded rail between its
+    # bed-founded piers. Each opening spans only 2.4 mm along X: its two
+    # ends support a short bridge on every print layer as the fold rises.
+    # Continuous ridge bearing lands, 1.4 mm inner/outer edge flanges and
+    # 4.1 mm transverse ties retain the saddle's shear path. Keep the full
+    # solid IMU landing, including its inclined undersides.
+    for side in (-1,1):
+        for i in range(15):
+            x=-45.5+6.5*i
+            if side > 0 and x-1.2 < -3.0 and x+1.2 > -33.0:
+                continue
+            for y in (16.0,23.0):
+                pts=[(fx+x-1.2,fy+side*y-1.5),
+                     (fx+x+1.2,fy+side*y-1.5),
+                     (fx+x+1.2,fy+side*y+1.5),
+                     (fx+x-1.2,fy+side*y+1.5)]
+                deck=deck-prism(pts,0,deck_z+1.0)
     # Do not introduce a deck wall through the original arm wiring galleries.
     for cavity in arm_cavities: deck=deck-cavity
     body=body+deck
