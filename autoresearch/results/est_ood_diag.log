@@ -1,0 +1,169 @@
+=== A) spec parity ===
+{
+ "hover_hold": {
+  "train": {
+   "radius": [
+    0.5021292274876196,
+    1.4997519614527017
+   ],
+   "hold_s": [
+    2.010173364267224,
+    59.82484454155052
+   ],
+   "goal_dist": [
+    2.0,
+    5.0,
+    10.0,
+    15.0,
+    25.0
+   ],
+   "density": [
+    0.0,
+    0.05,
+    0.1,
+    0.2
+   ]
+  },
+  "eval": {
+   "radius": [
+    0.5950476788792101,
+    1.3651820083210633
+   ],
+   "hold_s": [
+    2.429461416053296,
+    54.106985732709376
+   ],
+   "goal_dist": [
+    2.0,
+    5.0,
+    10.0,
+    15.0,
+    25.0
+   ],
+   "density": [
+    0.0,
+    0.05,
+    0.1,
+    0.2
+   ]
+  }
+ },
+ "land": {
+  "train": {
+   "radius": [
+    0.30080540360155683,
+    0.5999374001298982
+   ],
+   "hold_s": [
+    0.0,
+    0.0
+   ],
+   "goal_dist": [
+    2.0,
+    5.0,
+    10.0,
+    15.0,
+    25.0
+   ],
+   "density": [
+    0.0,
+    0.05,
+    0.1,
+    0.2
+   ]
+  },
+  "eval": {
+   "radius": [
+    0.3315157917949775,
+    0.5764396996522357
+   ],
+   "hold_s": [
+    0.0,
+    0.0
+   ],
+   "goal_dist": [
+    2.0,
+    5.0,
+    10.0,
+    15.0,
+    25.0
+   ],
+   "density": [
+    0.0,
+    0.05,
+    0.1,
+    0.2
+   ]
+  }
+ }
+}
+=== B) student visitation on training cells ===
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 0.43, "final_dist": 21.52, "frac_steps_within_radius": 0.01}
+{"sc": "land", "succ": false, "coll": false, "steps": 700, "min_dist": 1.15, "final_dist": 3.37, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": true, "steps": 303, "min_dist": 0.96, "final_dist": 7.44, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": true, "steps": 351, "min_dist": 0.99, "final_dist": 1.38, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 3.7, "final_dist": 4.27, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": true, "steps": 58, "min_dist": 0.8, "final_dist": 1.14, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 0.29, "final_dist": 12.28, "frac_steps_within_radius": 0.0157}
+{"sc": "land", "succ": false, "coll": true, "steps": 281, "min_dist": 0.47, "final_dist": 1.29, "frac_steps_within_radius": 0.0249}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 0.59, "final_dist": 6.34, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": false, "steps": 700, "min_dist": 3.81, "final_dist": 21.34, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 0.27, "final_dist": 1.77, "frac_steps_within_radius": 0.0214}
+{"sc": "land", "succ": false, "coll": true, "steps": 213, "min_dist": 1.6, "final_dist": 17.31, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 0.2, "final_dist": 6.01, "frac_steps_within_radius": 0.0186}
+{"sc": "land", "succ": false, "coll": false, "steps": 700, "min_dist": 1.57, "final_dist": 2.1, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 0.03, "final_dist": 3.4, "frac_steps_within_radius": 0.0386}
+{"sc": "land", "succ": false, "coll": true, "steps": 592, "min_dist": 1.17, "final_dist": 3.55, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 2.06, "final_dist": 7.51, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": true, "steps": 71, "min_dist": 0.63, "final_dist": 2.21, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": true, "steps": 276, "min_dist": 4.07, "final_dist": 25.51, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": false, "steps": 700, "min_dist": 2.03, "final_dist": 9.61, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": false, "steps": 700, "min_dist": 3.28, "final_dist": 5.43, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": false, "steps": 700, "min_dist": 1.76, "final_dist": 7.34, "frac_steps_within_radius": 0.0}
+{"sc": "hover_hold", "succ": false, "coll": true, "steps": 147, "min_dist": 1.93, "final_dist": 14.9, "frac_steps_within_radius": 0.0}
+{"sc": "land", "succ": false, "coll": true, "steps": 116, "min_dist": 0.77, "final_dist": 0.79, "frac_steps_within_radius": 0.0}
+=== C) teacher visitation on eval cells ===
+{"sc": "hover_hold", "succ": true, "steps": 226, "min_dist": 0.04, "frac_steps_within_radius": 0.4159}
+{"sc": "hover_hold", "succ": true, "steps": 1175, "min_dist": 0.03, "frac_steps_within_radius": 0.9209}
+{"sc": "hover_hold", "succ": true, "steps": 476, "min_dist": 0.03, "frac_steps_within_radius": 0.5966}
+{"sc": "hover_hold", "succ": true, "steps": 277, "min_dist": 0.03, "frac_steps_within_radius": 0.6715}
+{"sc": "hover_hold", "succ": true, "steps": 285, "min_dist": 0.03, "frac_steps_within_radius": 0.607}
+{"sc": "hover_hold", "succ": true, "steps": 384, "min_dist": 0.03, "frac_steps_within_radius": 0.4922}
+{"sc": "hover_hold", "succ": true, "steps": 629, "min_dist": 0.03, "frac_steps_within_radius": 0.6709}
+{"sc": "hover_hold", "succ": true, "steps": 410, "min_dist": 0.03, "frac_steps_within_radius": 0.5244}
+{"sc": "hover_hold", "succ": true, "steps": 192, "min_dist": 0.03, "frac_steps_within_radius": 0.7448}
+{"sc": "hover_hold", "succ": true, "steps": 257, "min_dist": 0.05, "frac_steps_within_radius": 0.1868}
+{"sc": "hover_hold", "succ": true, "steps": 788, "min_dist": 0.03, "frac_steps_within_radius": 0.9264}
+{"sc": "hover_hold", "succ": true, "steps": 425, "min_dist": 0.03, "frac_steps_within_radius": 0.6988}
+{"sc": "hover_hold", "succ": true, "steps": 605, "min_dist": 0.03, "frac_steps_within_radius": 0.6562}
+{"sc": "hover_hold", "succ": true, "steps": 468, "min_dist": 0.03, "frac_steps_within_radius": 0.7222}
+{"sc": "hover_hold", "succ": true, "steps": 286, "min_dist": 0.03, "frac_steps_within_radius": 0.486}
+{"sc": "hover_hold", "succ": true, "steps": 108, "min_dist": 0.13, "frac_steps_within_radius": 0.463}
+{"sc": "land", "succ": true, "steps": 182, "min_dist": 0.07, "frac_steps_within_radius": 0.0824}
+{"sc": "land", "succ": true, "steps": 124, "min_dist": 0.15, "frac_steps_within_radius": 0.1452}
+{"sc": "land", "succ": true, "steps": 215, "min_dist": 0.23, "frac_steps_within_radius": 0.0977}
+{"sc": "land", "succ": true, "steps": 101, "min_dist": 0.07, "frac_steps_within_radius": 0.198}
+{"sc": "land", "succ": true, "steps": 125, "min_dist": 0.08, "frac_steps_within_radius": 0.16}
+{"sc": "land", "succ": true, "steps": 227, "min_dist": 0.08, "frac_steps_within_radius": 0.1057}
+{"sc": "land", "succ": true, "steps": 220, "min_dist": 0.14, "frac_steps_within_radius": 0.1091}
+{"sc": "land", "succ": true, "steps": 101, "min_dist": 0.09, "frac_steps_within_radius": 0.198}
+{"sc": "land", "succ": true, "steps": 101, "min_dist": 0.1, "frac_steps_within_radius": 0.1287}
+{"sc": "land", "succ": true, "steps": 187, "min_dist": 0.12, "frac_steps_within_radius": 0.0749}
+{"sc": "land", "succ": true, "steps": 150, "min_dist": 0.04, "frac_steps_within_radius": 0.1067}
+{"sc": "land", "succ": true, "steps": 101, "min_dist": 0.1, "frac_steps_within_radius": 0.1485}
+{"sc": "land", "succ": true, "steps": 101, "min_dist": 0.09, "frac_steps_within_radius": 0.1683}
+{"sc": "land", "succ": true, "steps": 176, "min_dist": 0.16, "frac_steps_within_radius": 0.0795}
+{"sc": "land", "succ": true, "steps": 252, "min_dist": 0.07, "frac_steps_within_radius": 0.0516}
+{"sc": "land", "succ": true, "steps": 172, "min_dist": 0.2, "frac_steps_within_radius": 0.1337}
+=== D) coverage: student cloud 12208 states, teacher success-region 6387 states ===
+{"nn_median": 1.112, "nn_p90": 1.74, "nn_max": 2.265, "frac_nn_gt_2sig": 0.008}
+dim px: student [-32.89,22.71] teacher_success [-25.13,24.98]
+dim py: student [0.03,6.21] teacher_success [0.03,6.68]
+dim pz: student [-33.89,39.82] teacher_success [-25.30,14.88]
+dim vx: student [-3.27,7.83] teacher_success [-2.01,2.01]
+dim vy: student [-3.63,3.48] teacher_success [-1.17,0.77]
+dim vz: student [-6.25,9.50] teacher_success [-2.15,2.08]
+dim dx: student [-21.36,21.42] teacher_success [-4.61,5.42]
+dim dy: student [-2.79,4.18] teacher_success [-1.95,0.73]
+dim dz: student [-21.49,23.00] teacher_success [-5.52,5.13]
+dim dist: student [0.03,25.51] teacher_success [0.03,7.26]

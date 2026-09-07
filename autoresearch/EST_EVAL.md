@@ -137,3 +137,33 @@ reanchor20): ATE 39.4 / max 141.9 / yRMSE 3.89 / att 27.4 / RPE 0.824.
 
 reanchor30 dominates on every metric (ATE -35%, max ATE -73%, no metric worse).
 NOT adopted as default - awaiting parent decision.
+
+## Diagnostic (c) 2026-09-07: is eval-cell geometry OOD for the aggregated dataset? REFUTED.
+
+Two-level check (est_ood_diag.py, full log results/est_ood_diag.log):
+
+A) Spec parity: held-out eval blocks (hover 88000+, land 99000+) are drawn from
+IDENTICAL distributions as training seeds - success_radius (hover 0.50-1.50 train
+vs 0.60-1.37 eval; land 0.30-0.60 vs 0.33-0.58), hold_s (2.0-59.8 vs 2.4-54.1),
+goal_distance {2,5,10,15,25}, density {0,0.05,0.1,0.2}. No spec-level OOD.
+
+B) Student (v4 best) visitation on 24 TRAINING hover/land cells: 0/24 success,
+but it REACHES the target region - min_dist down to 0.03m (median ~1.1m), then
+drifts off (final_dist up to 25m). Steps within success radius: 0-3.9%.
+The student transits the success region; it cannot hold.
+
+C) Teacher on EVAL cells: 32/32 success, 8-93% of steps within radius.
+
+D) Coverage: 6387 teacher success-region states vs 12208 student-visited states
+(normalized 10-dim pos/vel/rel/dist space): NN median 1.11 sigma, p90 1.74,
+only 0.8% beyond 2 sigma. Student cloud covers the teacher success-region
+manifold, including velocities (teacher hold |v| <= 2.2 m/s is inside the
+student range). Coverage is THIN near the hold manifold (student spends 0-4%
+of steps there vs teacher 8-93%) but not absent.
+
+Conclusion: eval geometry is fair; hypothesis (c) rejected. The wall is
+behavioral - the policy cannot convert target transits into station-keeping
+under estimated obs. Proceeding to hypothesis (a) per parent direction:
+closed-loop correction authority. First measurement: teacher (pilot_act3)
+driven by ESTIMATED v3 obs instead of GT - quantifies how much estimation
+noise alone degrades a controller with full authority.
