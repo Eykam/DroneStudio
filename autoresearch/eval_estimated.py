@@ -37,12 +37,13 @@ def yaw_frame(v, yaw):
 
 class EstEnv(SimBinaryEnv):
     def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
-                 passthrough=False, noise_scale=1.0, **kw):
+                 passthrough=False, noise_scale=1.0, obs_v3=False, **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
         self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
         self.noise_scale = noise_scale  # curriculum knob: scales VO/mag measurement noise
+        self.obs_v3 = obs_v3            # 25-dim: + tof_alt/valid, sigma_p/v/att, vo_aid_std
 
     def _ensure_proc(self):
         fresh = self.proc is None or self.proc.poll() is not None
@@ -78,6 +79,8 @@ class EstEnv(SimBinaryEnv):
         self.vo_scale = float(rng.normal(1.0, 0.03 * self.noise_scale))
         self.vo_n = 0
         self.vo_drift = []
+        self.tof_alt = 0.0
+        self.tof_alt_t = -1e9
         self.p_prev = self.spawn.copy()
         return self._est_obs()
 
@@ -86,6 +89,8 @@ class EstEnv(SimBinaryEnv):
             return super().step(action)
         if self.passthrough:
             obs, r, done = self._est_step(action)
+            if self.obs_v3:
+                return self._last_gt_v3_obs, r, done
             return self.last_gt_obs, r, done
         return self._est_step(action)
 
@@ -154,13 +159,49 @@ class EstEnv(SimBinaryEnv):
                     sig = max(self.tof.spec["sigma_base_mm"]/1000.0
                               + self.tof.spec["sigma_range2"]*r_true*r_true, 0.005)
                     self.kf.update_ground_range(r_true, dirs[j], sig)
+                    self.tof_alt = r_true
+                    self.tof_alt_t = self.t
         # diagnostics
         self.pos_errs.append(float(np.linalg.norm(self.kf.p - p_t)))
         dq = quat_mul(q_t, np.array([-self.kf.q[0], -self.kf.q[1], -self.kf.q[2], self.kf.q[3]]))
         self.att_errs.append(float(np.rad2deg(2*np.arccos(np.clip(abs(dq[3]), 0, 1)))))
         self.vel_errs.append(float(np.linalg.norm(self.kf.v - np.array(info["vel"], dtype=float))))
         self.rate_errs.append(float(np.rad2deg(np.linalg.norm(self.gyro_last - np.array(row[0:3])))) if len(resp.get("fast", [])) else 0.0)
+        if self.obs_v3:
+            self._last_gt_v3_obs = self._gt_v3_obs(q_t, p_t, np.array(info["vel"], dtype=float))
         return self._est_obs(), float(resp["reward"]), bool(resp["done"])
+
+    def _v3_channels(self, ext):
+        P = self.kf.P
+        sp = float(np.sqrt(max(np.trace(P[0:3, 0:3]) / 3.0, 0.0)))
+        sv = float(np.sqrt(max(np.trace(P[3:6, 3:6]) / 3.0, 0.0)))
+        sa = float(np.sqrt(max(np.trace(P[6:9, 6:9]) / 3.0, 0.0)))
+        tof_valid = 1.0 if (self.t - self.tof_alt_t) <= 0.5 else 0.0
+        vo_std = 0.25 * float(np.sqrt(max(self.vo_n, 1)))
+        return np.array([min(self.tof_alt, 20.0) / ext, tof_valid,
+                         min(sp, 5.0) / 5.0, min(sv, 2.0) / 2.0,
+                         min(sa, 0.35) / 0.35, min(vo_std, 2.0) / 2.0])
+
+    def _gt_v3_obs(self, q_t, p_t, v_t):
+        # GT-state channels + real sensor channels: the v3 GT arm for
+        # regression floors (differs from est arm ONLY in state source).
+        ext = max(self.dist.scene_extent, 1.0)
+        fwd = R_of(q_t) @ np.array([1.0, 0.0, 0.0])
+        yaw = np.arctan2(-fwd[2], fwd[0])
+        YF = lambda v: yaw_frame(v, yaw)
+        rel_goal = YF(self.goal - p_t) / ext
+        v = YF(np.asarray(v_t, dtype=float)) / 10.0
+        g_body = (R_of(q_t).T @ G_VEC) / 9.81
+        rates = self.gyro_last / 10.0
+        rel = np.zeros(3)
+        if len(self.obs_centers):
+            dvec = self.obs_centers - p_t
+            rel = YF(dvec[int(np.argmin(np.linalg.norm(dvec, axis=1)))]) / ext
+        base = np.concatenate([rel_goal, v, g_body, rates, rel])
+        spec = self.scenario_spec or {}
+        oh = {"goto": [1,0,0], "hover_hold": [0,1,0], "land": [0,0,1]}[spec.get("scenario", "goto")]
+        base = np.concatenate([base, oh, [spec.get("success_radius", 2.0) / ext]])
+        return np.concatenate([base, self._v3_channels(ext)])
 
     def _est_obs(self):
         ext = max(self.dist.scene_extent, 1.0)
@@ -180,6 +221,8 @@ class EstEnv(SimBinaryEnv):
             spec = self.scenario_spec or {}
             oh = {"goto": [1,0,0], "hover_hold": [0,1,0], "land": [0,0,1]}[spec.get("scenario", "goto")]
             base = np.concatenate([base, oh, [spec.get("success_radius", 2.0) / ext]])
+        if self.obs_v3:
+            base = np.concatenate([base, self._v3_channels(ext)])
         return base
 
 def load_policy(path):
