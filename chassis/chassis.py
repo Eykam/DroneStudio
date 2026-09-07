@@ -1,9 +1,9 @@
-"""v66-g65a: cross-vault sensor saddles inside a tapered shoulder monocoque.
+"""v67-g66b: tapered load-path motor webs and conformal hollow saddles.
 
-Crossing pitched openings replace tall webs beneath the four cardinal
-carrier seats; diagonal saddles retain their full arm-root shear webs. The corrugated contact skin, PCB ledge, mounting ears,
-perimeter braces and full optical corridors retain their established datums.
-Clipped hood corners follow those internal saddles in the common shell.
+Swept closed spars terminate in hollow, normally-offset motor saddles.
+Four tapered first-layer spokes fan into the fixed bolt collars and shaft
+ring; their unused rectangular corners are removed without lowering the
+motor seats or cutting the monocoque's terminal shear diaphragm.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -293,14 +293,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # the arm tips without cutting a lateral slot or an enclosed overhang.
         web_height = max(2*p.arm_rib_thickness_mm,
                          0.54*p.motor_pad_thickness_mm)
-        pad = b.extrude(
-            b.Rectangle(spoke_length, p.motor_spoke_width_mm).face(),
-            web_height,
-        )
-        pad = pad + b.extrude(
-            b.Rectangle(p.motor_spoke_width_mm, spoke_length).face(),
-            web_height,
-        )
+        # Four widening radial ribs replace the uniform crossed slab.
+        # The shaft and bolt collars remain at their original diameter and
+        # Z datum. Continuous bed-founded wedges carry each bolt load into
+        # the central ring; there are no suspended webs or blind pockets.
+        root_half=p.motor_spoke_width_mm/2
+        end_half=max(1.24,0.76*root_half)
+        rib_outline=b.Wire.make_polygon([
+            (0,-root_half,0),(bolt_radius,-end_half,0),
+            (bolt_radius,end_half,0),(0,root_half,0)],close=True)
+        spoke=b.Solid.extrude(b.Face(rib_outline),(0,0,web_height))
+        pad=spoke
+        for rib_angle in (90,180,270):
+            pad=pad+spoke.rotate(b.Axis.Z,rib_angle)
         pad = pad + b.extrude(
             b.Circle(center_boss_radius).face(), p.motor_pad_thickness_mm
         )
@@ -323,6 +328,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 return tube_center_at(x)
             return tube_center_at(rib_end)*(L-x)/(L-rib_end)
         nacelle_sections = []
+        nacelle_polygons = []
         for x, height in ((bridge_start, tip_height),
                           (rib_end, tip_height),
                           (L, p.motor_pad_thickness_mm)):
@@ -333,26 +339,54 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # terminal shaft ring the roof spreads onto the motor seating plane.
             roof_rise = p.arm_roof_slope*half_width*(1.0 if x<=rib_end else 0.0)
             shoulder = height-roof_rise
-            nacelle_sections.append(b.Wire.make_polygon([
-                (x,center-half_width,0),(x,center+half_width,0),
-                (x,center+half_width,shoulder),(x,center,height),
-                (x,center-half_width,shoulder),
-            ],close=True))
+            points=[(center-half_width,0),(center+half_width,0),
+                    (center+half_width,shoulder),(center,height),
+                    (center-half_width,shoulder)]
+            nacelle_polygons.append((x,points))
+            nacelle_sections.append(b.Wire.make_polygon(
+                [(x,y,z) for y,z in points],close=True))
         pad = pad + b.Solid.make_loft(nacelle_sections,ruled=True)
 
-        # A pointed wiring gallery cores the falling motor fairing. Excluding
-        # the shaft and bolt collars leaves their full 1.2 mm radial walls.
-        gallery = []
-        for x, height in ((bridge_start+0.1, tip_height),
-                          (rib_end, tip_height),
-                          (L-center_boss_radius-0.2, 7.2)):
-            frac = (x-bridge_start)/(L-bridge_start)
-            center = nacelle_center_at(x)
-            gallery.append(b.Wire.make_polygon([
-                (x,center-2.7,p.arm_rib_thickness_mm*1.04),
-                (x,center+2.7,p.arm_rib_thickness_mm*1.04),
-                (x,center,height-p.arm_rib_thickness_mm*1.6),
-            ],close=True))
+        # Core the motor saddle with a conformal five-face gallery.
+        # The former narrow triangular bore left solid wedges beside its
+        # lower corners. True 3D normal offsets retain >=1.24 mm walls,
+        # including the falling roof and the lateral centerline gradient.
+        # The fixed collars are excluded from the complete tool below.
+        gallery=[]
+        for x in (bridge_start+0.1,rib_end,L-center_boss_radius-0.2):
+            for left,right in zip(nacelle_polygons,nacelle_polygons[1:]):
+                if x<=right[0]+1e-8:
+                    t=(x-left[0])/(right[0]-left[0])
+                    points=[(a[0]+t*(c[0]-a[0]),a[1]+t*(c[1]-a[1]))
+                            for a,c in zip(left[1],right[1])]
+                    break
+            neighbors=[]
+            for left,right in zip(nacelle_polygons,nacelle_polygons[1:]):
+                if left[0]-1e-8<=x<=right[0]+1e-8:
+                    neighbors.extend(n for n in (left,right) if abs(n[0]-x)>1e-8)
+            lines=[]
+            for i,((y0,z0),(y1,z1)) in enumerate(zip(points,points[1:]+points[:1])):
+                dy,dz=y1-y0,z1-z0
+                length=math.hypot(dy,dz);ny,nz=-dz/length,dy/length
+                gradient=0.0
+                for nx,other in neighbors:
+                    for j in (i,(i+1)%len(points)):
+                        dy0=other[j][0]-points[j][0]
+                        dz0=other[j][1]-points[j][1]
+                        gradient=max(gradient,abs((ny*dy0+nz*dz0)/(nx-x)))
+                gauge=max(1.24,p.arm_rib_thickness_mm-0.11)
+                gauge*=max(1.035,1.01*math.sqrt(1+gradient*gradient))
+                lines.append((ny,nz,ny*y0+nz*z0+gauge))
+            inner=[]
+            for (ay,az,ac),(by,bz,bc) in zip(lines[-1:]+lines[:-1],lines):
+                det=ay*bz-by*az
+                inner.append(((ac*bz-bc*az)/det,(ay*bc-by*ac)/det))
+            # The external roof flattens into the motor seat. Keep the
+            # internal eaves lower so both gallery roof faces stay >45 deg.
+            for j in (2,4):
+                y,z=inner[j]
+                inner[j]=(y,min(z,inner[3][1]-1.12*abs(y-inner[3][0])))
+            gallery.append(b.Wire.make_polygon([(x,y,z) for y,z in inner],close=True))
         pocket = b.Solid.make_loft(gallery,ruled=True)
         for bx,radius in ((L-bolt_radius,bolt_boss_radius),(L,center_boss_radius)):
             pocket = pocket - b.Pos(bx,0,-1)*b.Cylinder(radius,tip_height+2,
