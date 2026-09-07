@@ -1,9 +1,9 @@
-"""v71-g70a: raked wedge canopy with continuous pitched shoulder longerons.
+"""v72-g71a: swept battery-flank gills in a continuous structural fuselage.
 
-The cockpit shoulder planes descend toward the nose service portal,
-removing the tall forward crown and bringing the upper fuselage into a
-longitudinal wedge. True plane-normal skins retain the printable gauge;
-the carrier hoods, camera apertures, aft battery hip and arm boxes persist.
+Six pitched ventilation openings remove unloaded aft flank skin while
+continuous lower sills, upper eaves and swept diagonal piers carry the
+battery bay loads into the optical ring. The monocoque roof, internal
+carrier seats and fixed optical interfaces retain their existing geometry.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -673,6 +673,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
             window_wire(plane_r,window_w,window_h)],ruled=True))
         bezel_cuts.extend([opening,reveal,corridor])
 
+    # The rear battery flanks become a swept, ventilated shear panel.
+    # Cut only the shell skin: the recessed tray, longerons and internal
+    # sensor seats remain continuous. Each opening stops 4 mm above the
+    # bed and 5 mm below the eave; broad inclined piers connect these two
+    # chords. The aperture roofs rise >1.12:1 and grow from both jambs,
+    # so the flanks print without suspended horizontal lintels.
+    # These bays lie between the aft cardinal and diagonal ToF stations,
+    # outside every optical facet, carrier hood and PCB service envelope.
+    for gx in (-106.0,-92.0,-78.0):
+        outline=[(gx-5.0,4.0),(gx+3.0,4.0),(gx+6.0,14.0),
+                 (gx+0.5,23.0),(gx-3.0,14.0)]
+        wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
+        shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
+
     for cut in bezel_cuts: shell=shell-cut
     body=body+shell
 
@@ -975,7 +989,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         profile.append((y,deck_z-6.71))
         if y<26:
             profile.extend([(y+6.1,deck_z),(y+6.9,deck_z)])
-    lower=[(y,z-1.94) for y,z in reversed(profile)]
+    # V-vault the underside of each narrow ridge bearing land. The
+    # old 0.8 mm horizontal bridge retained 1.94 mm of material; a
+    # 1.12:1 pointed underside removes its center while leaving >=1.3 mm
+    # normal skin and 1.49 mm below the flat PCB contact at the crown.
+    # Both sides print from the existing inclined folds, and the bearing
+    # surface and the IMU landing remain at their original Z datums.
+    lower=[]
+    for i in range(len(profile)-1,-1,-1):
+        y,z=profile[i]
+        lower.append((y,z-1.94))
+        if i>0 and abs(z-profile[i-1][1])<1e-9:
+            prev_y=profile[i-1][0]
+            lower.append(((y+prev_y)/2,z-1.94+1.12*(y-prev_y)/2))
     wire=b.Wire.make_polygon([(deck_x0,fy+y,z) for y,z in profile+lower],close=True)
     deck=b.Solid.extrude(b.Face(wire),(deck_x1-deck_x0,0,0))
     # Keep the two outer load-bearing deck rails; the open center admits
