@@ -118,14 +118,15 @@ def main():
     va = np.isin(scene_ids, list(val_ids))
     print(f"scenes {len(uniq)} | train {tr.sum()} val {va.sum()} test {(~tr & ~va).sum()} frames", flush=True)
 
-    def tensors(sel):
-        r = torch.from_numpy(rgb[sel].astype(np.float32) / 255.0).permute(0, 3, 1, 2)
-        d = torch.from_numpy(dep[sel].astype(np.float32) / 1000.0)  # meters
-        s = torch.from_numpy(seg[sel].astype(np.int64))
+    # low-memory: keep uint8/uint16 numpy, convert per batch (2x dataset
+    # blew the container memory cap when materialized as float32)
+    rtr, dtr, str_ = rgb[tr], dep[tr], seg[tr]
+    rva, dva, sva = rgb[va], dep[va], seg[va]
+    def batch_tensors(rn, dn, sn):
+        r = torch.from_numpy(rn.astype(np.float32) / 255.0).permute(0, 3, 1, 2)
+        d = torch.from_numpy(dn.astype(np.float32) / 1000.0)
+        s = torch.from_numpy(sn.astype(np.int64))
         return r, d, s
-
-    rtr, dtr, str_ = tensors(tr)
-    rva, dva, sva = tensors(va)
     net = VisNet()
     nparams = sum(p.numel() for p in net.parameters())
     print(f"params: {nparams/1e6:.2f}M", flush=True)
@@ -141,8 +142,8 @@ def main():
         perm = torch.randperm(len(rtr))
         tl = td = ts = 0.0
         for i in range(0, len(perm) - a.bs + 1, a.bs):
-            idx = perm[i:i + a.bs]
-            r, d, s = rtr[idx], dtr[idx], str_[idx]
+            idx = perm[i:i + a.bs].numpy()
+            r, d, s = batch_tensors(rtr[idx], dtr[idx], str_[idx])
             r, d, s = augment(r, d, s)
             logd = torch.log(d.clamp(0.3, 65.535))
             opt.zero_grad()
@@ -156,9 +157,10 @@ def main():
         sched.step()
         net.eval()
         with torch.no_grad():
-            pd, ps = net(rva[:2000])
-            logd = torch.log(dva[:2000].clamp(0.3, 65.535))
-            mae, rmse, d125, ious = metrics(pd, ps, logd, sva[:2000], dva[:2000] > 65.0)
+            _rv, _dv, _sv = batch_tensors(rva[:2000], dva[:2000], sva[:2000])
+            pd, ps = net(_rv)
+            logd = torch.log(_dv.clamp(0.3, 65.535))
+            mae, rmse, d125, ious = metrics(pd, ps, logd, _sv, _dv > 65.0)
         miou = float(np.nanmean(list(ious.values())))
         print(f"ep {ep}: loss {tl:.1f} (d {td:.1f} s {ts:.1f}) | val MAE {mae:.2f}m RMSE {rmse:.2f}m d1.25 {d125:.3f} mIoU {miou:.3f} " +
               " ".join(f"c{c}:{ious[c]:.2f}" for c in range(4)), flush=True)

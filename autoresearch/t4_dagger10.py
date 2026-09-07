@@ -251,7 +251,7 @@ def main():
             best = {"mean": mean, "round": k}
         print(f"round {k} EVAL " + json.dumps({f"{sc}_t{t}": round(v, 3) for (sc, t), v in res.items()}) +
               f" mean={mean:.3f} ic_mean={mean_ic:.3f} floors_m2={floors}", flush=True)
-        P.post_status({"training": {"status": "running", "name": "t4_dagger10", "iter": k, "iters": ROUNDS,
+        P.post_status({"training": {"status": "running", "name": "t4_dagger10", "iter": k, "iters": ROUNDS, "note": "YARDSTICK CHANGE: skim penalty; dag10+ land numbers not comparable to dag7-9",
                        "note": f"m2 land curriculum + IC v1; r{k} mean {mean:.3f}"}})
     print("T4DAG10_BEST " + json.dumps(best), flush=True)
     if best["round"] > 0:

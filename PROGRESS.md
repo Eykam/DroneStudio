@@ -365,3 +365,8 @@ Peak-land checkpoint preserved at /workspace/t4_dag12b_r11.json. Answer to
 experiment (b): YES - land-focused imitation moves land_t0 (0 -> 0.75 peak)
 where mixed-scenario BC/DAgger never left 0.0. Levers (land-only mix vs 4x
 terminal weighting) remain confounded; ablation unprompted.
+
+## 2026-09-06 decisions (user-locked)
+- LAND ENDGAME: BANKED. Scripted terminal module (learned approach + scripted terminal) is the declared endgame for the landing line. dag12b checkpoint artifact preserved; the line is closed.
+- RL RESIDUAL LINEAGE: KILLED by user decision (residual PPO collapses precision; BC/DAgger is reward-blind; hybrid won).
+- TILE FLIP RULE (authorized): bc_ppo_v2_best flips into the /watch tile when it beats/matches live v1 (bc_flat) on 3 straight eval points. One-line revert: restore STREAM_POLICY_FLAT=/workspace/bc_flat.json in the v1 streamer supervisor config.

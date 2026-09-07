@@ -37,3 +37,16 @@ regression floor (u0 0.938, floor 0.887). Wall ~9 min.
   (gt_goto 0.938 -> 0.688 on later updates; floors protected the ckpt).
   hover/land 0% under est obs means zero reward signal there - needs
   denser shaping, DAgger, or GT->est curriculum, not more of the same.
+
+## Observability diagnostic (2026-09-06)
+
+diag_est.py: 6 arms, scenarios {goto, hover_hold, land} x {est-obs, GT passthrough (estimator passive)}, 12 eps each, eval cells, seeds 10000+.
+
+Champion (bc_ppo_v2_best, GT-trained):
+- goto: est-obs 66.7% vs GT 91.7% (estimator costs ~25pts; pos err 1.49 vs 1.08m)
+- hover_hold: est-obs 0% (33% collision) vs GT 50% (0% collision); pos err ~2.3-2.5m, p90 4.5m in BOTH arms (drift is estimator-side, trajectory-independent)
+- land: est-obs 0% (75% collision) vs GT 41.7% (50% collision); pos err ~1.3m both arms
+
+Read: est obs are NOT control-sufficient for hover/land - the champion holds 50%/42% on GT obs and collapses to 0%/0% on est obs. Hover drift ~2x goto (weak VO aiding at low translation). Residual GT-obs skill gap also real (50%/42%, land collisions 50% even on GT).
+
+Confound note: bc_ppo_est_best cannot hover/land even on GT obs (8.3%/0%) - ppo_est training atrophied GT hover/land skill; its earlier diagnostic (diag_observability_estbest.json) is policy-confounded.

@@ -36,10 +36,12 @@ def yaw_frame(v, yaw):
     return np.array([v[0]*c - v[2]*s, v[1], v[0]*s + v[2]*c])
 
 class EstEnv(SimBinaryEnv):
-    def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False, **kw):
+    def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
+                 passthrough=False, **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
+        self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
 
     def _ensure_proc(self):
         fresh = self.proc is None or self.proc.poll() is not None
@@ -66,6 +68,7 @@ class EstEnv(SimBinaryEnv):
         self.t = 0.0
         self.gyro_last = np.zeros(3)
         self.pos_errs, self.att_errs = [], []
+        self.vel_errs, self.rate_errs = [], []
         # synthetic VO chain: correlated scale + yaw-walk + white floor,
         # anchored to measured full-pilot VO ATE (5-17m over 50-60m) and
         # fusion v1's growing-R convention
@@ -80,6 +83,12 @@ class EstEnv(SimBinaryEnv):
     def step(self, action):
         if not self.estimated:
             return super().step(action)
+        if self.passthrough:
+            obs, r, done = self._est_step(action)
+            return self.last_gt_obs, r, done
+        return self._est_step(action)
+
+    def _est_step(self, action):
         a = np.clip(np.asarray(action, dtype=np.float64), -1, 1)
         resp = self._call({"cmd": "step", "action": [float(x) for x in a]})
         self.last_gt_obs = np.array(resp["obs"], dtype=np.float64)
@@ -148,6 +157,8 @@ class EstEnv(SimBinaryEnv):
         self.pos_errs.append(float(np.linalg.norm(self.kf.p - p_t)))
         dq = quat_mul(q_t, np.array([-self.kf.q[0], -self.kf.q[1], -self.kf.q[2], self.kf.q[3]]))
         self.att_errs.append(float(np.rad2deg(2*np.arccos(np.clip(abs(dq[3]), 0, 1)))))
+        self.vel_errs.append(float(np.linalg.norm(self.kf.v - np.array(info["vel"], dtype=float))))
+        self.rate_errs.append(float(np.rad2deg(np.linalg.norm(self.gyro_last - np.array(row[0:3])))) if len(resp.get("fast", [])) else 0.0)
         return self._est_obs(), float(resp["reward"]), bool(resp["done"])
 
     def _est_obs(self):
