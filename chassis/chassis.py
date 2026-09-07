@@ -1,10 +1,10 @@
-"""v75-g74b: broad-crown closed wings and bifurcated hub saddles.
+"""v76-g75b: deep lenticular spars with narrow keels and blade-rib motor hubs.
 
-Wider upper flanges and raised shoulders redistribute root and span skin
-for bending efficiency, with slimmer roots and canted outer cheeks. Two
-bed-founded rails replace the center of each unloaded hub apron. The
-optical-bypass axes, fixed motor seats, internal ToF cradles and forward
-camera exclusions remain coupled to the original component transforms.
+The free swept spans exchange low chine width for section depth and a
+narrower ridge, while the internal carrier-root sections stay unchanged.
+Deep, thin radial motor ribs carry the unchanged annular mounting seats;
+these bed-founded blades remove tip mass without reducing boss walls.
+All component transforms, internal sensor seats and optical cuts persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -110,7 +110,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 -bypass-window_bypass)
 
     def spar_profile(x, width, height):
-        """Deep closed wing with broad load-bearing crown and canted cheeks."""
+        """Deep lenticular wing with a narrow keel and broad upper shoulders."""
         # Broader crowns and raised shoulders put skin near the bending
         # flanges, permitting slimmer roots without thinning the walls.
         # The cant blends out ahead of the motor-end diaphragm; normal
@@ -127,6 +127,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
         shoulder_half=half*(1.0-0.04*blend)
         shoulder0=min(0.72*height,height-p.arm_roof_slope*(half-crown))
         shoulder=shoulder0+(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder0)*max(blend,root)
+        # Keep the complete original profile through the internal sensor
+        # ring; the lenticular chine begins beyond its carrier clearances.
+        # A narrower belly and deeper free-span section retain bending
+        # stiffness. Fade the resection out
+        # ahead of the fixed motor diaphragm; the broad upper shoulders
+        # remain the loaded compression flange. The lower facets rise
+        # well above 45 degrees from a continuous printable keel.
+        lens=max(0.0,min(1.0,(x-82.0)/15.0,(130.0-x)/32.0))
+        depth=1.0+0.045*lens
+        height*=depth
+        shoulder*=depth
+        chine*=depth
+        keel+=(0.60*half-keel)*lens
+        chine+=(0.26*height-chine)*lens
+        crown-=0.20*lens
+        shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -299,18 +315,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
         bolt_boss_radius = p.motor_hole_dia_mm / 2 + p.motor_boss_wall_mm
         center_boss_radius = p.motor_center_hole_dia_mm / 2 + p.motor_boss_wall_mm
         spoke_length = 2 * (bolt_radius + bolt_boss_radius)
-        # Recess the connecting webs below the annular mounting seats. The
-        # four full-height bolt collars and shaft ring locate the motor; these
-        # short webs transmit load at the first-layer keel. This takes mass off
-        # the arm tips without cutting a lateral slot or an enclosed overhang.
-        web_height = max(2*p.arm_rib_thickness_mm,
-                         0.54*p.motor_pad_thickness_mm)
-        # Four widening radial ribs replace the uniform crossed slab.
-        # The shaft and bolt collars remain at their original diameter and
-        # Z datum. Continuous bed-founded wedges carry each bolt load into
-        # the central ring; there are no suspended webs or blind pockets.
-        root_half=p.motor_spoke_width_mm/2
-        end_half=max(1.24,0.76*root_half)
+        # Taller blade ribs put material into depth instead of a wide
+        # shallow pad. Their 1.30 mm minimum width exceeds the DFAM
+        # floor, and their tops remain below the fixed annular seats.
+        # Each rib prints directly from the bed. Relative to the old
+        # tapered webs, vertical section inertia increases while rib
+        # volume falls; all four screw collars and shaft bores persist.
+        web_height=max(2*p.arm_rib_thickness_mm,
+                       0.80*p.motor_pad_thickness_mm)
+        root_half=max(0.65,0.56*p.motor_spoke_width_mm/2)
+        end_half=max(0.65,0.38*p.motor_spoke_width_mm/2)
         rib_outline=b.Wire.make_polygon([
             (0,-root_half,0),(bolt_radius,-end_half,0),
             (bolt_radius,end_half,0),(0,root_half,0)],close=True)
