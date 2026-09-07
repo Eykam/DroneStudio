@@ -84,3 +84,10 @@ Both are deep specialists (goto/land collapse on the hover specialist, goto/hove
 ## Track B: history-stacked K=4 policy under est obs - NEGATIVE
 
 dagger_est_hist.py (100-dim, champion newest-frame block, 12 iters): est hover 0.0% all 12 iters, est land one 6.2% blip, GT arm eroded (hover 62.5->6.2%). Memory does NOT change the outcome. Across v3-run1, v3-run2, hist: the common failure is the DAgger recipe itself - 1500-iter bc_train on aggregated student-visited (crashing) states overwrites the warm start in ONE iteration, every variant. Est-obs hover/land final tally: six recipe families, 0%.
+
+## Fusion scorecards re-run with LIVE ToF (2026-09-06, post gate fix) - earlier v11 conclusion REVERSED
+
+Gate fix (mounted dirs + boresight-down mount) applied to fusion_chained_g.py; inert-ToF scorecards preserved as *_tof_inert.json.
+- GT-depth + live ToF: ATE 36.2 (max 133.4), yRMSE 3.65, att 26.5, RPE 0.80
+- v11-depth + live ToF: ATE 38.6 (max 92.4), yRMSE 1.63, att 22.4, RPE 0.88
+With the altimeter live, predicted-depth fusion MATCHES GT-depth fusion (better yRMSE/att, no catastrophic scene). The inert-ToF "v11 degrades fusion" read was an artifact. Note: ToF worsened GT-depth ATE vs inert (30.2->36.2) - the fusion gates were tuned without ToF; retuning queued behind training tracks.
