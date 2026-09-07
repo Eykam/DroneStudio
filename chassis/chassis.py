@@ -1,9 +1,9 @@
-"""v64-g63a: conformal radial carrier hoods in the swept structural canopy.
+"""v65-g64a: scalloped shoulder monocoque with swept vaulted deck piers.
 
-Replace oversized axis-aligned roof patches with tapered radial hoods that
-follow each internal carrier and fan into the common optical-ring shoulder.
-The shell remains its own bodywork; pitched faces, the swept canopy ties,
-all carrier seats, optical recesses and the proven closed arms are retained.
+Keep a continuous narrow hip rim and fan the canopy shear ties into it,
+removing the broad redundant roof strip between the conformal sensor covers.
+Swept vaulted openings turn the mounting deck's tall side panels into deep
+inclined piers and continuous flanges; all carrier mounts and optics persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -464,9 +464,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for side in (-1,1):
         for spine_x, ring_x in ((-82.0,-68.0),(-54.0,-31.0),(-27.0,-2.0)):
             y0,y1=18.0,66.0
-            half=1.3*math.sqrt(1+((ring_x-spine_x)/(y1-y0))**2)
-            band=[(spine_x-half,side*y0),(ring_x-half,side*y1),
-                  (ring_x+half,side*y1),(spine_x+half,side*y0)]
+            # Fan the load path into the optical-ring shoulder: a 2.0 mm
+            # neck at the canopy grows to 3.2 mm at the continuous rim.
+            # These are pieces of structural roof, not added fairing.
+            factor=math.sqrt(1+((ring_x-spine_x)/(y1-y0))**2)
+            neck,foot=1.0*factor,1.6*factor
+            band=[(spine_x-neck,side*y0),(ring_x-foot,side*y1),
+                  (ring_x+foot,side*y1),(spine_x+neck,side*y0)]
             protected=protected+prism(band,0,150)
     shell=shell-(box(0,0,53.5,350,250,110)-protected)
     for key,pos in placements.items():
@@ -488,7 +492,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
         cx,cy,_=(v*1000 for v in placements[key])
         dx,dy,_=(v*1000 for v in LIBRARY[key.split('#')[0]].dims_m)
         protected=protected+box(cx,cy,0,dx+2*wall,dy+2*wall,150)
-    upper_tool=box(0,0,p.ring_roof_cut_z_mm,350,250,110)-protected
+    # A continuous 2.0 mm plan-width hip rim closes the shoulder load
+    # path. The former broad strip above it becomes scalloped service
+    # access between the carrier covers, with full hood footprints intact.
+    # Preserve the lower sidewall, every optical facet and all bezel lands.
+    rim=outer_plan-prism(offset(perimeter,-2.0),0,150)
+    # Cap the rim at the shoulder: concave plan corners must not retain
+    # tall patches of the hip roof above the intended continuous band.
+    rim=rim & box(0,0,0,350,250,p.ring_roof_cut_z_mm-1.5)
+    protected=protected+rim
+    upper_tool=box(0,0,p.ring_roof_cut_z_mm-5.0,350,250,110)-protected
     shell=shell-upper_tool
 
     # R2: stepped, inward-only IR-sheet bezels. The printed chassis contains
@@ -652,8 +665,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # spar-wall intersection; this area is behind the PCB and its post.
         back=-12.0 if diagonal else -10.2
         front=4.4
+        # The diagonally rotated square bed left tangential corner
+        # skirts far beyond the PCB, rails and gussets. End those skirts
+        # at +/-12.6 mm: the 20 mm board and both mounting ears retain full
+        # support, while the empty corner no longer grazes the spar floor.
+        # This also removes the nearly coplanar cradle/spar wedge that
+        # produced degenerate tetrahedra in otherwise valid solid exports.
+        skirt_width=25.2 if diagonal else 50.0
         shelf=shelf & local(box((back+front)/2,0,-.1,
-                                front-back,50.0,z0+1))
+                                front-back,skirt_width,z0+1))
         # A 1.4 mm ledge bears directly on the PCB bottom edge. The broad
         # shock-support shelf sits 1.7 mm below the carrier envelope.
         ridge=local(box(-3.27,0,z0-1.7,1.4,20.0,1.7))
@@ -847,16 +867,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
             deck=deck+box(x,fy+y,0,wall,wall,deck_z-5.7)
     for y in (-26.0,26.0):
         deck=deck+box((deck_x0+deck_x1)/2,fy+y,0,deck_x1-deck_x0,wall,deck_z-5.7)
-    # Pitched openings remove unloaded side-pier web while retaining a
-    # 2 mm bed rail, full height columns and the corrugated upper flange.
-    # Each arch roof rises at >45 degrees and adds no horizontal bridge.
+    # Swept piers carry the edge deck into the arm roots through a deep
+    # open web. Broader, taller vaults remove unloaded panel centers while
+    # retaining the 2 mm lower flange and >1.2 mm piers at both deck ends.
+    # The roofs rise 1.12:1; the small side lean also builds from below.
     for x in (-44.0,-22.0,0.0,22.0,44.0):
-        half=p.deck_arch_half_span_mm
-        apex=deck_z-9.0
+        half=p.deck_arch_half_span_mm+1.6
+        lean=math.copysign(0.3 if abs(x)>40 else 1.2,x) if x else 0.0
+        apex=deck_z-7.7
         shoulder=apex-1.12*half
         arch=b.Wire.make_polygon([(fx+x-half,fy-28,2.0),
-            (fx+x+half,fy-28,2.0),(fx+x+half,fy-28,shoulder),
-            (fx+x,fy-28,apex),(fx+x-half,fy-28,shoulder)],close=True)
+            (fx+x+half,fy-28,2.0),(fx+x+half+lean,fy-28,shoulder),
+            (fx+x+lean,fy-28,apex),(fx+x-half+lean,fy-28,shoulder)],close=True)
         deck=deck-b.Solid.extrude(b.Face(arch),(0,56,0))
     # Do not introduce a deck wall through the original arm wiring galleries.
     for cavity in arm_cavities: deck=deck-cavity
