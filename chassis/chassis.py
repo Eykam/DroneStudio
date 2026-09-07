@@ -1,8 +1,9 @@
-"""v63-g62a: swept canopy shear bands and compact internal carrier saddles.
+"""v64-g63a: conformal radial carrier hoods in the swept structural canopy.
 
-Mass mutation A: turn transverse canopy ribs into oblique load paths along
-its pitched skin; trim only the inboard overhang of the folded ToF beds.
-All pinned optics, bezel recesses, fasteners and arm sections are retained.
+Replace oversized axis-aligned roof patches with tapered radial hoods that
+follow each internal carrier and fan into the common optical-ring shoulder.
+The shell remains its own bodywork; pitched faces, the swept canopy ties,
+all carrier seats, optical recesses and the proven closed arms are retained.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -252,6 +253,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
             [section_wire(*section, inner=True) for section in tube_sections],
             ruled=True,
         )
+        # Two short internal roof ribs brace the long shallow root roof
+        # and interrupt its nearly tangent junction with the carrier bed.
+        # The lower wiring gallery stays continuous; the undersides inherit
+        # the pitched roof, and the rib breadth exceeds the 1.2 mm floor.
+        # Subtract them from the gallery itself so the later root re-opening
+        # preserves these load paths instead of erasing them.
+        roof_band=cavity-cavity.moved(b.Pos(0,0,-1.8))
+        for rib_x in (51.8,58.8):
+            slab=b.Pos(rib_x,0,0)*b.Box(1.5,100,40,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+            cavity=cavity-(roof_band & slab)
         arm_cavities.append(cavity.rotate(b.Axis.Z, ang))
         arm_envelopes.append(outer.rotate(b.Axis.Z, ang))
         arm = arm + (outer - cavity)
@@ -460,8 +472,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for key,pos in placements.items():
         if key in tof_poses:
             cx,cy,_=(v*1000 for v in pos)
-            protected=protected+box(cx,cy,0,p.ring_carrier_cover_mm,
-                                      p.ring_carrier_cover_mm,150)
+            angle=math.degrees(math.atan2(cy,cx))
+            # A radial hood covers the full 12.14 x 21.2 mm mechanical
+            # service envelope with clearance. Its outer end fans into the
+            # continuous lower roof strip; the narrowed inboard end removes
+            # the unused square corners above the carrier's rear wiring bay.
+            # Every hood is an area of the existing normally-offset skin,
+            # so there are no added pods, thin edge laps or new overhangs.
+            scale=p.ring_carrier_cover_mm/28.0
+            hood=[(-8.4,-12.6),(18.0,-14.0),(18.0,14.0),(-8.4,12.6)]
+            hood=[(r*scale,t*scale) for r,t in hood]
+            cap=prism(hood,0,150).rotate(b.Axis.Z,angle).moved(b.Pos(cx,cy,0))
+            protected=protected+cap
     for key in ('gps','pi_camera_3#left','pi_camera_3#right'):
         cx,cy,_=(v*1000 for v in placements[key])
         dx,dy,_=(v*1000 for v in LIBRARY[key.split('#')[0]].dims_m)
@@ -626,7 +648,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # retain their contact. Diagonal boards need a broader saddle for
         # their rotated carrier envelope; use a continuous perimeter cut.
         diagonal=abs(math.sin(math.radians(2*angle)))>0.5
-        back=-12.8 if diagonal else -10.2
+        # Stop the diagonal folded skirt before the near-tangent
+        # spar-wall intersection; this area is behind the PCB and its post.
+        back=-12.0 if diagonal else -10.2
         front=4.4
         shelf=shelf & local(box((back+front)/2,0,-.1,
                                 front-back,50.0,z0+1))
@@ -706,8 +730,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
             wire=b.Wire([b.Edge.make_line(a,c),b.Edge.make_line(c,d),
                 b.Edge.make_three_point_arc(d,point(mid,mid),f),
                 b.Edge.make_line(f,g),b.Edge.make_line(g,a)])
-            pad=b.Solid.extrude(b.Face(wire),(0,0,31.0))
-            pad=pad.rotate(b.Axis.Z,angle).moved(b.Pos(cx,cy,0))
+            # The service cut starts at the carrier's seating plane.
+            # Round only that cut: extending the pad to the bed deposited
+            # redundant islands on the sloping internal spar floor and
+            # produced near-zero-volume tetrahedra at the overlap return.
+            # Lap 1.5 mm into the supporting cradle instead of meeting
+            # its seating-plane edge tangentially (a non-manifold T join).
+            pad_z=max(3.0,z0-1.5)
+            pad=b.Solid.extrude(b.Face(wire),(0,0,31.0-pad_z))
+            pad=pad.rotate(b.Axis.Z,angle).moved(b.Pos(cx,cy,pad_z))
             for envelope in arm_envelopes:
                 rib=pad & envelope
                 if rib is not None and rib.volume>1e-7: body=body+rib
