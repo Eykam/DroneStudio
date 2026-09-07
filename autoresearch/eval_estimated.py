@@ -37,11 +37,12 @@ def yaw_frame(v, yaw):
 
 class EstEnv(SimBinaryEnv):
     def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
-                 passthrough=False, **kw):
+                 passthrough=False, noise_scale=1.0, **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
         self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
+        self.noise_scale = noise_scale  # curriculum knob: scales VO/mag measurement noise
 
     def _ensure_proc(self):
         fresh = self.proc is None or self.proc.poll() is not None
@@ -74,7 +75,7 @@ class EstEnv(SimBinaryEnv):
         # fusion v1's growing-R convention
         self.vo_p = self.spawn.copy()
         self.vo_yaw = 0.0
-        self.vo_scale = float(rng.normal(1.0, 0.03))
+        self.vo_scale = float(rng.normal(1.0, 0.03 * self.noise_scale))
         self.vo_n = 0
         self.vo_drift = []
         self.p_prev = self.spawn.copy()
@@ -110,7 +111,7 @@ class EstEnv(SimBinaryEnv):
         # policy-rate aiding from TRUE pose (sensor sim must never read the filter)
         q_t = np.array(info["quat"], dtype=float); p_t = np.array(info["pos"], dtype=float)
         rng = self.imu.rng
-        b_meas = R_of(q_t).T @ B_WORLD + HARD_IRON + rng.normal(0, 0.5, 3)
+        b_meas = R_of(q_t).T @ B_WORLD + HARD_IRON + rng.normal(0, 0.5 * self.noise_scale, 3)
         self.kf.update_mag(b_meas - HARD_IRON, B_WORLD, 0.7)
         centers, radii = self.obs_centers, self.obs_radii
         def cast(o, d):
@@ -132,10 +133,10 @@ class EstEnv(SimBinaryEnv):
             return best
         if self.vo_aided:
             dp = p_t - self.p_prev
-            self.vo_yaw += float(rng.normal(0, np.deg2rad(0.3)))
+            self.vo_yaw += float(rng.normal(0, np.deg2rad(0.3 * self.noise_scale)))
             c, sn = np.cos(self.vo_yaw), np.sin(self.vo_yaw)
             Rz = np.array([[c, -sn, 0], [sn, c, 0], [0, 0, 1.0]])
-            self.vo_p = self.vo_p + self.vo_scale * (Rz @ dp) + rng.normal(0, 0.02, 3)
+            self.vo_p = self.vo_p + self.vo_scale * (Rz @ dp) + rng.normal(0, 0.02 * self.noise_scale, 3)
             self.vo_n += 1
             self.kf.update_position(self.vo_p.copy(), np.eye(3) * (0.25 ** 2 * self.vo_n))
             self.vo_drift.append(float(np.linalg.norm(self.vo_p - p_t)))
