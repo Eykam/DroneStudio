@@ -1,9 +1,9 @@
-"""v67-g66b: tapered load-path motor webs and conformal hollow saddles.
+"""v68-g67a: low-shoulder monocoque with a waisted battery turtledeck.
 
-Swept closed spars terminate in hollow, normally-offset motor saddles.
-Four tapered first-layer spokes fan into the fixed bolt collars and shaft
-ring; their unused rectangular corners are removed without lowering the
-motor seats or cutting the monocoque's terminal shear diaphragm.
+Lower continuous chines reduce sidewall area around the pinned optical ring.
+A double-raked canopy follows the recessed battery and rises into the CM4
+spine; the roof remains a normally-offset structural sheet, with continuous
+sills, swept ties, enclosed carrier seats and the original arm load paths.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -407,10 +407,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
     body = arms[0]
     for a in arms[1:]:
         body = body + a
-    # R3: one continuous enclosure. The perimeter follows the incumbent's
-    # pinned seats; the normal-offset gabled roof covers the entire ring.
+    # The optical facets retain their XY datums. Their 28 mm eave leaves
+    # the full lens bezel and its upper land intact, while shortening the
+    # broad vertical skirt. The raised inboard hip still covers each carrier.
+    # A separate longitudinal rake below follows the battery-to-CM4 envelope.
     wall = p.body_thickness_mm
-    slope = p.body_roof_slope
+    # Raise the inboard roof through its pitch, rather than restoring
+    # the heavy skirt. The aft hip starts 4 mm earlier so its inner face
+    # clears the CM4 service corners without a flat clipped underside.
+    slope = p.body_roof_slope+0.04
     sx = p.center_plate_len_mm / 242.0
     sy = p.center_plate_wid_mm / 68.0
 
@@ -467,13 +472,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
     outer_plan=prism(perimeter,0,150)
     inner_plan=prism(offset(perimeter,-wall),-.2,151)
     outs=[];ins=[]
-    for x0,x1 in [(-145,-40),(-86,84),(40,103)]:
+    for x0,x1 in [(-145,-40),(-90,84),(40,103)]:
         pts=convex(clip_x(clip_x(perimeter,x0,1),x1,-1))
         outer=prism(pts,0,150); inner=prism(pts,-.2,151)
         for a,d in zip(pts,pts[1:]+pts[:1]):
             ex,ey=d[0]-a[0],d[1]-a[1]; el=math.hypot(ex,ey)
             nx,ny=ey/el,-ex/el;c=nx*a[0]+ny*a[1]
-            pl=b.Plane(origin=(nx*c,ny*c,31.5),z_dir=(slope*nx,slope*ny,1))
+            pl=b.Plane(origin=(nx*c,ny*c,28.0),z_dir=(slope*nx,slope*ny,1))
             half=pl*b.Box(600,600,500,align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             outer=outer & half
             inner=inner & half.moved(b.Pos(0,0,-wall*1.025*math.sqrt(1+slope*slope)))
@@ -481,6 +486,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
     outer=outs[0];inner=ins[0]
     for o in outs[1:]: outer=outer+o
     for i in ins[1:]: inner=inner+i
+    # A raked turtledeck replaces surplus canopy height above the rear
+    # battery. The two intersecting roof pairs form a shallow longitudinal
+    # waist; the aft pair returns into the GPS fin, the forward pair climbs
+    # to the unchanged CM4 clearance. Both roof faces rise at least 1.10:1
+    # in Y, independently of their fore/aft rake, and offset in the full
+    # plane normal so each face retains the original printable skin gauge.
+    # This shapes the hull itself; no second skin or external fairing is added.
+    roof_outers=[]; roof_inners=[]
+    for rake in (0.82,-0.50):
+        roof_outer=box(0,0,-.2,600,600,200)
+        roof_inner=box(0,0,-.2,600,600,200)
+        for side in (-1,1):
+            pl=b.Plane(origin=(-104*sx,0,56.0),
+                       z_dir=(-rake/sx,side*slope,1))
+            half=pl*b.Box(800,800,600,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+            roof_outer=roof_outer & half
+            drop=wall*1.025*math.sqrt(1+slope*slope+(rake/sx)**2)
+            roof_inner=roof_inner & half.moved(b.Pos(0,0,-drop))
+        roof_outers.append(roof_outer);roof_inners.append(roof_inner)
+    outer=outer & (roof_outers[0]+roof_outers[1])
+    inner=inner & (roof_inners[0]+roof_inners[1])
     outer_hull=outer&outer_plan; inner_hull=inner&inner_plan
     shell=outer_hull-inner_hull
     shell=shell-box(-68.0,0,37.2,78.0,12.0,100)
@@ -539,11 +566,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # access between the carrier covers, with full hood footprints intact.
     # Preserve the lower sidewall, every optical facet and all bezel lands.
     rim=outer_plan-prism(offset(perimeter,-2.0),0,150)
+    # Lower the rim cutoff with the eaves, preserving its 2 mm plan width.
     # Cap the rim at the shoulder: concave plan corners must not retain
     # tall patches of the hip roof above the intended continuous band.
-    rim=rim & box(0,0,0,350,250,p.ring_roof_cut_z_mm-1.5)
+    rim=rim & box(0,0,0,350,250,p.ring_roof_cut_z_mm-5.0)
     protected=protected+rim
-    upper_tool=box(0,0,p.ring_roof_cut_z_mm-5.0,350,250,110)-protected
+    upper_tool=box(0,0,p.ring_roof_cut_z_mm-8.5,350,250,110)-protected
     shell=shell-upper_tool
 
     # R2: stepped, inward-only IR-sheet bezels. The printed chassis contains
