@@ -167,3 +167,21 @@ under estimated obs. Proceeding to hypothesis (a) per parent direction:
 closed-loop correction authority. First measurement: teacher (pilot_act3)
 driven by ESTIMATED v3 obs instead of GT - quantifies how much estimation
 noise alone degrades a controller with full authority.
+
+## Hypothesis (a) gate measurement 2026-09-07: teacher on ESTIMATED obs. NEGATIVE.
+
+pilot_act3 (full-authority scripted pilot, GT-obs eval: goto 100 / hover 87.5 /
+land 100) driven by estimated v3 obs on the same held-out cells:
+  goto 87.5% | hover_hold 0.0% | land 0.0%
+(hover hold-speed under est obs: 1.63 m/s mean - it believes it is holding while
+drifting). Result: est_teacher_eval.py, results/est_teacher_eval.log, series
+est_teacher_* posted.
+
+Consequence: estimation noise in the terminal phase does not just handicap the
+BC student - it defeats a controller with FULL closed-loop authority. Authority
+(hypothesis a) is therefore not sufficient on the current estimator; the binding
+constraint for est hover/land is terminal-phase estimation quality (horizontal
+drift over multi-second holds; vertical is ToF-aided, alt R2 0.974). Note the
+control-time EKF is still the UNGATED estimator - the fusion innovation-gate /
+reanchor work (reanchor30 now default) has only been applied to the trajectory
+pipeline, never to the control loop.

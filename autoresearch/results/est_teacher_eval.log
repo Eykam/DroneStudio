@@ -1,0 +1,4 @@
+EST-TEACHER goto: 0.875
+EST-TEACHER hover_hold: 0.000 extra=1.626
+EST-TEACHER land: 0.000
+EST_TEACHER_DONE {"goto": 0.875, "hover_hold": 0.0, "land": 0.0}
