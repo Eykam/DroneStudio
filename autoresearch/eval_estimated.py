@@ -59,6 +59,15 @@ class EstEnv(SimBinaryEnv):
         self.imu = SimIMU(MPU9250_SPEC, seed=self.est_seed)
         self.tof = SimToF(VL53L9CX_SPEC, mode="wake", seed=self.est_seed + 1)
         self.tof.spec = {**self.tof.spec, "rate_hz": 20.0}
+        # altimeter mount: sensor boresight (+x) points DOWN (-y body).
+        # Default identity mount left the FoV forward-looking -> the 15-deg
+        # nadir gate never passed and update_ground_range never fired (found
+        # 2026-09-06: tof_valid 0.4% in hover cells). Real design is an
+        # 8-sensor ring (CAD poses pending); single nadir altimeter is the
+        # harness's documented abstraction until the ring sim lands.
+        self.tof.mount.rot = np.array([[0.0, 1.0, 0.0],
+                                       [-1.0, 0.0, 0.0],
+                                       [0.0, 0.0, 1.0]])
         self.senv = SimEnvironment()
         self.kf = ESKF(NOISE)
         self.kf.p = self.spawn.copy()
@@ -151,7 +160,8 @@ class EstEnv(SimBinaryEnv):
             rc = tm.channels["ranges"].ravel(); st = tm.channels["status"].ravel()
             ok = np.where(st == 0)[0]
             if len(ok):
-                Rk = R_of(self.kf.q); dirs = self.tof._dirs_sensor
+                Rk = R_of(self.kf.q)
+                dirs = np.stack([self.tof.mount.rot @ d for d in self.tof._dirs_sensor])
                 j = ok[int(np.argmin([(Rk @ dirs[m])[1] for m in ok]))]
                 d_w = Rk @ dirs[j]
                 if np.arccos(np.clip(-d_w[1], 0.0, 1.0)) <= np.deg2rad(15):
