@@ -27,7 +27,7 @@ from scenario_sampler import sample_spec, heldout_cells
 from eval_scenarios import cell_dist, post_series
 from parallel_rollout import parallel_episodes
 
-MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/v14_g13.manifest.json"
+MANIFEST = "/workspace/DroneStudio/autoresearch/fixtures/v61_g60a.manifest.json"  # v61-g60a landed chassis (16c07d5 delta eval: GT arm identical, est within noise); v14_g13 superseded 2026-09-06
 OBS_DIM, ACT_DIM, HID = 19, 4, 32
 LR, CLIP, GAMMA, LAM = 1e-4, 0.2, 0.999, 0.95
 EPOCHS, MINIBATCH = 4, 2048
