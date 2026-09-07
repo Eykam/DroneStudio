@@ -1,4 +1,4 @@
-"""v61-g60a: pared ring roof, recessed IR bezels and lightweight ToF cradles.
+"""v62-g61a: shared ring/cradle diaphragms and ribbed payload floors.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -62,6 +62,11 @@ class ChassisParams:
     cradle_foot_rail_mm: float = 2.0  # three bed-facing radial ties replace the broad apron
     deck_arch_half_span_mm: float = 8.0  # pitched openings in the tall deck side piers
     cradle_post_depth_mm: float = 4.0  # forward boss seat stays radial -3.77 mm
+    structural_gauge_mm: float = 1.24  # nominal 1.2 mm construction with print margin
+    cradle_ring_web_mm: float = 1.24
+    tray_rib_pitch_mm: float = 12.0
+    arm_box_depth_scale: float = 0.97
+    arm_box_width_scale: float = 0.98
 
     def motor_positions(self):
         """Quad-X motor XY positions (mm), sim order M1 FR, M2 FL, M3 RL, M4 RR."""
@@ -99,16 +104,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 -bypass-window_bypass)
 
     def spar_profile(x, width, height):
-        """Eight-facet closed section with a broad keel and pitched crown."""
+        """Root-matched closed spar, with broad-flange free-span sections."""
         transition = max(0.0,min(1.0,(x-75.0)/23.0))
         half = width/2
-        # A short lower chine moves the side webs outward sooner, putting
-        # material on useful bending flanges rather than along a long taper.
-        # The narrower plan retains lateral stiffness through its broad keel.
-        keel = max(p.arm_crown_width_mm/2, 0.80*half)
-        crown = 1.6-0.4*transition
-        chine = 0.15*height
-        shoulder = min(0.72*height, height-p.arm_roof_slope*(half-crown))
+        # Preserve the proven carrier/root interface. In the free span,
+        # broaden the lower flange and raise the shoulders so material
+        # carries bending at the section perimeter. Return to the fixed
+        # nacelle profile before the motor-end diaphragm.
+        blend=max(0.0,min(1.0,(x-75.0)/23.0,(138.0-x)/12.0))
+        crown=1.6-0.4*transition
+        keel0=max(p.arm_crown_width_mm/2,0.80*half)
+        keel=keel0+(0.98*half-keel0)*blend
+        chine=max(1.5*p.arm_rib_thickness_mm,(0.15-0.13*blend)*height)
+        shoulder0=min(0.72*height,height-p.arm_roof_slope*(half-crown))
+        shoulder=shoulder0+(height-p.arm_roof_slope*(half-crown)-shoulder0)*blend
         return [(-keel,0),(keel,0),(half,chine),(half,shoulder),
                 (crown,height),(-crown,height),(-half,shoulder),(-half,chine)]
 
@@ -216,6 +225,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
             height *= 1.0+0.04*max(0.0,min(1.0,(0.94-frac)/0.20))
             crest = max(0.0,min(1.0,(x-53.0)/14.0,(110.0-x)/22.0))
             height += 2.6*crest
+            box_blend=max(0.0,min(1.0,(x-75.0)/23.0,(.93-frac)/.12))
+            height *= 1.0+(p.arm_box_depth_scale-1.0)*box_blend
+            width *= 1.0+(p.arm_box_width_scale-1.0)*box_blend
             if frac == 1.0:
                 width, height = p.arm_width_mm, p.arm_tip_height_mm
             tube_sections.append((x, sweep_center(x), width, height))
@@ -478,6 +490,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         ring=local(box(outer_r-1.86,-1.25,oz-window_h/2-p.bezel_surround_mm,
                        3.72,window_w+2*p.bezel_surround_mm,
                        window_h+2*p.bezel_surround_mm)) & outer_hull
+        # A rear sheet land and four gauge-thickness returns share the
+        # shell wall, replacing the filled outer half of the backing block.
+        # Pitch the cavity ceiling so the return prints continuously
+        # from the rear land; a flat blind slot needs support at this height.
+        half_t=window_w/2+p.bezel_surround_mm-p.structural_gauge_mm
+        low_z=oz-window_h/2-p.bezel_surround_mm+p.structural_gauge_mm
+        high_z=oz+window_h/2+p.bezel_surround_mm-p.structural_gauge_mm*math.sqrt(1+1.12**2)
+        w=b.Wire.make_polygon([(plane_r,-1.25-half_t,low_z),
+            (plane_r+2.8,-1.25-half_t,low_z),
+            (plane_r+2.8,-1.25-half_t,high_z-1.12*2.8),
+            (plane_r,-1.25-half_t,high_z)],close=True)
+        relief=local(b.Solid.extrude(b.Face(w),(0,2*half_t,0)))
+        ring=ring-relief
         bezel_rings.append(ring)
         opening=local(box(plane_r-1.3,-1.25,oz-window_h/2,
                           5.2,window_w,window_h))
@@ -502,7 +527,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     body=body+shell
 
     # Re-open the arm roots through the enclosure walls. The original
-    # outboard spars, motor diaphragms and motor bolt load paths are retained.
+    # motor diaphragms and motor bolt load paths retain their fixed datums.
     gallery_limit=b.Cylinder(95,31,align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
     for cavity in arm_cavities:
         body=body-(cavity & gallery_limit)
@@ -529,9 +554,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         return (cx+ex-(bb.min.X+bb.max.X)/2,
                 cy+ey-(bb.min.Y+bb.max.Y)/2,z0,ang)
 
-    # R1: eight vaulted, bed-founded cradles. The real PCB is radial -3.77
-    # to -2.77, tangential +/-10, with its lower edge at placement z.
-    # Broad shelves also distribute landing shock under each assembly.
+    # R1: eight folded, bed-founded cradles with shared ring braces.
+    # The real PCB remains radial -3.77 to -2.77, tangential +/-10,
+    # with its lower edge at the unchanged placement Z.
     for key,pos in placements.items():
         if key not in tof_poses: continue
         cx,cy,z0,angle=carrier_mount_frame(pos)
@@ -540,14 +565,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Work in world XY for a compact square shelf containing the rotated
         # carrier as well as its mounting ear. The pitched vaults remain open
         # to the print bed; none is an inaccessible sealed cavity.
-        shelf=box(cx,cy,0,24.8,24.8,z0-1.7)
-        for offset in (-7.65,0.0,7.65):
-            half=3.2
-            apex=z0-3.0
-            eave=apex-1.12*half
+        # A folded skin replaces the filled top of the vaulted block.
+        # Its ridge lines meet the fixed PCB bottom plane; the unchanged
+        # board-edge ledge supplies continuous contact along the PCB.
+        # Vertical webs below the valleys carry the folds to the bed.
+        pitch=5.4
+        grade=1.11
+        normal=p.structural_gauge_mm
+        shelf=box(cx,cy,0,24.8,24.8,z0)
+        for offset in (-1.5*pitch,-.5*pitch,.5*pitch,1.5*pitch):
+            half=(pitch-normal)/2
+            apex=z0-normal*math.sqrt(1+grade*grade)
+            eave=apex-grade*half
             v=b.Wire.make_polygon([(cx-12.6,cy+offset-half,-.2),
                 (cx-12.6,cy+offset+half,-.2),(cx-12.6,cy+offset+half,eave),
                 (cx-12.6,cy+offset,apex),(cx-12.6,cy+offset-half,eave)],close=True)
+            shelf=shelf-b.Solid.extrude(b.Face(v),(25.2,0,0))
+        for offset in (-2*pitch,-pitch,0.0,pitch,2*pitch):
+            v=b.Wire.make_polygon([(cx-12.6,cy+offset-pitch/2,z0),
+                (cx-12.6,cy+offset,z0-grade*pitch/2),
+                (cx-12.6,cy+offset+pitch/2,z0),
+                (cx-12.6,cy+offset+pitch/2,z0+1),
+                (cx-12.6,cy+offset-pitch/2,z0+1)],close=True)
             shelf=shelf-b.Solid.extrude(b.Face(v),(25.2,0,0))
         # The cradle service volume frees the original spar crossing while
         # retaining its full section on either side of this tied-in saddle.
@@ -599,6 +638,31 @@ def build_chassis(p: ChassisParams) -> b.Part:
         notch=b.Wire.make_polygon([(-5.62,6.0,19.3),(-3.40,6.0,19.3),
             (-3.40,6.0,24.792),(-5.62,6.0,22.35)],close=True)
         cradle=cradle-local(b.Solid.extrude(b.Face(notch),(0,4.8,0)))
+        # Open triangular diaphragms share the cradle and shell sill.
+        # The inboard triangle transfers the M2 shelf load to the bed rail;
+        # the outboard triangle carries that rail into the lower bezel wall.
+        # Both inclined chords have >=1.24 mm normal gauge and rise >45 deg.
+        for tangent in (-9.4,9.4):
+            g=p.structural_gauge_mm
+            y=tangent-p.cradle_ring_web_mm/2
+            grade=1.12
+            def triangle_web(x0,x1,height,rising):
+                def poly(points):
+                    w=b.Wire.make_polygon([(x,y,z) for x,z in points],close=True)
+                    return b.Solid.extrude(b.Face(w),(0,p.cradle_ring_web_mm,0))
+                if rising:
+                    outer=poly([(x0,0),(x1,0),(x1,height)])
+                    c=-grade*x0-g*math.sqrt(1+grade*grade)
+                    inner=poly([((g-c)/grade,g),(x1-g,g),
+                                (x1-g,grade*(x1-g)+c)])
+                else:
+                    outer=poly([(x0,0),(x1,0),(x0,height)])
+                    c=height+grade*x0-g*math.sqrt(1+grade*grade)
+                    inner=poly([(x0+g,g),((c-g)/grade,g),
+                                (x0+g,c-grade*(x0+g))])
+                return outer-inner
+            cradle=cradle+local(triangle_web(-7.7,-7.7+(z0-1.7)/grade,z0-1.7,False))
+            cradle=cradle+local(triangle_web(6.8,16.5,grade*(16.5-6.8),True))
         # All cradle features stay within the common hull, never outside it.
         body=body+(cradle & outer_hull)
 
@@ -632,22 +696,46 @@ def build_chassis(p: ChassisParams) -> b.Part:
         rail=box(-21.2,rail_y,0,245.6,p.payload_rail_width_mm,wall)
         body=body+(rail & outer_hull)
 
-    # R6: solid battery tray, bottom 2.0 mm, with low retaining sills. The
-    # complete 74 x 34 footprint is solid; no spar drains pierce this bay.
+    # R6: ribbed battery tray with a continuous bed skin, fixed 2.0 mm
+    # seating plane and retaining sills. Spar drains do not pierce this bay.
     bx,by,bz=(v*1000 for v in placements['battery'])
     dx,dy,dz=(v*1000 for v in LIBRARY['battery'].dims_m)
     battery_clear=box(bx,by,bz,dx+0.6,dy+0.6,dz+0.6)
     body=body-battery_clear
-    tray=box(bx,by,0,dx+2*wall+0.6,dy+2*wall+0.6,bz)
+    # Bed skin takes shear; orthogonal ribs transfer battery inertia into
+    # the perimeter sills. Rib tops retain the fixed Z=2 seating plane.
+    gauge=p.structural_gauge_mm
+    tray=box(bx,by,0,dx+2*wall+0.6,dy+2*wall+0.6,gauge)
+    for ry in (-dy/2,0.0,dy/2):
+        tray=tray+box(bx,by+ry,0,dx+2*wall+.6,gauge,bz)
+    count=math.ceil(dx/p.tray_rib_pitch_mm)
+    for i in range(count+1):
+        rx=-dx/2+dx*i/count
+        tray=tray+box(bx+rx,by,0,gauge,dy+2*wall+.6,bz)
     for side in (-1,1):
         tray=tray+box(bx,by+side*(dy/2+.3+wall/2),0,dx+2*wall,wall,bz+3.0)
     tray=tray+box(bx-dx/2-.3-wall/2,by,0,wall,dy+2*wall,bz+3.0)
     body=body+tray
 
+    def ribbed_pad(x,y,dx,dy,seat_z):
+        # Continuous bed skin and orthogonal ribs retain the original
+        # seating plane and perimeter, with pockets between contact ribs.
+        g=p.structural_gauge_mm
+        pad=box(x,y,0,dx,dy,g)
+        nx=max(1,math.ceil((dx-g)/p.tray_rib_pitch_mm))
+        ny=max(1,math.ceil((dy-g)/p.tray_rib_pitch_mm))
+        for i in range(nx+1):
+            xx=x-(dx-g)/2+(dx-g)*i/nx
+            pad=pad+box(xx,y,0,g,dy,seat_z)
+        for j in range(ny+1):
+            yy=y-(dy-g)/2+(dy-g)*j/ny
+            pad=pad+box(x,yy,0,dx,g,seat_z)
+        return pad
+
     # GPS remains in the tail, directly on a real pad under the south ToF.
     gx,gy,gz=(v*1000 for v in placements['gps'])
     body=body-box(gx,gy,gz,22.6,20.6,7.5)
-    body=body+box(gx,gy,0,24.4,23.6,gz)
+    body=body+ribbed_pad(gx,gy,24.4,23.6,gz)
 
     # The camera STEP is taller and much shallower radially than the legacy
     # dimensions used by containment. The mount clears their union and
@@ -668,7 +756,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         cdy=max(24.0,cbb.size.Y)+.6
         cdz=max(12.0,cbb.size.Z)+.6
         body=body-box(cx,cy,cz,cdx,cdy,cdz)
-        body=body+box(cx,cy,0,cdx+wall*2,cdy+wall*2,cz)
+        body=body+ribbed_pad(cx,cy,cdx+wall*2,cdy+wall*2,cz)
         for side in (-1,1):
             body=body+box(cx-cbb.size.X/2-.3-wall/2,cy+side*8,
                            0,wall,4.0,cz+5.0)
@@ -748,7 +836,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 (x,oy+w,oz+h),(x,oy-w,oz+h)],close=True)
         body=body-b.Solid.make_loft([rect(ox+.5),rect(125.0)],ruled=True)
 
-    # Restore through motor holes on the retained, structurally proven arms.
+    # Restore the fixed through motor holes on the resectioned arms.
     for mx,my in p.motor_positions():
         hs=p.motor_hole_spacing_mm/2
         for dx,dy in ((hs,hs),(-hs,hs),(-hs,-hs),(hs,-hs)):
