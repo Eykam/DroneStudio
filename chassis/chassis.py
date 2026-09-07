@@ -1,9 +1,9 @@
-"""v69-g68a: tapered dorsal access coamings and relieved folded deck rails.
+"""v70-g69a: low twin-shoulder canopy with a continuous service channel.
 
-A long, tapered battery service opening removes unloaded high canopy
-skin while retaining continuous swept coamings above the recessed bay.
-Paired narrow reliefs lighten the avionics saddle folds between its deep
-piers; the bearing crests, IMU landing and enclosed optical ring persist.
+A pair of lower canopy shoulders replaces the tall closed dorsal crest
+over avionics. Their full-normal-offset skins return into the original
+optical ring and rear hip; a continuous central access channel saves high
+shell material while retaining both pitched load paths over the CM4 bay.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -508,6 +508,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
     outer=outer & (roof_outers[0]+roof_outers[1])
     inner=inner & (roof_inners[0]+roof_inners[1])
+    # Lower the dorsal roof to the actual CM4 clearance envelope. Both
+    # shoulder faces rise continuously inward from the existing shell,
+    # so they print from the perimeter without floating inner eaves.
+    # A 102 mm virtual apex preserves the optical-ring roof intersections;
+    # the extended central service slot removes the apex itself.
+    # Normal offsets keep the structural skin above the 1.2 mm floor.
+    for roof_side in (-1,1):
+        pl=b.Plane(origin=(0,0,102.0),z_dir=(0,roof_side*1.12,1))
+        half=pl*b.Box(800,800,600,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+        outer=outer & half
+        drop=wall*1.025*math.sqrt(1+1.12**2)
+        inner=inner & half.moved(b.Pos(0,0,-drop))
     outer_hull=outer&outer_plan; inner_hull=inner&inner_plan
     shell=outer_hull-inner_hull
     # Flared access shoulders follow the battery bay instead of carrying
@@ -520,6 +533,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
            (-29.0,-6.0),(-29.0,6.0),(-57.0,6.0),(-63.0,9.8),
            (-91.0,9.8),(-107.0,6.0)]
     shell=shell-prism(hatch,37.2,100)
+    # Continue the narrow channel to the existing forward service portal.
+    # Both complete shoulder ridges and their hip-to-ring ties persist.
+    shell=shell-box(-14.0,0,37.2,30.0,12.0,100)
     shell=shell-box(28.0,0,34.0,56.0,54.6,110)
 
     # A continuous lower roof strip follows the unchanged shell line.
