@@ -10,7 +10,8 @@ from sensors.specs.vl53l9cx import VL53L9CX_SPEC
 from sensors.base import SimEnvironment
 from fusion_v0 import rot_to_quat, NOISE, G
 
-def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=0):
+def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=0,
+        inno_deg_per_fr=25.0, t_gate_per_fr=2.0, sa_floor=0.15, reanchor_deg=20.0):
     f, cx, cy = K
     n = len(dep)
     gt_p = meta[:,1:4]
@@ -71,10 +72,10 @@ def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=
         R_inno = R_pc @ R_pred_incr.T
         inno_deg = np.rad2deg(np.arccos(np.clip((np.trace(R_inno)-1)/2, -1, 1)))
         n_fr = i - last_good
-        if inno_deg < 25.0 * n_fr and np.linalg.norm(t_pc) < 2.0 * n_fr:
+        if inno_deg < inno_deg_per_fr * n_fr and np.linalg.norm(t_pc) < t_gate_per_fr * n_fr:
             T_rel = np.eye(4); T_rel[:3,:3] = R_pc; T_rel[:3,3] = t_pc
             T_vo = T_vo @ T_rel
-            sp = 0.25 + 2.0*min(fit, 0.3); sa = max(0.02 + 0.5*min(fit, 0.3), 0.15)  # floor: mag must win the attitude tug-of-war
+            sp = 0.25 + 2.0*min(fit, 0.3); sa = max(0.02 + 0.5*min(fit, 0.3), sa_floor)  # floor: mag must win the attitude tug-of-war
             kf.update_position(T_vo[:3,3].copy(), np.eye(3)*(sp**2 * i))
             if use_vo_att:
                 # chain re-anchoring: the chain is an integrated reference and
@@ -86,7 +87,7 @@ def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=
                 q_vo = rot_to_quat(T_vo[:3,:3])
                 qe = quat_mul(np.array([-kf.q[0],-kf.q[1],-kf.q[2],kf.q[3]]), q_vo)
                 inno = np.rad2deg(2*np.arccos(np.clip(abs(qe[3]),0,1)))
-                if inno > 20.0:
+                if inno > reanchor_deg:
                     T_vo[:3,:3] = R_of(kf.q)
                     q_vo = rot_to_quat(T_vo[:3,:3])
                 kf.update_attitude(q_vo, np.eye(3)*(sa**2 * i))
