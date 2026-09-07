@@ -1,4 +1,8 @@
-"""v62-g61a: shared ring/cradle diaphragms and ribbed payload floors.
+"""v63-g62a: swept canopy shear bands and compact internal carrier saddles.
+
+Mass mutation A: turn transverse canopy ribs into oblique load paths along
+its pitched skin; trim only the inboard overhang of the folded ToF beds.
+All pinned optics, bezel recesses, fasteners and arm sections are retained.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -437,11 +441,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
     shell=shell-box(28.0,0,34.0,56.0,54.6,110)
 
     # A continuous lower roof strip follows the unchanged shell line.
-    # Full carrier covers and four transverse ribs retain enclosure and
+    # Full carrier covers and swept shear bands retain enclosure and
     # connect the ring to the battery/avionics canopy across scalloped bays.
     protected=box(-28,0,0,56,56,150)+box(-68,0,0,78,38,150)
-    for x in (-80.,-54.,-28.,-1.):
-        protected=protected+box(x,0,0,4.0,130,150)
+    # Swept roof bands connect the battery/FC spine to the optical-ring
+    # shoulders. Three paired diagonals replace four full transverse bands:
+    # the roof itself is the shear member, with no added decorative skin.
+    # Their 2.6 mm plan-normal width stays above the printable floor even
+    # at the sloping hip intersections. Covers below remain independent.
+    for side in (-1,1):
+        for spine_x, ring_x in ((-82.0,-68.0),(-54.0,-31.0),(-27.0,-2.0)):
+            y0,y1=18.0,66.0
+            half=1.3*math.sqrt(1+((ring_x-spine_x)/(y1-y0))**2)
+            band=[(spine_x-half,side*y0),(ring_x-half,side*y1),
+                  (ring_x+half,side*y1),(spine_x+half,side*y0)]
+            protected=protected+prism(band,0,150)
     shell=shell-(box(0,0,53.5,350,250,110)-protected)
     for key,pos in placements.items():
         if key in tof_poses:
@@ -607,7 +621,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
         if key == 'vl53l9cx_breakout#n':
             foot=local(box(5.5,0,0,23.0,22.8,wall))
         foot=foot & outer_hull
-        shelf=shelf & local(box(-15.6,0,-.1,40.0,50.0,z0+1))
+        # Trim the unused inboard skirt of the folded bed. The full PCB
+        # edge, rear screw post and both shell-sharing triangular braces
+        # retain their contact. Diagonal boards need a broader saddle for
+        # their rotated carrier envelope; use a continuous perimeter cut.
+        diagonal=abs(math.sin(math.radians(2*angle)))>0.5
+        back=-12.8 if diagonal else -10.2
+        front=4.4
+        shelf=shelf & local(box((back+front)/2,0,-.1,
+                                front-back,50.0,z0+1))
         # A 1.4 mm ledge bears directly on the PCB bottom edge. The broad
         # shock-support shelf sits 1.7 mm below the carrier envelope.
         ridge=local(box(-3.27,0,z0-1.7,1.4,20.0,1.7))
