@@ -18,6 +18,10 @@ def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=
     kf = ESKF(NOISE); kf.p = gt_p[0].copy(); kf.q = gt_q[0].copy(); kf.v = (gt_p[1]-gt_p[0])/dt
     imu = SimIMU(MPU9250_SPEC, seed=seed); env = SimEnvironment()
     tof = SimToF(VL53L9CX_SPEC, mode="room_mapping", seed=seed+7)
+    # altimeter mount (mirror of eval_estimated.py fix 4735402): boresight down,
+    # and the nadir gate must use MOUNTED dirs - raw _dirs_sensor bypasses the
+    # mount, which left ToF inert in every prior fusion scorecard.
+    tof.mount.rot = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     def cast_ground(o, d):
         if d[1] >= -1e-6: return None
         tt = -o[1]/d[1]
@@ -44,7 +48,7 @@ def run(dep, meta, K, use_tof=True, use_mag=True, use_vo_att=True, dt=0.1, seed=
             tm = tof.scan(t, dict(quat=qc, origin=gt_p[i]), env, cast_ground)
             if tm is not None:
                 rng = tm.channels["ranges"].ravel(); st = tm.channels["status"].ravel()
-                dirs_b = tof._dirs_sensor
+                dirs_b = np.stack([tof.mount.rot @ d for d in tof._dirs_sensor])
                 ok = np.where(st == 0)[0]
                 if len(ok):
                     Rk = R_of(kf.q)

@@ -1,0 +1,22 @@
+DAGGT-land iter0: {"goto": 0.938, "hover_hold": 0.688, "land": 0.375}
+bc iter 1000: loss 0.00040
+DAGGT-land iter1: n=6334 wall=67s {"goto": 0.312, "hover_hold": 0.0, "land": 0.062} best_land=0.375
+bc iter 1000: loss 0.00050
+DAGGT-land iter2: n=10694 wall=176s {"goto": 0.5, "hover_hold": 0.0, "land": 0.5} best_land=0.500
+bc iter 1000: loss 0.00054
+DAGGT-land iter3: n=15076 wall=273s {"goto": 0.688, "hover_hold": 0.0, "land": 0.312} best_land=0.500
+bc iter 1000: loss 0.00059
+DAGGT-land iter4: n=19484 wall=245s {"goto": 0.375, "hover_hold": 0.0, "land": 0.25} best_land=0.500
+bc iter 1000: loss 0.00069
+DAGGT-land iter5: n=23482 wall=252s {"goto": 0.438, "hover_hold": 0.0, "land": 0.5} best_land=0.500
+bc iter 1000: loss 0.00069
+DAGGT-land iter6: n=24000 wall=334s {"goto": 0.125, "hover_hold": 0.0, "land": 0.438} best_land=0.500
+bc iter 1000: loss 0.00072
+DAGGT-land iter7: n=24000 wall=265s {"goto": 0.062, "hover_hold": 0.0, "land": 0.5} best_land=0.500
+bc iter 1000: loss 0.00075
+DAGGT-land iter8: n=24000 wall=265s {"goto": 0.0, "hover_hold": 0.0, "land": 0.438} best_land=0.500
+bc iter 1000: loss 0.00070
+DAGGT-land iter9: n=24000 wall=291s {"goto": 0.0, "hover_hold": 0.0, "land": 0.375} best_land=0.500
+bc iter 1000: loss 0.00059
+DAGGT-land iter10: n=24000 wall=261s {"goto": 0.062, "hover_hold": 0.0, "land": 0.438} best_land=0.500
+DAGGT-land DONE best=0.500 wall=2430s

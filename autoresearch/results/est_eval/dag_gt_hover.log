@@ -1,0 +1,22 @@
+DAGGT-hover_hold iter0: {"goto": 0.938, "hover_hold": 0.688, "land": 0.375}
+bc iter 1000: loss 0.00006
+DAGGT-hover_hold iter1: n=13441 wall=50s {"goto": 0.75, "hover_hold": 0.688, "land": 0.0} best_hover_hold=0.688
+bc iter 1000: loss 0.00008
+DAGGT-hover_hold iter2: n=24000 wall=209s {"goto": 0.562, "hover_hold": 0.688, "land": 0.0} best_hover_hold=0.688
+bc iter 1000: loss 0.00008
+DAGGT-hover_hold iter3: n=24000 wall=252s {"goto": 0.688, "hover_hold": 0.812, "land": 0.0} best_hover_hold=0.812
+bc iter 1000: loss 0.00008
+DAGGT-hover_hold iter4: n=24000 wall=279s {"goto": 0.688, "hover_hold": 0.875, "land": 0.0} best_hover_hold=0.875
+bc iter 1000: loss 0.00007
+DAGGT-hover_hold iter5: n=24000 wall=258s {"goto": 0.625, "hover_hold": 0.875, "land": 0.0} best_hover_hold=0.875
+bc iter 1000: loss 0.00005
+DAGGT-hover_hold iter6: n=24000 wall=291s {"goto": 0.5, "hover_hold": 0.75, "land": 0.0} best_hover_hold=0.875
+bc iter 1000: loss 0.00005
+DAGGT-hover_hold iter7: n=24000 wall=281s {"goto": 0.438, "hover_hold": 0.688, "land": 0.0} best_hover_hold=0.875
+bc iter 1000: loss 0.00006
+DAGGT-hover_hold iter8: n=24000 wall=289s {"goto": 0.375, "hover_hold": 0.812, "land": 0.0} best_hover_hold=0.875
+bc iter 1000: loss 0.00006
+DAGGT-hover_hold iter9: n=24000 wall=312s {"goto": 0.562, "hover_hold": 0.75, "land": 0.0} best_hover_hold=0.875
+bc iter 1000: loss 0.00006
+DAGGT-hover_hold iter10: n=24000 wall=222s {"goto": 0.562, "hover_hold": 0.75, "land": 0.0} best_hover_hold=0.875
+DAGGT-hover_hold DONE best=0.875 wall=2444s

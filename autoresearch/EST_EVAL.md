@@ -73,3 +73,14 @@ run1: est hover/land 0% all 12 iters, GT arm collapsed i1 (bc_train aggregation 
 fixtures/v61_g60a.manifest.json (schema 1.2, from CAD v61-g60a): mass 0.5398->0.5201kg, ixx +6.3% iyy -3.9% izz +0.6%, aero z-area +81%, IMU real pose + offset_from_com. Champion eval under BOTH manifests (16 eps/cell): GT arm IDENTICAL (93.8/68.8/37.5 both), est_v3 within n=16 noise (goto 87.5/81.2, land 6.2/12.5, hover 0/0). All est-track conclusions (ToF fix, 0% hover/land wall, probe) survive the re-derivation. Data: results/est_eval/manifest_delta_eval.json.
 
 ## Tracks launched (parent call 20:37): A = GT-obs hover/land specialists (dagger_gt_specialist.py), B = history-stacked K=4 v3 est-obs policy (dagger_est_hist.py)
+
+## Track A: GT-obs specialists (2026-09-06) - SUCCESS
+
+dagger_gt_specialist.py, DAgger from champion, teacher pilot_act3, GT obs, v14-era dynamics (pre-flip import; GT numbers measured identical under v61).
+- hover_hold specialist: 68.8% -> 87.5% = TEACHER PARITY (results/bc_gt_hover_hold_best.json). Oscillated 68.8-81.2% live, best-checkpoint discipline held.
+- land specialist: 37.5% -> 50.0% (teacher 100%; results/bc_gt_land_best.json).
+Both are deep specialists (goto/land collapse on the hover specialist, goto/hover ~0 on the land specialist) - dispatch per-scenario; champion remains the generalist.
+
+## Track B: history-stacked K=4 policy under est obs - NEGATIVE
+
+dagger_est_hist.py (100-dim, champion newest-frame block, 12 iters): est hover 0.0% all 12 iters, est land one 6.2% blip, GT arm eroded (hover 62.5->6.2%). Memory does NOT change the outcome. Across v3-run1, v3-run2, hist: the common failure is the DAgger recipe itself - 1500-iter bc_train on aggregated student-visited (crashing) states overwrites the warm start in ONE iteration, every variant. Est-obs hover/land final tally: six recipe families, 0%.
