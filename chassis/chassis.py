@@ -1,9 +1,9 @@
-"""v65-g64a: scalloped shoulder monocoque with swept vaulted deck piers.
+"""v66-g65a: cross-vault sensor saddles inside a tapered shoulder monocoque.
 
-Keep a continuous narrow hip rim and fan the canopy shear ties into it,
-removing the broad redundant roof strip between the conformal sensor covers.
-Swept vaulted openings turn the mounting deck's tall side panels into deep
-inclined piers and continuous flanges; all carrier mounts and optics persist.
+Crossing pitched openings replace tall webs beneath the four cardinal
+carrier seats; diagonal saddles retain their full arm-root shear webs. The corrugated contact skin, PCB ledge, mounting ears,
+perimeter braces and full optical corridors retain their established datums.
+Clipped hood corners follow those internal saddles in the common shell.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -484,7 +484,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # Every hood is an area of the existing normally-offset skin,
             # so there are no added pods, thin edge laps or new overhangs.
             scale=p.ring_carrier_cover_mm/28.0
-            hood=[(-8.4,-12.6),(18.0,-14.0),(18.0,14.0),(-8.4,12.6)]
+            # Chamfer the unloaded outer shoulder corners while keeping
+            # the entire PCB/connector hood and its shell-root connection.
+            # These tapered panels are still the single structural shell.
+            # Start each clipped corner exactly on the original taper.
+            # Keeping this polygon a subset of the old cover avoids a
+            # narrow projecting lip where the hood meets the hip rim.
+            corner_t=12.6+(14.0+8.4)*(1.4/26.4)
+            hood=[(-8.4,-12.6),(14.0,-corner_t),(18.0,-11.4),
+                  (18.0,11.4),(14.0,corner_t),(-8.4,12.6)]
             hood=[(r*scale,t*scale) for r,t in hood]
             cap=prism(hood,0,150).rotate(b.Axis.Z,angle).moved(b.Pos(cx,cy,0))
             protected=protected+cap
@@ -637,6 +645,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 (cx-12.6,cy+offset+pitch/2,z0+1),
                 (cx-12.6,cy+offset-pitch/2,z0+1)],close=True)
             shelf=shelf-b.Solid.extrude(b.Face(v),(25.2,0,0))
+        # Cross-vault the cardinal seats perpendicular to their folds.
+        # Diagonal seats also carry the swept arm roots: keep their full
+        # folded shear webs to avoid grazing saddle/spar intersections.
+        # Each opening rises 1.12:1 from the build plate and stops below
+        # the corrugated valleys, retaining a deep two-direction saddle.
+        # The 4 mm central pier and 2.4 mm end piers receive the original
+        # contact skin; no carrier support or mounting feature is removed.
+        cardinal=abs(math.sin(math.radians(2*angle)))<0.5
+        for radial in ((-6.0,6.0) if cardinal else ()):
+            half=4.0
+            apex=z0-5.4*1.11/2-p.structural_gauge_mm
+            eave=apex-1.12*half
+            w=b.Wire.make_polygon([(cx+radial-half,cy-12.6,-.2),
+                (cx+radial+half,cy-12.6,-.2),
+                (cx+radial+half,cy-12.6,eave),
+                (cx+radial,cy-12.6,apex),
+                (cx+radial-half,cy-12.6,eave)],close=True)
+            shelf=shelf-b.Solid.extrude(b.Face(w),(0,25.2,0))
         # The cradle service volume frees the original spar crossing while
         # retaining its full section on either side of this tied-in saddle.
         carrier_clear=local(box(0,0,z0,12.14,21.2,16.8))
@@ -941,6 +967,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
             body=body-vent
         elif 0<abs(enclosed.volume)<=150:
             body=body+enclosed
+    # Regularize micron-scale Boolean wire gaps at folded saddle/spar
+    # intersections. This is 1/1200 of the minimum wall gauge; it removes
+    # numerical sliver faces before STEP meshing without changing the
+    # printable load paths, optical openings or component clearances.
+    from OCP.ShapeFix import ShapeFix_Wireframe
+    wireframe=ShapeFix_Wireframe(body.wrapped)
+    wireframe.SetPrecision(0.001)
+    wireframe.SetMaxTolerance(0.001)
+    wireframe.ModeDropSmallEdges=True
+    wireframe.FixSmallEdges()
+    wireframe.FixWireGaps()
+    body=b.Part(wireframe.Shape()).clean()
     if not body.is_valid or len(body.solids()) != 1:
         raise ValueError(f'Chassis must be one valid solid: valid={body.is_valid}, solids={[(round(s.volume,2),tuple(s.center())) for s in body.solids()]}')
     return b.Part(b.Part(children=body.solids()).wrapped)
