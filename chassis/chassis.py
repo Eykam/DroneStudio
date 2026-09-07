@@ -1,9 +1,10 @@
-"""v72-g71a: swept battery-flank gills in a continuous structural fuselage.
+"""v75-g74b: broad-crown closed wings and bifurcated hub saddles.
 
-Six pitched ventilation openings remove unloaded aft flank skin while
-continuous lower sills, upper eaves and swept diagonal piers carry the
-battery bay loads into the optical ring. The monocoque roof, internal
-carrier seats and fixed optical interfaces retain their existing geometry.
+Wider upper flanges and raised shoulders redistribute root and span skin
+for bending efficiency, with slimmer roots and canted outer cheeks. Two
+bed-founded rails replace the center of each unloaded hub apron. The
+optical-bypass axes, fixed motor seats, internal ToF cradles and forward
+camera exclusions remain coupled to the original component transforms.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -109,22 +110,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 -bypass-window_bypass)
 
     def spar_profile(x, width, height):
-        """Root-matched closed spar, with broad-flange free-span sections."""
-        transition = max(0.0,min(1.0,(x-75.0)/23.0))
-        half = width/2
-        # Preserve the proven carrier/root interface. In the free span,
-        # broaden the lower flange and raise the shoulders so material
-        # carries bending at the section perimeter. Return to the fixed
-        # nacelle profile before the motor-end diaphragm.
+        """Deep closed wing with broad load-bearing crown and canted cheeks."""
+        # Broader crowns and raised shoulders put skin near the bending
+        # flanges, permitting slimmer roots without thinning the walls.
+        # The cant blends out ahead of the motor-end diaphragm; normal
+        # offsets below account for both the section and its swept loft.
+        transition=max(0.0,min(1.0,(x-75.0)/23.0))
         blend=max(0.0,min(1.0,(x-75.0)/23.0,(138.0-x)/12.0))
-        crown=1.6-0.4*transition
+        root=max(0.0,min(1.0,(70.0-x)/22.0))
+        half=width/2*(1.0-0.06*blend-0.04*root)
+        height-=0.2*blend+0.3*root
+        crown=1.6-0.4*transition+0.7*blend+0.2*root
         keel0=max(p.arm_crown_width_mm/2,0.80*half)
         keel=keel0+(0.98*half-keel0)*blend
         chine=max(1.5*p.arm_rib_thickness_mm,(0.15-0.13*blend)*height)
+        shoulder_half=half*(1.0-0.04*blend)
         shoulder0=min(0.72*height,height-p.arm_roof_slope*(half-crown))
-        shoulder=shoulder0+(height-p.arm_roof_slope*(half-crown)-shoulder0)*blend
-        return [(-keel,0),(keel,0),(half,chine),(half,shoulder),
-                (crown,height),(-crown,height),(-half,shoulder),(-half,chine)]
+        shoulder=shoulder0+(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder0)*max(blend,root)
+        return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
+                (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
     def section_wire(x, center, width, height, inner=False):
         """Offset swept spar faces in 3D, including their spanwise gradients."""
@@ -189,6 +193,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outline = b.Polyline(*(lower+list(reversed(upper))),close=True)
         outline = b.fillet(outline.vertices(),p.fillet_radius_mm)
         arm = b.extrude(b.make_face(outline),p.body_thickness_mm)
+        # Divide the shallow hub saddle into two continuous tapered rails
+        # around a bed-facing wiring port. Solid end tongues preserve the
+        # central junction and open spar mouth; the bolt ring is outboard.
+        # Each side chord is over 2.4 mm wide at its narrowest section.
+        port=[(4.0,0.0),(7.0,-4.0),(16.0,-4.0),(18.0,0.0),
+              (16.0,4.0),(7.0,4.0)]
+        wire=b.Wire.make_polygon([(x,sweep_center(x)+y,-.2) for x,y in port],close=True)
+        arm=arm-b.Solid.extrude(b.Face(wire),(0,0,p.body_thickness_mm+.4))
 
         # A ridge-vault wing narrows sooner outside its broad root shoulder.
         # The deep root stays below the FC; the outboard crown grows only where
@@ -486,19 +498,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
     outer=outs[0];inner=ins[0]
     for o in outs[1:]: outer=outer+o
     for i in ins[1:]: inner=inner+i
-    # A raked turtledeck replaces surplus canopy height above the rear
-    # battery. The two intersecting roof pairs form a shallow longitudinal
-    # waist; the aft pair returns into the GPS fin, the forward pair climbs
-    # to the unchanged CM4 clearance. Both roof faces rise at least 1.10:1
-    # in Y, independently of their fore/aft rake, and offset in the full
-    # plane normal so each face retains the original printable skin gauge.
-    # This shapes the hull itself; no second skin or external fairing is added.
+    # Follow the two payload heights with a low battery turtledeck and a
+    # short, steep aft cockpit hip. The shallow battery ridge clears the
+    # 35.5 mm pack top at both outer corners; the delayed 2.30:1 hip
+    # leaves its inner face above the aft CM4 service corner at X=-56 mm. The tail returns into the GPS
+    # fin using the original aft pitch. Each transverse inner roof remains
+    # steeper than 45 degrees; all offsets include longitudinal rake.
     roof_outers=[]; roof_inners=[]
-    for rake in (0.82,-0.50):
+    roof_stations=[(-104.0,57.8,0.08),(-72.5,60.32,2.30),
+                   (-104.0,56.0,-0.50)]
+    for ridge_x,ridge_z,rake in roof_stations:
         roof_outer=box(0,0,-.2,600,600,200)
         roof_inner=box(0,0,-.2,600,600,200)
         for side in (-1,1):
-            pl=b.Plane(origin=(-104*sx,0,56.0),
+            pl=b.Plane(origin=(ridge_x*sx,0,ridge_z),
                        z_dir=(-rake/sx,side*slope,1))
             half=pl*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
@@ -506,8 +519,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
             drop=wall*1.025*math.sqrt(1+slope*slope+(rake/sx)**2)
             roof_inner=roof_inner & half.moved(b.Pos(0,0,-drop))
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
-    outer=outer & (roof_outers[0]+roof_outers[1])
-    inner=inner & (roof_inners[0]+roof_inners[1])
+    roof_outer=roof_outers[0];roof_inner=roof_inners[0]
+    for ro,ri in zip(roof_outers[1:],roof_inners[1:]):
+        roof_outer=roof_outer+ro;roof_inner=roof_inner+ri
+    outer=outer & roof_outer
+    inner=inner & roof_inner
     # Rake both cockpit shoulders toward the forward service portal.
     # Their intersection with the original aft hip forms a wedge instead
     # of a constant-height dorsal extrusion. Each shoulder still grows
@@ -604,6 +620,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
     protected=protected+rim
     upper_tool=box(0,0,p.ring_roof_cut_z_mm-8.5,350,250,110)-protected
     shell=shell-upper_tool
+    # Carry the existing scallops down with the lower battery roof.
+    # Otherwise a lower pitch restores broad panels below the old fixed
+    # Z cutoff and consumes the area saved by the compact turtledeck.
+    # The full 2 mm perimeter rim, diagonal roof ties, battery spine and
+    # every carrier hood remain protected. Only the empty aft shoulders
+    # between those continuous load paths are opened for service access.
+    aft_shoulder_tool=box(-88.0*sx,0,21.5,42.0*sx,250,110)-protected
+    shell=shell-aft_shoulder_tool
 
     # R2: stepped, inward-only IR-sheet bezels. The printed chassis contains
     # the bonding land; 0.75 mm dark IR-pass sheets are separate consumables.
@@ -684,6 +708,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for gx in (-106.0,-92.0,-78.0):
         outline=[(gx-5.0,4.0),(gx+3.0,4.0),(gx+6.0,14.0),
                  (gx+0.5,23.0),(gx-3.0,14.0)]
+        wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
+        shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
+
+    # Swept cheek vaults replace the broad forward skirt with a deep
+    # shear panel: continuous 4 mm belly and >5 mm upper chords surround
+    # two inclined piers. The side cuts stay in the near-vertical camera
+    # cheeks, ahead of the diagonal ToF carrier and behind the nose facet.
+    # Pointed roofs rise at least 1.2:1 and print inward from both jambs;
+    # all camera pads, retaining ears and optical cuts are added below.
+    for gx in (71.5,85.0):
+        outline=[(gx-5.0,4.0),(gx+3.0,4.0),(gx+5.0,13.0),
+                 (gx,21.5),(gx-3.5,13.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
