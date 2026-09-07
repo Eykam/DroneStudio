@@ -1,0 +1,27 @@
+DAGV3 start=bc_ppo_v2_best.json (zero-padded to 25-dim) iters=12 eps/iter=32
+DAGV3 iter0 (EST v3 obs): {"goto": 0.875, "hover_hold": 0.0, "land": 0.062} GT: {"goto": 0.938, "hover_hold": 0.625, "land": 0.25} floors: {"goto": 0.887, "hover_hold": 0.525, "land": 0.15}
+bc iter 1000: loss 0.00090
+DAGV3_ITER 1: n=11052 wall=42s EST {"goto": 0.375, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.5, "hover_hold": 0.188, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00171
+DAGV3_ITER 2: n=23255 wall=81s EST {"goto": 0.562, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.562, "hover_hold": 0.125, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00145
+DAGV3_ITER 3: n=24000 wall=83s EST {"goto": 0.5, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.5, "hover_hold": 0.062, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00103
+DAGV3_ITER 4: n=24000 wall=77s EST {"goto": 0.562, "hover_hold": 0.062, "land": 0.0} GT {"goto": 0.562, "hover_hold": 0.125, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00082
+DAGV3_ITER 5: n=24000 wall=78s EST {"goto": 0.438, "hover_hold": 0.062, "land": 0.0} GT {"goto": 0.812, "hover_hold": 0.062, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00083
+DAGV3_ITER 6: n=24000 wall=83s EST {"goto": 0.688, "hover_hold": 0.062, "land": 0.0} GT {"goto": 0.812, "hover_hold": 0.062, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00082
+DAGV3_ITER 7: n=24000 wall=86s EST {"goto": 0.688, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.875, "hover_hold": 0.062, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00088
+DAGV3_ITER 8: n=24000 wall=90s EST {"goto": 0.812, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.812, "hover_hold": 0.125, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00089
+DAGV3_ITER 9: n=24000 wall=85s EST {"goto": 0.688, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.625, "hover_hold": 0.0, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00077
+DAGV3_ITER 10: n=24000 wall=83s EST {"goto": 0.625, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.938, "hover_hold": 0.125, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00084
+DAGV3_ITER 11: n=24000 wall=98s EST {"goto": 0.75, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.875, "hover_hold": 0.062, "land": 0.0} best=0.312 floors_ok=False
+bc iter 1000: loss 0.00095
+DAGV3_ITER 12: n=24000 wall=96s EST {"goto": 0.562, "hover_hold": 0.0, "land": 0.0} GT {"goto": 0.688, "hover_hold": 0.125, "land": 0.0} best=0.312 floors_ok=False
+DAGV3_DONE best_mean=0.312 wall=1000s

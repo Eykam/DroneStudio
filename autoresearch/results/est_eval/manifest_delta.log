@@ -1,0 +1,12 @@
+v14/gt/goto: 0.938
+v14/gt/hover_hold: 0.688
+v14/gt/land: 0.375
+v14/est_v3/goto: 0.875
+v14/est_v3/hover_hold: 0.0
+v14/est_v3/land: 0.062
+v61/gt/goto: 0.938
+v61/gt/hover_hold: 0.688
+v61/gt/land: 0.375
+v61/est_v3/goto: 0.812
+v61/est_v3/hover_hold: 0.0
+v61/est_v3/land: 0.125

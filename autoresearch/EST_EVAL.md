@@ -59,3 +59,17 @@ Parent GO 17:41. From champion bc_ppo_v2_best; noise scale 0.25x -> 1.0x over u1
 - GT rehearsal failed to defend: GT hover 68.8% -> 6.2% (monotonic decay), GT land noisy 18.8-43.8%, GT goto held 93.8% to u39 (87.5% at u40). floors_ok=False on 38/40 updates.
 - What worked: est goto 43.8% -> 62.5% with GT goto intact. Best ckpt results/bc_ppo_est_ramp_best.json (mean 0.208, floors-ok update). Log: results/est_eval/ppo_est_ramp.log.
 - Five recipes now at exactly 0% est hover/land: ppo_est, anneal, dagger, shaped, ramp. Next levers proposed to parent: est-obs vector redesign (uncertainty/innovation channels), GT specialist distillation, or block on real VO/depth track.
+
+## ToF altimeter mount bug + fix (2026-09-06 evening) - all prior est results were IMU+mag+VO only
+
+Two-layer bug: SimToF default mount = identity (FoV forward-looking) and the EstEnv/fusion nadir gate checked RAW sensor-frame dirs, bypassing mount.rot. update_ground_range never fired. Fixed: boresight-down mount + mounted-dir gate (4735402). Verified: tof_valid 0.4%->96.7%, reading accuracy 1.5cm. Effect on UNRETRAINED champion under v3 obs: est goto 43.8->87.5%, est land 0->6.2%, hover alt probe R2 -0.07->0.974. fusion_chained_g has the same gate bug (ToF inert in all fusion scorecards) - patch pending.
+
+## DAgger v3 run1 (inert ToF) + run2 (live ToF) - hover/land still ~0%
+
+run1: est hover/land 0% all 12 iters, GT arm collapsed i1 (bc_train aggregation overwrites warm start). run2 (post-fix): est hover blips 6.2% (i4-6), est land 0% after iter0, GT hover/land 0-18.8%/0% all iters, floors_ok=False x12. Best = iter0 (0.312). Teacher check: pilot_act3 on GT = goto 100%, hover 87.5%, land 100% (eval cells) - teacher is NOT the cap. Chain: observability fixed + teacher competent + student still fails = policy-class wall (memoryless MLP + bc_train recipe). Log: results/est_eval/dagger_est_v3_run2.log.
+
+## v61-g60a dynamics re-derivation (2026-09-06) - conclusions survive
+
+fixtures/v61_g60a.manifest.json (schema 1.2, from CAD v61-g60a): mass 0.5398->0.5201kg, ixx +6.3% iyy -3.9% izz +0.6%, aero z-area +81%, IMU real pose + offset_from_com. Champion eval under BOTH manifests (16 eps/cell): GT arm IDENTICAL (93.8/68.8/37.5 both), est_v3 within n=16 noise (goto 87.5/81.2, land 6.2/12.5, hover 0/0). All est-track conclusions (ToF fix, 0% hover/land wall, probe) survive the re-derivation. Data: results/est_eval/manifest_delta_eval.json.
+
+## Tracks launched (parent call 20:37): A = GT-obs hover/land specialists (dagger_gt_specialist.py), B = history-stacked K=4 v3 est-obs policy (dagger_est_hist.py)
