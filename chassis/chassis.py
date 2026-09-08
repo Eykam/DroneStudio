@@ -1,10 +1,9 @@
-"""v86-g85a: compact compound-fold stereo nose and low cockpit shoulders.
+"""v88-g87b: deep folded arm roots with a near-minimum normal skin.
 
-Each camera brow now has an opposing longitudinal pitch, giving the
-structural shell a diamond hip over the fixed board rather than a long
-extruded ridge. Lower normal-offset cockpit facets follow the CM4 service
-corners; the lens voids, eight internal ToF seats and load-bearing arms stay
-coupled to the existing component geometry.
+The loaded inboard spar changes to a higher-chine closed kite, trading
+root-wall excess for section depth. The narrow printing keel and pitched
+crown blend back into the unchanged optical bypass and motor-end geometry;
+every sensor mount, shell facet and component-derived aperture is retained.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -180,6 +179,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
             crown+=(crown_target-crown)*blend_keel
             shoulder+=(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder)*blend_keel
             shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
+        # A deeper folded root uses a 1.24 mm nominal normal skin instead
+        # of the former 1.32 mm root allowance. Recover vertical bending
+        # inertia with 3.5% section depth and higher lower chines, keeping
+        # the bed keel continuous. The four sloping flanges meet taller
+        # shear sides; the roof closes with the original >45-degree pitch.
+        # Finish the taper before the carrier's inboard service boundary.
+        # Its entire span keeps the original section, rather than letting
+        # the higher crown approach the diagonal PCB's conservative box.
+        # Existing spanwise-normal offsets still include both neighbors.
+        folded_root=max(0.0,min(1.0,(48.0-x)/16.0))
+        height*=1.0+0.035*folded_root
+        shoulder*=1.0+0.035*folded_root
+        chine*=1.0+0.035*folded_root
+        keel+=(0.41*half-keel)*folded_root
+        chine+=(0.32*height-chine)*folded_root
+        crown+=(1.62-crown)*folded_root
+        shoulder+=(0.85*height-shoulder)*folded_root
+        shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -188,7 +205,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         points = spar_profile(x,width,height)
         if inner:
             root_blend = max(0.0,min(1.0,(75.0-x)/30.0))
-            wall = max(1.22,p.arm_rib_thickness_mm-0.13)+0.10*root_blend
+            folded_root=max(0.0,min(1.0,(48.0-x)/16.0))
+            wall = (max(1.22,p.arm_rib_thickness_mm-0.13)
+                    +0.10*root_blend-0.08*folded_root)
             # The section's YZ normal alone underestimates wall thickness on
             # the optical bypass. Include both adjacent loft spans and both
             # endpoints of each face, then miter those true normal offsets.
