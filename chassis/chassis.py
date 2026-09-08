@@ -1,9 +1,9 @@
-"""v80-g79a: compound-rake cockpit and low stereo brows.
+"""v81-g80a: vented shear shoulders in the faceted cockpit shell.
 
-An opposing aft roof rake removes surplus cockpit shoulder area while
-retaining the CM4 service volume and structural shell gauge. Lower outer
-nose folds follow the two camera boards; the central sensor hood retains
-its height. The recessed tray, closed arms and eight internal seats remain.
+Eight pointed, normal-cut vents replace the broad upper cockpit panels
+with continuous eave and dorsal chords joined by inclined shell webs.
+The relieved skin remains the structural bodywork; the recessed battery
+bay, sensor hoods, service portal and internal mounting decks stay intact.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -704,6 +704,29 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # between those continuous load paths are opened for service access.
     aft_shoulder_tool=box(-88.0*sx,0,21.5,42.0*sx,250,110)-protected
     shell=shell-aft_shoulder_tool
+
+    # Pointed ventilation bays turn the high cockpit shoulders into
+    # a shear lattice within the existing skin. Both longitudinal edge
+    # chords remain continuous, and broad webs separate the openings.
+    # Cut perpendicular to the aft roof plane to retain the complete
+    # normal wall gauge at the rims instead of leaving feather edges.
+    # The tips close over 6 mm of plan run with only 2.4 mm lateral
+    # advance: the 1.12:1 roof gives a >45-degree print trajectory.
+    # Only the upper shoulders are relieved; all carrier covers and
+    # lower ring load paths lie below these tools.
+    for side in (-1,1):
+        for vent_x in (-47.0,-34.0,-21.0,-8.0):
+            vent_y=17.0*side
+            surface_z=96.0-aft_rake*vent_x-1.12*abs(vent_y)
+            plane=b.Plane(origin=(vent_x,vent_y,surface_z),
+                          x_dir=(1,0,-aft_rake),
+                          z_dir=(aft_rake,side*1.12,1))
+            along=math.sqrt(1+1.12**2)
+            outline=[(0,-9.0*along),(2.4,-3.0*along),
+                     (2.4,3.0*along),(0,9.0*along),
+                     (-2.4,3.0*along),(-2.4,-3.0*along)]
+            wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
+            shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
     # R2: stepped, inward-only IR-sheet bezels. The printed chassis contains
     # the bonding land; 0.75 mm dark IR-pass sheets are separate consumables.
