@@ -1,10 +1,9 @@
-"""v76-g75b: deep lenticular spars with narrow keels and blade-rib motor hubs.
+"""v77-g76a: swept open-web battery flanks in a folded monocoque.
 
-The free swept spans exchange low chine width for section depth and a
-narrower ridge, while the internal carrier-root sections stay unchanged.
-Deep, thin radial motor ribs carry the unchanged annular mounting seats;
-these bed-founded blades remove tip mass without reducing boss walls.
-All component transforms, internal sensor seats and optical cuts persist.
+Larger pointed flank vaults remove unused side-skin centers while retaining
+continuous belly and eave chords and inclined piers. The normally offset
+shell, recessed battery tray, optical facets and all internal seats remain
+on their original datums; every aperture roof grows from its side jambs.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -312,8 +311,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # A cruciform motor mount follows the four bolt load paths instead of
         # carrying a mostly unstressed solid disk.  Circular bosses retain a
         # full printable wall around both the shaft bore and every M3 hole.
-        bolt_boss_radius = p.motor_hole_dia_mm / 2 + p.motor_boss_wall_mm
-        center_boss_radius = p.motor_center_hole_dia_mm / 2 + p.motor_boss_wall_mm
+        # A 0.02 mm collar allowance keeps the tessellated curved walls
+        # above the 1.2 mm floor; the fixed bores and seating heights stay.
+        boss_wall = max(1.22, p.motor_boss_wall_mm)
+        bolt_boss_radius = p.motor_hole_dia_mm / 2 + boss_wall
+        center_boss_radius = p.motor_center_hole_dia_mm / 2 + boss_wall
         spoke_length = 2 * (bolt_radius + bolt_boss_radius)
         # Taller blade ribs put material into depth instead of a wide
         # shallow pad. Their 1.30 mm minimum width exceeds the DFAM
@@ -556,6 +558,34 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.025*math.sqrt(1+1.12**2+roof_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
+    # A three-fold nose follows the two camera boards and central radial
+    # carrier. Intersect it with the existing shell: every fold is inward,
+    # and the fixed optical facets, seats and clearance tools are retained.
+    # Ridge valleys have 1.12:1 inner pitches and a true normal skin offset.
+    # A steep aft hip blends the folds into the forward cockpit jamb;
+    # the union of the four roofs leaves no unsupported horizontal ledge.
+    nose_outer=[]; nose_inner=[]
+    for ridge_y in (-28.0,0.0,28.0):
+        no=box(0,0,-.2,600,600,200)
+        ni=box(0,0,-.2,600,600,200)
+        rake=.06/sx
+        for side in (-1,1):
+            plane=b.Plane(origin=(83.0*sx,ridge_y*sy,45.3),
+                          z_dir=(rake,side*1.12/sy,1))
+            half=plane*b.Box(800,800,600,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+            no=no & half
+            drop=wall*1.025*math.sqrt(1+(1.12/sy)**2+rake*rake)
+            ni=ni & half.moved(b.Pos(0,0,-drop))
+        nose_outer.append(no);nose_inner.append(ni)
+    hip=b.Plane(origin=(71.0*sx,0,45.3),z_dir=(1.20/sx,0,1))
+    half=hip*b.Box(800,800,600,
+        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+    nose_o=half;nose_i=half.moved(b.Pos(0,0,-wall*1.025*math.sqrt(1+(1.20/sx)**2)))
+    for no,ni in zip(nose_outer,nose_inner):
+        nose_o=nose_o+no;nose_i=nose_i+ni
+    outer=outer & nose_o
+    inner=inner & nose_i
     outer_hull=outer&outer_plan; inner_hull=inner&inner_plan
     shell=outer_hull-inner_hull
     # Flared access shoulders follow the battery bay instead of carrying
@@ -713,15 +743,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
 
     # The rear battery flanks become a swept, ventilated shear panel.
     # Cut only the shell skin: the recessed tray, longerons and internal
-    # sensor seats remain continuous. Each opening stops 4 mm above the
-    # bed and 5 mm below the eave; broad inclined piers connect these two
+    # sensor seats remain continuous. Each opening stops 2.6 mm above the
+    # bed and 3 mm below the eave; inclined piers connect these two
     # chords. The aperture roofs rise >1.12:1 and grow from both jambs,
     # so the flanks print without suspended horizontal lintels.
     # These bays lie between the aft cardinal and diagonal ToF stations,
     # outside every optical facet, carrier hood and PCB service envelope.
     for gx in (-106.0,-92.0,-78.0):
-        outline=[(gx-5.0,4.0),(gx+3.0,4.0),(gx+6.0,14.0),
-                 (gx+0.5,23.0),(gx-3.0,14.0)]
+        outline=[(gx-5.5,2.6),(gx+3.5,2.6),(gx+6.2,14.0),
+                 (gx+0.5,25.0),(gx-4.0,14.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
@@ -935,7 +965,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # Stop 0.2 mm short of the FFC passage; the screw-ear-side
             # return retains its original radius and pilot clearance.
             radius=2.4 if radial_sign > 0 or sign < 0 else 1.8
-            overlap=.2
+            # Extend the return into the existing spar by 0.28 mm.
+            # This removes a near-coplanar cradle/roof sliver while
+            # keeping the same inner corner radius and carrier clearance.
+            overlap=.28
             a,c,d=point(-overlap,-overlap),point(radius,-overlap),point(radius,0)
             f,g=point(0,radius),point(-overlap,radius)
             mid=radius*(1-1/math.sqrt(2))
@@ -1089,12 +1122,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # ends support a short bridge on every print layer as the fold rises.
     # Continuous ridge bearing lands, 1.4 mm inner/outer edge flanges and
     # 4.1 mm transverse ties retain the saddle's shear path. Keep the full
-    # solid IMU landing, including its inclined undersides.
+    # IMU bearing ridges; the flat landing receives the same short vents.
     for side in (-1,1):
         for i in range(15):
             x=-45.5+6.5*i
-            if side > 0 and x-1.2 < -3.0 and x+1.2 > -33.0:
-                continue
+            # Slot ends bridge only 2.4 mm; continuous side flanges and
+            # the central bearing ridge support the complete IMU footprint.
             for y in (16.0,23.0):
                 pts=[(fx+x-1.2,fy+side*y-1.5),
                      (fx+x+1.2,fy+side*y-1.5),

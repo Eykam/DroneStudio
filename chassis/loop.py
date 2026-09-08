@@ -220,6 +220,22 @@ def run_generation():
     # then the winner must still beat the incumbent (same gates-first rule)
     improved = (w["all_pass"] and not best_all_pass) or                (w["all_pass"] == best_all_pass and (w["score"] > st["best_score"] or
                 (w["score"] == st["best_score"] and w["mass_g"] and (best_mass is None or w["mass_g"] < best_mass))))
+    # parent standing rule 2026-09-07: once crash stress margin < 1.0 MPa, stop adopting
+    # mass-reduction candidates that erode the crash stress margin further (quality-over-grams)
+    if improved:
+        try:
+            def _crash_stress(v):
+                m = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
+                return ((m.get("metrics") or {}).get("fea") or {}).get("crash", {}).get("max_von_mises_mpa")
+            inc_s = _crash_stress(st["best_variant"])
+            cand_s = _crash_stress(w["variant"])
+            if (inc_s is not None and cand_s is not None and 16.5 - inc_s < 1.0
+                    and w["mass_g"] and best_mass and w["mass_g"] < best_mass
+                    and cand_s > inc_s):
+                improved = False
+                print(f"[gen {gen}] QUALITY HOLD: crash stress margin {16.5-inc_s:.2f} MPa < 1.0 and {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} erodes it ({inc_s}->{cand_s} MPa); adoption blocked", flush=True)
+        except Exception as e:
+            print(f"[gen {gen}] stress-guard check failed (non-gating): {e}", flush=True)
     tally = " | ".join(f"{c['variant']}={c['score']:.3f}{' PASS' if c['all_pass'] else ' fail'}{(' %.1fg' % c['mass_g']) if c['mass_g'] else ''}" for c in results.values())
     if improved:
         wL = w["variant"][-1]
