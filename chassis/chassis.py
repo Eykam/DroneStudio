@@ -1,9 +1,9 @@
-"""v88-g87b: deep folded arm roots with a near-minimum normal skin.
+"""v92-g91b: flange-biased closed roots with narrowed shear sides.
 
-The loaded inboard spar changes to a higher-chine closed kite, trading
-root-wall excess for section depth. The narrow printing keel and pitched
-crown blend back into the unchanged optical bypass and motor-end geometry;
-every sensor mount, shell facet and component-derived aperture is retained.
+The loaded arm roots trade side breadth and excess wall allowance for
+slightly greater depth and broader compression crowns. Higher lower
+chines taper into the original sensor bypass, preserving the printable
+keels, closed wiring galleries and fixed hollow motor transitions.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -179,7 +179,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             crown+=(crown_target-crown)*blend_keel
             shoulder+=(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder)*blend_keel
             shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
-        # A deeper folded root uses a 1.24 mm nominal normal skin instead
+        # A deeper folded root uses a 1.22 mm nominal normal skin instead
         # of the former 1.32 mm root allowance. Recover vertical bending
         # inertia with 3.5% section depth and higher lower chines, keeping
         # the bed keel continuous. The four sloping flanges meet taller
@@ -197,6 +197,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
         crown+=(1.62-crown)*folded_root
         shoulder+=(0.85*height-shoulder)*folded_root
         shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
+        # Rebalance the enclosed root into a slender, flange-biased spar.
+        # Keep the complete bed-keel breadth while pulling the neutral-
+        # axis sides inward. A slightly deeper crown and broader upper
+        # bearing flange recover bending inertia; the taller belly
+        # chines remove lower-corner perimeter without a flat apron.
+        # End the transition before the diagonal carrier service box.
+        # Both the cavity and exterior use this same section function,
+        # including the spanwise-normal allowance at every loft station.
+        flange_root=max(0.0,min(1.0,(48.0-x)/16.0))
+        half*=1.0-0.06*flange_root
+        shoulder_half*=1.0-0.06*flange_root
+        height*=1.0+0.007*flange_root
+        shoulder*=1.0+0.007*flange_root
+        chine*=1.0+0.007*flange_root
+        chine+=(0.34*height-chine)*flange_root
+        crown+=(1.82-crown)*flange_root
+        shoulder+=(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder)*flange_root
+        shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -207,7 +225,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             root_blend = max(0.0,min(1.0,(75.0-x)/30.0))
             folded_root=max(0.0,min(1.0,(48.0-x)/16.0))
             wall = (max(1.22,p.arm_rib_thickness_mm-0.13)
-                    +0.10*root_blend-0.08*folded_root)
+                    +0.10*root_blend-0.10*folded_root)
             # The section's YZ normal alone underestimates wall thickness on
             # the optical bypass. Include both adjacent loft spans and both
             # endpoints of each face, then miter those true normal offsets.
