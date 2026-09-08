@@ -1,9 +1,9 @@
-"""v83-g82a: lower cockpit shoulders with a forward-rising twin-ridge aft hip.
+"""v84-g83b: continuous tapered keel spars with deep elliptical haunches.
 
-A compound inward fold rises from the existing aft hip into two lower
-structural roof ridges. Slightly shallower support-free outer pitches
-reduce canopy area while clearing the complete CM4 service envelope.
-Original closed spars, optical seats and payload mounting datums persist.
+Resect the root and free span as one tapered closed-section arm family:
+narrow printable keels, raised haunches and slightly deeper crowns move
+material toward the bending flanges. True 3D offsets preserve the original
+wall gauge. The optical bypass axes, terminal nacelles and fuselage persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -149,6 +149,36 @@ def build_chassis(p: ChassisParams) -> b.Part:
         chine+=(0.26*height-chine)*lens
         crown-=0.20*lens
         shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
+        # A tapered keel runs from the hub into the outboard wing.
+        # At the loaded root, narrow breadth 3% and recover depth 4.5%;
+        # raise the haunches to 22% of depth and halve the belly breadth.
+        # Beyond the carrier ring, the belly contracts further, keeping
+        # extra depth through the light, lenticular free span. Fade
+        # both changes out before the original motor-end diaphragm.
+        # Original normal wall offsets retain the printable skin gauge;
+        # the complete chassis is checked under every FEA load case.
+        root_keel=max(0.0,min(1.0,(76.0-x)/25.0))
+        wing_keel=max(0.0,min(1.0,(x-78.0)/20.0,(133.0-x)/20.0))
+        # The diagonal sensor's horizontal edge ray skims the crown at
+        # radial X=104 mm. Keep this station at its original apex height,
+        # blending the depth recovery into the adjoining stations; a
+        # small extra root depth carries the corresponding bending load.
+        optical_crest=max(0.0,min(1.0,(x-94.0)/6.0,(116.0-x)/6.0))
+        for blend_keel,keel_ratio,crown_target,depth_gain in (
+                (root_keel,0.50,1.30,0.045),
+                (wing_keel,0.35,1.40,0.04*(1.0-optical_crest))):
+            half*=1.0-0.03*blend_keel
+            shoulder_half*=1.0-0.03*blend_keel
+            keel*=1.0-0.03*blend_keel
+            crown*=1.0-0.03*blend_keel
+            height*=1.0+depth_gain*blend_keel
+            shoulder*=1.0+depth_gain*blend_keel
+            chine*=1.0+depth_gain*blend_keel
+            keel+=(keel_ratio*half-keel)*blend_keel
+            chine+=(0.22*height-chine)*blend_keel
+            crown+=(crown_target-crown)*blend_keel
+            shoulder+=(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder)*blend_keel
+            shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -208,7 +238,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         plan_x = [0.0, x0, x0+5.0]
         lower, upper = [], []
         for x in plan_x:
-            width = p.arm_root_width_mm*(1-0.10*x/(x0+5.0))
+            width = p.arm_root_width_mm*(1-0.30*x/(x0+5.0))
             center = sweep_center(x)
             lower.append((x,center-width/2))
             upper.append((x,center+width/2))
@@ -218,7 +248,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Divide the shallow hub saddle into two continuous tapered rails
         # around a bed-facing wiring port. Solid end tongues preserve the
         # central junction and open spar mouth; the bolt ring is outboard.
-        # Each side chord is over 2.4 mm wide at its narrowest section.
+        # The saddle tapers into the new keel, leaving >1.6 mm side
+        # chords around the wiring port and a continuous bed load path.
         port=[(4.0,0.0),(7.0,-4.0),(16.0,-4.0),(18.0,0.0),
               (16.0,4.0),(7.0,4.0)]
         wire=b.Wire.make_polygon([(x,sweep_center(x)+y,-.2) for x,y in port],close=True)
