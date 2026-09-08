@@ -1,9 +1,9 @@
-"""v93-g92b: deeper hub haunches feeding thin closed sensor-bypass shoulders.
+"""v94-g93a: deep swept waist frames within the enclosed optical fuselage.
 
-The short inboard haunch gains depth to carry bending into the hub, while
-reducing the surplus wall allowance of the adjoining closed shoulder.
-The original outer section at the carrier ring is preserved: all eight
-fixed internal mounts and optical corridors retain their clearances.
+Inclined waist piers and a deeper continuous lower chord replace the
+empty side-panel centers between the cardinal and diagonal sensor facets.
+All eight carrier hoods, internal seats, optical interfaces, payload bays,
+and the loaded battery-tail shell retain their original geometry.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -968,8 +968,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
     # The waist between each cardinal and diagonal optical facet has
-    # no payload behind its lower skirt. Convert those broad panels into
-    # swept shear piers, retaining 2.6 mm belly and 3.7 mm eave chords.
+    # no payload behind its lower skirt. A deeper swept frame retains
+    # a 3.6 mm lower chord and 1.5 mm eave, with inclined end piers.
     # Only the shell is cut: the arm tubes, internal sensor saddles and
     # every optical bezel are independent and retain their original forms.
     # Cut normal to each slanted facet to avoid feathering its 1.22 mm
@@ -981,9 +981,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
             tx,ty=1/length,flank_grade/length
             nx,ny=-ty,tx
             cy=side*(61.6+(abs(waist_x)-14.0)*3.8/29.8)*sy
-            lean=math.copysign(1.0,waist_x)
-            outline=[(-6.3,2.6),(6.3,2.6),(6.3+lean,12.8),
-                     (lean,24.3),(-6.3+lean,12.8)]
+            # Deepen the lower chord at the arm/shell reaction, then
+            # fan the piers outward around the unloaded upper panel.
+            # Section depth strengthens the bed junction without adding
+            # uniform wall thickness. The high pointed crown removes
+            # more area than the deeper lower chord restores, and both
+            # roof edges rise >1.8:1. Normal cuts retain the skin gauge.
+            lean=math.copysign(1.3,waist_x)
+            outline=[(-6.3,3.6),(6.3,3.6),(7.4+lean,13.0),
+                     (lean,26.5),(-7.4+lean,13.0)]
             wire=b.Wire.make_polygon([
                 (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
