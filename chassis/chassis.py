@@ -1,9 +1,10 @@
-"""v85-g84a: a low bifurcated cockpit hip grown from the battery turtledeck.
+"""v86-g85a: compact compound-fold stereo nose and low cockpit shoulders.
 
-Replace the steep aft shoulder fold with two longer rising creases that
-meet the battery roof continuously. A longer hatch flare follows the
-creases, while taller swept cheek vaults remove sidewall area. Normal wall
-gauge, all optical interfaces, the recessed tray and closed arms remain.
+Each camera brow now has an opposing longitudinal pitch, giving the
+structural shell a diamond hip over the fixed board rather than a long
+extruded ridge. Lower normal-offset cockpit facets follow the CM4 service
+corners; the lens voids, eight internal ToF seats and load-bearing arms stay
+coupled to the existing component geometry.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -597,7 +598,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         drop=wall*1.025*math.sqrt(1+1.12**2+roof_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     # A second, opposing longitudinal pitch shortens the high aft
-    # cockpit shoulders. The compound hip uses shallower 1.06:1 inner
+    # cockpit shoulders. The compound hip uses shallower 1.015:1 inner
     # roof slopes and >=1.22 mm normal skin; its ridge intersects the
     # forward rake rather than adding a suspended transverse bulkhead.
     # At the full rear service corner (X=-56,Y=28), the inner roof
@@ -614,14 +615,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.025*math.sqrt(1+1.12**2+(-0.015/sx)**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
+    cockpit_pitch=1.015
+    cockpit_ridge=92.65
     aft_rake=-0.015/sx
     for roof_side in (-1,1):
-        plane=b.Plane(origin=(0,0,94.0),
-                      z_dir=(aft_rake,roof_side*1.06,1))
+        plane=b.Plane(origin=(0,0,cockpit_ridge),
+                      z_dir=(aft_rake,roof_side*cockpit_pitch,1))
         half=plane*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         outer=outer & half
-        drop=wall*1.025*math.sqrt(1+1.06**2+aft_rake**2)
+        drop=wall*1.025*math.sqrt(1+cockpit_pitch**2+aft_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     # Two long rising creases bring the cockpit shoulders down toward
     # the enclosed FC rather than carrying tall triangular aft cheeks.
@@ -660,7 +663,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # The camera brows sit lower than the central radial carrier
         # hood. Their inner corners clear the real 25.862 mm board top;
         # the existing steep hip joins them to the cockpit service jamb.
-        brow_z=45.3 if ridge_y == 0.0 else 43.0
+        brow_z=45.3 if ridge_y == 0.0 else 43.6
         for side in (-1,1):
             plane=b.Plane(origin=(83.0*sx,ridge_y*sy,brow_z),
                           z_dir=(rake,side*1.12/sy,1))
@@ -668,6 +671,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             no=no & half
             drop=wall*1.025*math.sqrt(1+(1.12/sy)**2+rake*rake)
+            ni=ni & half.moved(b.Pos(0,0,-drop))
+        # Opposing roof pitches meet above each fixed lens/PCB. The
+        # inboard half rises from the existing cockpit hip at 0.16:1,
+        # while the transverse 1.12:1 folds grow from the cheek eaves.
+        # This trims the tall rear brow triangles, within the old hull.
+        # The normal offset includes both slopes; no wall is thinned.
+        for side in (-1,1):
+            back_rake=(-0.06 if ridge_y == 0.0 else -0.16)/sx
+            plane=b.Plane(origin=(83.0*sx,ridge_y*sy,brow_z),
+                          z_dir=(back_rake,side*1.12/sy,1))
+            half=plane*b.Box(800,800,600,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+            no=no & half
+            drop=wall*1.025*math.sqrt(1+(1.12/sy)**2+back_rake**2)
             ni=ni & half.moved(b.Pos(0,0,-drop))
         nose_outer.append(no);nose_inner.append(ni)
     hip=b.Plane(origin=(71.0*sx,0,45.3),z_dir=(1.20/sx,0,1))
@@ -779,7 +796,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Cut perpendicular to the aft roof plane to retain the complete
     # normal wall gauge at the rims instead of leaving feather edges.
     # The tips close over 6 mm of plan run with only 3.0 mm lateral
-    # advance: the 1.06:1 roof gives a >45-degree print trajectory.
+    # advance: the 1.015:1 roof gives a >45-degree print trajectory.
     # Only the upper shoulders are relieved; all carrier covers and
     # lower ring load paths lie below these tools. The wider openings
     # retain 6.0 mm webs between their 12 mm stations and continuous
@@ -787,11 +804,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for side in (-1,1):
         for vent_x in (-44.0,-32.0,-20.0,-8.0):
             vent_y=17.0*side
-            surface_z=94.0-aft_rake*vent_x-1.06*abs(vent_y)
+            surface_z=cockpit_ridge-aft_rake*vent_x-cockpit_pitch*abs(vent_y)
             plane=b.Plane(origin=(vent_x,vent_y,surface_z),
                           x_dir=(1,0,-aft_rake),
-                          z_dir=(aft_rake,side*1.06,1))
-            along=math.sqrt(1+1.06**2)
+                          z_dir=(aft_rake,side*cockpit_pitch,1))
+            along=math.sqrt(1+cockpit_pitch**2)
             outline=[(0,-9.0*along),(3.0,-3.0*along),
                      (3.0,3.0*along),(0,9.0*along),
                      (-3.0,3.0*along),(-3.0,-3.0*along)]
