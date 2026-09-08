@@ -266,3 +266,16 @@ rather than reduces error; terminal relative-nav does NOT close land 0.3-0.6m
 on this sensor suite. Arrival offset (~|bias| ~1.25m mean) is preserved by any
 relative frame. Kept behind gps_bias_state flag, default OFF. Plain GPS+ZUPT
 remains the stack. Est-obs PPO (lever b) launched on GPS+ZUPT.
+
+## 2026-09-07 Est-obs on-policy PPO (lever b) on GPS+ZUPT stack: NEGATIVE
+ppo_est.py (PPO fine-tune, warm start bc_ppo_v2_best, estimator-in-loop,
+heldout-cell selection, GT-goto floor) patched to zupt=True gps=True.
+40 updates x 32 eps (~10min): best_est_mean 0.3125 set at u4 (goto 87.5/
+hover 0/land 6.2) and never beaten; hover_hold 0% at the selected checkpoint.
+Late updates degraded GT-goto to 0.69-0.75 (floor 0.887). On-policy RL at this
+budget does not move hover/land on the GPS+ZUPT est stack.
+WALL STATUS (all levers measured): (a) authority/hybrid refuted; (b) on-policy
+PPO negative; (c) OOD refuted; DAgger v4 negative; ZUPT estimate-stable but
+headline 0-6%; GPS channel halves pos_err (2.1/1.8m) but bias floor > criterion;
+terminal relative-nav (bias state) negative. Land 0.3-0.6m is structurally
+beyond single-band GPS + this IMU/VO/mag/ToF suite under GT-frame scoring.
