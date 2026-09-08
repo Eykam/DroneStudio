@@ -223,3 +223,21 @@ ingests that wander every step and the teacher chases it (1.63 m/s believed-hold
 The honest lever for THIS failure mode is velocity-domain damping (e.g.
 zero-velocity updates when IMU+ToF indicate stationary), not position-chain
 gating. Ungated control estimator remains the default.
+
+## ZUPT (2026-09-07, parent-approved) - partial fix, hover/land still 0%.
+
+Zero-velocity updates in EstEnv (zupt flag, default False) + ESKF.update_velocity.
+Detector (sensor-side only): |gyro|<0.15 rad/s AND |a|~g AND VO step <0.04m AND
+ToF alt steady. Teacher-on-est (est v3 obs):
+  goto 87.5% (pos_err 0.86m) | hover 0.0% (pos_err 4.2m, hold speed 2.08m/s,
+  zupt 499 fires) | land 0.0% (pos_err 2.8m, zupt 157)
+vs ungated 87.5/0/0 (hold speed 1.63) and gated 81.2/0/0 (21.6m/502.7m pos_err).
+
+ZUPT stabilizes the estimate (no runaway, pos_err 4.2m vs gated 21.6m) but does
+not reach the ~1m hover precision needed. Root cause is structural: horizontal
+position has NO absolute channel in the sim sensor suite - IMU integrates and
+wanders, VO random-walks, mag is attitude-only, ToF is vertical-only. Nothing
+anchors x/z. The placed hardware (placement-effective.json) includes GPS at
+[-0.1165, 0, 0.002] - the sim simply does not simulate it. Next honest lever:
+add a u-blox-class GPS channel (~1.5m CEP, 5-10Hz) so GPS anchors the absolute
+frame while VO supplies smooth relative motion; re-gate teacher-on-est.

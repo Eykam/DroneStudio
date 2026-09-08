@@ -104,6 +104,16 @@ class ESKF:
         self._inject(K @ (z - self.p), K, H)
         return float(np.trace(S))
 
+    def update_velocity(self, z, sigma):
+        """z: measured velocity (3,), isotropic sigma. Used for ZUPT."""
+        H = np.zeros((3, 15))
+        H[0:3, 3:6] = np.eye(3)
+        R = np.eye(3) * sigma ** 2
+        S = H @ self.P @ H.T + R
+        K = self.P @ H.T @ np.linalg.inv(S)
+        self._inject(K @ (z - self.v), K, H)
+        return float(np.trace(S))
+
     def update_attitude(self, q_meas, R_meas):
         """z: measured attitude quat; residual = rotvec of q_est^-1 * q_meas."""
         qe = self.q

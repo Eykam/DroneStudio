@@ -38,13 +38,14 @@ def yaw_frame(v, yaw):
 class EstEnv(SimBinaryEnv):
     def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
                  passthrough=False, noise_scale=1.0, obs_v3=False, fusion_gated=False,
-                 **kw):
+                 zupt=False, **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
         # fusion_gated: port of fusion_chained_g's innovation gate + chain
         # re-anchoring into the control-time estimator (parent dir 2026-09-07).
         self.fusion_gated = fusion_gated
+        self.zupt = zupt  # zero-velocity updates when detector says stationary (parent 2026-09-07)
         self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
         self.noise_scale = noise_scale  # curriculum knob: scales VO/mag measurement noise
         self.obs_v3 = obs_v3            # 25-dim: + tof_alt/valid, sigma_p/v/att, vo_aid_std
@@ -82,6 +83,10 @@ class EstEnv(SimBinaryEnv):
         self.kf.P[6:9, 6:9] = np.eye(3) * (np.deg2rad(3.0)) ** 2
         self.t = 0.0
         self.gyro_last = np.zeros(3)
+        self.accel_last = np.array([0.0, 9.81, 0.0])
+        self.vo_p_prev = None
+        self.tof_alt_prev = None
+        self.zupt_fires = 0
         self.pos_errs, self.att_errs = [], []
         self.vel_errs, self.rate_errs = [], []
         # synthetic VO chain: correlated scale + yaw-walk + white floor,
@@ -130,6 +135,7 @@ class EstEnv(SimBinaryEnv):
                                    throttle=float(np.clip(fthr / MAX_THRUST, 0, 1)))
             if meas is not None:
                 self.gyro_last = meas.channels["gyro"]
+                self.accel_last = meas.channels["accel"]
                 self.kf.predict(meas.channels["gyro"], meas.channels["accel"], FAST_DT)
         # policy-rate aiding from TRUE pose (sensor sim must never read the filter)
         q_t = np.array(info["quat"], dtype=float); p_t = np.array(info["pos"], dtype=float)
@@ -207,6 +213,22 @@ class EstEnv(SimBinaryEnv):
                     self.kf.update_ground_range(r_true, dirs[j], sig)
                     self.tof_alt = r_true
                     self.tof_alt_t = self.t
+        # ZUPT (parent 2026-09-07): during holds the VO random walk (~2cm/step)
+        # is the dominant terminal-phase error. Detector uses only sensor-side
+        # quantities: rates low, specific force ~ g, VO increment near zero,
+        # ToF altitude steady. Cruise/descent cannot false-fire: cruise has
+        # ~0.1m/step VO increments, descent moves the altimeter.
+        if self.zupt:
+            vo_step = float(np.linalg.norm(self.vo_p - self.vo_p_prev)) if self.vo_p_prev is not None else 1.0
+            tof_steady = (self.tof_alt_prev is not None
+                          and abs(self.tof_alt - self.tof_alt_prev) < 0.03)
+            if (np.linalg.norm(self.gyro_last) < 0.15
+                    and abs(float(np.linalg.norm(self.accel_last)) - 9.81) < 0.5
+                    and vo_step < 0.04 and tof_steady):
+                self.kf.update_velocity(np.zeros(3), 0.1)
+                self.zupt_fires += 1
+        self.vo_p_prev = self.vo_p.copy()
+        self.tof_alt_prev = self.tof_alt
         # diagnostics
         self.pos_errs.append(float(np.linalg.norm(self.kf.p - p_t)))
         dq = quat_mul(q_t, np.array([-self.kf.q[0], -self.kf.q[1], -self.kf.q[2], self.kf.q[3]]))
