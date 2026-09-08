@@ -1,9 +1,9 @@
-"""v77-g76a: swept open-web battery flanks in a folded monocoque.
+"""v80-g79a: compound-rake cockpit and low stereo brows.
 
-Larger pointed flank vaults remove unused side-skin centers while retaining
-continuous belly and eave chords and inclined piers. The normally offset
-shell, recessed battery tray, optical facets and all internal seats remain
-on their original datums; every aperture roof grows from its side jambs.
+An opposing aft roof rake removes surplus cockpit shoulder area while
+retaining the CM4 service volume and structural shell gauge. Lower outer
+nose folds follow the two camera boards; the central sensor hood retains
+its height. The recessed tray, closed arms and eight internal seats remain.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -105,8 +105,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # corner; no arm is slit and the main-shell aperture stays minimal.
         window_bypass = (1.9*math.sin(math.pi*(x-101.0)/30.0)**2
                          if 101.0 < x < 131.0 else 0.0)
+        # Carry the inboard shoulder outside the lower optical corner.
+        # The short extra sweep removes a notch at the diagonal carrier
+        # while leaving the lens corridor, saddle and motor axes fixed.
+        root_bypass=(1.4*math.sin(math.pi*(x-48.0)/44.0)**2
+                     if 48.0 < x < 92.0 else 0.0)
         return arm_sweep_sign*(-p.arm_sweep_mm*math.sin(math.pi*x/p.arm_length_mm)
-                -bypass-window_bypass)
+                -bypass-window_bypass-root_bypass)
 
     def spar_profile(x, width, height):
         """Deep lenticular wing with a narrow keel and broad upper shoulders."""
@@ -119,7 +124,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         root=max(0.0,min(1.0,(70.0-x)/22.0))
         half=width/2*(1.0-0.06*blend-0.04*root)
         height-=0.2*blend+0.3*root
-        crown=1.6-0.4*transition+0.7*blend+0.2*root
+        # Shorten the internal bridge without thinning the normal skin.
+        # The pointed roof keeps its depth and >45-degree side pitches.
+        crown=1.45-0.4*transition+0.7*blend+0.2*root
         keel0=max(p.arm_crown_width_mm/2,0.80*half)
         keel=keel0+(0.98*half-keel0)*blend
         chine=max(1.5*p.arm_rib_thickness_mm,(0.15-0.13*blend)*height)
@@ -558,6 +565,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.025*math.sqrt(1+1.12**2+roof_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
+    # A second, opposing longitudinal pitch shortens the high aft
+    # cockpit shoulders. The compound hip keeps the same 1.12:1 inner
+    # roof slopes and >=1.22 mm normal skin; its ridge intersects the
+    # forward rake rather than adding a suspended transverse bulkhead.
+    # At the full rear service corner (X=-56,Y=28), the inner roof
+    # remains above Z=61.9 mm, clearing the 61.2 mm CM4 service box.
+    aft_rake=-0.015/sx
+    for roof_side in (-1,1):
+        plane=b.Plane(origin=(0,0,96.0),
+                      z_dir=(aft_rake,roof_side*1.12,1))
+        half=plane*b.Box(800,800,600,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+        outer=outer & half
+        drop=wall*1.025*math.sqrt(1+1.12**2+aft_rake**2)
+        inner=inner & half.moved(b.Pos(0,0,-drop))
     # A three-fold nose follows the two camera boards and central radial
     # carrier. Intersect it with the existing shell: every fold is inward,
     # and the fixed optical facets, seats and clearance tools are retained.
@@ -569,8 +591,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
         no=box(0,0,-.2,600,600,200)
         ni=box(0,0,-.2,600,600,200)
         rake=.06/sx
+        # The camera brows sit lower than the central radial carrier
+        # hood. Their inner corners clear the real 25.862 mm board top;
+        # the existing steep hip joins them to the cockpit service jamb.
+        brow_z=45.3 if ridge_y == 0.0 else 43.0
         for side in (-1,1):
-            plane=b.Plane(origin=(83.0*sx,ridge_y*sy,45.3),
+            plane=b.Plane(origin=(83.0*sx,ridge_y*sy,brow_z),
                           z_dir=(rake,side*1.12/sy,1))
             half=plane*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
@@ -644,6 +670,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
             corner_t=12.6+(14.0+8.4)*(1.4/26.4)
             hood=[(-8.4,-12.6),(14.0,-corner_t),(18.0,-11.4),
                   (18.0,11.4),(14.0,corner_t),(-8.4,12.6)]
+            # Broaden the east/west hood-to-rim fan at its acute waist
+            # junction. This retains a little existing structural skin
+            # across the crash-stress notch, within the original hull.
+            if key in ('vl53l9cx_breakout#e','vl53l9cx_breakout#w'):
+                hood=[(-8.4,-13.4),(14.0,-14.8),(18.0,-11.4),
+                      (18.0,11.4),(14.0,14.8),(-8.4,13.4)]
             hood=[(r*scale,t*scale) for r,t in hood]
             cap=prism(hood,0,150).rotate(b.Axis.Z,angle).moved(b.Pos(cx,cy,0))
             protected=protected+cap
@@ -874,17 +906,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # retain their contact. Diagonal boards need a broader saddle for
         # their rotated carrier envelope; use a continuous perimeter cut.
         diagonal=abs(math.sin(math.radians(2*angle)))>0.5
-        # Stop the diagonal folded skirt before the near-tangent
-        # spar-wall intersection; this area is behind the PCB and its post.
-        back=-12.0 if diagonal else -10.2
+        # Stop the folded skirt before the revised spar's grazing
+        # lower-wall intersection. Its rear datum is still 3.2 mm
+        # behind the mounting post, leaving the complete PCB seat.
+        back=-11.0 if diagonal else -10.0
         front=4.4
         # The diagonally rotated square bed left tangential corner
         # skirts far beyond the PCB, rails and gussets. End those skirts
-        # at +/-12.6 mm: the 20 mm board and both mounting ears retain full
+        # at +/-12.0 mm: the 20 mm board and both mounting ears retain full
         # support, while the empty corner no longer grazes the spar floor.
         # This also removes the nearly coplanar cradle/spar wedge that
         # produced degenerate tetrahedra in otherwise valid solid exports.
-        skirt_width=25.2 if diagonal else 50.0
+        skirt_width=24.0 if diagonal else 50.0
         shelf=shelf & local(box((back+front)/2,0,-.1,
                                 front-back,skirt_width,z0+1))
         # A 1.4 mm ledge bears directly on the PCB bottom edge. The broad
@@ -1117,7 +1150,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             (fx+x+half,fy-28,2.0),(fx+x+half+lean,fy-28,shoulder),
             (fx+x+lean,fy-28,apex),(fx+x-half+lean,fy-28,shoulder)],close=True)
         deck=deck-b.Solid.extrude(b.Face(arch),(0,56,0))
-    # Paired rows of short slots lighten the folded rail between its
+    # Paired rows of normal-cut slots lighten the folded rail between its
     # bed-founded piers. Each opening spans only 2.4 mm along X: its two
     # ends support a short bridge on every print layer as the fold rises.
     # Continuous ridge bearing lands, 1.4 mm inner/outer edge flanges and
@@ -1133,7 +1166,27 @@ def build_chassis(p: ChassisParams) -> b.Part:
                      (fx+x+1.2,fy+side*y-1.5),
                      (fx+x+1.2,fy+side*y+1.5),
                      (fx+x-1.2,fy+side*y+1.5)]
-                deck=deck-prism(pts,0,deck_z+1.0)
+                imu_x=placements['mpu9250'][0]*1000
+                if abs(fx+x-imu_x)<14.2:
+                    # The flat IMU landing keeps vertical service holes.
+                    deck=deck-prism(pts,0,deck_z+1.0)
+                else:
+                    # Cut normal to the folded sheet. Vertical slot walls
+                    # shaved triangular feather edges from its underside;
+                    # these perpendicular returns retain the full normal
+                    # sheet gauge at both ends of every opening.
+                    grade=1.10 if y<19.5 else -1.10
+                    top=deck_z-1.10*(abs(y-19.5)-.4)
+                    pl=b.Plane(origin=(fx+x,fy+side*y,top-.97),
+                               x_dir=(1,0,0),z_dir=(0,-side*grade,1))
+                    # Point both ends: their inclined edge faces rise
+                    # from the 2.4 mm side jambs instead of closing with
+                    # a downward-facing straight lintel along the fold.
+                    outline=[(-1.2,-1.75),(0,-2.45),(1.2,-1.75),
+                             (1.2,1.75),(0,2.45),(-1.2,1.75)]
+                    w=b.Wire.make_polygon([(u,v,-2.0) for u,v in outline],close=True)
+                    tool=pl*b.Solid.extrude(b.Face(w),(0,0,4.0))
+                    deck=deck-tool
     # Do not introduce a deck wall through the original arm wiring galleries.
     for cavity in arm_cavities: deck=deck-cavity
     body=body+deck
