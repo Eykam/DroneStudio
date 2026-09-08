@@ -1,9 +1,9 @@
-"""v81-g80a: vented shear shoulders in the faceted cockpit shell.
+"""v82-g81a: swept waist vaults in the structural fuselage skin.
 
-Eight pointed, normal-cut vents replace the broad upper cockpit panels
-with continuous eave and dorsal chords joined by inclined shell webs.
-The relieved skin remains the structural bodywork; the recessed battery
-bay, sensor hoods, service portal and internal mounting decks stay intact.
+Four pointed bays pare the empty waist skirts into inclined shear piers
+between continuous belly and eave chords. Normal-to-skin cuts retain the
+full printable gauge; the enclosed payloads, internal optical seats,
+carrier hoods and original closed spars keep their load paths.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -821,6 +821,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
                  (gx,21.5),(gx-3.5,13.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
+
+    # The waist between each cardinal and diagonal optical facet has
+    # no payload behind its lower skirt. Convert those broad panels into
+    # swept shear piers, retaining 2.6 mm belly and 3.7 mm eave chords.
+    # Only the shell is cut: the arm tubes, internal sensor saddles and
+    # every optical bezel are independent and retain their original forms.
+    # Cut normal to each slanted facet to avoid feathering its 1.22 mm
+    # skin. Both pointed roof edges rise >1.25:1 from their side jambs.
+    for waist_x in (-26.5,26.5):
+        for side in (-1,1):
+            flank_grade=side*math.copysign(3.8/29.8,waist_x)*sy/sx
+            length=math.sqrt(1+flank_grade*flank_grade)
+            tx,ty=1/length,flank_grade/length
+            nx,ny=-ty,tx
+            cy=side*(61.6+(abs(waist_x)-14.0)*3.8/29.8)*sy
+            lean=math.copysign(1.0,waist_x)
+            outline=[(-6.3,2.6),(6.3,2.6),(6.3+lean,12.8),
+                     (lean,24.3),(-6.3+lean,12.8)]
+            wire=b.Wire.make_polygon([
+                (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
+                for u,z in outline],close=True)
+            shell=shell-b.Solid.extrude(b.Face(wire),(8*nx,8*ny,0))
 
     for cut in bezel_cuts: shell=shell-cut
     body=body+shell
