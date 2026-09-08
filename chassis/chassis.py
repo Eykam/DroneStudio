@@ -1,9 +1,9 @@
-"""v84-g83b: continuous tapered keel spars with deep elliptical haunches.
+"""v85-g84a: a low bifurcated cockpit hip grown from the battery turtledeck.
 
-Resect the root and free span as one tapered closed-section arm family:
-narrow printable keels, raised haunches and slightly deeper crowns move
-material toward the bending flanges. True 3D offsets preserve the original
-wall gauge. The optical bypass axes, terminal nacelles and fuselage persist.
+Replace the steep aft shoulder fold with two longer rising creases that
+meet the battery roof continuously. A longer hatch flare follows the
+creases, while taller swept cheek vaults remove sidewall area. Normal wall
+gauge, all optical interfaces, the recessed tray and closed arms remain.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -623,30 +623,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.025*math.sqrt(1+1.06**2+aft_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
-    # An inward fold splits the back of the cockpit into two raked
-    # ridges, cutting the high aft shoulders down toward the CM4 envelope.
-    # Unlike a constant-height trough, this face rises forward at 2.00:1:
-    # its first layer meets the bed-founded aft hip, then each higher layer
-    # advances less than its height, including the flared hatch edge:
-    # (2.00-1.12*(3.8/6))/sqrt(1+(3.8/6)**2) = 1.09 > 1.0.
-    # The inner lip therefore grows from supported material throughout.
-    # Outboard, the original roof remains lower, retaining the carrier
-    # covers and ring. Full normal offsets include both roof gradients.
+    # Two long rising creases bring the cockpit shoulders down toward
+    # the enclosed FC rather than carrying tall triangular aft cheeks.
+    # The original battery roof is the lower branch of the envelope:
+    # its union with the creases makes a continuous hip, with no abrupt
+    # clipping plane or suspended step at the battery/avionics transition.
+    # True normal offsets include the longitudinal and transverse grades.
     folds_outer=[]; folds_inner=[]
     for fold_side in (-1,1):
-        plane=b.Plane(origin=(-65.0*sx,0,59.4),
-                      z_dir=(-2.00/sx,-fold_side*1.12,1))
+        plane=b.Plane(origin=(-67.0*sx,0,49.0),
+                      z_dir=(-1.50/sx,-fold_side*1.12,1))
         half=plane*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         folds_outer.append(half)
-        drop=wall*1.025*math.sqrt(1+(2.00/sx)**2+1.12**2)
+        drop=wall*1.025*math.sqrt(1+(1.50/sx)**2+1.12**2)
         folds_inner.append(half.moved(b.Pos(0,0,-drop)))
-    # Restrict the forward rake to the cockpit. At X=-70 its full
-    # skin is already above the old aft hip outside the open hatch,
-    # so the boundary makes no step; the battery and tail are untouched.
-    aft_keep=box(-370.0*sx,0,-.2,600.0*sx,600,200)
-    outer=outer & (folds_outer[0]+folds_outer[1]+aft_keep)
-    inner=inner & (folds_inner[0]+folds_inner[1]+aft_keep)
+    # Keep both the battery turtledeck and its aft GPS hip as supported
+    # starting surfaces; their old longitudinal rakes also protect the
+    # complete fixed tail carrier. The cockpit grows out of these roofs.
+    fold_outer=folds_outer[0]+folds_outer[1]+roof_outers[0]+roof_outers[2]
+    fold_inner=folds_inner[0]+folds_inner[1]+roof_inners[0]+roof_inners[2]
+    outer=outer & fold_outer
+    inner=inner & fold_inner
 
     # A three-fold nose follows the two camera boards and central radial
     # carrier. Intersect it with the existing shell: every fold is inward,
@@ -688,8 +686,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # battery leads while leaving both continuous canopy edge chords.
     # Close the flare before the flight-board envelope: its aft canopy
     # shoulders keep their complete original coverage over the CM4 bay.
-    hatch=[(-107.0,-6.0),(-91.0,-9.8),(-63.0,-9.8),(-57.0,-6.0),
-           (-29.0,-6.0),(-29.0,6.0),(-57.0,6.0),(-63.0,9.8),
+    # The 12 mm aft cockpit flare gives a supported closing trajectory:
+    # (1.50 - 1.12 * 3.8/12) / sqrt(1 + (3.8/12)**2) = 1.092 > 1.
+    hatch=[(-107.0,-6.0),(-91.0,-9.8),(-69.0,-9.8),(-57.0,-6.0),
+           (-29.0,-6.0),(-29.0,6.0),(-57.0,6.0),(-69.0,9.8),
            (-91.0,9.8),(-107.0,6.0)]
     shell=shell-prism(hatch,37.2,100)
     # Continue the narrow channel to the existing forward service portal.
@@ -881,14 +881,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
     # Swept cheek vaults replace the broad forward skirt with a deep
-    # shear panel: continuous 4 mm belly and >5 mm upper chords surround
+    # shear panel: continuous belly and upper chords surround
     # two inclined piers. The side cuts stay in the near-vertical camera
     # cheeks, ahead of the diagonal ToF carrier and behind the nose facet.
     # Pointed roofs rise at least 1.2:1 and print inward from both jambs;
     # all camera pads, retaining ears and optical cuts are added below.
+    # Taller swept cheek vaults carry the nose as a deep shear panel.
+    # A 3 mm continuous belly and >=3.8 mm eave chord surround each
+    # opening; the original camera seats and corner piers remain intact.
+    # Both roof edges rise more than 2:1, and the widening vertical jambs
+    # grow directly from the bed. The upper camera brows stay unchanged.
     for gx in (71.5,85.0):
-        outline=[(gx-5.0,4.0),(gx+3.0,4.0),(gx+5.0,13.0),
-                 (gx,21.5),(gx-3.5,13.0)]
+        outline=[(gx-5.0,3.0),(gx+4.0,3.0),(gx+5.5,13.0),
+                 (gx+0.3,24.2),(gx-4.1,13.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
