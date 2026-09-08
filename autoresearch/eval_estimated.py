@@ -37,10 +37,14 @@ def yaw_frame(v, yaw):
 
 class EstEnv(SimBinaryEnv):
     def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
-                 passthrough=False, noise_scale=1.0, obs_v3=False, **kw):
+                 passthrough=False, noise_scale=1.0, obs_v3=False, fusion_gated=False,
+                 **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
+        # fusion_gated: port of fusion_chained_g's innovation gate + chain
+        # re-anchoring into the control-time estimator (parent dir 2026-09-07).
+        self.fusion_gated = fusion_gated
         self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
         self.noise_scale = noise_scale  # curriculum knob: scales VO/mag measurement noise
         self.obs_v3 = obs_v3            # 25-dim: + tof_alt/valid, sigma_p/v/att, vo_aid_std
@@ -88,6 +92,11 @@ class EstEnv(SimBinaryEnv):
         self.vo_scale = float(rng.normal(1.0, 0.03 * self.noise_scale))
         self.vo_n = 0
         self.vo_drift = []
+        # gated-fusion anchors: last ACCEPTED chain/filter correspondence
+        self.vo_anchor = self.spawn.copy()
+        self.p_anchor_filter = self.spawn.copy()
+        self.vo_rejects = 0
+        self.vo_accepts = 0
         self.tof_alt = 0.0
         self.tof_alt_t = -1e9
         self.p_prev = self.spawn.copy()
@@ -152,7 +161,34 @@ class EstEnv(SimBinaryEnv):
             Rz = np.array([[c, -sn, 0], [sn, c, 0], [0, 0, 1.0]])
             self.vo_p = self.vo_p + self.vo_scale * (Rz @ dp) + rng.normal(0, 0.02 * self.noise_scale, 3)
             self.vo_n += 1
-            self.kf.update_position(self.vo_p.copy(), np.eye(3) * (0.25 ** 2 * self.vo_n))
+            if not self.fusion_gated:
+                self.kf.update_position(self.vo_p.copy(), np.eye(3) * (0.25 ** 2 * self.vo_n))
+            else:
+                # INNOVATION GATE (port of fusion_chained_g): chain displacement
+                # since last accepted anchor vs filter displacement over the same
+                # interval. Reject when inconsistent -> coast on IMU+ToF+mag.
+                # REANCHOR: chain is an integrated reference and leaks without
+                # bound; after 2s of consecutive rejects, reset chain to filter.
+                n_br = self.vo_n - getattr(self, "_vo_n_anchor", 0)
+                chain_d = self.vo_p - self.vo_anchor
+                filt_d = self.kf.p - self.p_anchor_filter
+                inno = float(np.linalg.norm(chain_d - filt_d))
+                gate = 0.25 * np.sqrt(max(n_br, 1)) * 1.5 + 0.05 * float(np.linalg.norm(filt_d))
+                if inno <= gate:
+                    self.kf.update_position(self.vo_p.copy(), np.eye(3) * (0.25 ** 2 * self.vo_n))
+                    self.vo_anchor = self.vo_p.copy()
+                    self.p_anchor_filter = self.kf.p.copy()
+                    self._vo_n_anchor = self.vo_n
+                    self.vo_rejects = 0
+                    self.vo_accepts += 1
+                else:
+                    self.vo_rejects += 1
+                    if self.vo_rejects >= 40:  # ~2s of policy-rate rejects
+                        self.vo_p = self.kf.p.copy()
+                        self.vo_anchor = self.kf.p.copy()
+                        self.p_anchor_filter = self.kf.p.copy()
+                        self._vo_n_anchor = self.vo_n
+                        self.vo_rejects = 0
             self.vo_drift.append(float(np.linalg.norm(self.vo_p - p_t)))
         self.p_prev = p_t.copy()
         tm = self.tof.scan(self.t, dict(quat=q_t, origin=p_t), self.senv, cast)

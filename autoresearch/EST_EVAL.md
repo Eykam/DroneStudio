@@ -185,3 +185,41 @@ drift over multi-second holds; vertical is ToF-aided, alt R2 0.974). Note the
 control-time EKF is still the UNGATED estimator - the fusion innovation-gate /
 reanchor work (reanchor30 now default) has only been applied to the trajectory
 pipeline, never to the control loop.
+
+## Fusion port to control loop (2026-09-07, parent dir) - NEGATIVE, destabilizing.
+
+Ported fusion_chained_gs innovation gate + chain re-anchoring into EstEnvs
+control-time estimator behind an opt-in flag (fusion_gated=True; default False,
+ungated path untouched). Teacher-on-est gate (pilot_act3, est v3 obs):
+  goto 81.2% (vs 87.5% ungated) | hover 0.0% | land 0.0%
+Diagnostics: hover pos_err 21.6m mean, land pos_err 502.7m mean, att_err ~8.5deg,
+vo rejects nearly zero (14-70 vs 11k-29k accepts).
+
+Why it failed: the trajectory-pipeline gate works because ICP rotation increments
+are gated against GYRO integration - two independent rotation measurements. The
+control loops synthetic VO is a position chain
+
+## Fusion port to control loop (2026-09-07, parent dir) - NEGATIVE, destabilizing.
+
+Ported fusion_chained_g's innovation gate + chain re-anchoring into EstEnv's
+control-time estimator behind an opt-in flag (fusion_gated=True; default False,
+ungated path untouched). Teacher-on-est gate (pilot_act3, est v3 obs):
+  goto 81.2% (vs 87.5% ungated) | hover 0.0% | land 0.0%
+Diagnostics: hover pos_err 21.6m mean, land pos_err 502.7m mean, att_err ~8.5deg,
+vo rejects nearly zero (14-70 vs 11k-29k accepts).
+
+Why it failed: the trajectory-pipeline gate works because ICP rotation increments
+are gated against GYRO integration - two independent rotation measurements. The
+control loop's synthetic VO is a position chain; the only thing to gate it
+against is the filter itself (self-referential), so the gate accepts ~everything
+(toothless), while the reanchor snaps the chain to the filter during rejection
+windows - if the filter has run away on IMU drift, the chain anchors to garbage
+(positive feedback -> 503m mean land pos_err). Direct port does not transfer.
+
+Actual terminal-phase error budget (from hold analysis): during holds the drone
+is near-stationary, so VO increments are ~2cm/step noise random-walk (~0.7m over
+a 60s hold - exactly success-radius scale) plus 0.3deg/step yaw walk. The filter
+ingests that wander every step and the teacher chases it (1.63 m/s believed-hold).
+The honest lever for THIS failure mode is velocity-domain damping (e.g.
+zero-velocity updates when IMU+ToF indicate stationary), not position-chain
+gating. Ungated control estimator remains the default.
