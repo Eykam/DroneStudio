@@ -1,4 +1,4 @@
-"""15-state error-state Kalman filter (ESKF) for IMU-driven estimation.
+"""18-state error-state Kalman filter (ESKF) for IMU-driven estimation.
 
 Nominal state: p (pos), v (vel), q (attitude quat x,y,z,w), b_g, b_a.
 Error state (15): dp, dv, dth, db_g, db_a.
@@ -52,9 +52,16 @@ class ESKF:
         self.q = np.array([0., 0., 0., 1.])
         self.bg = np.zeros(3)
         self.ba = np.zeros(3)
-        self.P = np.eye(15) * 1e-3
+        # GPS slowly-varying bias as filter states (parent 2026-09-07): single-
+        # band GNSS error is dominated by a common-mode, time-correlated bias
+        # (troposphere/ephemeris). Modelling it makes it observable during
+        # motion (VO/IMU pin the relative trajectory; each fix measures p+b),
+        # so the terminal phase can fly relative-nav precision.
+        self.bgps = np.zeros(3)
+        self.P = np.eye(18) * 1e-3
         self.P[9:12, 9:12] *= 10   # bias uncertainty higher
         self.P[12:15, 12:15] *= 10
+        self.P[15:18, 15:18] = np.eye(3) * noise.get("gps_bias_std", 1.0) ** 2
         self.n = noise
 
     def predict(self, gyro_m, accel_m, dt):
@@ -67,13 +74,16 @@ class ESKF:
         self.q = quat_mul(self.q, quat_from_rotvec(w * dt))
         self.q /= np.linalg.norm(self.q)
         # error-state propagation
-        F = np.eye(15)
+        F = np.eye(18)
         F[0:3, 3:6] = np.eye(3) * dt
         F[3:6, 6:9] = -R @ skew(a) * dt
         F[3:6, 12:15] = -R * dt
         F[6:9, 9:12] = -np.eye(3) * dt
+        # GPS bias: OU mean-reversion, tau ~120s (navigation-message class)
+        _tau = self.n.get("gps_bias_tau", 120.0)
+        F[15:18, 15:18] = np.eye(3) * np.exp(-dt / _tau)
         # process noise (continuous -> discrete, simple form)
-        Qd = np.zeros((15, 15))
+        Qd = np.zeros((18, 18))
         sa = self.n["accel_nd"] ** 2 * dt
         sg = self.n["gyro_nd"] ** 2 * dt
         sba = self.n["accel_bias_rw"] ** 2 * dt
@@ -82,31 +92,47 @@ class ESKF:
         Qd[6:9, 6:9] = np.eye(3) * sg
         Qd[9:12, 9:12] = np.eye(3) * sbg
         Qd[12:15, 12:15] = np.eye(3) * sba
+        Qd[15:18, 15:18] = np.eye(3) * (self.n.get("gps_bias_std", 1.0) ** 2
+                                        * (1.0 - np.exp(-2.0 * dt / _tau)))
         self.P = F @ self.P @ F.T + Qd
 
     def _inject(self, dx, K, H):
         dp, dv, dth, dbg, dba = dx[0:3], dx[3:6], dx[6:9], dx[9:12], dx[12:15]
+        dbgps = dx[15:18]
         self.p += dp
         self.v += dv
         self.q = quat_mul(self.q, quat_from_rotvec(dth))
         self.q /= np.linalg.norm(self.q)
         self.bg += dbg
         self.ba += dba
+        self.bgps += dbgps
         # covariance reset (simple form)
-        self.P = (np.eye(15) - K @ H) @ self.P
+        self.P = (np.eye(18) - K @ H) @ self.P
 
     def update_position(self, z, R_meas):
         """z: measured position (3,), R_meas: 3x3 covariance."""
-        H = np.zeros((3, 15))
+        H = np.zeros((3, 18))
         H[0:3, 0:3] = np.eye(3)
         S = H @ self.P @ H.T + R_meas
         K = self.P @ H.T @ np.linalg.inv(S)
         self._inject(K @ (z - self.p), K, H)
         return float(np.trace(S))
 
+    def update_gps(self, z, R_meas):
+        """GPS fix: z = p + bgps + noise. The bias-state split is what makes
+        terminal relative-nav possible: VO/IMU constrain p between fixes, so
+        the filter attributes the slow common-mode offset to bgps."""
+        H = np.zeros((3, 18))
+        H[0:3, 0:3] = np.eye(3)
+        H[0:3, 15:18] = np.eye(3)
+        S = H @ self.P @ H.T + R_meas
+        K = self.P @ H.T @ np.linalg.inv(S)
+        self._inject(K @ (z - (self.p + self.bgps)), K, H)
+        return float(np.trace(S))
+
     def update_velocity(self, z, sigma):
         """z: measured velocity (3,), isotropic sigma. Used for ZUPT."""
-        H = np.zeros((3, 15))
+        H = np.zeros((3, 18))
         H[0:3, 3:6] = np.eye(3)
         R = np.eye(3) * sigma ** 2
         S = H @ self.P @ H.T + R
@@ -122,7 +148,7 @@ class ESKF:
         if dq[3] < 0:
             dq = -dq
         r = 2 * dq[:3]
-        H = np.zeros((3, 15))
+        H = np.zeros((3, 18))
         H[0:3, 6:9] = np.eye(3)
         S = H @ self.P @ H.T + R_meas
         K = self.P @ H.T @ np.linalg.inv(S)
@@ -138,7 +164,7 @@ class ESKF:
         r_pred = self.p[1] / (-d_w[1])
         if r_pred <= 0:
             return None
-        H = np.zeros((1, 15))
+        H = np.zeros((1, 18))
         H[0, 1] = 1.0 / (-d_w[1])
         # attitude block: d(d_w)/d(theta) via -[d_w]x R (body-frame error state)
         J = -(self.p[1] / (d_w[1] ** 2)) * (skew(d_w) @ R_of(self.q))[1, :]
@@ -158,7 +184,7 @@ class ESKF:
         R = R_of(self.q)
         b_pred = R.T @ b_world
         # d(b_body)/d(theta_body) = [b_body]x  (body-frame error state)
-        H = np.zeros((3, 15))
+        H = np.zeros((3, 18))
         H[0:3, 6:9] = skew(b_pred)
         Rm = np.eye(3) * sigma_ut ** 2
         S = H @ self.P @ H.T + Rm

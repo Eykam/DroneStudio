@@ -1,0 +1,4 @@
+EST-TEACHER goto: 0.938 pos_err=0.915 att_err=5.49 vo_acc=0 vo_rej=0 zupt=25 gps=372 bias_err=0.808
+EST-TEACHER hover_hold: 0.062 extra=1.017 pos_err=2.609 att_err=7.61 vo_acc=0 vo_rej=0 zupt=732 gps=6453 bias_err=1.369
+EST-TEACHER land: 0.000 pos_err=2.619 att_err=7.46 vo_acc=0 vo_rej=0 zupt=207 gps=2907 bias_err=1.525
+EST_TEACHER_DONE {"goto": 0.938, "hover_hold": 0.062, "land": 0.0}

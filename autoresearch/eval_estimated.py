@@ -54,6 +54,11 @@ class EstEnv(SimBinaryEnv):
         # VO keeps relative smoothness, ToF owns vertical via Kalman weights.
         self.gps = gps
         self.gps_dt = 1.0 / gps_rate_hz
+        # GPS bias-as-state (terminal relative-nav attempt, 2026-09-07):
+        # measured NEUTRAL-NEGATIVE in the teacher gate (bias split polluted
+        # by VO-chain drift; hover/land 6.2/0.0 vs 6.2/6.2 plain). Kept behind
+        # a flag, default off. Reanchor30 variant strongly negative (17m).
+        self.gps_bias_state = kw.get("gps_bias_state", False)
         self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
         self.noise_scale = noise_scale  # curriculum knob: scales VO/mag measurement noise
         self.obs_v3 = obs_v3            # 25-dim: + tof_alt/valid, sigma_p/v/att, vo_aid_std
@@ -115,6 +120,7 @@ class EstEnv(SimBinaryEnv):
         self.gps_bias = np.zeros(3)
         self.gps_last_t = -1e9
         self.gps_fixes = 0
+        self.gps_bias_err = []
         self.p_prev = self.spawn.copy()
         return self._est_obs()
 
@@ -234,7 +240,11 @@ class EstEnv(SimBinaryEnv):
                                                      2.5 * self.noise_scale,
                                                      1.27 * self.noise_scale])
             Rg = np.diag([1.27 ** 2, 2.5 ** 2, 1.27 ** 2]) * (self.noise_scale ** 2)
-            self.kf.update_position(z, Rg)
+            if self.gps_bias_state:
+                self.kf.update_gps(z, Rg)
+                self.gps_bias_err.append(float(np.linalg.norm(self.kf.bgps - self.gps_bias)))
+            else:
+                self.kf.update_position(z, Rg)
             self.gps_fixes += 1
         # ZUPT (parent 2026-09-07): during holds the VO random walk (~2cm/step)
         # is the dominant terminal-phase error. Detector uses only sensor-side

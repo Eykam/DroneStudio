@@ -250,3 +250,19 @@ Teacher (pilot_act3 GT-trained) on est v3 obs, GPS+ZUPT, 16 ep/phase:
 - land 6.2% (1/16, pos_err 1.834, att_err 9.76)
 vs ZUPT-only: pos_err hover 4.2->2.09m, land 2.8->1.83m. Estimate fidelity now sits at the GPS bias floor (~1-2m); hover/land success criterion is tighter than that floor, so headline stays ~0. Estimation is no longer the obvious bottleneck at this magnitude - remaining gap is bias-floor vs criterion plus behavioral (att_err rose with GPS coupling).
 Next lever: est-obs policy training on the GPS+ZUPT stack (DAgger v4 was blocked by garbage estimate; distribution now much closer to GT).
+
+## 2026-09-07 Terminal relative-nav attempt: GPS bias-as-state (18-state ESKF)
+Parent-greenlit architecture probe: GPS gets you there, relative sensing puts
+you down. Added bgps OU states (tau 120s, 1m stationary) + update_gps H=[I|I].
+Synthetic static test: bias converges to ~0.1m horizontal. In-episode: NEGATIVE.
+Single-episode trace (hover seed 88000): bias_err 0.49 at t=0 -> grows with
+vo_drift (0.05 -> 1.5m); the VO-chain random walk (2cm/step) pollutes the bias
+split through the VO position-update channel. Teacher gate with bias state:
+goto 93.8/hover 6.2/land 0.0, pos_err 2.61/2.62 (vs plain GPS+ZUPT 2.09/1.83,
+hover/land 6.2/6.2). Reanchor30-on-GPS variant STRONGLY NEGATIVE (hover pos_err
+17.1m, land 24.5m: fresh small-R VO noise injected at 20Hz kicked the filter).
+Conclusion: VO chain drift ~= GPS bias dynamics, so the bias split redistributes
+rather than reduces error; terminal relative-nav does NOT close land 0.3-0.6m
+on this sensor suite. Arrival offset (~|bias| ~1.25m mean) is preserved by any
+relative frame. Kept behind gps_bias_state flag, default OFF. Plain GPS+ZUPT
+remains the stack. Est-obs PPO (lever b) launched on GPS+ZUPT.
