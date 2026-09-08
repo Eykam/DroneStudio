@@ -1,9 +1,9 @@
-"""v82-g81a: swept waist vaults in the structural fuselage skin.
+"""v83-g82a: lower cockpit shoulders with a forward-rising twin-ridge aft hip.
 
-Four pointed bays pare the empty waist skirts into inclined shear piers
-between continuous belly and eave chords. Normal-to-skin cuts retain the
-full printable gauge; the enclosed payloads, internal optical seats,
-carrier hoods and original closed spars keep their load paths.
+A compound inward fold rises from the existing aft hip into two lower
+structural roof ridges. Slightly shallower support-free outer pitches
+reduce canopy area while clearing the complete CM4 service envelope.
+Original closed spars, optical seats and payload mounting datums persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -566,20 +566,57 @@ def build_chassis(p: ChassisParams) -> b.Part:
         drop=wall*1.025*math.sqrt(1+1.12**2+roof_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     # A second, opposing longitudinal pitch shortens the high aft
-    # cockpit shoulders. The compound hip keeps the same 1.12:1 inner
+    # cockpit shoulders. The compound hip uses shallower 1.06:1 inner
     # roof slopes and >=1.22 mm normal skin; its ridge intersects the
     # forward rake rather than adding a suspended transverse bulkhead.
     # At the full rear service corner (X=-56,Y=28), the inner roof
-    # remains above Z=61.9 mm, clearing the 61.2 mm CM4 service box.
-    aft_rake=-0.015/sx
+    # remains above Z=61.6 mm, clearing the 61.2 mm CM4 service box.
+    # Retain the original outboard shoulder plane as an envelope limit.
+    # The shallower cockpit pitch below intersects it at |Y|=33.3 mm:
+    # only the high central skin moves inward, while all optical-ring
+    # eaves and carrier-cover edges keep their original height and gauge.
     for roof_side in (-1,1):
         plane=b.Plane(origin=(0,0,96.0),
-                      z_dir=(aft_rake,roof_side*1.12,1))
+                      z_dir=(-0.015/sx,roof_side*1.12,1))
         half=plane*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         outer=outer & half
-        drop=wall*1.025*math.sqrt(1+1.12**2+aft_rake**2)
+        drop=wall*1.025*math.sqrt(1+1.12**2+(-0.015/sx)**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
+    aft_rake=-0.015/sx
+    for roof_side in (-1,1):
+        plane=b.Plane(origin=(0,0,94.0),
+                      z_dir=(aft_rake,roof_side*1.06,1))
+        half=plane*b.Box(800,800,600,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+        outer=outer & half
+        drop=wall*1.025*math.sqrt(1+1.06**2+aft_rake**2)
+        inner=inner & half.moved(b.Pos(0,0,-drop))
+    # An inward fold splits the back of the cockpit into two raked
+    # ridges, cutting the high aft shoulders down toward the CM4 envelope.
+    # Unlike a constant-height trough, this face rises forward at 2.00:1:
+    # its first layer meets the bed-founded aft hip, then each higher layer
+    # advances less than its height, including the flared hatch edge:
+    # (2.00-1.12*(3.8/6))/sqrt(1+(3.8/6)**2) = 1.09 > 1.0.
+    # The inner lip therefore grows from supported material throughout.
+    # Outboard, the original roof remains lower, retaining the carrier
+    # covers and ring. Full normal offsets include both roof gradients.
+    folds_outer=[]; folds_inner=[]
+    for fold_side in (-1,1):
+        plane=b.Plane(origin=(-65.0*sx,0,59.4),
+                      z_dir=(-2.00/sx,-fold_side*1.12,1))
+        half=plane*b.Box(800,800,600,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+        folds_outer.append(half)
+        drop=wall*1.025*math.sqrt(1+(2.00/sx)**2+1.12**2)
+        folds_inner.append(half.moved(b.Pos(0,0,-drop)))
+    # Restrict the forward rake to the cockpit. At X=-70 its full
+    # skin is already above the old aft hip outside the open hatch,
+    # so the boundary makes no step; the battery and tail are untouched.
+    aft_keep=box(-370.0*sx,0,-.2,600.0*sx,600,200)
+    outer=outer & (folds_outer[0]+folds_outer[1]+aft_keep)
+    inner=inner & (folds_inner[0]+folds_inner[1]+aft_keep)
+
     # A three-fold nose follows the two camera boards and central radial
     # carrier. Intersect it with the existing shell: every fold is inward,
     # and the fixed optical facets, seats and clearance tools are retained.
@@ -710,21 +747,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # chords remain continuous, and broad webs separate the openings.
     # Cut perpendicular to the aft roof plane to retain the complete
     # normal wall gauge at the rims instead of leaving feather edges.
-    # The tips close over 6 mm of plan run with only 2.4 mm lateral
-    # advance: the 1.12:1 roof gives a >45-degree print trajectory.
+    # The tips close over 6 mm of plan run with only 3.0 mm lateral
+    # advance: the 1.06:1 roof gives a >45-degree print trajectory.
     # Only the upper shoulders are relieved; all carrier covers and
-    # lower ring load paths lie below these tools.
+    # lower ring load paths lie below these tools. The wider openings
+    # retain 6.0 mm webs between their 12 mm stations and continuous
+    # longitudinal chords along both canopy edges.
     for side in (-1,1):
-        for vent_x in (-47.0,-34.0,-21.0,-8.0):
+        for vent_x in (-44.0,-32.0,-20.0,-8.0):
             vent_y=17.0*side
-            surface_z=96.0-aft_rake*vent_x-1.12*abs(vent_y)
+            surface_z=94.0-aft_rake*vent_x-1.06*abs(vent_y)
             plane=b.Plane(origin=(vent_x,vent_y,surface_z),
                           x_dir=(1,0,-aft_rake),
-                          z_dir=(aft_rake,side*1.12,1))
-            along=math.sqrt(1+1.12**2)
-            outline=[(0,-9.0*along),(2.4,-3.0*along),
-                     (2.4,3.0*along),(0,9.0*along),
-                     (-2.4,3.0*along),(-2.4,-3.0*along)]
+                          z_dir=(aft_rake,side*1.06,1))
+            along=math.sqrt(1+1.06**2)
+            outline=[(0,-9.0*along),(3.0,-3.0*along),
+                     (3.0,3.0*along),(0,9.0*along),
+                     (-3.0,3.0*along),(-3.0,-3.0*along)]
             wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
             shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
