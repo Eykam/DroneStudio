@@ -38,7 +38,7 @@ def yaw_frame(v, yaw):
 class EstEnv(SimBinaryEnv):
     def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
                  passthrough=False, noise_scale=1.0, obs_v3=False, fusion_gated=False,
-                 zupt=False, **kw):
+                 zupt=False, gps=False, gps_rate_hz=5.0, **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
@@ -46,6 +46,14 @@ class EstEnv(SimBinaryEnv):
         # re-anchoring into the control-time estimator (parent dir 2026-09-07).
         self.fusion_gated = fusion_gated
         self.zupt = zupt  # zero-velocity updates when detector says stationary (parent 2026-09-07)
+        # GPS (parent 2026-09-07): placed hardware (placement-effective.json
+        # [-0.1165,0,0.002]) that the sim never modeled - the only absolute
+        # horizontal channel on the real frame. u-blox-class: ~1.5m CEP
+        # horizontal (per-axis ~1.27m), vertical ~2.5m, OU bias (tau 120s,
+        # stationary std 1m) + white noise. Fused as slow absolute anchor;
+        # VO keeps relative smoothness, ToF owns vertical via Kalman weights.
+        self.gps = gps
+        self.gps_dt = 1.0 / gps_rate_hz
         self.passthrough = passthrough   # run estimator + diagnostics, return GT obs
         self.noise_scale = noise_scale  # curriculum knob: scales VO/mag measurement noise
         self.obs_v3 = obs_v3            # 25-dim: + tof_alt/valid, sigma_p/v/att, vo_aid_std
@@ -104,6 +112,9 @@ class EstEnv(SimBinaryEnv):
         self.vo_accepts = 0
         self.tof_alt = 0.0
         self.tof_alt_t = -1e9
+        self.gps_bias = np.zeros(3)
+        self.gps_last_t = -1e9
+        self.gps_fixes = 0
         self.p_prev = self.spawn.copy()
         return self._est_obs()
 
@@ -213,6 +224,18 @@ class EstEnv(SimBinaryEnv):
                     self.kf.update_ground_range(r_true, dirs[j], sig)
                     self.tof_alt = r_true
                     self.tof_alt_t = self.t
+        # GPS aiding: sampled from TRUE pose (sensor sim never reads the filter)
+        if self.gps and (self.t - self.gps_last_t) >= self.gps_dt:
+            self.gps_last_t = self.t
+            # OU bias: tau=120s, stationary std 1.0m per axis
+            a_ou = np.exp(-self.gps_dt / 120.0)
+            self.gps_bias = a_ou * self.gps_bias + np.sqrt(1 - a_ou ** 2) * rng.normal(0, 1.0 * self.noise_scale, 3)
+            z = p_t + self.gps_bias + rng.normal(0, [1.27 * self.noise_scale,
+                                                     2.5 * self.noise_scale,
+                                                     1.27 * self.noise_scale])
+            Rg = np.diag([1.27 ** 2, 2.5 ** 2, 1.27 ** 2]) * (self.noise_scale ** 2)
+            self.kf.update_position(z, Rg)
+            self.gps_fixes += 1
         # ZUPT (parent 2026-09-07): during holds the VO random walk (~2cm/step)
         # is the dominant terminal-phase error. Detector uses only sensor-side
         # quantities: rates low, specific force ~ g, VO increment near zero,

@@ -23,7 +23,8 @@ def teacher_est(sc, seed):
                  scenario_spec=spec, estimated=True, obs_v2=True, obs_v3=True,
                  vo_aided=True, est_seed=int(seed) + 777,
                  fusion_gated=os.environ.get("FUSION_GATED") == "1",
-                 zupt=os.environ.get("ZUPT") == "1")
+                 zupt=os.environ.get("ZUPT") == "1",
+                 gps=os.environ.get("GPS") == "1")
     obs = env.reset()
     hold_speeds, pos_errs = [], []
     for _ in range(ms):
@@ -39,7 +40,7 @@ def teacher_est(sc, seed):
     extra = float(np.mean(hold_speeds)) if hold_speeds else None
     diag = dict(pos_err=float(np.mean(env.pos_errs)) if env.pos_errs else None,
                 att_err=float(np.mean(env.att_errs)) if env.att_errs else None,
-                vo_acc=env.vo_accepts, vo_rej=env.vo_rejects, zupt=env.zupt_fires)
+                vo_acc=env.vo_accepts, vo_rej=env.vo_rejects, zupt=env.zupt_fires, gps=env.gps_fixes)
     env.close()
     return ok, extra, diag
 
@@ -55,10 +56,10 @@ def main():
         pe = np.mean([d["pos_err"] for d in diags if d["pos_err"] is not None])
         ae = np.mean([d["att_err"] for d in diags if d["att_err"] is not None])
         va = sum(d["vo_acc"] for d in diags); vr = sum(d["vo_rej"] for d in diags)
-        zf = sum(d["zupt"] for d in diags)
+        zf = sum(d["zupt"] for d in diags); gf = sum(d["gps"] for d in diags)
         print(f"EST-TEACHER {sc}: {out[sc]:.3f}"
               + (f" extra={np.mean(extras):.3f}" if extras else "")
-              + f" pos_err={pe:.3f} att_err={ae:.2f} vo_acc={va} vo_rej={vr} zupt={zf}", flush=True)
+              + f" pos_err={pe:.3f} att_err={ae:.2f} vo_acc={va} vo_rej={vr} zupt={zf} gps={gf}", flush=True)
         post_series(f"est_teacher_{sc}", out[sc], label="pilot_act3 on est v3 obs FUSION_GATED=1")
     post_status({"candidate": {"name": "est_teacher_eval"},
                  "note": "pilot_act3 on ESTIMATED v3 obs: " +

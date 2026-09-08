@@ -241,3 +241,12 @@ anchors x/z. The placed hardware (placement-effective.json) includes GPS at
 [-0.1165, 0, 0.002] - the sim simply does not simulate it. Next honest lever:
 add a u-blox-class GPS channel (~1.5m CEP, 5-10Hz) so GPS anchors the absolute
 frame while VO supplies smooth relative motion; re-gate teacher-on-est.
+
+## 2026-09-07 GPS channel (u-blox-class) + ZUPT, teacher-on-est gate
+Parent-greenlit fidelity fix: placement-effective.json has GPS at [-0.1165,0,0.002] but sim never modeled it. Added 5Hz GPS: OU bias (tau 120s, 1m stationary std/axis) + white noise (1.27m h, 2.5m v per-axis), fused via kf.update_position; sampled from TRUE pose. GPS=1 env flag.
+Teacher (pilot_act3 GT-trained) on est v3 obs, GPS+ZUPT, 16 ep/phase:
+- goto 87.5% (pos_err 0.889)
+- hover 6.2% (1/16, pos_err 2.085, att_err 5.98, zupt=865 fires, gps=6659 fixes)
+- land 6.2% (1/16, pos_err 1.834, att_err 9.76)
+vs ZUPT-only: pos_err hover 4.2->2.09m, land 2.8->1.83m. Estimate fidelity now sits at the GPS bias floor (~1-2m); hover/land success criterion is tighter than that floor, so headline stays ~0. Estimation is no longer the obvious bottleneck at this magnitude - remaining gap is bias-floor vs criterion plus behavioral (att_err rose with GPS coupling).
+Next lever: est-obs policy training on the GPS+ZUPT stack (DAgger v4 was blocked by garbage estimate; distribution now much closer to GT).
