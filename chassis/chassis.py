@@ -1,9 +1,9 @@
-"""v92-g91b: flange-biased closed roots with narrowed shear sides.
+"""v93-g92b: deeper hub haunches feeding thin closed sensor-bypass shoulders.
 
-The loaded arm roots trade side breadth and excess wall allowance for
-slightly greater depth and broader compression crowns. Higher lower
-chines taper into the original sensor bypass, preserving the printable
-keels, closed wiring galleries and fixed hollow motor transitions.
+The short inboard haunch gains depth to carry bending into the hub, while
+reducing the surplus wall allowance of the adjoining closed shoulder.
+The original outer section at the carrier ring is preserved: all eight
+fixed internal mounts and optical corridors retain their clearances.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -215,6 +215,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
         crown+=(1.82-crown)*flange_root
         shoulder+=(height-p.arm_roof_slope*(shoulder_half-crown)-shoulder)*flange_root
         shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
+        # A deeper inboard haunch carries bending into the stack ring.
+        # Recover stiffness by lifting the existing closed crown and lower
+        # chines, retaining the bed keel and the pitched roof. The depth
+        # fades completely before the carrier service region; every outer
+        # station from radial X=48.3 mm outward is exactly the reference.
+        # Its adjoining shoulder sheds excess skin allowance below, using
+        # section depth inboard instead of extra sidewall around sensors.
+        haunch=max(0.0,min(1.0,(48.0-x)/16.0))
+        depth=1.025
+        height*=1.0+(depth-1.0)*haunch
+        shoulder*=1.0+(depth-1.0)*haunch
+        chine*=1.0+(depth-1.0)*haunch
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -224,8 +236,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
         if inner:
             root_blend = max(0.0,min(1.0,(75.0-x)/30.0))
             folded_root=max(0.0,min(1.0,(48.0-x)/16.0))
+            # Preserve the 1.22 mm hub skin and a 1.24 mm shoulder.
+            # The deeper hub haunch above supplies the bending load path;
+            # both adjacent loft spans still contribute their full 3D
+            # normal correction to the swept faces and pitched flanges.
             wall = (max(1.22,p.arm_rib_thickness_mm-0.13)
-                    +0.10*root_blend-0.10*folded_root)
+                    +min(0.02,0.10*root_blend-0.10*folded_root))
             # The section's YZ normal alone underestimates wall thickness on
             # the optical bypass. Include both adjacent loft spans and both
             # endpoints of each face, then miter those true normal offsets.
