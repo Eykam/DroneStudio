@@ -17,6 +17,7 @@ sys.path.insert(0, HERE)
 from scene_schema import SceneDistribution
 from env_sim import SimBinaryEnv
 from scenario_sampler import sample_spec
+from vis_visual import sample_visual
 
 DASH = os.environ.get("DASHBOARD_URL", "").rstrip("/")
 TOKEN = os.environ.get("INGEST_TOKEN", "")
@@ -124,6 +125,7 @@ def main():
         ep_id = f"v{ep:05d}"
         seed = 50_000 + ep
         spec = sample_spec(seed)
+        vis = sample_visual(seed)  # DR visuals per episode scene (rung-2)
         env = StreamingEnv(dist, seed=seed, max_steps=MAX_STEPS, dynamics=DYNAMICS,
                            scenario_spec=spec)
         try:
@@ -136,13 +138,15 @@ def main():
                 info = getattr(env, "last_info", {})
                 if env.steps % 4 == 0:
                     try:
-                        vf = env._call({"cmd": "render", "width": VW, "height": VH})
+                        vf = env._call({"cmd": "render", "width": VW, "height": VH, "visual": vis})
                         rgb = np.array(vf["rgb"], dtype=np.uint32)
                         rgb3 = np.stack([(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255],
                                         axis=-1).astype(np.uint8).reshape(VH, VW, 3)
                         pd, psg = model.infer(rgb3)
                         post({"type": "scenario",
                               "episode_id": ep_id,
+                              "model": os.path.basename(CKPT),
+                              "visual": vis,
                               "scenario": spec["scenario"],
                               "step": env.steps,
                               "pos": info.get("pos"),
