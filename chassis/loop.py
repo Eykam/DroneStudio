@@ -250,6 +250,19 @@ def run_generation():
                 print(f"[gen {gen}] DISP FLOOR HOLD: {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} crash disp {cand_d} mm breaches the 0.3mm margin floor (limit 5.0); adoption blocked", flush=True)
         except Exception as e:
             print(f"[gen {gen}] disp-floor check failed (non-gating): {e}", flush=True)
+    # parent ruling 2026-09-08: modal soft floor 125 Hz (gate floor 120) - block adoptions
+    # whose first eigenmode drops below it, same treatment as the crash-disp floor
+    if improved:
+        try:
+            def _modal(v):
+                m = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
+                return ((m.get("metrics") or {}).get("fea") or {}).get("modal", {}).get("first_mode_hz")
+            cand_m = _modal(w["variant"])
+            if cand_m is not None and cand_m < 125.0:
+                improved = False
+                print(f"[gen {gen}] MODAL FLOOR HOLD: {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} first mode {cand_m} Hz below the 125 Hz soft floor (gate 120); adoption blocked", flush=True)
+        except Exception as e:
+            print(f"[gen {gen}] modal-floor check failed (non-gating): {e}", flush=True)
     tally = " | ".join(f"{c['variant']}={c['score']:.3f}{' PASS' if c['all_pass'] else ' fail'}{(' %.1fg' % c['mass_g']) if c['mass_g'] else ''}" for c in results.values())
     if improved:
         wL = w["variant"][-1]
