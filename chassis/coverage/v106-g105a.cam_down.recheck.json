@@ -1,0 +1,1 @@
+{"variant": "v106-g105a", "sensor": "cam_down", "origin_glb_m": [0.0, 0.0013999999999999998, 0.0], "cone_half_angle_deg": 65, "range_m": 8, "rays": 1728, "clear": 1728, "coverage_fraction": 1.0, "aperture_drop_mm": 0.7}

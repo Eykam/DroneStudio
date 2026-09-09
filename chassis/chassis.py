@@ -1,10 +1,11 @@
-"""v106-g105a: low twin-camera brows and a close-wrapped swept shell lattice.
+"""v107-g106a: close-wrapped battery shell with deep swept waist chords.
 
-Lower the paired camera brows while retaining the central carrier hood
-and its service clearance; tuck the camera and battery flanks inward. Four
-pitched battery-side bays replace the broad panels with continuous edge
-chords and shorter unsupported piers. Preserve normal skin gauges, the
-closed reference arms, every internal seat and optical clearance tool.
+Tuck the aft flanks and lower the battery ridge inside the reference hull.
+Open the unloaded skirt into larger pitched bays while deepening the lower
+waist chord, concentrating ring stiffness at its arm reactions. Preserve
+the normally offset skins, closed arms, carrier covers and all mounts.
+Steepen only the aft cockpit entry hips so the compact skirt joins the
+board roof without a flat ledge; the overall bounds remain fixed.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -653,7 +654,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         mid_x=(a[0]+d[0])/2
         tuck=0.0 if protected_facet else (1.95 if mid_x > 65.0 else 2.5)
         if not protected_facet and -122.0 < mid_x < -65.0:
-            tuck=3.05
+            tuck=3.40
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
     compact=[]
     for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
@@ -670,10 +671,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
         for a,d in zip(pts,pts[1:]+pts[:1]):
             ex,ey=d[0]-a[0],d[1]-a[1]; el=math.hypot(ex,ey)
             nx,ny=ey/el,-ex/el;c=nx*a[0]+ny*a[1]
-            pl=b.Plane(origin=(nx*c,ny*c,28.0),z_dir=(slope*nx,slope*ny,1))
+            # The compact aft skirt uses a slightly steeper cockpit
+            # entry hip. Its rising inner face clears the board service
+            # corner, avoiding a flat ledge left by the final bay cut.
+            # The original crown limits cap its height, and the tucked
+            # vertical flanks continue to set the smaller plan envelope.
+            pitch=slope+(0.030 if x0 == -90 and nx < -0.01 and abs(ny) > 0.1 else 0.0)
+            pl=b.Plane(origin=(nx*c,ny*c,28.0),z_dir=(pitch*nx,pitch*ny,1))
             half=pl*b.Box(600,600,500,align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             outer=outer & half
-            inner=inner & half.moved(b.Pos(0,0,-wall*1.025*math.sqrt(1+slope*slope)))
+            inner=inner & half.moved(b.Pos(0,0,-wall*1.025*math.sqrt(1+pitch*pitch)))
         outs.append(outer);ins.append(inner)
     outer=outs[0];inner=ins[0]
     for o in outs[1:]: outer=outer+o
@@ -707,7 +714,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         if ridge_x == -104.0 and rake > 0:
             battery_pitch = 1.025
             for side in (-1, 1):
-                plane = b.Plane(origin=(ridge_x*sx,0,ridge_z-1.7),
+                plane = b.Plane(origin=(ridge_x*sx,0,ridge_z-2.0),
                                 z_dir=(-rake/sx,side*battery_pitch,1))
                 half = plane*b.Box(800,800,600,
                     align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
@@ -1101,8 +1108,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Four swept triangular bays retain 2.6 mm belly chords, 2 mm
         # eave chords and >1.5 mm intervening diagonal piers. Their
         # narrow pitched crowns close from both printed jambs.
-        outline=[(gx-4.9,2.6),(gx+4.0,2.6),(gx+5.0,14.0),
-                 (gx+0.4,26.0),(gx-4.2,14.0)]
+        # Broad pointed bays between deeper continuous lower chords;
+        # >1.7 mm projected diagonal piers retain their full normal gauge.
+        outline=[(gx-5.2,3.0),(gx+4.4,3.0),(gx+5.4,14.0),
+                 (gx+0.4,26.0),(gx-4.6,14.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
@@ -1145,8 +1154,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # roof edges rise >1.8:1. Normal cuts retain the skin gauge.
             lean=math.copysign(1.3,waist_x)
             apex=23.5 if waist_x < 0 else 25.0
-            outline=[(-6.3,3.6),(6.3,3.6),(7.4+lean,13.0),
-                     (lean,apex),(-7.4+lean,13.0)]
+            # A deeper 5 mm bed chord carries shell/arm reaction, while
+            # the wider high bay removes neutral-axis skirt area. Keep
+            # >3 mm end piers beside the protected optical facets. The
+            # least steep roof closes at 10.5/9.8 > 1 from the jamb.
+            outline=[(-8.6,5.0),(8.6,5.0),(9.8+lean,13.0),
+                     (lean,apex),(-9.8+lean,13.0)]
             wire=b.Wire.make_polygon([
                 (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
@@ -1671,6 +1684,26 @@ def build_chassis(p: ChassisParams) -> b.Part:
     wireframe.FixSmallEdges()
     wireframe.FixWireGaps()
     body=b.Part(wireframe.Shape()).clean()
+    # Normalize the closed BRep before final domain unification. Swept
+    # loft p-curves can otherwise retain nearly coincident entities that
+    # create zero-volume tetrahedra after solver coordinate rounding.
+    # Use OpenCascade's native in-memory format, with no external cache
+    # or tessellated replacement; this retains the exact parametric solid.
+    from io import BytesIO
+    from OCP.BRepTools import BRepTools
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Shape
+    from OCP.ShapeFix import ShapeFix_Shape
+    stream=BytesIO()
+    BRepTools.Write_s(b.Part(children=body.solids()).wrapped,stream)
+    stream.seek(0)
+    normalized=TopoDS_Shape()
+    BRepTools.Read_s(normalized,stream,BRep_Builder())
+    shape_fix=ShapeFix_Shape(normalized)
+    shape_fix.SetPrecision(0.001)
+    shape_fix.SetMaxTolerance(0.001)
+    shape_fix.Perform()
+    body=b.Part(shape_fix.Shape()).clean()
     if not body.is_valid or len(body.solids()) != 1:
         raise ValueError(f'Chassis must be one valid solid: valid={body.is_valid}, solids={[(round(s.volume,2),tuple(s.center())) for s in body.solids()]}')
     return b.Part(b.Part(children=body.solids()).wrapped)
