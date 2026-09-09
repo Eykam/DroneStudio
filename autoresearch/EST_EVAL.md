@@ -303,3 +303,13 @@ budget does not close the behavioral gap (teacher gate hover 50/land 62.5 vs
 policy-on-est 12.5/25). Next lever: DAgger v5 (v4 recipe, marker stack) - v4
 failed on the OLD est distribution; the marker stack puts est obs much closer
 to GT, which is exactly what imitation needs. v5 launched 6:38 PM.
+
+## 2026-09-08 DAgger v5 (v4 recipe on GPS+ZUPT+MARKER): PARTIAL
+14 iters, 672s. best_mean 0.479 at iter6: EST goto 87.5/hover 12.5/land 43.8
+(warm start was 81.2/12.5/25.0). Land climbed 25 -> 43.8% (real imitation gain
+under the marker channel); hover oscillated 0-25% and never settled. Still
+under the teacher gate (50/62.5). Best checkpoint /workspace/bc_est_dag_v5_best.json.
+Housekeeping: v5 inherited v4s OUT prefix and overwrote v4s /workspace
+checkpoints during the run; v4 artifacts restored from results/, v5 renamed.
+Remaining behavioral gap is hover-dominant: land is learning, hover station-
+keeping is not (hold-speed oscillation in the student under est noise).
