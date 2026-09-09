@@ -66,3 +66,28 @@ export async function fetchCadDesigns(): Promise<{ designs: CadDesign[]; updated
   if (!r.ok) throw new Error(`cad fetch failed: ${r.status}`);
   return r.json();
 }
+
+export type FovSensor = {
+  id: string;
+  label: string;
+  mount: { pos_mm: number[]; quat_xyzw: number[] };
+  fov:
+    | { type: "cone"; half_angle_deg: number }
+    | { type: "frustum"; hfov_deg: number; vfov_deg: number };
+  range_m: { min: number; max: number };
+  coverage_fraction?: number;
+  raycast: { dirs: number[][]; hit_mm: (number | null)[] };
+};
+export type CadFov = {
+  available: boolean;
+  variant?: string;
+  units?: string;
+  mesh?: { url?: string; version?: number };
+  sensors?: FovSensor[];
+  updated_at?: string;
+};
+export async function fetchCadFov(): Promise<CadFov> {
+  const r = await fetch("/api/cad/fov", { credentials: "same-origin" });
+  if (!r.ok) throw new Error(`fov fetch failed: ${r.status}`);
+  return r.json();
+}

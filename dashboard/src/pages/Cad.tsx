@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { fetchCadDesigns, fetchState, type CadDesign, type CadSnapshotRecord } from "@/api";
+import { fetchCadDesigns, fetchCadFov, fetchState, type CadDesign, type CadSnapshotRecord } from "@/api";
 import { ChevronRight } from "lucide-react";
 import CadViewer from "@/components/CadViewer";
+import SensorFovViewer from "@/components/SensorFovViewer";
 
 function lineageOf(d: CadDesign, all: CadDesign[]): CadDesign[] {
   const chain: CadDesign[] = [];
@@ -71,6 +72,8 @@ export default function Cad() {
     refetchInterval: 10_000,
   });
   const prog = progQ.data as any;
+  const fovQ = useQuery({ queryKey: ["cad-fov"], queryFn: fetchCadFov, refetchInterval: 30_000 });
+  const [view, setView] = useState<"model" | "sensors">("model");
   const progAge = prog?.ts ? (Date.now() - new Date(prog.ts).getTime()) / 1000 : 1e9;
   const progLive = prog && prog.status === "working" && progAge < 120;
   // Merge GLB-bearing designs with geometry-pending snapshot records
@@ -172,8 +175,34 @@ export default function Cad() {
                   </div>
                 </div>
               )}
-              <div className="h-72 md:h-[45vh] md:min-h-[320px] md:shrink-0">
-                {sel.glb_url ? (
+              <div className="h-72 md:h-[45vh] md:min-h-[320px] md:shrink-0 flex flex-col">
+                <div className="flex gap-1 mb-1.5 shrink-0">
+                  {(["model", "sensors"] as const).map((v) => (
+                    <button key={v} onClick={() => setView(v)}
+                      className={`px-2.5 py-1 rounded-md border text-xs font-medium ${view === v ? "border-primary text-primary bg-primary/5" : "border-border text-muted-foreground hover:text-foreground"}`}>
+                      {v === "model" ? "3D model" : "Sensors (FoV)"}
+                    </button>
+                  ))}
+                  {view === "sensors" && fovQ.data?.available && (
+                    <span className="ml-auto text-[11px] text-muted-foreground self-center">
+                      {fovQ.data.variant} - {fovQ.data.sensors?.length ?? 0} sensors
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 min-h-0">
+                {view === "sensors" ? (
+                  fovQ.data?.available && sel.glb_url ? (
+                    <SensorFovViewer key={sel.id + ":fov"} glbUrl={sel.glb_url} fov={fovQ.data} />
+                  ) : (
+                    <div className="h-full grid place-items-center rounded-lg border border-dashed border-border text-center p-4">
+                      <div className="text-sm text-muted-foreground">
+                        {sel.glb_url
+                          ? "No sensor coverage data yet - CAD publishes it after the coverage raycast run."
+                          : "Geometry pending - GLB not uploaded yet."}
+                      </div>
+                    </div>
+                  )
+                ) : sel.glb_url ? (
                   <CadViewer key={sel.id} url={sel.glb_url} />
                 ) : (
                   <div className="h-full grid place-items-center rounded-lg border border-dashed border-border text-center p-4">
@@ -185,6 +214,7 @@ export default function Cad() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
 
               <div className="md:flex-1 md:min-h-0 md:overflow-y-auto space-y-4 md:pr-1">

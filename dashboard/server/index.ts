@@ -263,6 +263,38 @@ app.get("/api/cad/designs", async (c) => {
   });
 });
 
+// --- FoV / sensor-coverage payloads (CAD raycast output) -------------------
+// POST: bearer-token ingest from the CAD box, one JSON per accepted variant.
+// GET: session-authed read for the dashboard Sensors tab.
+app.post("/api/cad/fov", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ error: "body must be a JSON object" }, 400);
+  const variant = safeId(String(body.variant || ""));
+  if (!variant) return c.json({ error: "variant required" }, 400);
+  if (!Array.isArray(body.sensors) || !body.sensors.length) return c.json({ error: "sensors[] required" }, 400);
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(CAD_DIR, { recursive: true });
+  await Bun.write(`${CAD_DIR}/fov-${variant}.json`, JSON.stringify(body));
+  await Bun.write(`${CAD_DIR}/fov-latest.json`, JSON.stringify({ variant, updated_at: new Date().toISOString() }));
+  return c.json({ ok: true, variant, sensors: body.sensors.length });
+});
+
+app.get("/api/cad/fov", async (c) => {
+  if (!(await checkSession(getCookie(c, "ds_session")))) return c.json({ error: "unauthorized" }, 401);
+  const f = Bun.file(`${CAD_DIR}/fov-latest.json`);
+  if (!(await f.exists())) return c.json({ available: false });
+  const latest = await f.json();
+  const pf = Bun.file(`${CAD_DIR}/fov-${latest.variant}.json`);
+  if (!(await pf.exists())) return c.json({ available: false });
+  const payload = await pf.json();
+  return c.json({ available: true, updated_at: latest.updated_at, ...payload });
+});
+
 app.get("/api/cad/designs/:id/glb", async (c) => {
   const id = safeId(c.req.param("id"));
   if (!id) return c.json({ error: "bad id" }, 400);
