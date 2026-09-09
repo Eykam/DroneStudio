@@ -1,10 +1,10 @@
-"""v97-g96a: a low folded turtledeck over vaulted battery flanks.
+"""v105-g104b: deep, direct closed wings integrated into a compact folded shell.
 
-Fold the central battery roof down onto a shallower pitched crease and
-open the aft sidewall into deeper vaults between its continuous load paths.
-The outboard hip and GPS return retain their original roofs; all faces
-keep the full normal skin gauge. The existing carrier hoods, attachment
-seats, optical windows, service hatch and load-bearing canopy ties remain.
+Shorten the outboard swept load path and deepen its broad compression
+shoulders while tucking the lower chines. The compact shell brings the
+carrier hoods and battery tray into shorter supported load paths, with
+low folded cockpit returns. Retain normal wall gauge, all eight internal
+sensor seats, fixed motor datums, stereo voids and the belly-camera pocket.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -92,7 +92,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     tof_poses = tof_lens_poses()
     camera_poses = camera_lens_poses()
     arm_sweep_sign=1.0
-    def sweep_center(x):
+    def sweep_datum(x):
         # Both endpoints remain on the fixed motor radial. Mirrored sweeps
         # carry the arms around the optical ring and away from the stereo bay.
         # Bend the outboard span around the diagonal optical window. The
@@ -122,6 +122,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
                      if 79.0 < x < 104.0 else 0.0)
         return arm_sweep_sign*(-p.arm_sweep_mm*math.sin(math.pi*x/p.arm_length_mm)
                 -bypass-window_bypass-root_bypass+short_chine)
+
+    def sweep_center(x):
+        # Once past the complete carrier saddle, the old outer optical
+        # detour is unnecessary for a proximity-monitor station. Connect
+        # its outer shoulder to the motor approach with one direct chine.
+        # Blend only at its ends; the middle loft stations are collinear,
+        # avoiding the extra kink caused by a larger local sine correction.
+        # The root and motor axis keep their original exact coordinates.
+        center=sweep_datum(x)
+        if 76.0 < x < 132.0:
+            t=(x-76.0)/56.0
+            chord=(1.0-t)*sweep_datum(76.0)+t*sweep_datum(132.0)
+            blend=max(0.0,min(1.0,(x-76.0)/5.0,(132.0-x)/6.0))
+            center+=(chord-center)*blend
+        return center
 
     def spar_profile(x, width, height):
         """Deep lenticular wing with a narrow keel and broad upper shoulders."""
@@ -237,6 +252,31 @@ def build_chassis(p: ChassisParams) -> b.Part:
         height*=1.0+(depth-1.0)*haunch
         shoulder*=1.0+(depth-1.0)*haunch
         chine*=1.0+(depth-1.0)*haunch
+        # A direct outer wing carries its side-impact load in the broad
+        # upper shoulders. Pull only the lower neutral-axis corners inward,
+        # raise the belly chines, and recover vertical inertia in depth.
+        # The closed section retains its full 3D normal gauge; the motor
+        # diaphragm, fixed collars and carrier saddle keep their datums.
+        # Every section stays below the existing complete chassis height.
+        approach=max(0.0,min(1.0,(x-86.0)/22.0,(138.0-x)/10.0))
+        height*=1.0+0.07*approach
+        shoulder*=1.0+0.07*approach
+        chine*=1.0+0.07*approach
+        # Keep the lateral compression shoulders broad for cartwheel
+        # loading. The lower corners tuck in independently, shortening
+        # the neutral-axis skin; higher lower chines retain section depth.
+        # Narrow the crown's short internal bridge as well, allowing the
+        # pitched flanges to close sooner with the full normal skin gauge.
+        # Fade the change out before the original motor diaphragm.
+        half*=1.0-0.075*approach
+        keel+=(0.32*half-keel)*approach
+        chine+=(0.39*height-chine)*approach
+        # Shorten the inner crown bridge through the deep outer span.
+        # The two pitched upper flanges retain their normal offsets and
+        # close over a 2.4 mm outer ridge, reducing unsupported roof area
+        # while the broad shoulders continue to carry compression.
+        crown+=(1.20-crown)*approach
+        shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -599,6 +639,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 raise ValueError('collinear offset')
             out.append(((a[2]*d[1]-d[2]*a[1])/det,(a[0]*d[2]-d[0]*a[2])/det))
         return out
+    # Pull empty waist and battery-flank space inside the reference hull.
+    # Preserve the four diagonal optical planes and the south carrier's
+    # rear clearance. Camera cheeks use a smaller inset so the real stereo
+    # PCBs remain behind full-gauge walls. Rebuild the pitched eaves from
+    # these facets: both plan area and developed shoulder skin decrease.
+    compact_lines=[]
+    for a,d in zip(perimeter,perimeter[1:]+perimeter[:1]):
+        ex,ey=d[0]-a[0],d[1]-a[1]
+        length=math.hypot(ex,ey)
+        nx,ny=ey/length,-ex/length
+        protected_facet=nx < -0.9999 or abs(abs(nx)-abs(ny)) < 1e-6
+        tuck=0.0 if protected_facet else (1.6 if (a[0]+d[0])/2 > 65.0 else 2.5)
+        compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
+    compact=[]
+    for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
+        det=a[0]*d[1]-d[0]*a[1]
+        compact.append(((a[2]*d[1]-d[2]*a[1])/det,
+                        (a[0]*d[2]-d[0]*a[2])/det))
+    perimeter=compact
     outer_plan=prism(perimeter,0,150)
     inner_plan=prism(offset(perimeter,-wall),-.2,151)
     outs=[];ins=[]
@@ -705,6 +764,37 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.025*math.sqrt(1+cockpit_pitch**2+aft_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
+    # Twin inward cockpit creases replace the tall inner shoulders with
+    # a low folded crown on each side of the service channel. Their
+    # inward slopes grow from the hatch edges; outer shoulders retain the
+    # reference envelope wherever it is tighter. True 3D normal offsets
+    # retain the skin gauge across both pitches and longitudinal rake.
+    # The full rear CM4 corner stays below the original outer shoulder.
+    crease_pitch=1.12
+    # Translate each crease outward and down along its existing outer
+    # shoulder. The outboard roof remains on exactly the same plane,
+    # while the inward skin contracts toward the service channel. At the
+    # lowest aft hatch corner the normal-offset roof remains above the
+    # 61.2 mm flight-board service box; no horizontal clearance cut is
+    # used to make room under an otherwise unsupported roof.
+    crease_y=17.0
+    crease_z=76.54
+    creased_outer=[]; creased_inner=[]
+    for side in (-1,1):
+        co=box(0,0,-.2,600,600,200)
+        ci=box(0,0,-.2,600,600,200)
+        for face_side in (-1,1):
+            plane=b.Plane(origin=(0,side*crease_y,crease_z),
+                          z_dir=(aft_rake,face_side*crease_pitch,1))
+            half=plane*b.Box(800,800,600,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+            co=co & half
+            drop=wall*1.025*math.sqrt(1+crease_pitch**2+aft_rake**2)
+            ci=ci & half.moved(b.Pos(0,0,-drop))
+        creased_outer.append(co); creased_inner.append(ci)
+    outer=outer & (creased_outer[0]+creased_outer[1])
+    inner=inner & (creased_inner[0]+creased_inner[1])
+
     # Two long rising creases bring the cockpit shoulders down toward
     # the enclosed FC rather than carrying tall triangular aft cheeks.
     # The original battery roof is the lower branch of the envelope:
@@ -808,7 +898,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # A continuous lower roof strip follows the unchanged shell line.
     # Full carrier covers and swept shear bands retain enclosure and
     # connect the ring to the battery/avionics canopy across scalloped bays.
-    protected=box(-28,0,0,56,56,150)+box(-68,0,0,78,38,150)
+    protected=box(-28,0,0,56,56,150)+box(-68,0,0,78,36.6,150)
     # Swept roof bands connect the battery/FC spine to the optical-ring
     # shoulders. Three paired diagonals replace four full transverse bands:
     # the roof itself is the shear member, with no added decorative skin.
@@ -903,6 +993,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
             outline=[(0,-9.0*along),(3.4,-3.0*along),
                      (3.4,3.0*along),(0,9.0*along),
                      (-3.4,3.0*along),(-3.4,-3.0*along)]
+            wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
+            shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
+
+    # Short pointed vents follow the new inward folds. Their inclined
+    # ends close at >45 degrees, while full-gauge longitudinal edge chords
+    # and transverse ties carry roof shear into the untouched outer hips.
+    for side in (-1,1):
+        for vent_x in (-32.0,-20.0,-8.0):
+            vent_y=10.6*side
+            z=crease_z-aft_rake*vent_x+crease_pitch*(abs(vent_y)-crease_y)
+            plane=b.Plane(origin=(vent_x,vent_y,z),
+                          x_dir=(1,0,-aft_rake),
+                          z_dir=(aft_rake,-side*crease_pitch,1))
+            along=math.sqrt(1+crease_pitch**2)
+            outline=[(0,-1.8*along),(.65,-.2*along),(.65,.2*along),
+                     (0,1.8*along),(-.65,.2*along),(-.65,-.2*along)]
             wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
             shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
@@ -1032,8 +1138,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # more area than the deeper lower chord restores, and both
             # roof edges rise >1.8:1. Normal cuts retain the skin gauge.
             lean=math.copysign(1.3,waist_x)
+            apex=23.5 if waist_x < 0 else 25.0
             outline=[(-6.3,3.6),(6.3,3.6),(7.4+lean,13.0),
-                     (lean,26.5),(-7.4+lean,13.0)]
+                     (lean,apex),(-7.4+lean,13.0)]
             wire=b.Wire.make_polygon([
                 (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
@@ -1104,17 +1211,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 (cx-12.6,cy+offset+pitch/2,z0+1),
                 (cx-12.6,cy+offset-pitch/2,z0+1)],close=True)
             shelf=shelf-b.Solid.extrude(b.Face(v),(25.2,0,0))
-        # Cross-vault the cardinal seats perpendicular to their folds.
-        # Diagonal seats also carry the swept arm roots: keep their full
-        # folded shear webs to avoid grazing saddle/spar intersections.
-        # Each opening rises 1.12:1 from the build plate and stops below
-        # the corrugated valleys, retaining a deep two-direction saddle.
-        # The 4 mm central pier and 2.4 mm end piers receive the original
-        # contact skin; no carrier support or mounting feature is removed.
+        # Cross-vault the carrier beds perpendicular to their folds.
+        # The diagonal beds share the arm's deep closed shell, so their
+        # lower web centers need not remain solid. Use smaller, lower
+        # openings there: 5.4 mm central and 3.1 mm outer piers support
+        # the full upper folded sheet, PCB ledge and original screw ears.
+        # Cutting only the bed before union preserves the arm skins and
+        # avoids slicing a thin notch into their independent load paths.
+        # Every vault rises 1.12:1 from bed-founded jambs; the diagonal
+        # roofs keep an extra 0.6 mm of depth under the folded valleys.
         cardinal=abs(math.sin(math.radians(2*angle)))<0.5
-        for radial in ((-6.0,6.0) if cardinal else ()):
-            half=4.0
-            apex=z0-5.4*1.11/2-p.structural_gauge_mm
+        for radial in (-6.0,6.0):
+            half=4.0 if cardinal else 3.3
+            apex=z0-5.4*1.11/2-p.structural_gauge_mm-(0.0 if cardinal else 0.6)
             eave=apex-1.12*half
             w=b.Wire.make_polygon([(cx+radial-half,cy-12.6,-.2),
                 (cx+radial+half,cy-12.6,-.2),
@@ -1149,7 +1258,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Stop the folded skirt before the revised spar's grazing
         # lower-wall intersection. Its rear datum is still 3.2 mm
         # behind the mounting post, leaving the complete PCB seat.
-        back=-11.0 if diagonal else -10.0
+        # Stop the diagonal bed 0.4 mm short of its former grazing
+        # intersection with the sloping spar floor. The complete rear
+        # mounting post retains over 2.8 mm of bed behind it; this removes
+        # the coplanar wedge without changing the spar's normal skin.
+        back=-10.6 if diagonal else -10.0
         front=4.4
         # The diagonally rotated square bed left tangential corner
         # skirts far beyond the PCB, rails and gussets. End those skirts
@@ -1362,7 +1475,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
     deck=b.Solid.extrude(b.Face(wire),(deck_x1-deck_x0,0,0))
     # Keep the two outer load-bearing deck rails; the open center admits
     # underside wiring and access, with broad support along both PCB edges.
+    # The aft half of the pad-camera bay shares this corrugated deck
+    # as its overhead shell. Keep a short transverse saddle tied into
+    # both PCB rails: it encloses the recessed camera and stiffens the
+    # central hub without a separate canopy. The front half stays open
+    # to the existing service aisle, so the module can slide in and drop
+    # onto its 2 mm seating plane. The lowest roof underside is 27.15 mm,
+    # safely above the camera's 14 mm top; every fold prints from below.
+    pad_x,pad_y,_=(v*1000 for v in placements['pad_camera'])
+    pad_w,pad_l,_=(v*1000 for v in LIBRARY['pad_camera'].dims_m)
+    pad_saddle=deck & box(pad_x-pad_w/4,pad_y,0,pad_w/2+1.2,pad_l+4,60)
     deck=deck-box((deck_x0+deck_x1)/2,fy,0,deck_x1-deck_x0+2,26.0,60)
+    deck=deck+pad_saddle
     # The real battery occupies the aft inner corner below the flight board.
     deck=deck-box(bx,by,bz,dx+.6,dy+.6,dz+.4)
     # Local flat IMU landing over the north deck rail. Its undersides retain
@@ -1477,6 +1601,36 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
             body=body+collar.rotate(b.Axis.Z,ang)
             body=body-throat.rotate(b.Axis.Z,ang)
+    # A recessed, top-loading pad-camera cassette sits between the four
+    # stack bosses. Its 25 x 24 x 12 mm service box starts at the pinned
+    # Z=2 mm datum; only a 10 mm lens bore reaches the underside. The
+    # lens barrel seats through this bore with its face at the bed plane.
+    # Even the conservative optical apex at component-bottom Z=2 mm
+    # clears the bore: 2*tan(65 deg)=4.29 mm < its 5 mm radius.
+    # A continuous 1.24 mm belly sheet joins the existing longerons;
+    # low vertical capture sills grow from the bed with no overhead lip.
+    # The central opening above the pocket remains available for removal.
+    pcx,pcy,pcz=(v*1000 for v in placements['pad_camera'])
+    pcw,pcl,pch=(v*1000 for v in LIBRARY['pad_camera'].dims_m)
+    pg=max(1.24,p.structural_gauge_mm)
+    pocket_w,pocket_l=pcw+.6,pcl+.6
+    body=body-box(pcx,pcy,pcz,pocket_w,pocket_l,pch+.6)
+    camera_floor=box(pcx,pcy,0,pocket_w+2*pg,pocket_l+2*pg,pg)
+    # A 1.4 mm edge bearing raises the board onto its prescribed 2 mm
+    # seat without filling the broad center of the shallow belly pan.
+    for side in (-1,1):
+        camera_floor=camera_floor+box(pcx,pcy+side*(pcl/2-.7),0,
+            pocket_w+2*pg,1.4,pcz)
+        camera_floor=camera_floor+box(pcx+side*(pocket_w+pg)/2,pcy,0,
+            pg,pocket_l+2*pg,pcz+2.5)
+        camera_floor=camera_floor+box(pcx,pcy+side*(pocket_l+pg)/2,0,
+            pocket_w+2*pg,pg,pcz+2.5)
+    body=body+camera_floor
+    pad_lens_radius=max(5.0,pcz*math.tan(math.radians(65.0))+.6)
+    lens_port=b.Pos(pcx,pcy,-.2)*b.Cylinder(pad_lens_radius,pcz+.4,
+        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
+    body=body-lens_port
+
     # Drain every trapped cradle/spar vault through a small vertical port.
     # Connected internal galleries produce one watertight STL boundary.
     for boundary in list(body.shells()):
