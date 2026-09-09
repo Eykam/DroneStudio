@@ -38,7 +38,8 @@ def yaw_frame(v, yaw):
 class EstEnv(SimBinaryEnv):
     def __init__(self, *a, estimated=False, obs_v2=True, est_seed=0, vo_aided=False,
                  passthrough=False, noise_scale=1.0, obs_v3=False, fusion_gated=False,
-                 zupt=False, gps=False, gps_rate_hz=5.0, **kw):
+                 zupt=False, gps=False, gps_rate_hz=5.0,
+                 marker=False, marker_rate_hz=10.0, **kw):
         super().__init__(*a, **kw)
         self.estimated, self.obs_v2, self.est_seed = estimated, obs_v2, est_seed
         self.vo_aided = vo_aided
@@ -54,6 +55,14 @@ class EstEnv(SimBinaryEnv):
         # VO keeps relative smoothness, ToF owns vertical via Kalman weights.
         self.gps = gps
         self.gps_dt = 1.0 / gps_rate_hz
+        # Pad-marker channel (parent 2026-09-08): downward camera tracks an
+        # AprilTag-style marker at the scenario target for terminal relative
+        # nav. GPS gets you there, the marker puts you down. Visibility:
+        # marker within 65-deg half-angle of the body down-axis and < 5m.
+        self.marker = marker
+        self.marker_dt = 1.0 / marker_rate_hz
+        self.marker_fixes = 0
+        self.marker_last_t = -1e9
         # GPS bias-as-state (terminal relative-nav attempt, 2026-09-07):
         # measured NEUTRAL-NEGATIVE in the teacher gate (bias split polluted
         # by VO-chain drift; hover/land 6.2/0.0 vs 6.2/6.2 plain). Kept behind
@@ -246,6 +255,24 @@ class EstEnv(SimBinaryEnv):
             else:
                 self.kf.update_position(z, Rg)
             self.gps_fixes += 1
+        # Pad marker: sampled from TRUE pose (sensor sim never reads filter)
+        if self.marker and (self.t - self.marker_last_t) >= self.marker_dt:
+            # marker on the GROUND below the scenario target (pad marker,
+            # not a point floating at hover altitude) - visible through the
+            # whole terminal phase, not just at arrival
+            m = np.array([self.goal[0], 0.0, self.goal[2]])
+            v_w = m - p_t
+            rng_m = np.linalg.norm(v_w)
+            z_b_true = R_of(q_t).T @ v_w
+            # body down-axis is -y (level rest accel reads +9.81y specific force)
+            import numpy as _np
+            cos_ang = float(-z_b_true[1] / max(rng_m, 1e-9))
+            if rng_m < 5.0 and cos_ang > _np.cos(_np.deg2rad(65)):
+                self.marker_last_t = self.t
+                sig = (0.01 + 0.02 * rng_m) * self.noise_scale  # AprilTag-class
+                z_b = z_b_true + rng.normal(0, sig, 3)
+                self.kf.update_marker(z_b, m, sig)
+                self.marker_fixes += 1
         # ZUPT (parent 2026-09-07): during holds the VO random walk (~2cm/step)
         # is the dominant terminal-phase error. Detector uses only sensor-side
         # quantities: rates low, specific force ~ g, VO increment near zero,

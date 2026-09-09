@@ -176,6 +176,24 @@ class ESKF:
         return float(r_pred)
 
 
+    def update_marker(self, z_body, p_marker_world, sigma):
+        """Pad-marker (AprilTag-style) relative fix: z_body is the marker
+        position measured in the body frame by the downward camera. Same
+        Jacobian shape as update_mag: d(R^T v)/d(theta_body) = [R^T v]x.
+        This is the terminal relative-nav channel: it ties the filter
+        directly to the landing target, bypassing the GPS bias floor."""
+        R = R_of(self.q)
+        v_pred = p_marker_world - self.p
+        z_pred = R.T @ v_pred
+        H = np.zeros((3, 18))
+        H[0:3, 0:3] = -R.T
+        H[0:3, 6:9] = skew(z_pred)
+        Rm = np.eye(3) * sigma ** 2
+        S = H @ self.P @ H.T + Rm
+        K = self.P @ H.T @ np.linalg.inv(S)
+        self._inject(K @ (z_body - z_pred), K, H)
+        return float(np.linalg.norm(z_pred))
+
     def update_mag(self, b_meas, b_world, sigma_ut):
         """Magnetometer: measured body-frame field vs known world field.
         b_meas (3,) body frame (uT), b_world (3,) world frame (uT).

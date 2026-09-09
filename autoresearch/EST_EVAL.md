@@ -279,3 +279,18 @@ PPO negative; (c) OOD refuted; DAgger v4 negative; ZUPT estimate-stable but
 headline 0-6%; GPS channel halves pos_err (2.1/1.8m) but bias floor > criterion;
 terminal relative-nav (bias state) negative. Land 0.3-0.6m is structurally
 beyond single-band GPS + this IMU/VO/mag/ToF suite under GT-frame scoring.
+
+## 2026-09-08 Pad-marker channel (parent-greenlit): THE WALL CRACKS
+Downward camera tracks an AprilTag-style marker ON THE GROUND below the
+scenario target (65-deg half-angle cone, <5m, 10Hz, sigma = 1cm + 2cm/m,
+sampled from TRUE pose), fused via kf.update_marker (body-frame relative
+vector, H on position+attitude). Terminal relative nav: ties the filter to
+the TARGET, bypassing the GPS bias floor. Marker at goal altitude was wrong
+(6 fixes/hover, no signal); marker on the ground below is the right geometry.
+Teacher (pilot_act3 GT-trained) on est v3 obs, GPS+ZUPT+MARKER, 16 ep/phase:
+- goto 93.8% (pos_err 0.738)
+- hover_hold 50.0% (8/16, pos_err 1.451, att_err 5.66, marker=1434 fixes)
+- land 62.5% (10/16, pos_err 0.893, att_err 9.20, marker=952 fixes)
+vs GPS+ZUPT: hover 6.2 -> 50.0, land 6.2 -> 62.5. Estimation is no longer
+the binding constraint; remaining gap is behavioral (att_err, hold
+stability). Next: est-obs PPO on the full stack (lever b retry, marker on).
