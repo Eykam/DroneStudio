@@ -1,10 +1,10 @@
-"""v96-g95b: shorter cranked wings around the fixed optical ring.
+"""v97-g96a: a low folded turtledeck over vaulted battery flanks.
 
-Pull the unloaded sweep apex inward between the carrier shoulder and
-the optical crest, shortening the closed spar and its load path. The
-loft's spanwise normal offsets follow this new planform automatically;
-root depth, all skin gauges and motor-end transitions are preserved.
-The fuselage, payload mounts and eight internal optical seats persist.
+Fold the central battery roof down onto a shallower pitched crease and
+open the aft sidewall into deeper vaults between its continuous load paths.
+The outboard hip and GPS return retain their original roofs; all faces
+keep the full normal skin gauge. The existing carrier hoods, attachment
+seats, optical windows, service hatch and load-bearing canopy ties remain.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -636,6 +636,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
             roof_outer=roof_outer & half
             drop=wall*1.025*math.sqrt(1+slope*slope+(rake/sx)**2)
             roof_inner=roof_inner & half.moved(b.Pos(0,0,-drop))
+        # A shallow central fold lowers the battery turtledeck while
+        # the original outboard pitch remains its envelope limit. Their
+        # crease lands at |Y| = 14.78 mm, inboard of the pack shoulders;
+        # at the battery corner the original normal-offset roof survives.
+        # Both inner slopes exceed 45 degrees. Keeping this operation in
+        # the battery branch preserves the full tail/CM4 transition roofs.
+        if ridge_x == -104.0 and rake > 0:
+            battery_pitch = 1.025
+            for side in (-1, 1):
+                plane = b.Plane(origin=(ridge_x*sx,0,ridge_z-1.7),
+                                z_dir=(-rake/sx,side*battery_pitch,1))
+                half = plane*b.Box(800,800,600,
+                    align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                roof_outer = roof_outer & half
+                drop = wall*1.025*math.sqrt(1+battery_pitch**2+(rake/sx)**2)
+                roof_inner = roof_inner & half.moved(b.Pos(0,0,-drop))
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
     roof_outer=roof_outers[0];roof_inner=roof_inners[0]
     for ro,ri in zip(roof_outers[1:],roof_inners[1:]):
@@ -966,9 +982,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # so the flanks print without suspended horizontal lintels.
     # These bays lie between the aft cardinal and diagonal ToF stations,
     # outside every optical facet, carrier hood and PCB service envelope.
+    # Flare the empty centers of the aft shear bays while preserving
+    # the continuous 2.6 mm belly chord and 2 mm upper chord. The
+    # narrowest inclined pier remains 2.5 mm in longitudinal projection;
+    # the roof edges rise at least 2:1, directly from their printed jambs.
+    # The recessed battery tray, carrier hoods and lower ties are added
+    # independently and are untouched by these shell-only ventilation cuts.
     for gx in (-106.0,-92.0,-78.0):
-        outline=[(gx-5.5,2.6),(gx+3.5,2.6),(gx+6.2,14.0),
-                 (gx+0.5,25.0),(gx-4.0,14.0)]
+        outline=[(gx-6.0,2.6),(gx+4.5,2.6),(gx+6.5,14.0),
+                 (gx+0.5,26.0),(gx-5.0,14.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 

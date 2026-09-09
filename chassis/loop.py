@@ -27,6 +27,7 @@ Context:
 - chassis.py in this directory holds the parametric model (build123d). ChassisParams + build_chassis(p) -> Part MUST keep their signatures.
 - evaluate.py scores candidates: watertight, single body, FDM overhang, wall thickness, prop clearance, hover margin, CONTAINMENT, CAMERA FOV, IMU LEVER ARM, and FEA.
 - MASS (user directive 2026-09-06): the enclosure is TOO MASSIVE - printed mass is the primary optimization axis. Shave monocoque/shell/arm material everywhere the gates allow; no decorative fairing, no external pods, no excess wall beyond the 1.2mm dfam floor + FEA margins. The Pi Zero is REMOVED from the build (ee-flight's CM4 replaces it) - do not add any bay/mount for it.
+- BULK (user directive 2026-09-08): the frame reads INSANELY BULKY - envelope/bulk is now a first-class objective alongside mass, not a side effect of it. Current envelope 340x340x87 mm (XxY footprint x Z height). Shrink fuselage plan area, canopy height, and rim/ring envelope wherever the gates allow; prefer low, tight, close-wrapped volumes over tall or airy ones; close dead space between sensors and their windows unless the optical cone justifies the standoff. Never GROW the envelope to buy mass or FEA margin.
 - CAMERA FOV (hard gate, user requirement): both cameras (Pi Camera 3 pair on the main board's dual CSI) mount lens-FORWARD (+X) and see out the nose apertures: no frame material inside the FOV pyramid (66.3h x 41.6v deg). chassis.py cuts the sight-line voids from components.camera_lens_poses() - keep that coupling; cameras in placement.json stay lens-forward at the nose.
 - TOF ARRAY (hard requirement, user directives 2026-09-05/06): eight VL53L9CX dToF breakouts (20x16x5 mm carrier envelope) mount INSIDE the main enclosure shell for 360-degree coverage - placement.json keys vl53l9cx_breakout#n/ne/e/se/s/sw/w/nw at exact 45-degree bearings (PINNED, not movable), sensor face radially outward (55x42 deg FoV, 10 deg overlaps). MOUNT STYLE (user directive 2026-09-06): each carrier sits on an internal seat flush against the shell inner face; the shell gets ONLY a minimal aperture sized to the module body window (12.83x6.10 mm per ST DS14879 Rev 7 + ~1mm margin), NOT a carrier-sized port. NO external pods, bumps, or protruding enclosures for the ToF carriers - the carrier body must be fully inside the frame envelope +2mm (containment). Their address-select runs on the main flight board (XSHUT chain, no separate hub board). Preserve all eight placements and their internal seats/apertures in every candidate.
 - IMU LEVER ARM (gate): the mpu9250 must sit within 60 mm of the frame CoM (on/near the FC stack). The manifest exports its full transform (position + rotation + offset from CoM, schema 1.2) for the estimator.
@@ -236,6 +237,19 @@ def run_generation():
                 print(f"[gen {gen}] QUALITY HOLD: crash stress margin {16.5-inc_s:.2f} MPa < 1.0 and {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} erodes it ({inc_s}->{cand_s} MPa); adoption blocked", flush=True)
         except Exception as e:
             print(f"[gen {gen}] stress-guard check failed (non-gating): {e}", flush=True)
+    # parent standing rule 2026-09-06: crash displacement margin hard floor 0.3mm (limit 5.0mm)
+    # - block any adoption whose crash disp exceeds 4.70mm, regardless of mass/stress
+    if improved:
+        try:
+            def _crash_disp(v):
+                m = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
+                return ((m.get("metrics") or {}).get("fea") or {}).get("crash", {}).get("max_disp_mm")
+            cand_d = _crash_disp(w["variant"])
+            if cand_d is not None and cand_d > 4.70:
+                improved = False
+                print(f"[gen {gen}] DISP FLOOR HOLD: {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} crash disp {cand_d} mm breaches the 0.3mm margin floor (limit 5.0); adoption blocked", flush=True)
+        except Exception as e:
+            print(f"[gen {gen}] disp-floor check failed (non-gating): {e}", flush=True)
     tally = " | ".join(f"{c['variant']}={c['score']:.3f}{' PASS' if c['all_pass'] else ' fail'}{(' %.1fg' % c['mass_g']) if c['mass_g'] else ''}" for c in results.values())
     if improved:
         wL = w["variant"][-1]
