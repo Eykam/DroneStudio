@@ -1,9 +1,10 @@
-"""v95-g94a: shortened cockpit with two-stage swept structural hips.
+"""v96-g95b: shorter cranked wings around the fixed optical ring.
 
-A steep battery-to-cockpit fold blends into a lower forward crease,
-removing tall aft shoulder area while retaining the 1.22 mm normal skin.
-The enclosed payloads, service openings, eight internal sensor seats,
-optical interfaces and closed arm sections retain their fixed datums.
+Pull the unloaded sweep apex inward between the carrier shoulder and
+the optical crest, shortening the closed spar and its load path. The
+loft's spanwise normal offsets follow this new planform automatically;
+root depth, all skin gauges and motor-end transitions are preserved.
+The fuselage, payload mounts and eight internal optical seats persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -110,8 +111,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # while leaving the lens corridor, saddle and motor axes fixed.
         root_bypass=(1.4*math.sin(math.pi*(x-48.0)/44.0)**2
                      if 48.0 < x < 92.0 else 0.0)
+        # Replace the broad outer bow with a shorter cranked shoulder.
+        # Its maximum contraction lies beyond the diagonal carrier seat
+        # and ends before the low optical crest at radial X=104 mm.
+        # This reduces both developed skin area and sweep-induced normal
+        # offset material; every pitched spar face still receives its full
+        # 3D normal gauge from the actual adjacent loft stations below.
+        # The inboard carrier junction and motor-end radial stay fixed.
+        short_chine=(2.0*math.sin(math.pi*(x-79.0)/25.0)**2
+                     if 79.0 < x < 104.0 else 0.0)
         return arm_sweep_sign*(-p.arm_sweep_mm*math.sin(math.pi*x/p.arm_length_mm)
-                -bypass-window_bypass-root_bypass)
+                -bypass-window_bypass-root_bypass+short_chine)
 
     def spar_profile(x, width, height):
         """Deep lenticular wing with a narrow keel and broad upper shoulders."""
