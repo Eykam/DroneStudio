@@ -97,6 +97,28 @@ GL_ARB_bindless_texture; no CPU rasterizer implements it
    sim state; nav policy offboard first.
 4. **Real scenes**: field tests.
 
+## Rung-2 kickoff decisions (agent engineering call, 2026-09-09)
+
+- **RGB rasterizer path for rung 2: extend option D (vision_raster.zig),
+  NOT option A.** The 2026-09-05 note mapped rung 2 to option A; parent
+  re-opened A-vs-D as the builder's call at kickoff. Reasons: (1) D is
+  built, deterministic, and already generates RGB+depth+seg at training
+  rates (v1 dataset + live scenario streaming run on it); (2) rung 2's
+  deliverable is visual domain randomization for depth+seg robustness,
+  and shade() parameterization (sun dir/intensity/color, ambient split,
+  per-class albedos, floor texture family, fog density/color, sky
+  gradient) exercises exactly the invariance axes the model needs;
+  (3) option A's prerequisite (bindless -> sampler2DArray surgery on the
+  real renderer) plus llvmpipe throughput at stereo 640x480 training
+  rates is unmeasured risk on the critical path. Option A remains the
+  photorealism-rung plan; re-evaluate with raster_smoke.zig llvmpipe
+  numbers before that rung commits.
+- **Visual domain randomization design**: scene JSON carries a `visual`
+  block (seeded per scene_id so train/val/test scene splits stay clean);
+  scenario_sampler.py samples it alongside geometry; headless_main.zig
+  passes it into RasterScene; shade() consumes it. Geometry
+  randomization unchanged (existing sampler). Deterministic per seed.
+
 ## Decisions (Eyad, 2026-09-05 12:32 PM)
 
 - **Split: depth+segmentation first (option D), RGB photorealism on rung
