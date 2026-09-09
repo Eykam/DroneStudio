@@ -1,9 +1,10 @@
-"""v108-g107a: low folded cockpit and deep swept fuselage sills.
+"""v109-g108b: flange-biased tapered closed wings.
 
-Lower the inward cockpit creases and stereo brows within the reference
-hull. Trade unloaded skirt centers for taller bed-founded waist chords;
-the normally offset canopy, protected carrier hoods and recessed bays
-remain part of one serviceable shell.
+Pull the lower spar sides toward a straight keel-to-shoulder load path,
+retaining the broad upper flanges and recovering bending inertia with
+local depth. The resection fades out around all carrier saddles and
+motor diaphragms. Wider crossed cradle vaults and spaced tray ribs pay
+for the deeper wings while retaining every bearing plane and belly skin.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -69,7 +70,7 @@ class ChassisParams:
     cradle_post_depth_mm: float = 4.0  # forward boss seat stays radial -3.77 mm
     structural_gauge_mm: float = 1.24  # nominal 1.2 mm construction with print margin
     cradle_ring_web_mm: float = 1.24
-    tray_rib_pitch_mm: float = 12.0
+    tray_rib_pitch_mm: float = 16.0
     arm_box_depth_scale: float = 0.97
     arm_box_width_scale: float = 0.98
 
@@ -276,6 +277,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # while the broad shoulders continue to carry compression.
         crown+=(1.20-crown)*approach
         shoulder=min(shoulder,height-p.arm_roof_slope*(shoulder_half-crown))
+        # A narrow lower web joins the keel directly to the broad upper
+        # shoulder. The old vertical neutral-axis side carried perimeter
+        # without useful flange breadth. Pull that corner inward, retain
+        # the compression shoulders, and recover inertia through depth.
+        # This new lenticular section stays closed and receives the same
+        # complete spanwise normal offset as the reference. All lower
+        # faces rise steeply from the original first-layer keel.
+        # Leave the whole carrier crossing and terminal diaphragm intact.
+        root_lens=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing_lens=max(0.0,min(1.0,(x-84.0)/16.0,(136.0-x)/12.0))
+        depth_gain=0.025*root_lens+0.010*wing_lens
+        height*=1.0+depth_gain
+        shoulder*=1.0+depth_gain
+        chine*=1.0+depth_gain
+        straight_half=keel+(shoulder_half-keel)*chine/shoulder
+        half+=(straight_half-half)*(0.20*root_lens+0.14*wing_lens)
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -674,7 +691,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # corner, avoiding a flat ledge left by the final bay cut.
             # The original crown limits cap its height, and the tucked
             # vertical flanks continue to set the smaller plan envelope.
-            pitch=slope+(0.030 if x0 == -90 and nx < -0.01 and abs(ny) > 0.1 else 0.0)
+            # Steepen the local entry hip under the unchanged cockpit
+            # crown limits. Its inner face clears the complete PCBA box,
+            # removing the broad flat underside left by the service cut.
+            pitch=slope+(0.150 if x0 == -90 and nx < -0.01 and abs(ny) > 0.1 else 0.0)
             pl=b.Plane(origin=(nx*c,ny*c,28.0),z_dir=(pitch*nx,pitch*ny,1))
             half=pl*b.Box(600,600,500,align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             outer=outer & half
@@ -1247,7 +1267,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # roofs keep an extra 0.6 mm of depth under the folded valleys.
         cardinal=abs(math.sin(math.radians(2*angle)))<0.5
         for radial in (-6.0,6.0):
-            half=4.0 if cardinal else 3.3
+            # Wider crossed vaults unload the carrier-bed web centers.
+            # Four-mm center piers and >=2.4 mm end piers retain the
+            # full folded bearing sheet and both PCB mounting ears.
+            half=4.6 if cardinal else 4.0
             apex=z0-5.4*1.11/2-p.structural_gauge_mm-(0.0 if cardinal else 0.6)
             eave=apex-1.12*half
             w=b.Wire.make_polygon([(cx+radial-half,cy-12.6,-.2),
