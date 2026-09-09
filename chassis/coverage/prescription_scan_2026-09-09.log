@@ -1,0 +1,27 @@
+== L0 baseline (current tof_ne empirical origin, near hits <20mm excluded) ==
+  coverage 44.4%
+== L1a radial outboard shift (aperture follows sensor) ==
+  dr +   0 mm ->  44.4%
+  dr +   5 mm ->  43.8%
+  dr +  10 mm ->  41.9%
+  dr +  15 mm ->  41.0%
+  dr +  20 mm ->  41.4%
+== L1b vertical raise ==
+  dz +   5 mm ->  43.3%
+  dz +  10 mm ->  45.1%
+  dz +  15 mm ->  44.4%
+== L1c azimuth tilt off arm axis (origin fixed, near<20mm excluded) ==
+  tilt -15 deg ->  29.6%
+  tilt -10 deg ->  34.5%
+  tilt  -5 deg ->  40.0%
+  tilt  +5 deg ->  47.9%
+  tilt +10 deg ->  52.1%
+  tilt +15 deg ->  57.2%
+== L3 down-camera belly candidates (65deg cone, near<20mm excluded) ==
+  belly (  +0,  +0) -> 100.0% clear down-cone
+  belly ( +40,  +0) ->  98.6% clear down-cone
+  belly ( -40,  +0) -> 100.0% clear down-cone
+  belly (  +0, +25) ->  78.7% clear down-cone
+  belly (  +0, -25) ->  78.7% clear down-cone
+  belly ( +60, +20) ->  97.2% clear down-cone
+SCAN-DONE

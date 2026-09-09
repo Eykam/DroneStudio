@@ -156,10 +156,6 @@ LIBRARY = {
         "VL53L9CX dToF breakout", 2.0, (0.0228, 0.0228, 0.0155), "box", "perimeter",
         "REAL ee-tof v2 carrier (TOF6, released, DRC-zero, consumed 2026-09-06): board 15x20x1.0mm, U1 VL53L9CX body 12.83x6.10x4.64 (DS14879 Rev 7), J1 2x4 2.54mm vertical header (front, 8.54mm tall), J2 Hirose FH12 FFC (back, 2.0mm), assembly radial span 11.54mm; H1/H2 NPTH 2.2mm with 4.5mm sacred disks extending 0.25mm past board sides / 0.65mm past mount edge. Envelope 22.8x22.8x15.5 covers all 8 bearings (diagonal projection (20.65+11.54)/sqrt2=22.77). Orientation: board Y tangential (mount-end holes), board X vertical with X=15 edge DOWN (optical axes at board X=11.6 -> lens z = placement z + 3.4mm). Mass 2.0g UNMEASURED estimate (EE: no defensible mass source yet). Sources: geometry_tof001.json (ee-tof.geometry.v1 released) + ee_tof_carrier.step (board sha256 d929d57f)",
         step_path="parts/ee_tof_carrier.step"),
-    "pad_camera": Component(
-        "Pad-marker down camera (provisional module - Pi Cam 3 placeholder, marker spec 65deg half-angle cone, 8m range)",
-        4.0, (0.025, 0.024, 0.012), "box", "belly",
-        "sim sibling pad-marker spec 2026-09-08 (65deg half-angle cone, 8m); module identity provisional pending Eyad pick; user directive 2026-09-09 via parent"),
 }
 
 ORIENTATIONS = {
@@ -191,7 +187,6 @@ def _apply_orientation(cname, sh):
 DEFAULT_PLACEMENT = {
     "fc_esc_stack": [0.0, 0.0, 0.016],
     "battery": [0.0, 0.0, 0.045],
-    "pad_camera": [0.0, 0.0, 0.002],  # user directive 2026-09-09: belly-center down cam, recessed drop-in pocket, lateral offset <20mm
     "pi_camera_3#left": [0.083, -0.028, 0.002],  # user directive 2026-09-05: +4mm to nose apertures (was 0.079)
     "pi_camera_3#right": [0.083, 0.028, 0.002],
     "mpu9250": [0.0, 0.0, 0.022],
@@ -219,7 +214,6 @@ FIXED_PLACEMENT_KEYS = frozenset({
     "vl53l9cx_breakout#se", "vl53l9cx_breakout#s", "vl53l9cx_breakout#sw",
     "vl53l9cx_breakout#w", "vl53l9cx_breakout#nw",
     "pi_camera_3#left", "pi_camera_3#right",
-    "pad_camera",
 })
 
 def placement():
