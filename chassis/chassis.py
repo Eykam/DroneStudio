@@ -1,9 +1,9 @@
-"""v110-g109b: shoulder-flanged closed wings with vaulted internal seats.
+"""v111-g110a: tucked cockpit with a deep, ventilated perimeter beam.
 
-Raise the upper arm shoulders and widen the bed keels into paired bending
-flanges inside the existing section width and height. Vaulted carrier beds
-and a lighter folded mounting deck repay the flange material.
-The swept closed wings retain the fixed roots, optical saddles and motors.
+The battery flanks tuck inward and the cockpit folds lower around the
+CM4, retaining the original outer shoulders and full PCBA clearance.
+Deeper perimeter chords carry shell reactions through the original piers;
+pointed vents lighten the mounting deck without changing bearing datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -681,7 +681,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         mid_x=(a[0]+d[0])/2
         tuck=0.0 if protected_facet else (1.95 if mid_x > 65.0 else 2.5)
         if not protected_facet and -122.0 < mid_x < -65.0:
-            tuck=3.40
+            tuck=3.65
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
     compact=[]
     for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
@@ -826,12 +826,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         co=box(0,0,-.2,600,600,200)
         ci=box(0,0,-.2,600,600,200)
         for face_side in (-1,1):
-            plane=b.Plane(origin=(0,side*crease_y,crease_z),
-                          z_dir=(aft_rake,face_side*crease_pitch,1))
+            # Keep the external shoulder plane; lower only the inward
+            # fold. Its shallower, still >45-degree pitch follows the
+            # CM4 top more closely. The two faces intersect lower and
+            # farther outboard without expanding the original hull.
+            inward=face_side != side
+            local_pitch=1.025 if inward else crease_pitch
+            local_z=crease_z-(0.95 if inward else 0.0)
+            plane=b.Plane(origin=(0,side*crease_y,local_z),
+                          z_dir=(aft_rake,face_side*local_pitch,1))
             half=plane*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             co=co & half
-            drop=wall*1.025*math.sqrt(1+crease_pitch**2+aft_rake**2)
+            drop=wall*1.025*math.sqrt(1+local_pitch**2+aft_rake**2)
             ci=ci & half.moved(b.Pos(0,0,-drop))
         creased_outer.append(co); creased_inner.append(ci)
     outer=outer & (creased_outer[0]+creased_outer[1])
@@ -1048,11 +1055,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for side in (-1,1):
         for vent_x in (-32.0,-20.0,-8.0):
             vent_y=10.6*side
-            z=crease_z-aft_rake*vent_x+crease_pitch*(abs(vent_y)-crease_y)
+            inner_pitch=1.025
+            z=crease_z-.95-aft_rake*vent_x+inner_pitch*(abs(vent_y)-crease_y)
             plane=b.Plane(origin=(vent_x,vent_y,z),
                           x_dir=(1,0,-aft_rake),
-                          z_dir=(aft_rake,-side*crease_pitch,1))
-            along=math.sqrt(1+crease_pitch**2)
+                          z_dir=(aft_rake,-side*inner_pitch,1))
+            along=math.sqrt(1+inner_pitch**2)
             outline=[(0,-1.8*along),(.65,-.2*along),(.65,.2*along),
                      (0,1.8*along),(-.65,.2*along),(-.65,-.2*along)]
             wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
@@ -1196,7 +1204,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # The 6.5 mm lower chord deepens the shell beam at each arm
             # reaction. Widen only the low bay center to recover skin area;
             # the pitched crown and end piers retain their original reach.
-            outline=[(-10.0,6.5),(10.0,6.5),(9.8+lean,13.0),
+            # Deepen the lower ring chord, retaining the original arch
+            # jambs and pitched cap at the arm-to-shell junction. The
+            # lower cockpit and vented deck repay this reaction flange.
+            outline=[(-10.0,7.5),(10.0,7.5),(9.8+lean,13.0),
                      (lean,apex),(-9.8+lean,13.0)]
             wire=b.Wire.make_polygon([
                 (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
@@ -1608,8 +1619,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                     # Point both ends: their inclined edge faces rise
                     # from the 2.4 mm side jambs instead of closing with
                     # a downward-facing straight lintel along the fold.
-                    outline=[(-1.2,-1.75),(0,-2.45),(1.2,-1.75),
-                             (1.2,1.75),(0,2.45),(-1.2,1.75)]
+                    outline=[(-1.4,-1.75),(0,-2.65),(1.4,-1.75),
+                             (1.4,1.75),(0,2.65),(-1.4,1.75)]
                     w=b.Wire.make_polygon([(u,v,-2.0) for u,v in outline],close=True)
                     tool=pl*b.Solid.extrude(b.Face(w),(0,0,4.0))
                     deck=deck-tool
