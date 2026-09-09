@@ -34,15 +34,21 @@ POLICY_NAME = os.path.basename(POLICY_FLAT)
 def post(payload):
     if not DASH or not TOKEN:
         return
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         DASH + "/api/vision/ingest",
-        data=json.dumps(payload).encode(),
+        data=body,
         headers={"Content-Type": "application/json",
                  "Authorization": "Bearer " + TOKEN})
+    t0 = time.time()
     try:
-        urllib.request.urlopen(req, timeout=10).read()
+        urllib.request.urlopen(req, timeout=25).read()
+        post.ok_n += 1
+        if post.ok_n <= 3 or post.ok_n % 50 == 0:
+            print(f"post ok #{post.ok_n} ({len(body)}B {time.time()-t0:.1f}s)", flush=True)
     except Exception as e:
-        print("ingest:", e, flush=True)
+        print(f"ingest: {e} after {time.time()-t0:.1f}s ({len(body)}B)", flush=True)
+post.ok_n = 0
 
 
 def best_dist():
