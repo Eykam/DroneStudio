@@ -164,10 +164,13 @@ function ArtworkDiff({ board, from, to, layers }: { board: string; from: number;
       </div>
       <PanZoom wrapClass="min-w-[600px] w-full">
         <div className="relative">
+          {/* black-on-white layer exports: sepia tint keeps the white background
+              white (invert tinted it gray), multiply blend: red = only in
+              v-from, green = only in v-to, dark = in both */}
           <img src={fileUrl(board, from, layer)} alt={`v${from} ${layer}`} className="w-full"
-            style={{ filter: "invert(27%) sepia(98%) saturate(2000%) hue-rotate(330deg) brightness(95%)" }} />
+            style={{ filter: "sepia(1) saturate(14) hue-rotate(-45deg) brightness(1.02)" }} />
           <img src={fileUrl(board, to, layer)} alt={`v${to} ${layer}`} className="w-full absolute inset-0"
-            style={{ filter: "invert(55%) sepia(90%) saturate(1500%) hue-rotate(75deg) brightness(90%)", mixBlendMode: "darken" }} />
+            style={{ filter: "sepia(1) saturate(14) hue-rotate(80deg) brightness(1.02)", mixBlendMode: "multiply" }} />
         </div>
       </PanZoom>
     </div>
@@ -257,7 +260,9 @@ export default function Ee() {
   });
   const [boardId, setBoardId] = useState<string | null>(null);
   const [ver, setVer] = useState<number | null>(null);
-  const [tab, setTab] = useState<"sch" | "pcb" | "3d" | "diff" | "tests">("sch");
+  const [tab, setTab] = useState<"sch" | "pcb" | "3d" | "stackup" | "diff" | "tests">("sch");
+  const [pcbView, setPcbView] = useState<"all" | "top" | "bot">("all");
+  const [glbView, setGlbView] = useState<"pcba" | "bare">("pcba");
   const [diffFrom, setDiffFrom] = useState<number | null>(null);
 
   const board = (boards.data || []).find((b) => b.id === boardId) || (boards.data || [])[0] || null;
@@ -355,8 +360,8 @@ export default function Ee() {
             <CardContent className="space-y-3">
               <div className="flex gap-2 items-center flex-wrap">
                 <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted/50 p-1">
-                {(["sch", "pcb", "3d", "diff", "tests"] as const).map((t) => {
-                  const dis = (t === "sch" && !version.files?.sch_svg) || (t === "pcb" && !version.files?.pcb_svg) || (t === "3d" && !version.files?.glb) || (t === "diff" && !prev) || (t === "tests" && !version.verify?.length);
+                {(["sch", "pcb", "3d", "stackup", "diff", "tests"] as const).map((t) => {
+                  const dis = (t === "sch" && !version.files?.sch_svg) || (t === "pcb" && !version.files?.pcb_svg) || (t === "3d" && !version.files?.glb) || (t === "stackup" && !(version.files?.pcb_fcu || version.files?.pcb_bcu || version.files?.pcba)) || (t === "diff" && !prev) || (t === "tests" && !version.verify?.length);
                   return (
                   <button key={t}
                     onClick={() => !dis && setTab(t)}
@@ -365,7 +370,7 @@ export default function Ee() {
                       tab === t ? "bg-background text-foreground shadow-sm"
                                 : dis ? "text-muted-foreground/40 cursor-not-allowed"
                                       : "text-muted-foreground hover:text-foreground"}`}>
-                    {t === "sch" ? "Schematic" : t === "pcb" ? "Layout" : t === "3d" ? "3D" : t === "diff" ? "Diff" : `Tests${version.verify?.length ? ` (${version.verify.length})` : ""}`}
+                    {t === "sch" ? "Schematic" : t === "pcb" ? "Layout" : t === "3d" ? "3D" : t === "stackup" ? "Stackup" : t === "diff" ? "Diff" : `Tests${version.verify?.length ? ` (${version.verify.length})` : ""}`}
                   </button>
                   );
                 })}
@@ -385,14 +390,48 @@ export default function Ee() {
                   <img src={fileUrl(board.id, version.version, "sch_svg")} alt="schematic" className="w-full" draggable={false} />
                 </PanZoom>
               )}
-              {tab === "pcb" && version.files?.pcb_svg && (
-                <PanZoom wrapClass="min-w-[600px] w-full">
-                  <img src={fileUrl(board.id, version.version, "pcb_svg")} alt="layout" className="w-full" draggable={false} />
-                </PanZoom>
-              )}
-              {tab === "3d" && version.files?.glb && (
-                <div className="h-[60vh]"><CadViewer url={fileUrl(board.id, version.version, "glb")} /></div>
-              )}
+              {tab === "pcb" && version.files?.pcb_svg && (() => {
+                const kind = pcbView === "top" && version.files?.pcb_top ? "pcb_top"
+                  : pcbView === "bot" && version.files?.pcb_bot ? "pcb_bot" : "pcb_svg";
+                return (
+                <div className="space-y-2">
+                  {(version.files?.pcb_top || version.files?.pcb_bot) && (
+                    <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted/50 p-1">
+                      {([["all", "All layers"], ["top", "Top"], ["bot", "Bottom"]] as const).map(([v, label]) => (
+                        <button key={v} onClick={() => setPcbView(v)}
+                          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                            pcbView === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <PanZoom wrapClass="min-w-[600px] w-full">
+                    <img key={kind} src={fileUrl(board.id, version.version, kind)} alt="layout" className="w-full" draggable={false} />
+                  </PanZoom>
+                </div>
+                );
+              })()}
+              {tab === "3d" && version.files?.glb && (() => {
+                const kind = glbView === "bare" && version.files?.glb_bare ? "glb_bare" : "glb";
+                return (
+                <div className="space-y-2">
+                  {version.files?.glb_bare && (
+                    <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted/50 p-1">
+                      {([["pcba", "PCBA (populated)"], ["bare", "Bare PCB"]] as const).map(([v, label]) => (
+                        <button key={v} onClick={() => setGlbView(v)}
+                          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                            glbView === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="h-[60vh]"><CadViewer key={kind} url={fileUrl(board.id, version.version, kind)} /></div>
+                </div>
+                );
+              })()}
+              {tab === "stackup" && <StackupView board={board.id} version={version} />}
               {tab === "tests" && (
                 <div className="space-y-3">
                   {!version.verify?.length && (
@@ -454,6 +493,106 @@ export default function Ee() {
           </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+
+type PcbaManifest = {
+  board_id?: string;
+  candidate_id?: string;
+  board?: {
+    outline_mm?: { width: number; height: number };
+    mounting_holes?: { x: number; y: number; drill_mm?: number }[];
+    thickness_mm?: number;
+  };
+  components?: { ref: string; value: string; package: string; side: string; mass_g: number }[];
+  totals?: { component_count: number; components_g: number; board_g: number; pcba_g: number };
+};
+
+function StackupView({ board, version }: { board: string; version: EeVersion }) {
+  // Rebuilt 2026-09-09: the original stackup view was lost with the pre-redeploy
+  // dashboard work. Renders the physical layer stack from the published
+  // per-layer artwork + the PCBA mass manifest (pcba.json).
+  const pcbaQ = useQuery({
+    queryKey: ["ee-pcba", board, version.version],
+    enabled: !!version.files?.pcba,
+    queryFn: async () =>
+      (await (await fetch(fileUrl(board, version.version, "pcba"), { credentials: "same-origin" })).json()) as PcbaManifest,
+  });
+  const m = pcbaQ.data;
+  const layers: { label: string; kind?: string; note: string }[] = [
+    { label: "F.Silkscreen", kind: version.files?.pcb_fsilk ? "pcb_fsilk" : undefined, note: "top legend" },
+    { label: "F.Cu", kind: version.files?.pcb_fcu ? "pcb_fcu" : undefined, note: "top copper" },
+    { label: "FR4 core", note: m?.board?.thickness_mm ? `dielectric - board thickness ${m.board.thickness_mm} mm` : "dielectric" },
+    { label: "B.Cu", kind: version.files?.pcb_bcu ? "pcb_bcu" : undefined, note: "bottom copper (viewed through board, mirrored)" },
+  ];
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        {layers.map((l, i) => (
+          <div key={l.label} className="flex items-center gap-3 rounded-lg border border-border p-2">
+            <span className="font-mono text-[11px] text-muted-foreground w-5 text-right">{i + 1}</span>
+            {l.kind ? (
+              <a href={fileUrl(board, version.version, l.kind)} target="_blank" rel="noreferrer" className="shrink-0">
+                <img src={fileUrl(board, version.version, l.kind)} alt={l.label}
+                  className="h-14 w-auto rounded border border-border bg-white" />
+              </a>
+            ) : (
+              <div className="h-14 w-20 rounded border border-dashed border-border bg-muted/40 flex items-center justify-center text-[10px] text-muted-foreground">
+                {l.label === "FR4 core" ? "core" : "no art"}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-xs font-medium">{l.label}</p>
+              <p className="text-[11px] text-muted-foreground">{l.note}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {m && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+          {m.board?.outline_mm && (
+            <div className="rounded-lg border border-border p-2">
+              <p className="text-[11px] text-muted-foreground">Outline</p>
+              <p className="font-mono">{m.board.outline_mm.width} x {m.board.outline_mm.height} mm</p>
+            </div>
+          )}
+          {m.board?.thickness_mm != null && (
+            <div className="rounded-lg border border-border p-2">
+              <p className="text-[11px] text-muted-foreground">Thickness</p>
+              <p className="font-mono">{m.board.thickness_mm} mm</p>
+            </div>
+          )}
+          {m.totals && (
+            <>
+              <div className="rounded-lg border border-border p-2">
+                <p className="text-[11px] text-muted-foreground">Components</p>
+                <p className="font-mono">{m.totals.component_count}</p>
+              </div>
+              <div className="rounded-lg border border-border p-2">
+                <p className="text-[11px] text-muted-foreground">PCBA mass (est)</p>
+                <p className="font-mono">{m.totals.pcba_g} g</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {!version.files?.pcba && (
+        <p className="text-xs text-muted-foreground">No mass manifest published for this version - showing artwork layers only.</p>
+      )}
+      {m?.components && m.components.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            Component table ({m.components.length})
+          </summary>
+          <ul className="mt-1 space-y-0.5 text-muted-foreground max-h-64 overflow-y-auto">
+            {m.components.map((c) => (
+              <li key={c.ref} className="font-mono">{c.ref} {c.value} - {c.package} [{c.side}] {c.mass_g}g</li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

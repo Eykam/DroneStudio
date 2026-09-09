@@ -1,6 +1,6 @@
 import { Suspense, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, useGLTF, Bounds, GizmoHelper, GizmoViewport } from "@react-three/drei";
+import { OrbitControls, useGLTF, Bounds, Center, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { Crosshair, Maximize2, X, ZoomIn, ZoomOut } from "lucide-react";
 import ErrorBoundary from "./ErrorBoundary";
 
@@ -72,12 +72,19 @@ function ViewerCanvas({
         <directionalLight position={[-3, 2, -2]} intensity={0.6} />
         <Suspense fallback={null}>
           {/* Bounds auto-fits the camera to the model - works whether the GLB
-              is exported in meters or millimeters */}
+              is exported in meters or millimeters. Center shifts the geometry
+              so its bbox center sits at the world origin: EE board GLBs are
+              exported at --grid-origin (board can sit far from 0,0), and the
+              OrbitControls target is the origin - without Center the rotation
+              axis misses the board entirely. */}
           <Bounds key={fitKey} fit clip observe margin={1.5}>
-            <Model url={url} />
+            <Center>
+              <Model url={url} />
+            </Center>
           </Bounds>
         </Suspense>
-        <OrbitControls makeDefault enablePan enableZoom enableRotate />
+        <OrbitControls makeDefault enablePan enableZoom enableRotate
+          enableDamping dampingFactor={0.12} rotateSpeed={0.9} zoomSpeed={0.9} />
         <GizmoHelper alignment="bottom-right" margin={[56, 56]}>
           <GizmoViewport labelColor="white" axisHeadScale={0.8} />
         </GizmoHelper>

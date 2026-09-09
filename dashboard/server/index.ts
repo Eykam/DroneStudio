@@ -492,6 +492,99 @@ app.get("/api/stream/state", (c) => c.json({
   registry: streamSources,
 }));
 
+// --- vision training (learned depth+seg model) -----------------------------
+// box1 poster sends per-epoch metrics + GT/prediction sample frames as the
+// run progresses; vis_scenario_streamer.py sends the live model-watches-flight
+// frame. Epochs persist to disk so redeploys keep the curves.
+// (Restored 2026-09-09: originally shipped 2026-09-05 uncommitted, lost in the
+// Sep 6 clean redeploy; recovered from the agent transcript.)
+type VisionTrainState = {
+  meta: Record<string, unknown> | null;
+  epochs: Record<string, unknown>[];
+  frames: Record<string, unknown> | null;
+  scenario: Record<string, unknown> | null;
+};
+const VISION_TRAIN_FILE = `${DATA_DIR}/vision_train.json`;
+let visionTrain: VisionTrainState = await (async () => {
+  try {
+    const f = Bun.file(VISION_TRAIN_FILE);
+    if (await f.exists()) return await f.json();
+  } catch {}
+  return { meta: null, epochs: [], frames: null, scenario: null };
+})();
+
+async function saveVisionTrain() {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const tmp = VISION_TRAIN_FILE + ".tmp";
+  await Bun.write(tmp, JSON.stringify(visionTrain));
+  await fs.rename(tmp, VISION_TRAIN_FILE);
+}
+
+app.post("/api/vision/ingest", async (c) => {
+  const auth = c.req.header("authorization") || "";
+  if (!eqHex(await sha256hex(auth.replace(/^Bearer /, "")), await sha256hex(INGEST_TOKEN))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  let body: any;
+  try { body = await c.req.json(); } catch { return c.json({ error: "bad request" }, 400); }
+  const now = new Date().toISOString();
+  const t = body.type;
+  if (t === "train_status") {
+    const { type, ...rest } = body;
+    visionTrain.meta = { ...rest, ts: now };
+  } else if (t === "train_epoch") {
+    const ep = Number(body.epoch);
+    if (!Number.isInteger(ep) || ep < 0 || ep > 100000) return c.json({ error: "bad epoch" }, 400);
+    const { type, ...rest } = body;
+    const row = { ...rest, epoch: ep, ts: now };
+    const i = visionTrain.epochs.findIndex((e) => Number(e.epoch) === ep);
+    if (i >= 0) visionTrain.epochs[i] = row; else visionTrain.epochs.push(row);
+    visionTrain.epochs.sort((x, y) => Number(x.epoch) - Number(y.epoch));
+    if (visionTrain.epochs.length > 4000) visionTrain.epochs.splice(0, visionTrain.epochs.length - 4000);
+  } else if (t === "train_frames") {
+    const w = Number(body.w), h = Number(body.h);
+    const frames = body.frames;
+    if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > 640 || h > 480
+        || !Array.isArray(frames) || frames.length < 1 || frames.length > 8) {
+      return c.json({ error: "bad train frames" }, 400);
+    }
+    for (const fr of frames) {
+      for (const k of ["rgb", "depth", "seg", "pred_depth", "pred_seg"]) {
+        if (!fr || !Array.isArray(fr[k]) || fr[k].length !== w * h) {
+          return c.json({ error: `bad ${k}` }, 400);
+        }
+      }
+    }
+    visionTrain.frames = { w, h, epoch: body.epoch ?? null, frames, ts: now };
+  } else if (t === "scenario") {
+    // live model-watches-flight frame from vis_scenario_streamer.py: one
+    // frame (GT + prediction) plus episode metadata, latest-only.
+    const w = Number(body.w), h = Number(body.h);
+    const frames = body.frames;
+    if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1 || w > 640 || h > 480
+        || !Array.isArray(frames) || frames.length !== 1) {
+      return c.json({ error: "bad scenario frame" }, 400);
+    }
+    for (const k of ["rgb", "depth", "seg", "pred_depth", "pred_seg"]) {
+      if (!frames[0] || !Array.isArray(frames[0][k]) || frames[0][k].length !== w * h) {
+        return c.json({ error: `bad ${k}` }, 400);
+      }
+    }
+    const { type, frames: _f, ...meta } = body;
+    visionTrain.scenario = { ...meta, w, h, frames, ts: now };
+    // latest-only, no disk write: live stream, not history
+    return c.json({ ok: true });
+  } else {
+    return c.json({ error: "unknown type" }, 400);
+  }
+  await saveVisionTrain();
+  broadcast("vision_train", { t });
+  return c.json({ ok: true });
+});
+
+app.get("/api/vision/state", (c) => c.json(visionTrain));
+
 app.get("/api/stream", (c) =>
   streamSSE(c, async (stream) => {
     const client: SseClient = {
@@ -649,12 +742,19 @@ const EE_EXT: Record<string, string> = {
   pcb_fcu: ".F_Cu.svg", pcb_bcu: ".B_Cu.svg",
   pcb_fsilk: ".F_Silkscreen.svg", pcb_fab: ".F_Fab.svg",
   fp: ".footprints.json",  // footprint table: ref/value/x/y/rot/side per version
+  // populated vs bare 3D + per-side color artwork + mass manifest (restored
+  // 2026-09-09: artifacts existed on disk from the pre-redeploy server, the
+  // committed whitelist had dropped the kinds and orphaned them)
+  pcb_top: ".top.svg", pcb_bot: ".bot.svg",
+  glb_bare: ".bare.glb", pcba: ".pcba.json",
 };
 const EE_CAP: Record<string, number> = {
   sch: 16 * 1024 * 1024, pcb: 32 * 1024 * 1024, net: 8 * 1024 * 1024,
   glb: 64 * 1024 * 1024, sch_svg: 16 * 1024 * 1024, pcb_svg: 16 * 1024 * 1024,
   pcb_fcu: 16 * 1024 * 1024, pcb_bcu: 16 * 1024 * 1024,
   pcb_fsilk: 16 * 1024 * 1024, pcb_fab: 16 * 1024 * 1024, fp: 4 * 1024 * 1024,
+  pcb_top: 16 * 1024 * 1024, pcb_bot: 16 * 1024 * 1024,
+  glb_bare: 64 * 1024 * 1024, pcba: 4 * 1024 * 1024,
 };
 
 async function loadEe(): Promise<EeBoard[]> {
@@ -764,8 +864,12 @@ app.get("/api/ee/boards/:id/versions/:v/file", async (c) => {
   if (!name) return c.json({ error: "not found" }, 404);
   const f = Bun.file(`${EE_DIR}/${id}/v${v}/${name}`);
   if (!(await f.exists())) return c.json({ error: "artifact missing" }, 404);
-  const mime = kind === "glb" ? "model/gltf-binary"
-    : kind.endsWith("svg") ? "image/svg+xml"
+  // mime from the stored filename, not the kind: per-layer artwork kinds
+  // (pcb_fcu etc.) are .svg files - keying on kind served them as
+  // application/octet-stream and <img> refused to render them (broken diff).
+  const mime = name.endsWith(".glb") ? "model/gltf-binary"
+    : name.endsWith(".svg") ? "image/svg+xml"
+    : name.endsWith(".json") ? "application/json"
     : "application/octet-stream";
   return new Response(f, { headers: { "content-type": mime } });
 });

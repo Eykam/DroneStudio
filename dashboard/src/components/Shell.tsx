@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Home, CircuitBoard, Box, Radar, LogOut, Bird } from "lucide-react";
+import { Home, CircuitBoard, Box, Radar, Eye, LogOut, Bird } from "lucide-react";
 import { logout } from "@/api";
 import { BRAND } from "@/brand";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -10,6 +10,7 @@ const NAV = [
   { to: "/ee", label: "EE", icon: CircuitBoard, end: false },
   { to: "/cad", label: "CAD", icon: Box, end: false },
   { to: "/sim", label: "SIM", icon: Radar, end: false },
+  { to: "/vision", label: "VISION", icon: Eye, end: false },
 ];
 
 export default function Shell({ children }: { children: React.ReactNode }) {

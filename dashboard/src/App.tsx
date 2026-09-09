@@ -6,6 +6,7 @@ import Home from "./pages/Home";
 import Shell from "./components/Shell";
 
 const Sim = lazy(() => import("./pages/Sim"));
+const Vision = lazy(() => import("./pages/Vision"));
 const Cad = lazy(() => import("./pages/Cad"));
 const Ee = lazy(() => import("./pages/Ee"));
 
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/login" element={me.data ? <Navigate to="/" /> : <Login />} />
       <Route path="/" element={authed(<Home />)} />
       <Route path="/sim" element={authed(<Sim />, "Loading SIM...")} />
+      <Route path="/vision" element={authed(<Vision />, "Loading VISION...")} />
       <Route path="/watch" element={<Navigate to="/sim" replace />} />
       <Route path="/cad" element={authed(<Cad />, "Loading CAD viewer...")} />
       <Route path="/ee" element={authed(<Ee />, "Loading EE viewer...")} />
