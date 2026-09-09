@@ -313,3 +313,10 @@ Housekeeping: v5 inherited v4s OUT prefix and overwrote v4s /workspace
 checkpoints during the run; v4 artifacts restored from results/, v5 renamed.
 Remaining behavioral gap is hover-dominant: land is learning, hover station-
 keeping is not (hold-speed oscillation in the student under est noise).
+
+## DAgger v6 (2026-09-08 ~19:11-19:29 PDT) - hover-heavy mix from v5 best: MARGINAL
+- Recipe: v5 (lr 1e-3 x300, GT-anchor 8/32), iteration mix 70/20/10 hover/land/goto, 25 iters, warm from bc_est_dag_v5_best.json. Log: results/dagger_est_v6.log
+- Result: best_mean=0.500 at iter21 (EST goto 87.5 / hover 18.8 / land 43.8) vs v5 best 0.479 (goto 87.5 / hover 12.5 / land 43.8). +0.021, all of it hover, land unchanged.
+- Hover still oscillates 0-31% across iters and never holds; teacher GT hover improved under the hover-heavy data (0.75-0.88 mid-run) so the data is there - the student is not absorbing it. Hover-heavy mix alone does not crack hover.
+- Best checkpoint: /workspace/bc_est_dag_v6_best.json (iter21).
+- Launch incidents (fixed pre-flight): 25-dim warm-start must bypass warm_start_25() (19-dim only); /proc-kill idiom bug left a duplicate racing the first launch - relaunched clean.

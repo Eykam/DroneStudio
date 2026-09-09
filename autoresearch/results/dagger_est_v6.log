@@ -1,0 +1,28 @@
+DAGV4 start=bc_est_dag_v5_best.json recipe: lr=0.001 iters=300 anchor=8/32
+DAGV4 iter0 (EST v3 obs): {"goto": 0.875, "hover_hold": 0.125, "land": 0.438} GT: {"goto": 1.0, "hover_hold": 0.562, "land": 0.312}
+DAGV4_ITER 1: n=16620 wall=40s EST {"goto": 0.625, "hover_hold": 0.125, "land": 0.188} GT {"goto": 0.688, "hover_hold": 0.438, "land": 0.375} best=0.479 floors_ok=False
+DAGV4_ITER 2: n=24000 wall=42s EST {"goto": 0.812, "hover_hold": 0.062, "land": 0.062} GT {"goto": 0.938, "hover_hold": 0.5, "land": 0.312} best=0.479 floors_ok=False
+DAGV4_ITER 3: n=24000 wall=40s EST {"goto": 0.562, "hover_hold": 0.062, "land": 0.125} GT {"goto": 0.438, "hover_hold": 0.562, "land": 0.312} best=0.479 floors_ok=False
+DAGV4_ITER 4: n=24000 wall=38s EST {"goto": 0.812, "hover_hold": 0.125, "land": 0.062} GT {"goto": 0.75, "hover_hold": 0.5, "land": 0.375} best=0.479 floors_ok=False
+DAGV4_ITER 5: n=24000 wall=38s EST {"goto": 0.688, "hover_hold": 0.062, "land": 0.0} GT {"goto": 0.625, "hover_hold": 0.5, "land": 0.125} best=0.479 floors_ok=False
+DAGV4_ITER 6: n=24000 wall=41s EST {"goto": 0.938, "hover_hold": 0.0, "land": 0.25} GT {"goto": 0.938, "hover_hold": 0.125, "land": 0.188} best=0.479 floors_ok=False
+DAGV4_ITER 7: n=24000 wall=44s EST {"goto": 0.312, "hover_hold": 0.062, "land": 0.062} GT {"goto": 0.438, "hover_hold": 0.312, "land": 0.062} best=0.479 floors_ok=False
+DAGV4_ITER 8: n=24000 wall=42s EST {"goto": 0.625, "hover_hold": 0.125, "land": 0.188} GT {"goto": 0.562, "hover_hold": 0.312, "land": 0.438} best=0.479 floors_ok=False
+DAGV4_ITER 9: n=24000 wall=38s EST {"goto": 0.438, "hover_hold": 0.25, "land": 0.312} GT {"goto": 0.438, "hover_hold": 0.688, "land": 0.5} best=0.479 floors_ok=False
+DAGV4_ITER 10: n=24000 wall=43s EST {"goto": 0.812, "hover_hold": 0.25, "land": 0.25} GT {"goto": 0.875, "hover_hold": 0.875, "land": 0.625} best=0.479 floors_ok=False
+DAGV4_ITER 11: n=24000 wall=38s EST {"goto": 0.812, "hover_hold": 0.125, "land": 0.125} GT {"goto": 0.875, "hover_hold": 0.75, "land": 0.188} best=0.479 floors_ok=False
+DAGV4_ITER 12: n=24000 wall=41s EST {"goto": 0.75, "hover_hold": 0.062, "land": 0.125} GT {"goto": 0.75, "hover_hold": 0.562, "land": 0.125} best=0.479 floors_ok=False
+DAGV4_ITER 13: n=24000 wall=41s EST {"goto": 0.875, "hover_hold": 0.062, "land": 0.25} GT {"goto": 0.938, "hover_hold": 0.812, "land": 0.438} best=0.479 floors_ok=False
+DAGV4_ITER 14: n=24000 wall=39s EST {"goto": 0.812, "hover_hold": 0.125, "land": 0.25} GT {"goto": 0.938, "hover_hold": 0.75, "land": 0.25} best=0.479 floors_ok=False
+DAGV4_ITER 15: n=24000 wall=40s EST {"goto": 0.812, "hover_hold": 0.125, "land": 0.125} GT {"goto": 0.938, "hover_hold": 0.75, "land": 0.375} best=0.479 floors_ok=False
+DAGV4_ITER 16: n=24000 wall=41s EST {"goto": 0.938, "hover_hold": 0.25, "land": 0.188} GT {"goto": 1.0, "hover_hold": 0.812, "land": 0.25} best=0.479 floors_ok=True
+DAGV4_ITER 17: n=24000 wall=45s EST {"goto": 0.812, "hover_hold": 0.312, "land": 0.125} GT {"goto": 0.938, "hover_hold": 0.688, "land": 0.375} best=0.479 floors_ok=False
+DAGV4_ITER 18: n=24000 wall=42s EST {"goto": 0.75, "hover_hold": 0.25, "land": 0.312} GT {"goto": 0.75, "hover_hold": 0.625, "land": 0.438} best=0.479 floors_ok=False
+DAGV4_ITER 19: n=24000 wall=42s EST {"goto": 0.562, "hover_hold": 0.25, "land": 0.188} GT {"goto": 0.5, "hover_hold": 0.688, "land": 0.125} best=0.479 floors_ok=False
+DAGV4_ITER 20: n=24000 wall=40s EST {"goto": 0.875, "hover_hold": 0.25, "land": 0.125} GT {"goto": 0.938, "hover_hold": 0.688, "land": 0.062} best=0.479 floors_ok=False
+DAGV4_ITER 21: n=24000 wall=40s EST {"goto": 0.875, "hover_hold": 0.188, "land": 0.438} GT {"goto": 1.0, "hover_hold": 0.562, "land": 0.625} best=0.500 floors_ok=True
+DAGV4_ITER 22: n=24000 wall=36s EST {"goto": 0.875, "hover_hold": 0.188, "land": 0.312} GT {"goto": 0.938, "hover_hold": 0.438, "land": 0.438} best=0.500 floors_ok=False
+DAGV4_ITER 23: n=24000 wall=42s EST {"goto": 0.938, "hover_hold": 0.25, "land": 0.188} GT {"goto": 0.812, "hover_hold": 0.688, "land": 0.438} best=0.500 floors_ok=False
+DAGV4_ITER 24: n=24000 wall=38s EST {"goto": 0.938, "hover_hold": 0.188, "land": 0.312} GT {"goto": 0.812, "hover_hold": 0.688, "land": 0.25} best=0.500 floors_ok=False
+DAGV4_ITER 25: n=24000 wall=45s EST {"goto": 0.75, "hover_hold": 0.25, "land": 0.125} GT {"goto": 0.812, "hover_hold": 0.562, "land": 0.188} best=0.500 floors_ok=False
+DAGV4_DONE best_mean=0.500 wall=1038s
