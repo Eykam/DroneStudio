@@ -1,10 +1,10 @@
-"""v105-g104b: deep, direct closed wings integrated into a compact folded shell.
+"""v106-g105a: low twin-camera brows and a close-wrapped swept shell lattice.
 
-Shorten the outboard swept load path and deepen its broad compression
-shoulders while tucking the lower chines. The compact shell brings the
-carrier hoods and battery tray into shorter supported load paths, with
-low folded cockpit returns. Retain normal wall gauge, all eight internal
-sensor seats, fixed motor datums, stereo voids and the belly-camera pocket.
+Lower the paired camera brows while retaining the central carrier hood
+and its service clearance; tuck the camera and battery flanks inward. Four
+pitched battery-side bays replace the broad panels with continuous edge
+chords and shorter unsupported piers. Preserve normal skin gauges, the
+closed reference arms, every internal seat and optical clearance tool.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -650,7 +650,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
         length=math.hypot(ex,ey)
         nx,ny=ey/length,-ex/length
         protected_facet=nx < -0.9999 or abs(abs(nx)-abs(ny)) < 1e-6
-        tuck=0.0 if protected_facet else (1.6 if (a[0]+d[0])/2 > 65.0 else 2.5)
+        mid_x=(a[0]+d[0])/2
+        tuck=0.0 if protected_facet else (1.95 if mid_x > 65.0 else 2.5)
+        if not protected_facet and -122.0 < mid_x < -65.0:
+            tuck=3.05
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
     compact=[]
     for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
@@ -844,7 +847,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # The camera brows sit lower than the central radial carrier
         # hood. Their inner corners clear the real 25.862 mm board top;
         # the existing steep hip joins them to the cockpit service jamb.
-        brow_z=45.3 if ridge_y == 0.0 else 43.6
+        brow_z=45.3 if ridge_y == 0.0 else 43.3
         for side in (-1,1):
             plane=b.Plane(origin=(83.0*sx,ridge_y*sy,brow_z),
                           z_dir=(rake,side*1.12/sy,1))
@@ -1094,9 +1097,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # the roof edges rise at least 2:1, directly from their printed jambs.
     # The recessed battery tray, carrier hoods and lower ties are added
     # independently and are untouched by these shell-only ventilation cuts.
-    for gx in (-106.0,-92.0,-78.0):
-        outline=[(gx-6.0,2.6),(gx+4.5,2.6),(gx+6.5,14.0),
-                 (gx+0.5,26.0),(gx-5.0,14.0)]
+    for gx in (-108.0,-96.0,-84.0,-72.0):
+        # Four swept triangular bays retain 2.6 mm belly chords, 2 mm
+        # eave chords and >1.5 mm intervening diagonal piers. Their
+        # narrow pitched crowns close from both printed jambs.
+        outline=[(gx-4.9,2.6),(gx+4.0,2.6),(gx+5.0,14.0),
+                 (gx+0.4,26.0),(gx-4.2,14.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
@@ -1642,6 +1648,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
             body=body-vent
         elif 0<abs(enclosed.volume)<=150:
             body=body+enclosed
+    # Four bed-founded internal returns lap the grazing arm/waist seams.
+    # Their 3 mm breadth ties the swept spar into the thin ring wall,
+    # removes the zero-area seam on STL export and carries ring shear
+    # through a deeper local section. Clip to the existing enclosure:
+    # the hull never grows, and all toes stay below the carrier boards.
+    for x_sign in (-1,1):
+        for y_sign in (-1,1):
+            toe=box(x_sign*45.1*sx,y_sign*62.1*sy,0,
+                    3.0*sx,3.0*sy,10.6)
+            body=body+(toe & outer_hull)
+
     # Regularize micron-scale Boolean wire gaps at folded saddle/spar
     # intersections. This is 1/1200 of the minimum wall gauge; it removes
     # numerical sliver faces before STEP meshing without changing the
