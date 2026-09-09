@@ -1,11 +1,9 @@
-"""v107-g106a: close-wrapped battery shell with deep swept waist chords.
+"""v108-g107a: low folded cockpit and deep swept fuselage sills.
 
-Tuck the aft flanks and lower the battery ridge inside the reference hull.
-Open the unloaded skirt into larger pitched bays while deepening the lower
-waist chord, concentrating ring stiffness at its arm reactions. Preserve
-the normally offset skins, closed arms, carrier covers and all mounts.
-Steepen only the aft cockpit entry hips so the compact skirt joins the
-board roof without a flat ledge; the overall bounds remain fixed.
+Lower the inward cockpit creases and stereo brows within the reference
+hull. Trade unloaded skirt centers for taller bed-founded waist chords;
+the normally offset canopy, protected carrier hoods and recessed bays
+remain part of one serviceable shell.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -787,8 +785,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # lowest aft hatch corner the normal-offset roof remains above the
     # 61.2 mm flight-board service box; no horizontal clearance cut is
     # used to make room under an otherwise unsupported roof.
-    crease_y=17.0
-    crease_z=76.54
+    # Move the ridge down its unchanged outer shoulder; its inward face
+    # follows the electronics more closely while keeping the full gauge.
+    crease_y=17.10
+    crease_z=76.428
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
         co=box(0,0,-.2,600,600,200)
@@ -850,11 +850,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for ridge_y in (-28.0,0.0,28.0):
         no=box(0,0,-.2,600,600,200)
         ni=box(0,0,-.2,600,600,200)
-        rake=.06/sx
+        rake=(.06 if ridge_y == 0.0 else .03)/sx
         # The camera brows sit lower than the central radial carrier
         # hood. Their inner corners clear the real 25.862 mm board top;
         # the existing steep hip joins them to the cockpit service jamb.
-        brow_z=45.3 if ridge_y == 0.0 else 43.3
+        brow_z=45.3 if ridge_y == 0.0 else 43.0
         for side in (-1,1):
             plane=b.Plane(origin=(83.0*sx,ridge_y*sy,brow_z),
                           z_dir=(rake,side*1.12/sy,1))
@@ -869,7 +869,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # This trims the tall rear brow triangles, within the old hull.
         # The normal offset includes both slopes; no wall is thinned.
         for side in (-1,1):
-            back_rake=(-0.06 if ridge_y == 0.0 else -0.16)/sx
+            # A shallow longitudinal hip clears both full board corners;
+            # keep the steep transverse pitch for support-free printing.
+            back_rake=(-0.06 if ridge_y == 0.0 else -0.03)/sx
             plane=b.Plane(origin=(83.0*sx,ridge_y*sy,brow_z),
                           z_dir=(back_rake,side*1.12/sy,1))
             half=plane*b.Box(800,800,600,
@@ -896,6 +898,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # shoulders keep their complete original coverage over the CM4 bay.
     # The 12 mm aft cockpit flare gives a supported closing trajectory:
     # (1.50 - 1.12 * 3.8/12) / sqrt(1 + (3.8/12)**2) = 1.092 > 1.
+    # The modest inward crease shift retains the original service slot;
+    # the rear board corner remains below the normally offset roof.
     hatch=[(-107.0,-6.0),(-91.0,-9.8),(-69.0,-9.8),(-57.0,-6.0),
            (-29.0,-6.0),(-29.0,6.0),(-57.0,6.0),(-69.0,9.8),
            (-91.0,9.8),(-107.0,6.0)]
@@ -1101,7 +1105,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Flare the empty centers of the aft shear bays while preserving
     # the continuous 2.6 mm belly chord and 2 mm upper chord. The
     # narrowest inclined pier remains 2.5 mm in longitudinal projection;
-    # the roof edges rise at least 2:1, directly from their printed jambs.
+    # the roof edges rise above 1.30:1, directly from their printed jambs.
     # The recessed battery tray, carrier hoods and lower ties are added
     # independently and are untouched by these shell-only ventilation cuts.
     for gx in (-108.0,-96.0,-84.0,-72.0):
@@ -1110,8 +1114,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # narrow pitched crowns close from both printed jambs.
         # Broad pointed bays between deeper continuous lower chords;
         # >1.7 mm projected diagonal piers retain their full normal gauge.
-        outline=[(gx-5.2,3.0),(gx+4.4,3.0),(gx+5.4,14.0),
-                 (gx+0.4,26.0),(gx-4.6,14.0)]
+        # Taller swept bays remove the unused upper skirt between the
+        # same bed/eave chords. Their roof pitches remain above 1.30:1;
+        # >1.3 mm normal piers connect the continuous shell flanges.
+        outline=[(gx-5.3,3.0),(gx+4.7,3.0),(gx+5.65,19.0),
+                 (gx+0.4,26.0),(gx-4.95,19.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
@@ -1154,11 +1161,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # roof edges rise >1.8:1. Normal cuts retain the skin gauge.
             lean=math.copysign(1.3,waist_x)
             apex=23.5 if waist_x < 0 else 25.0
-            # A deeper 5 mm bed chord carries shell/arm reaction, while
-            # the wider high bay removes neutral-axis skirt area. Keep
-            # >3 mm end piers beside the protected optical facets. The
-            # least steep roof closes at 10.5/9.8 > 1 from the jamb.
-            outline=[(-8.6,5.0),(8.6,5.0),(9.8+lean,13.0),
+            # The 6.5 mm lower chord deepens the shell beam at each arm
+            # reaction. Widen only the low bay center to recover skin area;
+            # the pitched crown and end piers retain their original reach.
+            outline=[(-10.0,6.5),(10.0,6.5),(9.8+lean,13.0),
                      (lean,apex),(-9.8+lean,13.0)]
             wire=b.Wire.make_polygon([
                 (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
