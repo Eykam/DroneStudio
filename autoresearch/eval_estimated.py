@@ -58,7 +58,9 @@ class EstEnv(SimBinaryEnv):
         # Pad-marker channel (parent 2026-09-08): downward camera tracks an
         # AprilTag-style marker at the scenario target for terminal relative
         # nav. GPS gets you there, the marker puts you down. Visibility:
-        # marker within 65-deg half-angle of the body down-axis and < 5m.
+        # marker within 65-deg half-angle of the body down-axis and < 8m
+        # (raised 5->8m 2026-09-08: probe showed 5m cap dead by design in
+        # 3/16 hover cells; 8m covers the full hover altitude envelope).
         self.marker = marker
         self.marker_dt = 1.0 / marker_rate_hz
         self.marker_fixes = 0
@@ -267,7 +269,7 @@ class EstEnv(SimBinaryEnv):
             # body down-axis is -y (level rest accel reads +9.81y specific force)
             import numpy as _np
             cos_ang = float(-z_b_true[1] / max(rng_m, 1e-9))
-            if rng_m < 5.0 and cos_ang > _np.cos(_np.deg2rad(65)):
+            if rng_m < 8.0 and cos_ang > _np.cos(_np.deg2rad(65)):
                 self.marker_last_t = self.t
                 sig = (0.01 + 0.02 * rng_m) * self.noise_scale  # AprilTag-class
                 z_b = z_b_true + rng.normal(0, sig, 3)
