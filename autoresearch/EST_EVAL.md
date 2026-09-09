@@ -327,3 +327,14 @@ keeping is not (hold-speed oscillation in the student under est noise).
 - Probe at 8m: valid 49.5 -> 52.4% overall, corrections 45.2 -> 48.7%; residual invalidity is wander beyond any cap (p99 range 16.7m).
 - DAgger v7 (v6 recipe, hover-heavy, from v6 best, 25 iters): best_mean=0.521 = the warm start itself (iter0 87.5/25.0/43.8; hover 12.5->25.0 from the sensor change alone). No iteration beat it under floors. BUT hover EST reached 56.2% at iter25 (v6 max was 31.2%) with goto collapsing to 62.5 (floors_ok=False) - the BC recipe oscillates between phases instead of converging; hover is now trainable signal, the aggregator is the limiter.
 - Best checkpoint: /workspace/bc_est_dag_v7_best.json (= v6 best numbers; training could not improve on it).
+
+## DAgger v8 (2026-09-08 ~20:58-21:25 PDT) - lr 5e-4 + per-phase best-keeping: THE STACK STABILIZED
+- Recipe: v7 with BC_LR 5e-4 (halved), per-phase specialist best-keeping, 25 iters, from v7 best, 8m marker. Log: results/dagger_est_v8.log
+- Composite (floors-gated) best remained the warm start (0.521) - GT floors conservative. But per-phase keeping caught the nets the floors hid:
+- FINAL cross-phase EST matrix:
+  - composite:      goto 87.5 / hover 25.0 / land 43.8  (mean 52.1)
+  - spec_goto:      goto 93.8 / hover 25.0 / land 25.0  (mean 47.9)
+  - spec_hover:     goto 93.8 / hover 56.2 / land 31.2  (mean 60.4)  <- hover-56 net HOLDS goto (93.8)
+  - spec_land:      goto 81.2 / hover 37.5 / land 62.5  (mean 60.4)
+- spec_hover is the strongest single net to date (mean 60.4, was 52.1). The lr-5e-4 fix stopped phase whiplash: a single net now carries hover 56 AND goto 94. Answer to "does the hover-56 net hold goto": YES.
+- Checkpoints: /workspace/bc_est_dag_v8_best.json (composite), _best_{goto,hover_hold,land}.json (specialists).
