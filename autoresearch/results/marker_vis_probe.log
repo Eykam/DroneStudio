@@ -1,0 +1,32 @@
+seed 0 done steps=381
+seed 1 done steps=1765
+seed 2 done steps=1482
+seed 3 done steps=2100
+seed 4 done steps=2100
+seed 5 done steps=2100
+seed 6 done steps=2100
+seed 7 done steps=315
+seed 8 done steps=348
+seed 9 done steps=2100
+seed 10 done steps=795
+seed 11 done steps=2100
+seed 12 done steps=2100
+seed 13 done steps=576
+seed 14 done steps=243
+seed 15 done steps=180
+
+steps=20785 overall marker-valid fraction = 0.495
+off-axis angle deg: mean 36.9 p50 26.6 p90 86.2 p99 97.9
+range m: mean 4.82 p99 15.13; fraction >=5m: 0.3928
+tilt deg: mean 4.26 p90 8.92 p99 17.11 max 52.21
+
+correction steps: 0.917 of all; marker-valid during corrections = 0.452 (n=19058)
+steady steps: 0.049 of all; marker-valid during steady = 0.967 (n=1019)
+tilt [ 0, 2) deg: n=  6087 valid=0.688
+tilt [ 2, 5) deg: n=  8620 valid=0.588
+tilt [ 5,10) deg: n=  4552 valid=0.213
+tilt [10,20) deg: n=  1387 valid=0.050
+tilt [20,45) deg: n=   125 valid=0.000
+
+invalid steps: 10488 (0.5046); of those, range-out 0.779, angle-out 0.411
+off-axis during invalid: mean 52.9; tilt during invalid: mean 5.8
