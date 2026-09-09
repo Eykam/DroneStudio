@@ -28,7 +28,6 @@ Context:
 - evaluate.py scores candidates: watertight, single body, FDM overhang, wall thickness, prop clearance, hover margin, CONTAINMENT, CAMERA FOV, IMU LEVER ARM, and FEA.
 - MASS (user directive 2026-09-06): the enclosure is TOO MASSIVE - printed mass is the primary optimization axis. Shave monocoque/shell/arm material everywhere the gates allow; no decorative fairing, no external pods, no excess wall beyond the 1.2mm dfam floor + FEA margins. The Pi Zero is REMOVED from the build (ee-flight's CM4 replaces it) - do not add any bay/mount for it.
 - BULK (user directive 2026-09-08): the frame reads INSANELY BULKY - envelope/bulk is now a first-class objective alongside mass, not a side effect of it. Current envelope 340x340x87 mm (XxY footprint x Z height). Shrink fuselage plan area, canopy height, and rim/ring envelope wherever the gates allow; prefer low, tight, close-wrapped volumes over tall or airy ones; close dead space between sensors and their windows unless the optical cone justifies the standoff. Never GROW the envelope to buy mass or FEA margin.
-- MODAL TARGET (adoption constraint 2026-09-09): the 125 Hz first-mode soft floor now blocks every adoption - recent candidates read 121-122 Hz. Lift first mode above 125 Hz WITH MARGIN (aim >= 127 Hz) WHILE cutting mass: buy section inertia, not uniform thickness - deeper arm roots, vertical ribs and web depth, closed-section depth in the shell ring - and take the grams back from skin/canopy/wall areas. A candidate under 125 Hz cannot adopt however light it is.
 - CAMERA FOV (hard gate, user requirement): both cameras (Pi Camera 3 pair on the main board's dual CSI) mount lens-FORWARD (+X) and see out the nose apertures: no frame material inside the FOV pyramid (66.3h x 41.6v deg). chassis.py cuts the sight-line voids from components.camera_lens_poses() - keep that coupling; cameras in placement.json stay lens-forward at the nose.
 - TOF ARRAY (hard requirement, user directives 2026-09-05/06): eight VL53L9CX dToF breakouts (20x16x5 mm carrier envelope) mount INSIDE the main enclosure shell for 360-degree coverage - placement.json keys vl53l9cx_breakout#n/ne/e/se/s/sw/w/nw at exact 45-degree bearings (PINNED, not movable), sensor face radially outward (55x42 deg FoV, 10 deg overlaps). MOUNT STYLE (user directive 2026-09-06): each carrier sits on an internal seat flush against the shell inner face; the shell gets ONLY a minimal aperture sized to the module body window (12.83x6.10 mm per ST DS14879 Rev 7 + ~1mm margin), NOT a carrier-sized port. NO external pods, bumps, or protruding enclosures for the ToF carriers - the carrier body must be fully inside the frame envelope +2mm (containment). Their address-select runs on the main flight board (XSHUT chain, no separate hub board). Preserve all eight placements and their internal seats/apertures in every candidate.
 - PAD CAMERA (hard requirement, user directive 2026-09-09): a downward-facing pad-marker camera (placement.json key pad_camera, PINNED at belly center (0,0); 25x24x12 mm envelope, z=2mm component bottom) mounts in a recessed drop-in pocket in the belly floor at frame center (lateral offset <20mm by pin). The belly skin gets ONLY a minimal lens aperture at the mount; keep the lens face flush with or just proud of the belly underside so the camera's 65-degree half-angle downward cone (8 m range, pad-marker chain) passes NO frame material - the cone is steep (tan65 = 2.14), so any frame depth ahead of the lens widens the required opening fast. Do NOT grow the envelope for it; the pocket lives inside the existing floor/deck cavity. The diagonal ToF stations' ~44% world coverage is ACCEPTED BY DESIGN (2026-09-09 decision): they are arm/prop-line proximity monitors, not navigation sensors - do not spend mutations trying to clear the diagonal arms from their FoV.
@@ -218,67 +217,53 @@ def run_generation():
     best_all_pass = st.get("best_all_pass", False)
     best_mass = st.get("best_mass_g")
     # winner among candidates: gates first, then score, then lowest mass
-    ordered = sorted(results.values(), key=lambda c: (c["all_pass"], c["score"], -(c["mass_g"] or 1e9)), reverse=True)
-    best_all_pass = st.get("best_all_pass", False)
-    best_mass = st.get("best_mass_g")
-
-    def _metric(v, *path):
+    winner = max(results.values(), key=lambda c: (c["all_pass"], c["score"], -(c["mass_g"] or 1e9)))
+    w = winner
+    # then the winner must still beat the incumbent (same gates-first rule)
+    improved = (w["all_pass"] and not best_all_pass) or                (w["all_pass"] == best_all_pass and (w["score"] > st["best_score"] or
+                (w["score"] == st["best_score"] and w["mass_g"] and (best_mass is None or w["mass_g"] < best_mass))))
+    # parent standing rule 2026-09-07: once crash stress margin < 1.0 MPa, stop adopting
+    # mass-reduction candidates that erode the crash stress margin further (quality-over-grams)
+    if improved:
         try:
-            cur = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
-            for k in path:
-                if not isinstance(cur, dict):
-                    return None
-                cur = cur.get(k)
-            return cur
-        except Exception:
-            return None
-
-    def _hold_reason(c):
-        # parent standing rule 2026-09-07: quality-over-grams - stop adopting
-        # mass-reduction candidates that erode the crash stress margin once < 1.0 MPa
-        try:
-            inc_s = _metric(st["best_variant"], "metrics", "fea", "crash", "max_von_mises_mpa")
-            cand_s = _metric(c["variant"], "metrics", "fea", "crash", "max_von_mises_mpa")
+            def _crash_stress(v):
+                m = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
+                return ((m.get("metrics") or {}).get("fea") or {}).get("crash", {}).get("max_von_mises_mpa")
+            inc_s = _crash_stress(st["best_variant"])
+            cand_s = _crash_stress(w["variant"])
             if (inc_s is not None and cand_s is not None and 16.5 - inc_s < 1.0
-                    and c["mass_g"] and best_mass and c["mass_g"] < best_mass
+                    and w["mass_g"] and best_mass and w["mass_g"] < best_mass
                     and cand_s > inc_s):
-                return ("QUALITY HOLD: crash stress margin %.2f MPa < 1.0 and %s erodes it (%s->%s MPa); adoption blocked"
-                        % (16.5 - inc_s, c["variant"], inc_s, cand_s))
+                improved = False
+                print(f"[gen {gen}] QUALITY HOLD: crash stress margin {16.5-inc_s:.2f} MPa < 1.0 and {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} erodes it ({inc_s}->{cand_s} MPa); adoption blocked", flush=True)
         except Exception as e:
             print(f"[gen {gen}] stress-guard check failed (non-gating): {e}", flush=True)
-        # parent standing rule 2026-09-06: crash displacement hard floor 0.3mm margin (limit 5.0)
-        cand_d = _metric(c["variant"], "metrics", "fea", "crash", "max_disp_mm")
-        if cand_d is not None and cand_d > 4.70:
-            return ("DISP FLOOR HOLD: %s crash disp %s mm breaches the 0.3mm margin floor (limit 5.0); adoption blocked"
-                    % (c["variant"], cand_d))
-        # parent ruling 2026-09-08: modal soft floor 125 Hz (gate floor 120)
-        cand_m = _metric(c["variant"], "metrics", "fea", "modal", "first_mode_hz")
-        if cand_m is not None and cand_m < 125.0:
-            return ("MODAL FLOOR HOLD: %s first mode %s Hz below the 125 Hz soft floor (gate 120); adoption blocked"
-                    % (c["variant"], cand_m))
-        return None
-
-    def _improves(c):
-        return (c["all_pass"] and not best_all_pass) or \
-               (c["all_pass"] == best_all_pass and (c["score"] > st["best_score"] or
-                (c["score"] == st["best_score"] and c["mass_g"] and (best_mass is None or c["mass_g"] < best_mass))))
-
-    improved = False
-    w = ordered[0]
-    for cand in ordered:
-        if not _improves(cand):
-            continue
-        hold = _hold_reason(cand)
-        if hold:
-            print(f"[gen {gen}] {hold}; trying next candidate", flush=True)
-            continue
-        improved = True
-        w = cand
-        break
-    if not improved:
-        c0 = ordered[0]
-        print(f"[gen {gen}] no adoption: best candidate {c0['variant']} (all_pass={c0['all_pass']}, score={c0['score']:.3f}, mass={c0['mass_g']}) "
-              f"vs incumbent {st['best_variant']} (score={st['best_score']:.3f}, mass={best_mass}, all_pass={best_all_pass})", flush=True)
+    # parent standing rule 2026-09-06: crash displacement margin hard floor 0.3mm (limit 5.0mm)
+    # - block any adoption whose crash disp exceeds 4.70mm, regardless of mass/stress
+    if improved:
+        try:
+            def _crash_disp(v):
+                m = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
+                return ((m.get("metrics") or {}).get("fea") or {}).get("crash", {}).get("max_disp_mm")
+            cand_d = _crash_disp(w["variant"])
+            if cand_d is not None and cand_d > 4.70:
+                improved = False
+                print(f"[gen {gen}] DISP FLOOR HOLD: {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} crash disp {cand_d} mm breaches the 0.3mm margin floor (limit 5.0); adoption blocked", flush=True)
+        except Exception as e:
+            print(f"[gen {gen}] disp-floor check failed (non-gating): {e}", flush=True)
+    # parent ruling 2026-09-08: modal soft floor 125 Hz (gate floor 120) - block adoptions
+    # whose first eigenmode drops below it, same treatment as the crash-disp floor
+    if improved:
+        try:
+            def _modal(v):
+                m = json.load(open(os.path.join(HERE, "snapshots", v, "metrics.json")))
+                return ((m.get("metrics") or {}).get("fea") or {}).get("modal", {}).get("first_mode_hz")
+            cand_m = _modal(w["variant"])
+            if cand_m is not None and cand_m < 125.0:
+                improved = False
+                print(f"[gen {gen}] MODAL FLOOR HOLD: {w[chr(39)+chr(118)+chr(97)+chr(114)+chr(105)+chr(97)+chr(110)+chr(116)+chr(39)]} first mode {cand_m} Hz below the 125 Hz soft floor (gate 120); adoption blocked", flush=True)
+        except Exception as e:
+            print(f"[gen {gen}] modal-floor check failed (non-gating): {e}", flush=True)
     tally = " | ".join(f"{c['variant']}={c['score']:.3f}{' PASS' if c['all_pass'] else ' fail'}{(' %.1fg' % c['mass_g']) if c['mass_g'] else ''}" for c in results.values())
     if improved:
         wL = w["variant"][-1]

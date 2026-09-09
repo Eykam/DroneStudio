@@ -88,47 +88,6 @@ def mass_properties(m, motor_positions_mm, arm_length_mm):
         "hover_thrust_frac": round(total_mass*9.81/(4*MAX_THRUST_PER_MOTOR_N),3),
     }, total_mass
 
-
-def _mt_hit_dists(mesh, origin, dirs, first_only=True):
-    """Batched vectorized Moller-Trumbore. first_only=True: nearest hit distance
-    per ray (inf if none). first_only=False: list of all hit distances per ray.
-    Units follow the mesh (candidate meshes are chassis-frame mm)."""
-    tri = np.asarray(mesh.triangles, dtype=np.float64)
-    v0 = tri[:, 0, :]; e1 = tri[:, 1, :] - v0; e2 = tri[:, 2, :] - v0
-    o = np.asarray(origin, float)
-    if first_only:
-        out = np.full(len(dirs), np.inf)
-    else:
-        out = [[] for _ in range(len(dirs))]
-    B, N = 64, 20000
-    for r0 in range(0, len(dirs), B):
-        D = np.asarray(dirs[r0:r0+B], dtype=np.float64)
-        bmin = np.full(len(D), np.inf)
-        ball = [[] for _ in range(len(D))] if not first_only else None
-        for c0 in range(0, len(v0), N):
-            V0 = v0[c0:c0+N]; E1 = e1[c0:c0+N]; E2 = e2[c0:c0+N]
-            P = np.cross(D[:, None, :], E2[None, :, :])
-            det = (E1[None, :, :] * P).sum(-1)
-            nz = np.abs(det) > 1e-12
-            inv = np.where(nz, 1.0 / np.where(nz, det, 1.0), 0.0)
-            TV = np.repeat(o[None, None, :] - V0[None, :, :], len(D), axis=0)
-            U = (TV * P).sum(-1) * inv
-            Q = np.cross(TV, E1[None, :, :])
-            V = (D[:, None, :] * Q).sum(-1) * inv
-            T = (E2[None, :, :] * Q).sum(-1) * inv
-            ok = nz & (U >= 0) & (V >= 0) & (U + V <= 1) & (T > 1e-9)
-            if first_only:
-                bmin = np.minimum(bmin, np.where(ok, T, np.inf).min(axis=1))
-            else:
-                for i in range(len(D)):
-                    ball[i].extend(T[i][ok[i]].tolist())
-        if first_only:
-            out[r0:r0+B] = bmin
-        else:
-            for i in range(len(D)):
-                out[r0 + i] = sorted(ball[i])
-    return out
-
 def check_camera_fov(m):
     """User requirement 2026-09-04: cameras must point OUT through the nose apertures,
     unobstructed - not downward into the shell. For each placed camera, cast rays from
@@ -157,46 +116,9 @@ def check_camera_fov(m):
         n = int(np.asarray(hits).sum())
         if n:
             problems.append(f"{key}: {n}/{len(dirs)} FOV rays blocked")
-    # pad_camera hard gate (parent ruling 2026-09-09): the belly-center down
-    # camera's 65deg half-angle cone (2deg margin inside spec) must pass NO
-    # frame material with the candidate's actual pocket geometry. Locate the
-    # aperture plane from drop rays around the datum, put the emitter just
-    # above the skin underside at the aperture, and require every cone ray
-    # clear to 8m. No pocket + aperture -> fail.
-    from components import placement as _placement
-    pad = _placement().get("pad_camera")
-    if pad is not None:
-        o0 = np.array([pad[0] * 1000.0, pad[1] * 1000.0, pad[2] * 1000.0])
-        down = np.array([0.0, 0.0, -1.0])
-        probe_origins = [o0] + [o0 + 6.0 * (math.cos(t) * np.array([1.0, 0, 0]) + math.sin(t) * np.array([0, 1.0, 0]))
-                                for t in [2 * math.pi * i / 8 for i in range(8)]]
-        probe_hits = [_mt_hit_dists(m, po, down[None, :], first_only=False)[0] for po in probe_origins]
-        probe_hits = [[h for h in hs if h <= 60.0] for hs in probe_hits]
-        center_hits = probe_hits[0]
-        ring_bottoms = [hs[-1] for hs in probe_hits[1:] if hs]
-        if center_hits:
-            # frame material directly under the datum: pocket closed or missing
-            problems.append("pad_camera: no clear drop from belly-center datum (pocket/aperture missing or occluded)")
-        elif not ring_bottoms:
-            problems.append("pad_camera: no belly skin found under datum (drop probe found no aperture plane)")
-        else:
-            bottom = sorted(ring_bottoms)[len(ring_bottoms) // 2]
-            o = o0 + (bottom - 0.15) * down  # emitter just above the aperture plane
-            half = math.radians(65.0 - 2.0)
-            right = np.array([1.0, 0.0, 0.0]); upv = np.array([0.0, 1.0, 0.0])
-            dirs = [down]
-            for frac, nseg in ((0.5, 8), (1.0, 24)):
-                for i in range(nseg):
-                    t = 2 * math.pi * i / nseg
-                    d = down + math.tan(half * frac) * (math.cos(t) * right + math.sin(t) * upv)
-                    dirs.append(d / np.linalg.norm(d))
-            hits = _mt_hit_dists(m, o, np.array(dirs))
-            nblocked = int(np.sum(np.isfinite(hits) & (hits <= 8000.0)))
-            if nblocked:
-                problems.append(f"pad_camera: {nblocked}/{len(dirs)} down-cone rays blocked (65deg half-angle, emitter at aperture plane)")
     ok = not problems
     return ("camera_fov", ok, "; ".join(problems) if problems else
-            f"{len(poses)} cameras + pad_camera: FOV clear", 0.0 if ok else 0.5)
+            f"{len(poses)} cameras: lens forward, FOV pyramid clear", 0.0 if ok else 0.5)
 
 def check_imu_lever_arm(m):
     """IMU must sit near the frame CoM (lever-arm corrections only work for small
