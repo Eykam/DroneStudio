@@ -1,10 +1,9 @@
-"""v109-g108b: flange-biased tapered closed wings.
+"""v110-g109b: shoulder-flanged closed wings with vaulted internal seats.
 
-Pull the lower spar sides toward a straight keel-to-shoulder load path,
-retaining the broad upper flanges and recovering bending inertia with
-local depth. The resection fades out around all carrier saddles and
-motor diaphragms. Wider crossed cradle vaults and spaced tray ribs pay
-for the deeper wings while retaining every bearing plane and belly skin.
+Raise the upper arm shoulders and widen the bed keels into paired bending
+flanges inside the existing section width and height. Vaulted carrier beds
+and a lighter folded mounting deck repay the flange material.
+The swept closed wings retain the fixed roots, optical saddles and motors.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -293,6 +292,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
         chine*=1.0+depth_gain
         straight_half=keel+(shoulder_half-keel)*chine/shoulder
         half+=(straight_half-half)*(0.20*root_lens+0.14*wing_lens)
+        # Redistribute each free section into taller side webs and
+        # broader upper flanges, within its existing width and height.
+        # The crown stays short enough for a <2.5 mm internal bridge.
+        # End both changes before the complete carrier service region
+        # and motor diaphragm. All faces retain their 3D normal offsets.
+        flange=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        crown-=0.04*flange+0.02*wing
+        roof_pitch=p.arm_roof_slope-0.07*max(flange,wing)
+        shoulder+=(height-roof_pitch*(shoulder_half-crown)-shoulder)*max(flange,wing)
+        # Widen only the bed flange, where it improves both vertical
+        # and lateral inertia. Keep the complete upper-shoulder breadth.
+        keel+=0.30*flange+0.18*wing
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -1270,7 +1282,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # Wider crossed vaults unload the carrier-bed web centers.
             # Four-mm center piers and >=2.4 mm end piers retain the
             # full folded bearing sheet and both PCB mounting ears.
-            half=4.6 if cardinal else 4.0
+            half=4.9 if cardinal else 4.3
             apex=z0-5.4*1.11/2-p.structural_gauge_mm-(0.0 if cardinal else 0.6)
             eave=apex-1.12*half
             w=b.Wire.make_polygon([(cx+radial-half,cy-12.6,-.2),
@@ -1500,7 +1512,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
     deck_z=fz-1.2
     deck_x0=fx-55.3
     deck_x1=fx+55.3
-    # A physical corrugated sheet, 1.3 mm normal gauge, with 2 mm ridge flats.
+    # A 1.265 mm normal corrugated sheet preserves the PCB bearing
+    # datums while removing excess underside allowance. The shallow
+    # contact flats and all >45-degree folded faces stay supported.
     profile=[]
     for y in (-26.0,-13.0,0.0,13.0,26.0):
         profile.append((y,deck_z-6.71))
@@ -1508,17 +1522,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
             profile.extend([(y+6.1,deck_z),(y+6.9,deck_z)])
     # V-vault the underside of each narrow ridge bearing land. The
     # old 0.8 mm horizontal bridge retained 1.94 mm of material; a
-    # 1.12:1 pointed underside removes its center while leaving >=1.3 mm
-    # normal skin and 1.49 mm below the flat PCB contact at the crown.
+    # 1.12:1 pointed underside now leaves >=1.26 mm normal skin and
+    # 1.43 mm below the flat PCB contact at the crown.
     # Both sides print from the existing inclined folds, and the bearing
     # surface and the IMU landing remain at their original Z datums.
     lower=[]
     for i in range(len(profile)-1,-1,-1):
         y,z=profile[i]
-        lower.append((y,z-1.94))
+        lower.append((y,z-1.88))
         if i>0 and abs(z-profile[i-1][1])<1e-9:
             prev_y=profile[i-1][0]
-            lower.append(((y+prev_y)/2,z-1.94+1.12*(y-prev_y)/2))
+            lower.append(((y+prev_y)/2,z-1.88+1.12*(y-prev_y)/2))
     wire=b.Wire.make_polygon([(deck_x0,fy+y,z) for y,z in profile+lower],close=True)
     deck=b.Solid.extrude(b.Face(wire),(deck_x1-deck_x0,0,0))
     # Keep the two outer load-bearing deck rails; the open center admits
