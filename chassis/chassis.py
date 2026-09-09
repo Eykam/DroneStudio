@@ -1,9 +1,9 @@
-"""v94-g93a: deep swept waist frames within the enclosed optical fuselage.
+"""v95-g94a: shortened cockpit with two-stage swept structural hips.
 
-Inclined waist piers and a deeper continuous lower chord replace the
-empty side-panel centers between the cardinal and diagonal sensor facets.
-All eight carrier hoods, internal seats, optical interfaces, payload bays,
-and the loaded battery-tail shell retain their original geometry.
+A steep battery-to-cockpit fold blends into a lower forward crease,
+removing tall aft shoulder area while retaining the 1.22 mm normal skin.
+The enclosed payloads, service openings, eight internal sensor seats,
+optical interfaces and closed arm sections retain their fixed datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -686,14 +686,26 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # clipping plane or suspended step at the battery/avionics transition.
     # True normal offsets include the longitudinal and transverse grades.
     folds_outer=[]; folds_inner=[]
+    # A two-stage swept hip shortens the tall aft cockpit. Its steep
+    # first fold grows from the battery shoulder into a shallower forward
+    # run, leaving a deep crease instead of a long triangular side panel.
+    # The first 1.50:1 run supports the flared hatch edges; the second
+    # 1.12:1 run begins ahead of the flare and carries the narrow opening.
+    # At X=-56,Y=6 the inner skin remains above Z=62 mm, clearing the
+    # full PCBA service box. Both folds keep a true 3D normal wall offset.
     for fold_side in (-1,1):
-        plane=b.Plane(origin=(-67.0*sx,0,49.0),
-                      z_dir=(-1.50/sx,-fold_side*1.12,1))
-        half=plane*b.Box(800,800,600,
-            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
-        folds_outer.append(half)
-        drop=wall*1.025*math.sqrt(1+(1.50/sx)**2+1.12**2)
-        folds_inner.append(half.moved(b.Pos(0,0,-drop)))
+        fold_o=box(0,0,-.2,600,600,200)
+        fold_i=box(0,0,-.2,600,600,200)
+        for fold_x,fold_z,run in ((-56.0,58.2,1.50),(-46.0,73.2,1.12)):
+            plane=b.Plane(origin=(fold_x*sx,0,fold_z),
+                          z_dir=(-run/sx,-fold_side*1.12,1))
+            half=plane*b.Box(800,800,600,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+            fold_o=fold_o & half
+            drop=wall*1.025*math.sqrt(1+(run/sx)**2+1.12**2)
+            fold_i=fold_i & half.moved(b.Pos(0,0,-drop))
+        folds_outer.append(fold_o)
+        folds_inner.append(fold_i)
     # Keep both the battery turtledeck and its aft GPS hip as supported
     # starting surfaces; their old longitudinal rakes also protect the
     # complete fixed tail carrier. The cockpit grows out of these roofs.
@@ -848,11 +860,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # chords remain continuous, and broad webs separate the openings.
     # Cut perpendicular to the aft roof plane to retain the complete
     # normal wall gauge at the rims instead of leaving feather edges.
-    # The tips close over 6 mm of plan run with only 3.0 mm lateral
+    # The tips close over 6 mm of plan run with only 3.4 mm lateral
     # advance: the 1.015:1 roof gives a >45-degree print trajectory.
     # Only the upper shoulders are relieved; all carrier covers and
     # lower ring load paths lie below these tools. The wider openings
-    # retain 6.0 mm webs between their 12 mm stations and continuous
+    # retain 5.2 mm webs between their 12 mm stations and continuous
     # longitudinal chords along both canopy edges.
     for side in (-1,1):
         for vent_x in (-44.0,-32.0,-20.0,-8.0):
@@ -862,9 +874,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
                           x_dir=(1,0,-aft_rake),
                           z_dir=(aft_rake,side*cockpit_pitch,1))
             along=math.sqrt(1+cockpit_pitch**2)
-            outline=[(0,-9.0*along),(3.0,-3.0*along),
-                     (3.0,3.0*along),(0,9.0*along),
-                     (-3.0,3.0*along),(-3.0,-3.0*along)]
+            outline=[(0,-9.0*along),(3.4,-3.0*along),
+                     (3.4,3.0*along),(0,9.0*along),
+                     (-3.4,3.0*along),(-3.4,-3.0*along)]
             wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
             shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
