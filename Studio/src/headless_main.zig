@@ -1123,6 +1123,36 @@ pub fn main() !void {
             const mz = f32FromJson(root.object.get("mz") orelse .null, 0.0);
             const myaw = f32FromJson(root.object.get("yaw") orelse .null, 0.0);
             const mpitch = f32FromJson(root.object.get("pitch") orelse .null, 0.0);
+            // optional visual domain-randomization block (rung-2): any
+            // subset of Visual fields; absent = legacy fixed look.
+            var vis = VR.Visual{};
+            if (root.object.get("visual")) |vv| {
+                if (vv == .object) {
+                    const vo = vv.object;
+                    if (vo.get("sun_dir")) |sv| {
+                        if (sv == .array and sv.array.items.len == 3) {
+                            vis.sun_dir = Vec3.init(f32FromJson(sv.array.items[0], 0), f32FromJson(sv.array.items[1], 1), f32FromJson(sv.array.items[2], 0));
+                        }
+                    }
+                    vis.ambient = f32FromJson(vo.get("ambient") orelse .null, vis.ambient);
+                    vis.fog_scale = f32FromJson(vo.get("fog_scale") orelse .null, vis.fog_scale);
+                    vis.checker_m = f32FromJson(vo.get("checker_m") orelse .null, vis.checker_m);
+                    vis.checker_gain = f32FromJson(vo.get("checker_gain") orelse .null, vis.checker_gain);
+                    vis.exposure = f32FromJson(vo.get("exposure") orelse .null, vis.exposure);
+                    const cols = .{
+                        .{ "sky_lo", &vis.sky_lo },     .{ "sky_hi", &vis.sky_hi },
+                        .{ "fog_col", &vis.fog_col },   .{ "floor_col", &vis.floor_col },
+                        .{ "obstacle_col", &vis.obstacle_col }, .{ "goal_col", &vis.goal_col },
+                    };
+                    inline for (cols) |cf| {
+                        if (vo.get(cf[0])) |cv| {
+                            if (cv == .array and cv.array.items.len == 3) {
+                                cf[1].* = .{ f32FromJson(cv.array.items[0], 128), f32FromJson(cv.array.items[1], 128), f32FromJson(cv.array.items[2], 128) };
+                            }
+                        }
+                    }
+                }
+            }
             const robst = try alloc.alloc(VR.RasterObstacle, world.scene.obstacles.len);
             for (world.scene.obstacles, 0..) |ob, i| robst[i] = .{ .center = ob.center, .radius = ob.radius };
             const rscene = VR.RasterScene{
@@ -1130,6 +1160,7 @@ pub fn main() !void {
                 .obstacles = robst,
                 .goal = world.scene.goal,
                 .goal_radius = world.scene.success_radius,
+                .visual = vis,
             };
             const cam = VR.Camera{
                 .width = vw, .height = vh, .hfov_deg = hfov,

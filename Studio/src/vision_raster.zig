@@ -52,34 +52,67 @@ pub const RasterScene = struct {
     obstacles: []const RasterObstacle,
     goal: Vec3,
     goal_radius: f32, // rendered as a flat pad disc on the ground
+    visual: Visual = .{},
+};
+
+/// Visual domain-randomization parameters (rung-2, 2026-09-09: extend
+/// option D for RGB - NAV_STACK.md rung-2 kickoff decisions). Defaults
+/// reproduce the pre-DR look bit-for-bit; the dataset generator sends a
+/// seeded per-scene visual block with the render command.
+pub const Visual = struct {
+    sun_dir: ?Vec3 = null, // null -> legacy (-0.4, 0.85, 0.35) normalized
+    ambient: f32 = 0.35, // lam = ambient + (1-ambient) * max(0, n.sun)
+    fog_scale: f32 = 45.0, // fog = 1 - exp(-t / fog_scale)
+    sky_lo: [3]f32 = .{ 26.0, 34.0, 46.0 },
+    sky_hi: [3]f32 = .{ 92.0, 108.0, 126.0 },
+    fog_col: [3]f32 = .{ 38.0, 50.0, 66.0 },
+    floor_col: [3]f32 = .{ 150.0, 148.0, 142.0 },
+    obstacle_col: [3]f32 = .{ 92.0, 106.0, 124.0 },
+    goal_col: [3]f32 = .{ 30.0, 150.0, 84.0 },
+    checker_m: f32 = 0.0, // 0 = off; floor checker square size in meters
+    checker_gain: f32 = 0.85, // albedo multiplier on alternating squares
+    exposure: f32 = 1.0, // global gain, clamped to [0,255]
 };
 
 const Hit = struct { t: f32, class: SegClass, n: Vec3 };
 
-/// Sun-lit lambert shade + distance fog -> display RGB for the scene panel.
-/// Visualization only; training consumes depth/seg, never this.
+/// Sun-lit lambert shade + distance fog -> RGB model input / scene panel.
+/// All look parameters come from Visual so the dataset generator can
+/// randomize them per scene (domain randomization, rung-2).
 fn mix3(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
     return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
 }
 
-fn shade(hit: Hit, rd: Vec3) [3]u8 {
-    const sky = [3]f32{ 38.0, 50.0, 66.0 };
+fn toU8(c: [3]f32, gain: f32) [3]u8 {
+    return .{
+        @intFromFloat(std.math.clamp(c[0] * gain, 0.0, 255.0)),
+        @intFromFloat(std.math.clamp(c[1] * gain, 0.0, 255.0)),
+        @intFromFloat(std.math.clamp(c[2] * gain, 0.0, 255.0)),
+    };
+}
+
+fn shade(hit: Hit, rd: Vec3, ro: Vec3, v: Visual) [3]u8 {
     if (hit.class == .sky) {
         const g = std.math.clamp(0.5 + 0.5 * rd.y(), 0.0, 1.0);
-        const c = mix3(.{ 26.0, 34.0, 46.0 }, .{ 92.0, 108.0, 126.0 }, g);
-        return .{ @intFromFloat(c[0]), @intFromFloat(c[1]), @intFromFloat(c[2]) };
+        return toU8(mix3(v.sky_lo, v.sky_hi, g), v.exposure);
     }
-    const base: [3]f32 = switch (hit.class) {
-        .floor => .{ 150.0, 148.0, 142.0 },
-        .obstacle => .{ 92.0, 106.0, 124.0 },
-        .goal => .{ 30.0, 150.0, 84.0 },
+    var base: [3]f32 = switch (hit.class) {
+        .floor => v.floor_col,
+        .obstacle => v.obstacle_col,
+        .goal => v.goal_col,
         .sky => unreachable,
     };
-    const sun = Vec3.init(-0.4, 0.85, 0.35).normalize();
-    const lam = 0.35 + 0.65 * @max(0.0, hit.n.dot(sun));
-    const fog = 1.0 - @exp(-hit.t / 45.0);
-    const c = mix3(.{ base[0] * lam, base[1] * lam, base[2] * lam }, sky, fog * 0.55);
-    return .{ @intFromFloat(c[0]), @intFromFloat(c[1]), @intFromFloat(c[2]) };
+    if (hit.class == .floor and v.checker_m > 0.0) {
+        const p = ro.add(rd.scale(hit.t));
+        const cx: i32 = @intFromFloat(@floor(p.x() / v.checker_m));
+        const cz: i32 = @intFromFloat(@floor(p.z() / v.checker_m));
+        if (@mod(cx + cz, 2) != 0) base = .{ base[0] * v.checker_gain, base[1] * v.checker_gain, base[2] * v.checker_gain };
+    }
+    const sun = if (v.sun_dir) |sd| sd.normalize() else Vec3.init(-0.4, 0.85, 0.35).normalize();
+    const lam = v.ambient + (1.0 - v.ambient) * @max(0.0, hit.n.dot(sun));
+    const fog = 1.0 - @exp(-hit.t / v.fog_scale);
+    const c = mix3(.{ base[0] * lam, base[1] * lam, base[2] * lam }, v.fog_col, fog * 0.55);
+    return toU8(c, v.exposure);
 }
 
 fn raySphere(ro: Vec3, rd: Vec3, c: Vec3, r: f32) ?f32 {
@@ -168,7 +201,7 @@ pub fn renderRow(scene: RasterScene, cam: Camera, body_pos: Vec3, body_quat: Qua
         frame.depth[idx] = hit.t;
         frame.seg[idx] = @intFromEnum(hit.class);
         if (frame.rgb) |rgb| {
-            const c = shade(hit, rd);
+            const c = shade(hit, rd, ro, scene.visual);
             rgb[idx * 3] = c[0];
             rgb[idx * 3 + 1] = c[1];
             rgb[idx * 3 + 2] = c[2];

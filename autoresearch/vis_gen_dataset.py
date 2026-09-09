@@ -23,6 +23,7 @@ import numpy as np
 sys.path.insert(0, "/workspace/DroneStudio/autoresearch")
 from env_quad import QuadNavEnv
 from scene_schema import SceneDistribution
+from vis_visual import sample_visual
 
 BIN = "/workspace/zig-out/bin/dronestudio-headless"
 
@@ -76,6 +77,7 @@ def main():
     DEP = np.zeros((a.scenes * a.poses_per_scene, H, W), np.uint16)
     SEG = np.zeros((a.scenes * a.poses_per_scene, H, W), np.uint8)
     META = np.zeros((a.scenes * a.poses_per_scene, 9), np.float32)
+    visuals = {}
     n = 0
     t0 = time.time()
     for si in range(a.scenes):
@@ -87,6 +89,8 @@ def main():
             [env.obs_centers, env.obs_radii[:, None]], axis=1) \
             if len(env.obs_centers) else np.zeros((0, 4))
         ext = float(env.dist.scene_extent)
+        visuals[scene_id] = sample_visual(scene_id)  # seeded per scene: split-safe
+        vis = visuals[scene_id]
         for pi in range(a.poses_per_scene):
             pos = None
             for _ in range(64):
@@ -130,7 +134,8 @@ def main():
                               "extent": ext, "max_steps": 10}})
             f = h.call({"cmd": "render", "width": W, "height": H,
                         "yaw": float(np.radians(yaw)),
-                        "pitch": float(np.radians(pitch))})
+                        "pitch": float(np.radians(pitch)),
+                        "visual": vis})
             rgb = np.array(f["rgb"], dtype=np.uint32)
             RGB[n, :, :, 0] = ((rgb >> 16) & 255).reshape(H, W)
             RGB[n, :, :, 1] = ((rgb >> 8) & 255).reshape(H, W)
@@ -146,7 +151,9 @@ def main():
     out = os.path.join(a.out, f"shard_s{a.seed}_o{a.scene_offset}.npz")
     np.savez_compressed(out, rgb=RGB[:n], depth=DEP[:n], seg=SEG[:n],
                         meta=META[:n])
-    print(f"saved {out}: {n} frames in {time.time()-t0:.0f}s", flush=True)
+    vout = out.replace(".npz", ".visuals.json")
+    json.dump(visuals, open(vout, "w"), indent=1)
+    print(f"saved {out}: {n} frames in {time.time()-t0:.0f}s (+ {vout})", flush=True)
 
 
 if __name__ == "__main__":
