@@ -338,3 +338,14 @@ keeping is not (hold-speed oscillation in the student under est noise).
   - spec_land:      goto 81.2 / hover 37.5 / land 62.5  (mean 60.4)
 - spec_hover is the strongest single net to date (mean 60.4, was 52.1). The lr-5e-4 fix stopped phase whiplash: a single net now carries hover 56 AND goto 94. Answer to "does the hover-56 net hold goto": YES.
 - Checkpoints: /workspace/bc_est_dag_v8_best.json (composite), _best_{goto,hover_hold,land}.json (specialists).
+
+## DAgger v9 (2026-09-08 ~21:31-22:10 PDT) - land-heavy from v8 spec_hover: CHAMPION, no weak phase
+- Recipe: lr 5e-4 + per-phase best-keeping, mix rebalanced 60/25/15 land/hover/goto, 25 iters, from bc_est_dag_v8_best_hover_hold.json, 8m marker. Parent-approved ONE run, no auto v10. Log: results/dagger_est_v9.log
+- Iter14 broke through: EST 87.5/56.2/62.5 floors_ok=True, best 0.604 -> 0.688.
+- FINAL cross-phase EST matrix:
+  - composite (iter14 net): goto 87.5 / hover 56.2 / land 62.5  (mean 68.8)  <- single net, no weak phase
+  - spec_goto:              goto 100  / hover 31.2 / land 37.5  (mean 56.2)
+  - spec_hover:             goto 93.8 / hover 56.2 / land 31.2  (mean 60.4, = v8 best file)
+  - spec_land:              SAME net as composite (87.5/56.2/62.5)
+- Stack progression tonight: 47.9 (v5) -> 50.0 (v6) -> 52.1 (v7, 8m sensor) -> 60.4 (v8, lr+per-phase) -> 68.8 (v9, land rebalance). All phases now >= 56% on ONE net.
+- Champion checkpoint: /workspace/bc_est_dag_v9_best.json (iter14).
