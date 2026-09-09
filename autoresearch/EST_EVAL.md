@@ -294,3 +294,12 @@ Teacher (pilot_act3 GT-trained) on est v3 obs, GPS+ZUPT+MARKER, 16 ep/phase:
 vs GPS+ZUPT: hover 6.2 -> 50.0, land 6.2 -> 62.5. Estimation is no longer
 the binding constraint; remaining gap is behavioral (att_err, hold
 stability). Next: est-obs PPO on the full stack (lever b retry, marker on).
+
+## 2026-09-08 Est-obs PPO on GPS+ZUPT+MARKER: NEGATIVE (warm start stands)
+ppo_est.py (marker=True): best_est_mean 0.3958 = the u0/u1 warm-start snapshot
+(goto 81.2/hover 12.5/land 25.0 est-obs); 40 updates never beat it, GT-goto
+eroded to 0.688 (floor 0.887). Same shape as the GPS+ZUPT run: PPO at this
+budget does not close the behavioral gap (teacher gate hover 50/land 62.5 vs
+policy-on-est 12.5/25). Next lever: DAgger v5 (v4 recipe, marker stack) - v4
+failed on the OLD est distribution; the marker stack puts est obs much closer
+to GT, which is exactly what imitation needs. v5 launched 6:38 PM.

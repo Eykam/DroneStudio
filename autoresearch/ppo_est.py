@@ -34,7 +34,7 @@ def make_est_env(dist, max_steps, spec, seed):
     return EstEnv(dist, seed=seed, max_steps=max_steps, dynamics=MANIFEST,
                   scenario_spec=spec, estimated=True, obs_v2=True,
                   vo_aided=True, est_seed=int(seed) + 777,
-                  zupt=True, gps=True)  # GPS+ZUPT stack, parent 2026-09-07
+                  zupt=True, gps=True, marker=True)  # GPS+ZUPT+MARKER stack, parent 2026-09-08
 
 def rollout_one(actor_flat, log_std, critic_flat, seed, scenario):
     rng = np.random.default_rng(0)
