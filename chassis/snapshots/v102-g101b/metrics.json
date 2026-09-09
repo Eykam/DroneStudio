@@ -1,86 +1,86 @@
 {
   "id": "cad-chassis-v102-g101b",
   "kind": "cad.chassis.snapshot",
-  "parent_id": "cad-chassis-v101-g100a",
+  "parent_id": "cad-chassis-v97-g96a",
   "name": "Chassis v102-g101b",
-  "ts": "2026-09-06T14:34:27.159691+00:00",
+  "ts": "2026-09-09T12:51:59.362520+00:00",
   "glb_path": "snapshots/v102-g101b/chassis.glb",
   "metrics": {
-    "mass_g": 131.5,
-    "all_up_mass_kg": 0.476,
+    "mass_g": 132.0,
+    "all_up_mass_kg": 0.481,
     "inertia": {
-      "ixx": 0.0018406,
-      "iyy": 0.00201773,
-      "izz": 0.00395977
+      "ixx": 0.00185219,
+      "iyy": 0.00206483,
+      "izz": 0.00400671
     },
     "printability": {
-      "overhang": "0.54% of surface overhangs > 45.0deg (745 mm^2)",
+      "overhang": "1.03% of surface overhangs > 45.0deg (1839 mm^2)",
       "wall_thickness": "0.00% of samples below 1.2 mm wall",
       "prop_clearance": "212 mm vs 137 mm needed"
     },
     "fea": {
       "hover_max": {
-        "max_von_mises_mpa": 5.1,
-        "max_disp_mm": 1.61,
+        "max_von_mises_mpa": 5.2,
+        "max_disp_mm": 1.44,
         "limit_mpa": 16.5,
         "passed": true
       },
       "crash": {
-        "max_von_mises_mpa": 15.4,
-        "max_disp_mm": 4.82,
+        "max_von_mises_mpa": 15.6,
+        "max_disp_mm": 4.32,
         "limit_mpa": 16.5,
         "passed": true
       },
       "torsion": {
-        "max_von_mises_mpa": 7.7,
-        "max_disp_mm": 2.52,
+        "max_von_mises_mpa": 7.2,
+        "max_disp_mm": 2.39,
         "limit_mpa": 24.0,
         "passed": true
       },
       "pullout": {
         "max_von_mises_mpa": 4.6,
-        "max_disp_mm": 1.63,
+        "max_disp_mm": 1.49,
         "limit_mpa": 16.5,
         "passed": true
       },
       "cartwheel": {
-        "max_von_mises_mpa": 9.8,
-        "max_disp_mm": 4.11,
+        "max_von_mises_mpa": 8.7,
+        "max_disp_mm": 4.68,
         "limit_mpa": 30.0,
         "passed": true
       },
       "battery_eject": {
-        "max_von_mises_mpa": 9.8,
-        "max_disp_mm": 0.59,
+        "max_von_mises_mpa": 14.5,
+        "max_disp_mm": 0.14,
         "limit_mpa": 30.0,
         "passed": true
       },
       "modal": {
         "modes_hz": [
-          171.0,
-          224.3,
-          245.2,
-          257.4,
-          283.3,
-          293.5,
-          304.6,
-          314.0
+          121.4,
+          133.1,
+          161.1,
+          181.3,
+          184.0,
+          184.9,
+          188.6,
+          199.6
         ],
-        "first_mode_hz": 171.0,
+        "first_mode_hz": 121.4,
         "min_first_mode_hz": 120.0,
         "passed": true
       },
       "buckling": {
         "load_factors": [
-          4605784000.0,
-          8588362000.0
+          9051588000.0,
+          26680090000.0
         ],
-        "first_factor": 4605784000.0,
+        "first_factor": 9051588000.0,
         "min_factor": 2.0,
         "passed": true
       },
       "fatigue": {
-        "stress_amplitude_mpa": 1.5,
+        "stress_amplitude_mpa": 1.6,
         "endurance_limit_mpa": 10.0,
         "assumption": "cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)",
         "passed": true
@@ -88,12 +88,12 @@
       "passed": true
     },
     "score": 1.0,
-    "hover_thrust_frac": 0.12
+    "hover_thrust_frac": 0.122
   },
   "notes": "all checks pass",
   "variant": {
     "id": "v102-g101b",
-    "parent_id": "v101-g100a",
+    "parent_id": "v97-g96a",
     "generation": 101,
     "params": {
       "arm_length_mm": 150.0,
@@ -136,9 +136,20 @@
       "camera_aperture_dia_mm": 10.0,
       "fillet_radius_mm": 4.0,
       "prop_dia_mm": 127.0,
-      "prop_clearance_mm": 10.0
+      "prop_clearance_mm": 10.0,
+      "ring_roof_cut_z_mm": 36.5,
+      "ring_carrier_cover_mm": 28.0,
+      "bezel_surround_mm": 3.2,
+      "cradle_foot_rail_mm": 2.0,
+      "deck_arch_half_span_mm": 8.0,
+      "cradle_post_depth_mm": 4.0,
+      "structural_gauge_mm": 1.24,
+      "cradle_ring_web_mm": 1.24,
+      "tray_rib_pitch_mm": 12.0,
+      "arm_box_depth_scale": 0.97,
+      "arm_box_width_scale": 0.98
     },
-    "git_commit": "795768e17ae72e91bb66d0bfa87e7a4a43dcea20"
+    "git_commit": "b06b60c11c42506486515786f18b7653117dc2cd"
   },
   "score": 1.0,
   "evaluator": [
@@ -155,7 +166,7 @@
     {
       "name": "overhang",
       "passed": true,
-      "detail": "0.54% of surface overhangs > 45.0deg (745 mm^2)"
+      "detail": "1.03% of surface overhangs > 45.0deg (1839 mm^2)"
     },
     {
       "name": "wall_thickness",
@@ -170,12 +181,12 @@
     {
       "name": "containment",
       "passed": true,
-      "detail": "all components inside frame envelope + 2mm clearance, none embedded"
+      "detail": "all components enclosed by shell, supported, none embedded (R4)"
     },
     {
       "name": "camera_fov",
       "passed": true,
-      "detail": "2 cameras: lens forward, FOV pyramid clear"
+      "detail": "2 cameras + pad_camera: FOV clear"
     },
     {
       "name": "imu_lever_arm",
@@ -185,7 +196,7 @@
     {
       "name": "dfam",
       "passed": true,
-      "detail": "watertight=True, wall p05=1.22mm (limit 1.2), min=0.1mm, support~15.8% of part (limit 30)"
+      "detail": "watertight=True, wall p05=1.22mm (limit 1.2), min=0.1mm, support~29.5% of part (limit 30)"
     },
     {
       "name": "hover_margin",
@@ -195,8 +206,8 @@
     {
       "name": "fea",
       "passed": true,
-      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 5.1, \"max_disp_mm\": 1.61, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 15.4, \"max_disp_mm\": 4.82, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 7.7, \"max_disp_mm\": 2.52, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.6, \"max_disp_mm\": 1.63, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 9.8, \"max_disp_mm\": 4.11, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 9.8, \"max_disp_mm\": 0.59, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [171.0, 224.3, 245.2, 257.4, 283.3, 293.5, 304.6, 314.0], \"first_mode_hz\": 171.0, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [4605784000.0, 8588362000.0], \"first_factor\": 4605784000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.5, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 5.2, \"max_disp_mm\": 1.44, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 15.6, \"max_disp_mm\": 4.32, \"limit_mpa\": 16.5, \"passed\": true}, \"torsion\": {\"max_von_mises_mpa\": 7.2, \"max_disp_mm\": 2.39, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 4.6, \"max_disp_mm\": 1.49, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 8.7, \"max_disp_mm\": 4.68, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 14.5, \"max_disp_mm\": 0.14, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [121.4, 133.1, 161.1, 181.3, 184.0, 184.9, 188.6, 199.6], \"first_mode_hz\": 121.4, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [9051588000.0, 26680090000.0], \"first_factor\": 9051588000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.6, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": true}"
     }
   ],
-  "created_at": "2026-09-06T14:34:27.161478+00:00"
+  "created_at": "2026-09-09T12:51:59.363850+00:00"
 }
