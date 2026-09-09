@@ -320,3 +320,10 @@ keeping is not (hold-speed oscillation in the student under est noise).
 - Hover still oscillates 0-31% across iters and never holds; teacher GT hover improved under the hover-heavy data (0.75-0.88 mid-run) so the data is there - the student is not absorbing it. Hover-heavy mix alone does not crack hover.
 - Best checkpoint: /workspace/bc_est_dag_v6_best.json (iter21).
 - Launch incidents (fixed pre-flight): 25-dim warm-start must bypass warm_start_25() (19-dim only); /proc-kill idiom bug left a duplicate racing the first launch - relaunched clean.
+
+## Marker range 5m -> 8m + DAgger v7 (2026-09-08 ~20:05-20:40 PDT): mechanism confirmed, training still flat
+- Root cause found by marker-visibility probe (results/marker_vis_probe.*): hover goals sit 0.5-6.9m altitude; 5m cap dead by design in 3/16 cells; marker valid 49.5% overall, 96.7% steady vs 45.2% correcting, 78% of invalidity range-out. eval_estimated.py cap raised to 8m (a6a48db).
+- Teacher gate at 8m (results + /workspace/est_teacher_marker8m.log): scores FLAT (goto 100 / hover 50.0 / land 62.5) but hover est pos_err 1.451 -> 0.679, marker fixes 3.9x. Teacher hover failures are behavioral, not estimation.
+- Probe at 8m: valid 49.5 -> 52.4% overall, corrections 45.2 -> 48.7%; residual invalidity is wander beyond any cap (p99 range 16.7m).
+- DAgger v7 (v6 recipe, hover-heavy, from v6 best, 25 iters): best_mean=0.521 = the warm start itself (iter0 87.5/25.0/43.8; hover 12.5->25.0 from the sensor change alone). No iteration beat it under floors. BUT hover EST reached 56.2% at iter25 (v6 max was 31.2%) with goto collapsing to 62.5 (floors_ok=False) - the BC recipe oscillates between phases instead of converging; hover is now trainable signal, the aggregator is the limiter.
+- Best checkpoint: /workspace/bc_est_dag_v7_best.json (= v6 best numbers; training could not improve on it).
