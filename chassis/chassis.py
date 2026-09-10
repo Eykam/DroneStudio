@@ -1,10 +1,9 @@
-"""v121-g120b: flange-biased closed arms and rib-supported belly skins.
+"""v122-g121b: early straight arm chines with deeper root flanges.
 
-Independently re-form the arm flanges and lower chines to preserve lateral
-inertia while recovering root bending depth. Full 3D normal wall offsets,
+Start the direct free-wing chine earlier, beyond the complete optical
+reveal; re-form the arm flanges to retain lateral inertia and root depth. Full 3D normal wall offsets,
 fixed carrier crossings and original motor diaphragms retain their load
-paths; shallow rib-supported payload skins recover the added root mass.
-The enclosed shell, pinned sensor interfaces and seating datums remain.
+paths; the enclosed fuselage and payload seats remain integrated.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -124,6 +123,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 -bypass-window_bypass-root_bypass+short_chine)
 
     def sweep_center(x):
+        # v122: start the straight, tapered wing at the first free station
+        # beyond the carrier and its aperture reveal. The saddle stays fixed;
+        # the earlier direct chine removes sweep length and normal-offset
+        # area while the deeper root transfers its load into the hub.
         # Once past the complete carrier saddle, the old outer optical
         # detour is unnecessary for a proximity-monitor station. Connect
         # its outer shoulder to the motor approach with one direct chine.
@@ -131,10 +134,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # avoiding the extra kink caused by a larger local sine correction.
         # The root and motor axis keep their original exact coordinates.
         center=sweep_datum(x)
-        if 76.0 < x < 132.0:
-            t=(x-76.0)/56.0
-            chord=(1.0-t)*sweep_datum(76.0)+t*sweep_datum(132.0)
-            blend=max(0.0,min(1.0,(x-76.0)/5.0,(132.0-x)/6.0))
+        if 74.5 < x < 132.0:
+            t=(x-74.5)/57.5
+            chord=(1.0-t)*sweep_datum(74.5)+t*sweep_datum(132.0)
+            blend=max(0.0,min(1.0,(x-74.5)/5.0,(132.0-x)/6.0))
             center+=(chord-center)*blend
         return center
 
@@ -392,6 +395,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
         for blend, depth, breadth, bed, ridge, lower, web in (
                 (hub, 0.010000000, -0.008056680, -0.149989750, 0.171019501, 0.001718026, 0.000000000),
                 (wing, -0.011024899, 0.023959210, 0.043693606, 0.036100808, -0.006935741, 0.000000000)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
+        # Form a deep closed root and a compact, broad-shouldered wing.
+        # Separate the upper flange, lower chine and first-layer keel so
+        # each carries bending with less developed skin. The bed rails
+        # stay continuous and both roofs close on a >45-degree pitch.
+        # True adjacent-span normal offsets below retain the full gauge.
+        # Preserve the complete fixed sensor saddle and motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend, depth, breadth, bed, ridge, lower, web in (
+                (hub, 0.010000000, 0.000878357, 0.018879946, -0.080131619, -0.000249188, 0.000000000),
+                (wing, -0.010991290, 0.034478194, 0.081025883, 0.011316185, -0.017697678, 0.000000000)):
             height*=1.0+depth*blend
             shoulder_half*=1.0+breadth*blend
             keel+=bed*blend
