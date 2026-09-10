@@ -1,9 +1,9 @@
-"""v113-g112a: low compound camera brows and a vaulted nose monocoque.
+"""v114-g113a: low split cockpit with deep closed waist longerons.
 
-Additional inward roof folds flatten the stereo camera brows between
-unchanged outboard shoulders, keeping the complete fixed PCB clearance.
-Taller swept cheek vaults leave continuous bed and eave chords; the deep
-closed waist sills and all eight optical mounts retain their load paths.
+Lower inward cockpit folds follow a slightly wider service channel while
+keeping the original outer shoulders and full flight-board service volume.
+The removed high skin repays deeper, narrower enclosed waist sills that
+carry ring bending and shear inside the existing fuselage envelope.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -846,7 +846,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # farther outboard without expanding the original hull.
             inward=face_side != side
             local_pitch=1.025 if inward else crease_pitch
-            local_z=crease_z-(0.95 if inward else 0.0)
+            # Lower only the inward fold; the widened channel below keeps
+            # its normal-offset edge clear of the full CM4 service box.
+            local_z=crease_z-(1.50 if inward else 0.0)
             plane=b.Plane(origin=(0,side*crease_y,local_z),
                           z_dir=(aft_rake,face_side*local_pitch,1))
             half=plane*b.Box(800,800,600,
@@ -970,13 +972,16 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # (1.50 - 1.12 * 3.8/12) / sqrt(1 + (3.8/12)**2) = 1.092 > 1.
     # The modest inward crease shift retains the original service slot;
     # the rear board corner remains below the normally offset roof.
-    hatch=[(-107.0,-6.0),(-91.0,-9.8),(-69.0,-9.8),(-57.0,-6.0),
-           (-29.0,-6.0),(-29.0,6.0),(-57.0,6.0),(-69.0,9.8),
+    # A 12.8 mm cockpit channel follows the lowered inner folds. The
+    # original battery flare, end bridges and external hips remain;
+    # its gentler closing trajectory still grows from supported skin.
+    hatch=[(-107.0,-6.0),(-91.0,-9.8),(-69.0,-9.8),(-57.0,-6.4),
+           (-29.0,-6.4),(-29.0,6.4),(-57.0,6.4),(-69.0,9.8),
            (-91.0,9.8),(-107.0,6.0)]
     shell=shell-prism(hatch,37.2,100)
     # Continue the narrow channel to the existing forward service portal.
     # Both complete shoulder ridges and their hip-to-ring ties persist.
-    shell=shell-box(-14.0,0,37.2,30.0,12.0,100)
+    shell=shell-box(-14.0,0,37.2,30.0,12.8,100)
     shell=shell-box(28.0,0,34.0,56.0,54.6,110)
 
     # A continuous lower roof strip follows the unchanged shell line.
@@ -1091,7 +1096,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         for vent_x in (-32.0,-20.0,-8.0):
             vent_y=10.6*side
             inner_pitch=1.025
-            z=crease_z-.95-aft_rake*vent_x+inner_pitch*(abs(vent_y)-crease_y)
+            z=crease_z-1.50-aft_rake*vent_x+inner_pitch*(abs(vent_y)-crease_y)
             plane=b.Plane(origin=(vent_x,vent_y,z),
                           x_dir=(1,0,-aft_rake),
                           z_dir=(aft_rake,-side*inner_pitch,1))
@@ -1241,7 +1246,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             lean=math.copysign(1.3,waist_x)
             apex=23.5 if waist_x < 0 else 25.0
             # Relieve the flat lower chord above Z=4.5 mm. The hollow
-            # folded sill below provides an 8 mm deep load path instead;
+            # folded sill below provides a 9.0 mm deep load path instead;
             # its inward breadth resists ring twist without a heavier skin.
             # The original arch jambs and pitched crown remain connected.
             outline=[(-10.0,4.5),(10.0,4.5),(9.8+lean,13.0),
@@ -1255,14 +1260,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 for u,z in outline],close=True)
             shell=shell-b.Solid.extrude(b.Face(wire),(8*nx,8*ny,0))
             # A closed triangular sill grows inward from the first layer.
-            # Its tall outside web shares the shell; the 1.90:1 roof prints
+            # Its tall outside web shares the shell; the 2.43:1 roof prints
             # from the inner toe toward that web. True normal offsets keep
             # >=1.24 mm on the pitched roof, bed and inner return. The short
             # sill joins the continuous belly chord along its whole length;
             # open ends drain into the ventilated shell. Trimming its low-
             # moment end returns repays the retained reference skin gauge.
             g=p.structural_gauge_mm
-            breadth,depth=4.2,8.0
+            # Buy ring inertia with a 9.0 mm vertical web and a narrower
+            # inward toe. The roof remains steep and receives its exact
+            # normal offset; the sensor-facing wall and external hull stay.
+            breadth,depth=3.7,9.0
             grade=depth/breadth
             def rim_section(u,inside=False):
                 points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
