@@ -222,3 +222,133 @@ test "ground plane below" {
     const t = rayPlaneDown(ro, down, 0.05).?;
     try std.testing.expectApproxEqAbs(@as(f32, 1.95), t, 1e-5);
 }
+
+// ---------------------------------------------------------------------
+// ToF rangefinder ring (rung-2, 2026-09-09) - decided 8-sensor suite:
+// 4 cardinal nav ToF (0/90/180/270 deg) + 4 diagonal arm/prop-line
+// proximity monitors (45/135/225/315 deg). Sensor-suite decision doc:
+// diagonals are keep-and-accept arm monitors - on the real frame ~56%
+// of each diagonal cone reads arm/motor at a fixed 40-140mm baseline
+// (weighted 2:1 toward 40-100mm), ~44% is clear to the scene. The sim
+// reproduces that split so the estimator learns the diagonals as
+// proximity channels, not nav sensors.
+// Noise model (NAV_STACK.md): range-dependent sigma, dropout on grazing
+// incidence, max-range clamp. VL53L9CX class: ~4m practical ceiling.
+
+pub const TofRole = enum { nav, arm_monitor };
+
+pub const TofSensor = struct {
+    name: []const u8,
+    azimuth_deg: f32, // body yaw about +Y, 0 = nose (+X)
+    elevation_deg: f32 = 0.0, // pitch about +Z, -90 = straight down
+    offset: Vec3, // body frame, meters
+    role: TofRole = .nav,
+};
+
+pub const TofConfig = struct {
+    max_range_m: f32 = 4.0, // VL53L9CX-class clamp
+    sigma_floor_mm: f32 = 5.0,
+    sigma_rel: f32 = 0.01, // 1% of range
+    base_dropout: f32 = 0.01,
+    graze_cos: f32 = 0.3, // below this |cos(incidence)| dropout ramps up
+    arm_block_p: f32 = 0.56, // measured ~56% of diagonal cone blocked
+    // arm reading distribution: 2:1 weighted U(40,100) : U(100,140) mm
+    arm_lo_mm: f32 = 40.0,
+    arm_mid_mm: f32 = 100.0,
+    arm_hi_mm: f32 = 140.0,
+};
+
+pub const TofReading = struct {
+    name: []const u8,
+    clean_mm: u32, // noiseless ray length; 65535 = no surface within clamp
+    range_mm: u32, // noise model applied; 0 when valid=false
+    valid: bool,
+    cls: SegClass,
+};
+
+/// The decided suite (sensor-suite-coverage decision, 2026-09-09).
+pub fn defaultTofRing() [8]TofSensor {
+    const r_nav: f32 = 0.035; // frame edge
+    const r_arm: f32 = 0.040; // arm root
+    return .{
+        .{ .name = "N", .azimuth_deg = 0, .offset = Vec3.init(r_nav, 0, 0) },
+        .{ .name = "E", .azimuth_deg = 90, .offset = Vec3.init(0, 0, r_nav) },
+        .{ .name = "S", .azimuth_deg = 180, .offset = Vec3.init(-r_nav, 0, 0) },
+        .{ .name = "W", .azimuth_deg = 270, .offset = Vec3.init(0, 0, -r_nav) },
+        .{ .name = "NE", .azimuth_deg = 45, .offset = Vec3.init(r_arm * 0.7071, 0, r_arm * 0.7071), .role = .arm_monitor },
+        .{ .name = "SE", .azimuth_deg = 135, .offset = Vec3.init(-r_arm * 0.7071, 0, r_arm * 0.7071), .role = .arm_monitor },
+        .{ .name = "SW", .azimuth_deg = 225, .offset = Vec3.init(-r_arm * 0.7071, 0, -r_arm * 0.7071), .role = .arm_monitor },
+        .{ .name = "NW", .azimuth_deg = 315, .offset = Vec3.init(r_arm * 0.7071, 0, -r_arm * 0.7071), .role = .arm_monitor },
+    };
+}
+
+/// Read one ToF sensor against the analytic scene.
+/// rng: caller-owned seeded PRNG (deterministic per episode+frame).
+pub fn readTof(
+    scene: RasterScene,
+    s: TofSensor,
+    body_pos: Vec3,
+    body_quat: Quaternion,
+    rng: std.Random,
+    cfg: TofConfig,
+) TofReading {
+    const yaw_q = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), s.azimuth_deg);
+    const pitch_q = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), s.elevation_deg);
+    const q = body_quat.multiply(yaw_q).multiply(pitch_q);
+    const ro = body_pos.add(Vec3.rotate_by_quaternion(s.offset, body_quat));
+    const rd = Vec3.rotate_by_quaternion(Vec3.init(1.0, 0, 0), q).normalize();
+    const hit = castRay(scene, ro, rd);
+
+    var clean_mm: f32 = 65535.0;
+    var cls: SegClass = .sky;
+    var grazing = false;
+    if (!std.math.isInf(hit.t)) {
+        if (hit.t <= cfg.max_range_m) {
+            clean_mm = hit.t * 1000.0;
+            cls = hit.class;
+            grazing = @abs(rd.dot(hit.n)) < cfg.graze_cos;
+        } else {
+            cls = hit.class; // surface exists but beyond clamp
+        }
+    }
+
+    // arm/prop-line self-occupancy on diagonal monitors: the nearer of
+    // the frame baseline draw and any scene surface wins (photon race).
+    if (s.role == .arm_monitor and rng.float(f32) < cfg.arm_block_p) {
+        const u = rng.float(f32);
+        const arm_mm = if (rng.float(f32) < 0.6667)
+            cfg.arm_lo_mm + u * (cfg.arm_mid_mm - cfg.arm_lo_mm)
+        else
+            cfg.arm_mid_mm + u * (cfg.arm_hi_mm - cfg.arm_mid_mm);
+        if (arm_mm < clean_mm) {
+            clean_mm = arm_mm;
+            cls = .obstacle;
+            grazing = false; // arm face is near-normal to the boresight
+        }
+    }
+
+    var out: TofReading = .{
+        .name = s.name,
+        .clean_mm = @intFromFloat(@min(clean_mm, 65535.0)),
+        .range_mm = 0,
+        .valid = false,
+        .cls = cls,
+    };
+    if (clean_mm > 65000.0) return out; // no surface within clamp
+
+    // dropout: base rate + grazing-incidence ramp (arm reads exempt)
+    var p_drop = cfg.base_dropout;
+    if (grazing) {
+        const c = @abs(rd.dot(hit.n));
+        p_drop += (1.0 - c / cfg.graze_cos) * (1.0 - cfg.base_dropout);
+    }
+    if (rng.float(f32) < p_drop) return out;
+
+    // range-dependent sigma, Gaussian draw, clamp to physical range
+    const sigma = @max(cfg.sigma_floor_mm, cfg.sigma_rel * clean_mm);
+    var noisy = clean_mm + rng.floatNorm(f32) * sigma;
+    noisy = @max(10.0, @min(noisy, cfg.max_range_m * 1000.0));
+    out.range_mm = @intFromFloat(noisy);
+    out.valid = true;
+    return out;
+}

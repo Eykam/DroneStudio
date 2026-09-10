@@ -187,6 +187,7 @@ const World = struct {
     filtered_rates: [3]f32 = .{ 0, 0, 0 },
     filtered_thrust: f32 = 0.0,
     rng: std.Random.Xoshiro256,
+    tof_rng: std.Random.Xoshiro256 = undefined, // separate stream: ToF noise must not perturb dynamics rng
     scene: Scene = undefined,
     steps: u32 = 0,
     prev_dist: f32 = 0,
@@ -290,6 +291,7 @@ const World = struct {
     fn reset(self: *World, scene: Scene, seed: u64) void {
         self.scene = scene;
         self.rng = std.Random.Xoshiro256.init(seed);
+        self.tof_rng = std.Random.Xoshiro256.init(seed ^ 0x70f0_f0f0_5eed_5eed);
         self.rate_ctrl.reset();
         self.filtered_rates = .{ 0, 0, 0 };
         self.filtered_thrust = 0;
@@ -1192,6 +1194,48 @@ pub fn main() !void {
             alloc.free(depth);
             alloc.free(segb);
             alloc.free(rgbb);
+        } else if (std.mem.eql(u8, cmd, "tof")) {
+            // Rung-2 ToF ring (vision_raster.zig readTof): the decided
+            // 8-sensor suite - 4 cardinal nav + 4 diagonal arm/proximity
+            // monitors. Returns clean + noise-modeled ranges per sensor.
+            // Optional JSON: "seed" (u64) re-seeds the ToF noise stream;
+            // "max_range_m" overrides the 4.0m VL53L9CX-class clamp.
+            if (root.object.get("seed")) |s| {
+                const sd: u64 = switch (s) {
+                    .integer => |n| @intCast(n),
+                    .float => |f| @intFromFloat(f),
+                    else => 0,
+                };
+                world.tof_rng = std.Random.Xoshiro256.init(sd);
+            }
+            var tcfg = VR.TofConfig{};
+            tcfg.max_range_m = f32FromJson(root.object.get("max_range_m") orelse .null, tcfg.max_range_m);
+            const robst_t = try alloc.alloc(VR.RasterObstacle, world.scene.obstacles.len);
+            for (world.scene.obstacles, 0..) |ob, i| robst_t[i] = .{ .center = ob.center, .radius = ob.radius };
+            const rscene_t = VR.RasterScene{
+                .ground_y = GROUND_Y,
+                .obstacles = robst_t,
+                .goal = world.scene.goal,
+                .goal_radius = world.scene.success_radius,
+            };
+            const ring = VR.defaultTofRing();
+            const bp = world.bodyPos();
+            const bq = world.bodyQuat();
+            try stdout.writeAll("{\"tof\":[");
+            for (ring, 0..) |sen, i| {
+                const r = VR.readTof(rscene_t, sen, bp, bq, world.tof_rng.random(), tcfg);
+                try stdout.print("{s}{{\"name\":\"{s}\",\"clean_mm\":{d},\"range_mm\":{d},\"valid\":{},\"cls\":{d}}}", .{
+                    if (i > 0) "," else "",
+                    r.name,
+                    r.clean_mm,
+                    r.range_mm,
+                    r.valid,
+                    @intFromEnum(r.cls),
+                });
+            }
+            try stdout.writeAll("]}\n");
+            try stdout_buf.flush();
+            alloc.free(robst_t);
         } else if (std.mem.eql(u8, cmd, "fast_telemetry")) {
             const on_v = root.object.get("on") orelse continue;
             world.fast_telemetry = (on_v == .bool and on_v.bool);
