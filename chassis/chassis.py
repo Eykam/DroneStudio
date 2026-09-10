@@ -1,10 +1,9 @@
-"""v116-g115b: deeper hub haunches and lower closed outer wings.
+"""v117-g116b: broad-flange low-profile closed arms.
 
-Raise the enclosed hub compression flange and redistribute the free-span
-skin into lower crowns and shorter lower chines with full-width shoulders.
-The original motor pads retain their collar load paths, while narrower
-internal carrier floor ties repay the added root depth. The shell, pinned
-sensor seats and complete optical cuts remain coupled.
+Re-form the hub and outboard wing independently, using wider bed flanges
+and shorter neutral-axis facets to reduce skin area with higher lateral
+section inertia. Full-width shoulders carry cartwheel loads; the shell,
+carrier service crossings and fixed motor diaphragms retain their datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -344,6 +343,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*resection
             straight=keel+(shoulder_half-keel)*chine/shoulder
             half+=(straight-half)*web*resection
+        # A low, broad-shouldered closed wing carries lateral impact
+        # through both flanges. Re-form the lower chines into shorter,
+        # steeper facets and keep full-width upper shoulders, shedding
+        # side skin near the neutral axis without thinning it. The root
+        # and outboard wing use independent folds; the complete sensor
+        # crossing and terminal motor diaphragm keep their old sections.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend, depth, ridge, bed, lower, web in (
+                (hub, -0.004718749, -0.071065162, -0.100000000, -0.046469141, 0.000000000),
+                (wing, -0.036848192, -0.010440423, 0.167364885, -0.096725323, 0.000000000)):
+            height*=1.0+depth*blend
+            crown+=ridge*blend
+            keel+=bed*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
