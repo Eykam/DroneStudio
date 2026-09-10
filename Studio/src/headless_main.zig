@@ -181,6 +181,7 @@ const World = struct {
     hil_seq: u32 = 0,
     hil_last_ns: i128 = 0,
     hil_mutex: std.Thread.Mutex = .{},
+    hil_perm: [4]usize = .{ 0, 1, 2, 3 }, // FC motor index -> sim motor index
 
     world: bullet.CbtWorldHandle,
     body: bullet.CbtBodyHandle,
@@ -820,7 +821,7 @@ fn hilListenThread(world: *World, sock: std.posix.socket_t) void {
         var t: [4]f32 = undefined;
         inline for (0..4) |i| {
             const frac = std.math.clamp(@as(f32, @floatFromInt(thr[i] -| 48)) / 1999.0, 0.0, 1.0);
-            t[i] = frac * maxt;
+            t[world.hil_perm[i]] = frac * maxt;
         }
         world.hil_mutex.lock();
         world.hil_t = t;
@@ -1337,6 +1338,11 @@ pub fn main() !void {
             try stdout_buf.flush();
         } else if (std.mem.eql(u8, cmd, "hil_listen")) {
             const port: u16 = @intFromFloat(f32FromJson(root.object.get("port") orelse .null, 5100));
+            if (root.object.get("perm")) |pa| {
+                if (pa == .array and pa.array.items.len == 4) {
+                    for (pa.array.items, 0..) |v, i| world.hil_perm[i] = @intFromFloat(f32FromJson(v, @floatFromInt(i)));
+                }
+            }
             const addr = try std.net.Address.parseIp("0.0.0.0", port);
             const sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
             try std.posix.bind(sock, &addr.any, addr.getOsSockLen());
