@@ -1,10 +1,11 @@
-"""v127-g126a: low twin-ridge camera brows in an integrated folded shell.
+"""v129-g128a: tucked diagonal optical facets in a compact folded monocoque.
 
-Replace each tall camera brow with two lower structural folds that follow
-the fixed PCB corners, and lower the six cockpit creases. The ridges brace
-the normal-gauge skin while removing empty nose headroom; the existing
-hips bound every new surface. Deep ring sills, closed arms, internal
-sensor seats, service openings and placement-driven optics are retained.
+Pull the four diagonal sensor planes 1.2 mm inward, shorten their recessed
+window returns, and lower the shoulder eaves. True normal shell offsets
+and placement-driven optical reveals retain the full skin and clear cone.
+All eight carriers keep their bed-founded internal seats; the cockpit folds
+move down within
+the unchanged hips, retaining the deep waist sills and closed arm roots.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -819,6 +820,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
             tuck=3.10 if abs(nx) < 0.1 else 3.50
         if not protected_facet and -122.0 < mid_x < -65.0:
             tuck=4.45
+        # Move the diagonal shell plane toward its fixed internal carrier.
+        # Seats and bearings stay pinned; the window below is recomputed
+        # at the shorter optical standoff, retaining its complete cone.
+        # Rebuild the common hull and all inward-only returns from this
+        # smaller perimeter, so no pod, apron or outer fairing is added.
+        if abs(abs(nx)-abs(ny)) < 1e-6:
+            tuck=1.20
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
     compact=[]
     for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
@@ -844,7 +852,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # crown limits. Its inner face clears the complete PCBA box,
             # removing the broad flat underside left by the service cut.
             pitch=slope+(0.150 if x0 == -90 and nx < -0.01 and abs(ny) > 0.1 else 0.0)
-            pl=b.Plane(origin=(nx*c,ny*c,28.0),z_dir=(pitch*nx,pitch*ny,1))
+            # Lower the structural skirt with the tucked ring. Its normally
+            # offset pitched shoulders grow from the bed-founded wall;
+            # the placement-driven carrier covers and window lands stay
+            # clipped to this common hull instead of gaining outer stock.
+            pl=b.Plane(origin=(nx*c,ny*c,27.4),z_dir=(pitch*nx,pitch*ny,1))
             half=pl*b.Box(600,600,500,align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             outer=outer & half
             inner=inner & half.moved(b.Pos(0,0,-wall*1.005*math.sqrt(1+pitch*pitch)))
@@ -985,7 +997,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # every face keeps a >45-degree pitch and its full 3D normal gauge.
     # The dorsal channel and all ring/optical hips retain their datums.
     crease_pitch=1.025
-    crease_centers=((9.2,66.25),(16.2,66.25),(23.2,66.25))
+    crease_centers=((9.2,66.05),(16.2,66.05),(23.2,66.05))
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
         for crease_y,local_crease_z in crease_centers:
@@ -1338,14 +1350,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
             f=(ax*uy-ay*ux)/den
             if r>0 and -1e-8<=f<=1+1e-8: reaches.append(r)
         outer_r=min(reaches)
-        plane_r=outer_r-2.5
+        # A shallow inset uses the shell as the outer window return.
+        # Shorten diagonal recesses with the tucked facets: the backing
+        # land stays outside the conservative carrier envelope and keeps
+        # the full shell gauge. The 0.75 mm IR sheet still sits recessed;
+        # the clear opening/reveal uses its actual new optical depth.
+        recess=1.4 if abs(abs(ux)-abs(uy))<1e-6 else 2.5
+        backing_depth=recess+wall
+        plane_r=outer_r-recess
         standoff=plane_r-1.87
         window_w=21.1+1.24*(standoff-9.2)
         window_h=12.3+0.90*(standoff-9.2)
         oz=tof_poses[key]['origin_m'][2]*1000
         # Backing ring is wholly inboard of the unmodified shell line.
-        ring=local(box(outer_r-1.86,-1.25,oz-window_h/2-p.bezel_surround_mm,
-                       3.72,window_w+2*p.bezel_surround_mm,
+        ring=local(box(outer_r-backing_depth/2,-1.25,oz-window_h/2-p.bezel_surround_mm,
+                       backing_depth,window_w+2*p.bezel_surround_mm,
                        window_h+2*p.bezel_surround_mm)) & outer_hull
         # A rear sheet land and four gauge-thickness returns share the
         # shell wall, replacing the filled outer half of the backing block.
@@ -1355,8 +1374,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
         low_z=oz-window_h/2-p.bezel_surround_mm+p.structural_gauge_mm
         high_z=oz+window_h/2+p.bezel_surround_mm-p.structural_gauge_mm*math.sqrt(1+1.12**2)
         w=b.Wire.make_polygon([(plane_r,-1.25-half_t,low_z),
-            (plane_r+2.8,-1.25-half_t,low_z),
-            (plane_r+2.8,-1.25-half_t,high_z-1.12*2.8),
+            (plane_r+recess+.3,-1.25-half_t,low_z),
+            (plane_r+recess+.3,-1.25-half_t,high_z-1.12*(recess+.3)),
             (plane_r,-1.25-half_t,high_z)],close=True)
         relief=local(b.Solid.extrude(b.Face(w),(0,2*half_t,0)))
         ring=ring-relief
@@ -1371,8 +1390,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 (r,-1.25-w/2,oz+h/2)],close=True)
         reveal=local(b.Solid.make_loft([
             window_wire(plane_r,window_w+1.6,window_h+1.6),
-            window_wire(outer_r+3,window_w+1.6+1.24*5.5,
-                        window_h+1.6+2.24*5.5)],ruled=True))
+            window_wire(outer_r+3,window_w+1.6+1.24*(recess+3.0),
+                        window_h+1.6+2.24*(recess+3.0))],ruled=True))
         # The interior optical corridor clears the complete growing zone.
         # The inboard half-shelf and M2 post remain behind the module face.
         corridor=local(b.Solid.make_loft([
