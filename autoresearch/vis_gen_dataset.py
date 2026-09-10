@@ -68,6 +68,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--scene-offset", type=int, default=0)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--visual", choices=["dr", "tex"], default="dr")
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     h = Headless()
@@ -89,7 +90,7 @@ def main():
             [env.obs_centers, env.obs_radii[:, None]], axis=1) \
             if len(env.obs_centers) else np.zeros((0, 4))
         ext = float(env.dist.scene_extent)
-        visuals[scene_id] = sample_visual(scene_id)  # seeded per scene: split-safe
+        visuals[scene_id] = sample_visual(scene_id, tex=(a.visual == "tex"))  # seeded per scene: split-safe
         vis = visuals[scene_id]
         for pi in range(a.poses_per_scene):
             pos = None
