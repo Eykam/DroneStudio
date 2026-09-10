@@ -51,7 +51,7 @@ print("FC armed", flush=True)
 send("UpdateBaseThrottle 11.1")  # hover frac = 0.4959*9.81/(4*11.0) = 0.1106
 send("SetOrientation 1.0 0.0 0.0 0.0")  # level target (identity, FC frame)
 # gains for radian-error authority: stock 0.5/rad has ~zero torque authority
-for axis, kp, ki, kd in (("Roll", 6, 0.05, 1.0), ("Pitch", 6, 0.05, 1.0), ("Yaw", 2, 0.0, 0.5)):  # 100Hz feed: finer euler steps, ~10ms loop delay
+for axis, kp, ki, kd in (("Roll", 3, 0.05, 2.0), ("Pitch", 3, 0.05, 2.0), ("Yaw", 1.5, 0.0, 0.8)):  # phase-margin target: low wn, D-heavy lead
     send(f"UpdatePidParams {axis} {kp} {ki} {kd}")
 print("orientation control on; 6s hover run", flush=True)
 
@@ -62,7 +62,14 @@ while time.time() - t0 < 6.0:
     log.append(st)
     q = st["quat"]  # sim data order [x,y,z,w]
     q_sim = (q[3], q[0], q[1], q[2])  # (w,x,y,z)
-    q_fc = qmul(C, qmul(q_sim, C_INV))
+    # delay compensation: extrapolate attitude by loop delay using body omega
+    om = st["omega"]
+    DT = 0.012
+    dq = (1.0, om[0]*DT/2, om[1]*DT/2, om[2]*DT/2)
+    n = math.sqrt(sum(v*v for v in dq))
+    dq = tuple(v/n for v in dq)
+    q_pred = qmul(q_sim, dq)
+    q_fc = qmul(C, qmul(q_pred, C_INV))
     s.sendto(f"UpdateOrientation {q_fc[0]} {q_fc[1]} {q_fc[2]} {q_fc[3]}".encode(), FC)
     h.call({"cmd": "hil_step", "ticks": 5})
     if time.time() - last_hb > 0.5:
