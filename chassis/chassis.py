@@ -1,11 +1,9 @@
-"""v124-g123a: low corrugated cockpit with deeper closed perimeter sills.
+"""v126-g125a: split battery shoulders and deep compact perimeter sills.
 
-Two supported creases per cockpit shoulder follow the board envelope,
-replacing the tall single ridge with a lower structural roof. Pointed
-normal-cut vents preserve continuous crease chords; deeper, shorter hollow
-waist sills transmit ring bending inside the unchanged optical perimeter.
-Trim excess carrier screw-post stock while retaining all screw datums,
-PCB seating edges and the full printable mounting-wall allowance.
+Paired inward roof folds close the empty headroom beside the battery
+service channel. Pointed, normal-cut vents retain continuous shoulder
+chords; deeper, shorter inward sills carry the ring with less stock.
+The fixed sensor seats, optical cuts and enclosed CM4 deck are preserved.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -889,6 +887,27 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 roof_outer = roof_outer & half
                 drop = wall*1.005*math.sqrt(1+battery_pitch**2+(rake/sx)**2)
                 roof_inner = roof_inner & half.moved(b.Pos(0,0,-drop))
+        # Split the battery crown into two close-wrapped shoulders.
+        # Their rising transverse faces frame the service opening; the
+        # original outer hip is an envelope limit. At the rear battery
+        # corner the inner face clears the 35.5 mm pack and its service
+        # box. True normal offsets include the longitudinal rake.
+        if ridge_x == -104.0 and rake > 0:
+            paired_o=[]; paired_i=[]
+            for shoulder_side in (-1,1):
+                po=box(0,0,-.2,600,600,200)
+                pi=box(0,0,-.2,600,600,200)
+                for face_side in (-1,1):
+                    plane=b.Plane(origin=(ridge_x*sx,shoulder_side*14.0,41.65),
+                        z_dir=(-rake/sx,face_side*1.025,1))
+                    half=plane*b.Box(800,800,600,
+                        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                    po=po & half
+                    drop=wall*1.005*math.sqrt(1+1.025**2+(rake/sx)**2)
+                    pi=pi & half.moved(b.Pos(0,0,-drop))
+                paired_o.append(po);paired_i.append(pi)
+            roof_outer=roof_outer & (paired_o[0]+paired_o[1])
+            roof_inner=roof_inner & (paired_i[0]+paired_i[1])
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
     roof_outer=roof_outers[0];roof_inner=roof_inners[0]
     for ro,ri in zip(roof_outers[1:],roof_inners[1:]):
@@ -958,17 +977,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.005*math.sqrt(1+cockpit_pitch**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
-    # Four low roof creases close-wrap the flight board. The outboard
-    # ridge stands 1.2 mm above the inner ridge: its normal-offset roof
-    # clears the complete rear PCBA service corner by 0.24 mm. Their union
-    # makes two connected pitched folds on either side of the service
-    # channel. Both faces rise at >45 degrees, while the retained aft
-    # hips connect every fold to the bed-founded shell. The original
-    # shoulders still cap this inward-only change at the board corners.
-    # Normal offsets include both transverse pitch and longitudinal rake.
+    # Three compact folds per shoulder replace the high paired cockpit
+    # ridges. Their tighter pitch closes unused headroom over the CM4,
+    # while six longitudinal creases brace the thin structural roof.
+    # At the aft Y=27 service corner the inner skin remains above 59.6;
+    # every face keeps a >45-degree pitch and its full 3D normal gauge.
+    # The dorsal channel and all ring/optical hips retain their datums.
     crease_pitch=1.025
-    crease_z=68.4
-    crease_centers=((10.0,68.4),(20.0,69.6))
+    crease_centers=((9.2,66.45),(16.2,66.45),(23.2,66.45))
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
         for crease_y,local_crease_z in crease_centers:
@@ -1107,10 +1123,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # A 12.8 mm cockpit channel follows the lowered inner folds. The
     # original battery flare, end bridges and external hips remain;
     # its gentler closing trajectory still grows from supported skin.
-    hatch=[(-107.0,-6.0),(-91.0,-9.8),(-69.0,-9.8),(-57.0,-6.4),
-           (-29.0,-6.4),(-29.0,6.4),(-57.0,6.4),(-69.0,9.8),
-           (-91.0,9.8),(-107.0,6.0)]
-    shell=shell-prism(hatch,37.2,100)
+    hatch=[(-107.0,-6.0),(-91.0,-10.5),(-69.0,-10.5),(-57.0,-6.4),
+           (-29.0,-6.4),(-29.0,6.4),(-57.0,6.4),(-69.0,10.5),
+           (-91.0,10.5),(-107.0,6.0)]
+    # Cut the service channel through the shell at every roof height.
+    # The folded battery shoulders can now lie below the former Z=37.2
+    # start: a partial-depth cut would leave a detached roof tongue.
+    # The tray and all seats are separate bed-founded features below.
+    shell=shell-prism(hatch,0,150)
     # Continue the narrow channel to the existing forward service portal.
     # Both complete shoulder ridges and their hip-to-ring ties persist.
     shell=shell-box(-14.0,0,37.2,30.0,12.8,100)
@@ -1200,16 +1220,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
     aft_shoulder_tool=box(-88.0*sx,0,21.5,42.0*sx,250,110)-protected
     shell=shell-aft_shoulder_tool
 
-    # Each new roof facet keeps continuous ridge/valley chords and
-    # short pointed vents cut on its own normal. The 1.6 mm plan lands
-    # between rows exceed the wall floor; the 2.4 mm maximum slot width
-    # permits short bridges between the continuous 2.0 mm transverse webs.
+    # Each roof facet keeps continuous ridge/valley chords and pointed
+    # vents cut on its own normal. The innermost vent stops 0.95 mm
+    # from the service-channel edge, leaving 1.36 mm along the inclined
+    # skin. Paired rows leave >=1.4 mm plan lands at their valleys;
+    # transverse webs bridge at most 2.4 mm along the flight direction.
     for side in (-1,1):
         for vent_y,ridge_y,face_side,half_span in (
-                (8.1,10.0,-1,0.9),(12.5,10.0,1,1.7),
-                (17.5,20.0,-1,1.7),(23.6,20.0,1,1.7)):
+                (7.85,9.2,-1,0.5),(11.0,9.2,1,1.0),
+                (14.4,16.2,-1,1.0),(18.0,16.2,1,1.0),
+                (21.4,23.2,-1,1.0),(25.2,23.2,1,1.1)):
             for vent_x in (-43.0,-38.6,-34.2,-29.8,-25.4,-21.0,-16.6,-12.2,-7.8,-3.4):
-                z=(68.4 if ridge_y==10.0 else 69.6)-aft_rake*vent_x-crease_pitch*abs(vent_y-ridge_y)
+                z=dict(crease_centers)[ridge_y]-aft_rake*vent_x-crease_pitch*abs(vent_y-ridge_y)
                 plane=b.Plane(origin=(vent_x,side*vent_y,z),
                     x_dir=(1,0,-aft_rake),
                     z_dir=(aft_rake,side*face_side*crease_pitch,1))
@@ -1218,6 +1240,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 outline=[(0,-half_span*along),(breadth,-.2*along),
                          (breadth,.2*along),(0,half_span*along),
                          (-breadth,.2*along),(-breadth,-.2*along)]
+                wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
+                shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
+
+    # Pointed vents in the rising and falling battery shoulders.
+    # The true fold intersection lies near |Y|=13.9; both rows stay
+    # entirely on one face, leaving continuous ridge and service-edge
+    # chords. Each 2.4 mm X span bridges between printed jambs, and
+    # the normal cut preserves wall gauge at the opening returns.
+    for side in (-1,1):
+        for vent_y,half_span,face_side in ((12.1,.65,-1),(16.0,.6,1)):
+            for vent_x in (-97.0,-91.0,-85.0,-79.0):
+                rake=.08/sx
+                if face_side < 0:
+                    z=41.65+.08*(vent_x/sx+104.0)-1.025*(14.0-vent_y)
+                else:
+                    z=55.8+.08*(vent_x/sx+104.0)-1.025*vent_y
+                plane=b.Plane(origin=(vent_x,side*vent_y,z),
+                    x_dir=(1,0,rake),z_dir=(-rake,side*face_side*1.025,1))
+                length=math.sqrt(1+1.025**2)
+                outline=[(0,-half_span*length),(1.2,-.2*length),
+                         (1.2,.2*length),(0,half_span*length),
+                         (-1.2,.2*length),(-1.2,-.2*length)]
                 wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
                 shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
@@ -1374,13 +1418,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 (cx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
             shell=shell-b.Solid.extrude(b.Face(wire),(8*nx,8*ny,0))
-            # A deeper, shorter closed triangular sill grows inward
-            # from the first layer. Its 12 mm web and 3.4 mm toe give
-            # 26% more vertical section inertia with 4% less sill volume.
-            # The pitched lid receives a full normal offset; open ends
-            # drain into the shell and the exterior plane stays fixed.
+            # Short, deep inward sills take ring bending beneath the
+            # lowered cockpit. The narrower 3.0 mm toe and 14.4 mm web
+            # put material farther from the bed with less developed stock.
+            # The full normal offset and open ends keep the enclosed rib
+            # printable and drained inside the unchanged optical perimeter.
             g=p.structural_gauge_mm
-            breadth,depth=3.4,12.0
+            breadth,depth=3.0,14.4
             grade=depth/breadth
             def rim_section(u,inside=False):
                 points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
@@ -1390,8 +1434,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 return b.Wire.make_polygon([
                     (cx+tx*u+inward*nx*v,cy+ty*u+inward*ny*v,z)
                     for v,z in points],close=True)
-            rim_outer=b.Solid.make_loft([rim_section(-5.8),rim_section(5.8)],ruled=True)
-            rim_void=b.Solid.make_loft([rim_section(-6.0,True),rim_section(6.0,True)],ruled=True)
+            rim_outer=b.Solid.make_loft([rim_section(-4.7),rim_section(4.7)],ruled=True)
+            rim_void=b.Solid.make_loft([rim_section(-4.9,True),rim_section(4.9,True)],ruled=True)
             shell=shell+((rim_outer-rim_void) & outer_hull)
 
     for cut in bezel_cuts: shell=shell-cut
