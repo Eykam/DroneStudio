@@ -82,6 +82,51 @@ def load_state():
 def save_state(s):
     json.dump(s, open(STATE, "w"), indent=2)
 
+
+def _housekeeping(gen, keep_variant, attempted):
+    """Post-generation disk hygiene (parent-approved 2026-09-10):
+    - delete every artifact of this gen's non-adopted/failed candidates
+    - only the current best keeps chassis.sim.glb (snapshot + working copy);
+      historical sim.glbs regenerate from retained chassis.step (smoke-tested
+      2026-09-10: build123d import_step -> export_stl -> trimesh GLB)
+    - keep raw _fea only for the current best + 3 newest others
+    Never touches adopted bests' source/STEP/metrics/manifest/preview or git.
+    """
+    freed = [0]
+    def _rm(path):
+        try:
+            if os.path.isdir(path):
+                freed[0] += sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(path) for f in fs)
+                shutil.rmtree(path)
+            elif os.path.isfile(path):
+                freed[0] += os.path.getsize(path)
+                os.remove(path)
+            else:
+                return
+        except Exception as e:
+            print(f"[gen {gen}] housekeeping: failed to remove {path}: {e}", flush=True)
+    for v in attempted:
+        if v == keep_variant:
+            continue
+        _rm(os.path.join(HERE, "snapshots", v))
+        _rm(os.path.join(HERE, v + "_fea"))
+        for f in glob.glob(os.path.join(HERE, v + ".*")):
+            _rm(f)
+    for f in glob.glob(os.path.join(HERE, "snapshots", "*", "chassis.sim.glb")):
+        if os.path.basename(os.path.dirname(f)) != keep_variant:
+            _rm(f)
+    for f in glob.glob(os.path.join(HERE, "*.sim.glb")) + glob.glob(os.path.join(HERE, "*.sim.tmp.stl")):
+        if os.path.basename(f) != keep_variant + ".sim.glb":
+            _rm(f)
+    feas = sorted((d for d in glob.glob(os.path.join(HERE, "*_fea")) if os.path.isdir(d)),
+                  key=os.path.getmtime, reverse=True)
+    keep = set(feas[:3])
+    keep.add(os.path.join(HERE, keep_variant + "_fea"))
+    for d in feas:
+        if d not in keep:
+            _rm(d)
+    print(f"[gen {gen}] housekeeping: freed {freed[0] / 1e9:.2f} GB", flush=True)
+
 def run_generation():
     st = load_state()
     gen = st["generation"] + 1
@@ -178,6 +223,7 @@ def run_generation():
         return None
     cand_paths = {L: f"/tmp/candidates/{base}{L}.py" for L in LETTERS}
     cand_paths = {L: p for L, p in cand_paths.items() if os.path.exists(p)}
+    attempted = [base + L for L in cand_paths]
     if not cand_paths:
         print(f"[gen {gen}] codex produced no candidate files in /tmp/candidates; skipping generation", flush=True)
         return None
@@ -214,6 +260,7 @@ def run_generation():
         results[L] = {"variant": variant, "score": score, "all_pass": all_pass, "mass_g": mass}
     if not results:
         print(f"[gen {gen}] all candidates failed to evaluate; generation lost", flush=True)
+        _housekeeping(gen, st["best_variant"], attempted)
         return None
     best_all_pass = st.get("best_all_pass", False)
     best_mass = st.get("best_mass_g")
@@ -309,6 +356,7 @@ def run_generation():
     # commit candidate artifacts + adopted code state
     sh("git add -A && git -c user.name=\"Instinct Chassis Researcher\" -c user.email=\"instinct-chassis-researcher@users.noreply.github.com\" commit -q -m \"gen %d: %s (parent %s, %s) - %s\" && git push -q origin chassis" % (
         gen, tally, parent, "NEW BEST " + w["variant"] if improved else "incumbent held", wsum[:80] or "no summary"))
+    _housekeeping(gen, st["best_variant"], attempted)
     with open(ARCHIVE, "a") as f:
         f.write(json.dumps({"id": f"cad-gen-{gen}", "kind": "cad.chassis.generation", "variant": w["variant"],
                             "parent": parent, "score": w["score"], "improved": improved,
