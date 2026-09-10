@@ -1266,6 +1266,7 @@ const Server = struct {
                             std.debug.print("Updated Pitch PID: kp={d:.3} ki={d:.3} kd={d:.3}\n", .{ kp, ki, kd });
                         },
                         .Yaw => {
+                            control.yaw_pid.kp = kp;
                             control.yaw_pid.ki = ki;
                             control.yaw_pid.kd = kd;
                             control.yaw_pid.reset();
