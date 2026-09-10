@@ -1,9 +1,11 @@
-"""v123-g122a: close-wrapped cockpit and waist with deeper closed sills.
+"""v124-g123a: low corrugated cockpit with deeper closed perimeter sills.
 
-A lower transverse cockpit roof follows the CM4 service box while keeping
-the existing inner folds and narrow service channel. Contract the empty
-waist and battery flanks; deeper, narrower closed ring sills carry bending
-without thickening the skin. All optical seats remain at their fixed datums.
+Two supported creases per cockpit shoulder follow the board envelope,
+replacing the tall single ridge with a lower structural roof. Pointed
+normal-cut vents preserve continuous crease chords; deeper, shorter hollow
+waist sills transmit ring bending inside the unchanged optical perimeter.
+Trim excess carrier screw-post stock while retaining all screw datums,
+PCB seating edges and the full printable mounting-wall allowance.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -956,49 +958,36 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.005*math.sqrt(1+cockpit_pitch**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
-    # Twin inward cockpit creases replace the tall inner shoulders with
-    # a low folded crown on each side of the service channel. Their
-    # inward slopes grow from the hatch edges; outer shoulders retain the
-    # reference envelope wherever it is tighter. True 3D normal offsets
-    # retain the skin gauge across both pitches and longitudinal rake.
-    # The full rear CM4 corner stays below the original outer shoulder.
-    crease_pitch=1.12
-    # Translate each crease outward and down along its existing outer
-    # shoulder. The outboard roof remains on exactly the same plane,
-    # while the inward skin contracts toward the service channel. At the
-    # lowest aft hatch corner the normal-offset roof remains above the
-    # 59.6 mm flight-board service box; no horizontal clearance cut is
-    # used to make room under an otherwise unsupported roof.
-    # Move the ridge down its unchanged outer shoulder; its inward face
-    # follows the electronics more closely while keeping the full gauge.
-    crease_y=17.10
-    crease_z=76.428
+    # Four low roof creases close-wrap the flight board. The outboard
+    # ridge stands 1.2 mm above the inner ridge: its normal-offset roof
+    # clears the complete rear PCBA service corner by 0.24 mm. Their union
+    # makes two connected pitched folds on either side of the service
+    # channel. Both faces rise at >45 degrees, while the retained aft
+    # hips connect every fold to the bed-founded shell. The original
+    # shoulders still cap this inward-only change at the board corners.
+    # Normal offsets include both transverse pitch and longitudinal rake.
+    crease_pitch=1.025
+    crease_z=68.4
+    crease_centers=((10.0,68.4),(20.0,69.6))
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
-        co=box(0,0,-.2,600,600,200)
-        ci=box(0,0,-.2,600,600,200)
-        for face_side in (-1,1):
-            # Keep the external shoulder plane; lower only the inward
-            # fold. Its shallower, still >45-degree pitch follows the
-            # CM4 top more closely. The two faces intersect lower and
-            # farther outboard without expanding the original hull.
-            inward=face_side != side
-            local_pitch=1.025 if inward else crease_pitch
-            # Lower only the inward fold; the widened channel below keeps
-            # its normal-offset edge clear of the full CM4 service box.
-            # A lower inward fold shortens the split cockpit around the
-            # declared board; the original narrow service slot is retained.
-            local_z=crease_z-(3.00 if inward else 0.0)
-            plane=b.Plane(origin=(0,side*crease_y,local_z),
-                          z_dir=(aft_rake,face_side*local_pitch,1))
-            half=plane*b.Box(800,800,600,
-                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
-            co=co & half
-            drop=wall*1.005*math.sqrt(1+local_pitch**2+aft_rake**2)
-            ci=ci & half.moved(b.Pos(0,0,-drop))
-        creased_outer.append(co); creased_inner.append(ci)
-    outer=outer & (creased_outer[0]+creased_outer[1])
-    inner=inner & (creased_inner[0]+creased_inner[1])
+        for crease_y,local_crease_z in crease_centers:
+            co=box(0,0,-.2,600,600,200)
+            ci=box(0,0,-.2,600,600,200)
+            for face_side in (-1,1):
+                plane=b.Plane(origin=(0,side*crease_y,local_crease_z),
+                              z_dir=(aft_rake,face_side*crease_pitch,1))
+                half=plane*b.Box(800,800,600,
+                    align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                co=co & half
+                drop=wall*1.005*math.sqrt(1+crease_pitch**2+aft_rake**2)
+                ci=ci & half.moved(b.Pos(0,0,-drop))
+            creased_outer.append(co); creased_inner.append(ci)
+    folded_o=creased_outer[0]; folded_i=creased_inner[0]
+    for co,ci in zip(creased_outer[1:],creased_inner[1:]):
+        folded_o=folded_o+co; folded_i=folded_i+ci
+    outer=outer & folded_o
+    inner=inner & folded_i
 
     # Two long rising creases bring the cockpit shoulders down toward
     # the enclosed FC rather than carrying tall triangular aft cheeks.
@@ -1211,47 +1200,26 @@ def build_chassis(p: ChassisParams) -> b.Part:
     aft_shoulder_tool=box(-88.0*sx,0,21.5,42.0*sx,250,110)-protected
     shell=shell-aft_shoulder_tool
 
-    # Pointed ventilation bays turn the high cockpit shoulders into
-    # a shear lattice within the existing skin. Both longitudinal edge
-    # chords remain continuous, and broad webs separate the openings.
-    # Cut perpendicular to the aft roof plane to retain the complete
-    # normal wall gauge at the rims instead of leaving feather edges.
-    # The tips close over 6 mm of plan run with only 3.4 mm lateral
-    # advance: the 1.015:1 roof gives a >45-degree print trajectory.
-    # Only the upper shoulders are relieved; all carrier covers and
-    # lower ring load paths lie below these tools. The wider openings
-    # retain 5.2 mm webs between their 12 mm stations and continuous
-    # longitudinal chords along both canopy edges.
+    # Each new roof facet keeps continuous ridge/valley chords and
+    # short pointed vents cut on its own normal. The 1.6 mm plan lands
+    # between rows exceed the wall floor; the 2.4 mm maximum slot width
+    # permits short bridges between the continuous 2.0 mm transverse webs.
     for side in (-1,1):
-        for vent_x in (-44.0,-32.0,-20.0,-8.0):
-            vent_y=17.0*side
-            surface_z=cockpit_ridge-aft_rake*vent_x-cockpit_pitch*abs(vent_y)
-            plane=b.Plane(origin=(vent_x,vent_y,surface_z),
-                          x_dir=(1,0,-aft_rake),
-                          z_dir=(aft_rake,side*cockpit_pitch,1))
-            along=math.sqrt(1+cockpit_pitch**2)
-            outline=[(0,-9.0*along),(3.4,-3.0*along),
-                     (3.4,3.0*along),(0,9.0*along),
-                     (-3.4,3.0*along),(-3.4,-3.0*along)]
-            wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
-            shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
-
-    # Short pointed vents follow the new inward folds. Their inclined
-    # ends close at >45 degrees, while full-gauge longitudinal edge chords
-    # and transverse ties carry roof shear into the untouched outer hips.
-    for side in (-1,1):
-        for vent_x in (-32.0,-20.0,-8.0):
-            vent_y=10.6*side
-            inner_pitch=1.025
-            z=crease_z-3.00-aft_rake*vent_x+inner_pitch*(abs(vent_y)-crease_y)
-            plane=b.Plane(origin=(vent_x,vent_y,z),
-                          x_dir=(1,0,-aft_rake),
-                          z_dir=(aft_rake,-side*inner_pitch,1))
-            along=math.sqrt(1+inner_pitch**2)
-            outline=[(0,-1.8*along),(.65,-.2*along),(.65,.2*along),
-                     (0,1.8*along),(-.65,.2*along),(-.65,-.2*along)]
-            wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
-            shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
+        for vent_y,ridge_y,face_side,half_span in (
+                (8.1,10.0,-1,0.9),(12.5,10.0,1,1.7),
+                (17.5,20.0,-1,1.7),(23.6,20.0,1,1.7)):
+            for vent_x in (-43.0,-38.6,-34.2,-29.8,-25.4,-21.0,-16.6,-12.2,-7.8,-3.4):
+                z=(68.4 if ridge_y==10.0 else 69.6)-aft_rake*vent_x-crease_pitch*abs(vent_y-ridge_y)
+                plane=b.Plane(origin=(vent_x,side*vent_y,z),
+                    x_dir=(1,0,-aft_rake),
+                    z_dir=(aft_rake,side*face_side*crease_pitch,1))
+                along=math.sqrt(1+crease_pitch**2)
+                breadth=.6 if half_span < 1.0 else 1.2
+                outline=[(0,-half_span*along),(breadth,-.2*along),
+                         (breadth,.2*along),(0,half_span*along),
+                         (-breadth,.2*along),(-breadth,-.2*along)]
+                wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
+                shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
     # R2: stepped, inward-only IR-sheet bezels. The printed chassis contains
     # the bonding land; 0.75 mm dark IR-pass sheets are separate consumables.
@@ -1406,23 +1374,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 (cx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
             shell=shell-b.Solid.extrude(b.Face(wire),(8*nx,8*ny,0))
-            # A closed triangular sill grows inward from the first layer.
-            # Its tall outside web shares the shell; the 2.43:1 roof prints
-            # from the inner toe toward that web. True normal offsets keep
-            # >=1.24 mm on the pitched roof, bed and inner return. The short
-            # sill joins the continuous belly chord along its whole length;
-            # open ends drain into the ventilated shell. Trimming its low-
-            # moment end returns repays the retained reference skin gauge.
+            # A deeper, shorter closed triangular sill grows inward
+            # from the first layer. Its 12 mm web and 3.4 mm toe give
+            # 26% more vertical section inertia with 4% less sill volume.
+            # The pitched lid receives a full normal offset; open ends
+            # drain into the shell and the exterior plane stays fixed.
             g=p.structural_gauge_mm
-            # Buy ring inertia with a 9.0 mm vertical web and a narrower
-            # inward toe. The roof remains steep and receives its exact
-            # normal offset; the sensor-facing wall and external hull stay.
-            # A shorter, deeper triangular sill puts material into vertical
-            # web depth; the full-gauge pitched lid grows from its inner toe.
-            # Increase sill depth at the shell/arm reaction, retaining
-            # its outer wall datum and full normal gauge. The narrower
-            # toe reduces inward bulk while the roof remains >45 degrees.
-            breadth,depth=3.5,11.0
+            breadth,depth=3.4,12.0
             grade=depth/breadth
             def rim_section(u,inside=False):
                 points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
@@ -1432,8 +1390,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 return b.Wire.make_polygon([
                     (cx+tx*u+inward*nx*v,cy+ty*u+inward*ny*v,z)
                     for v,z in points],close=True)
-            rim_outer=b.Solid.make_loft([rim_section(-6.4),rim_section(6.4)],ruled=True)
-            rim_void=b.Solid.make_loft([rim_section(-6.6,True),rim_section(6.6,True)],ruled=True)
+            rim_outer=b.Solid.make_loft([rim_section(-5.8),rim_section(5.8)],ruled=True)
+            rim_void=b.Solid.make_loft([rim_section(-6.0,True),rim_section(6.0,True)],ruled=True)
             shell=shell+((rim_outer-rim_void) & outer_hull)
 
     for cut in bezel_cuts: shell=shell-cut
@@ -1579,8 +1537,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
             cradle=cradle+rail
         # Both mounting holes are on the same tangential mounting ear.
         # A continuous rear post connects both bosses to the floor/load path.
-        post=local(box(-3.77-p.cradle_post_depth_mm/2,8.4,z0-3.0,
-                       p.cradle_post_depth_mm,4.6,18.6))
+        # Retain the fixed screw seating face and pilots while removing
+        # unused rear/side stock. The 4.4 mm tangential breadth leaves
+        # 1.4 mm around each 1.6 mm pilot (1.2 mm at an M2 thread crest).
+        # A 3.6 mm engagement depth keeps a 1.75 mm rear spine behind
+        # the existing component notch; the PCB seat and rails persist.
+        post_depth=max(3.6,p.cradle_post_depth_mm-0.4)
+        post=local(box(-3.77-post_depth/2,8.4,z0-3.0,
+                       post_depth,4.4,18.6))
         cradle=cradle+post
         for hole_z in (z0+2.0,z0+13.0):
             # 1.6 mm pilot, >=1.2 mm surrounding PETG for M2 self-tappers.
@@ -2002,6 +1966,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
     shape_fix.SetMaxTolerance(0.001)
     shape_fix.Perform()
     body=b.Part(shape_fix.Shape()).clean()
+    # Merge microscopic coplanar returns at the carrier/spar junction.
+    # These sub-print-resolution slivers can become zero-volume solver
+    # tetrahedra after coordinate rounding. Native BRep healing preserves
+    # the parametric shell and its full gauge; no mesh or cached part is
+    # substituted, and the completed solid must still validate below.
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+    from OCP.ShapeFix import ShapeFix_FixSmallFace
+    unify=ShapeUpgrade_UnifySameDomain(body.wrapped,True,True,True)
+    unify.SetLinearTolerance(0.002)
+    unify.SetAngularTolerance(0.0001)
+    unify.Build()
+    small=ShapeFix_FixSmallFace()
+    small.Init(unify.Shape())
+    small.SetPrecision(0.002)
+    small.SetMaxTolerance(0.002)
+    small.Perform()
+    body=b.Part(small.Shape())
     if not body.is_valid or len(body.solids()) != 1:
         raise ValueError(f'Chassis must be one valid solid: valid={body.is_valid}, solids={[(round(s.volume,2),tuple(s.center())) for s in body.solids()]}')
     return b.Part(b.Part(children=body.solids()).wrapped)
