@@ -1,9 +1,9 @@
-"""v111-g110a: tucked cockpit with a deep, ventilated perimeter beam.
+"""v112-g111a: compact sensor waist with folded internal rim beams.
 
-The battery flanks tuck inward and the cockpit folds lower around the
-CM4, retaining the original outer shoulders and full PCBA clearance.
-Deeper perimeter chords carry shell reactions through the original piers;
-pointed vents lighten the mounting deck without changing bearing datums.
+The waist wraps closer to its fixed sensor carriers and the unused hood
+corners contract. Hollow inward rim folds replace broad flat lower chords,
+carrying shell reactions through bed-founded pitched sections inside the
+reference envelope. All payload, optical and motor interfaces remain fixed.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -62,7 +62,7 @@ class ChassisParams:
     prop_clearance_mm: float = 10.0     # min tip-to-tip margin between adjacent props
 
     ring_roof_cut_z_mm: float = 36.5  # continuous lower roof strip between carrier covers
-    ring_carrier_cover_mm: float = 28.0  # full cover over the fixed carrier envelope
+    ring_carrier_cover_mm: float = 26.8  # full cover over the fixed carrier envelope
     bezel_surround_mm: float = 3.2  # preserve optical aperture, recess and 0.8 mm land
     cradle_foot_rail_mm: float = 2.0  # three bed-facing radial ties replace the broad apron
     deck_arch_half_span_mm: float = 8.0  # pitched openings in the tall deck side piers
@@ -341,7 +341,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
                         delta_y = ncenter+other[j][0]-center-points[j][0]
                         delta_z = other[j][1]-points[j][1]
                         gradient = max(gradient,abs((ny*delta_y+nz*delta_z)/(nx-x)))
-                gauge = wall*max(1.035,1.01*math.sqrt(1+gradient*gradient))
+                # The folded ring supplies the extra load path. Remove
+                # excess spar allowance while retaining the complete 3D
+                # normal offset and the >=1.22 mm nominal arm skin.
+                gauge = wall*max(1.010,1.005*math.sqrt(1+gradient*gradient))
                 lines.append((ny,nz,ny*y0+nz*z0+gauge))
             inset = []
             for (ay,az,ac),(by,bz,bc) in zip(lines[-1:]+lines[:-1],lines):
@@ -551,7 +554,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # including the falling roof and the lateral centerline gradient.
         # The fixed collars are excluded from the complete tool below.
         gallery=[]
-        for x in (bridge_start+0.1,rib_end,L-center_boss_radius-0.2):
+        for x in (bridge_start,rib_end,L-center_boss_radius-0.2):
             for left,right in zip(nacelle_polygons,nacelle_polygons[1:]):
                 if x<=right[0]+1e-8:
                     t=(x-left[0])/(right[0]-left[0])
@@ -680,6 +683,17 @@ def build_chassis(p: ChassisParams) -> b.Part:
         protected_facet=nx < -0.9999 or abs(abs(nx)-abs(ny)) < 1e-6
         mid_x=(a[0]+d[0])/2
         tuck=0.0 if protected_facet else (1.95 if mid_x > 65.0 else 2.5)
+        if not protected_facet and mid_x > 65.0 and abs(nx) < .1:
+            tuck=1.45
+        # The camera cheeks retain a complete 1.22 mm wall outside the
+        # real 25 mm PCB and its 0.3 mm service clearance. The narrower
+        # waist more than repays this local clearance in plan area; the
+        # overall fuselage and complete-frame bounds never increase.
+        # Contract the cardinal waist and adjoining facets together, keeping
+        # their junctions aligned and the diagonal optical planes fixed.
+        # The bezel aperture follows the shortened optical standoff below.
+        if not protected_facet and abs(mid_x) < 44.0:
+            tuck=3.10
         if not protected_facet and -122.0 < mid_x < -65.0:
             tuck=3.65
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
@@ -979,7 +993,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # the unused square corners above the carrier's rear wiring bay.
             # Every hood is an area of the existing normally-offset skin,
             # so there are no added pods, thin edge laps or new overhangs.
-            scale=p.ring_carrier_cover_mm/28.0
+            # Keep the complete east/west shear fan at the rim: shrinking
+            # this specific junction creates an acute crash-load notch.
+            # The six other covers retain their close-wrapped perimeter.
+            scale=(1.0 if key in ('vl53l9cx_breakout#e','vl53l9cx_breakout#w')
+                   else p.ring_carrier_cover_mm/28.0)
             # Chamfer the unloaded outer shoulder corners while keeping
             # the entire PCB/connector hood and its shell-root connection.
             # These tapered panels are still the single structural shell.
@@ -1201,18 +1219,41 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # roof edges rise >1.8:1. Normal cuts retain the skin gauge.
             lean=math.copysign(1.3,waist_x)
             apex=23.5 if waist_x < 0 else 25.0
-            # The 6.5 mm lower chord deepens the shell beam at each arm
-            # reaction. Widen only the low bay center to recover skin area;
-            # the pitched crown and end piers retain their original reach.
-            # Deepen the lower ring chord, retaining the original arch
-            # jambs and pitched cap at the arm-to-shell junction. The
-            # lower cockpit and vented deck repay this reaction flange.
-            outline=[(-10.0,7.5),(10.0,7.5),(9.8+lean,13.0),
+            # Relieve the flat lower chord above Z=4.5 mm. The hollow
+            # folded sill below provides an 8 mm deep load path instead;
+            # its inward breadth resists ring twist without a heavier skin.
+            # The original arch jambs and pitched crown remain connected.
+            outline=[(-10.0,4.5),(10.0,4.5),(9.8+lean,13.0),
                      (lean,apex),(-9.8+lean,13.0)]
+            # Center the normal tool on the newly tucked facet.
+            inward=-side
+            cy+=inward*3.10*ny
+            cx=waist_x*sx+inward*3.10*nx
             wire=b.Wire.make_polygon([
-                (waist_x*sx+tx*u-4*nx,cy+ty*u-4*ny,z)
+                (cx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
             shell=shell-b.Solid.extrude(b.Face(wire),(8*nx,8*ny,0))
+            # A closed triangular sill grows inward from the first layer.
+            # Its tall outside web shares the shell; the 1.90:1 roof prints
+            # from the inner toe toward that web. True normal offsets keep
+            # >=1.24 mm on the pitched roof, bed and inner return. The short
+            # sill joins the continuous belly chord along its whole length;
+            # open ends drain into the ventilated shell. Trimming its low-
+            # moment end returns repays the retained reference skin gauge.
+            g=p.structural_gauge_mm
+            breadth,depth=4.2,8.0
+            grade=depth/breadth
+            def rim_section(u,inside=False):
+                points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
+                if inside:
+                    c=depth-g*math.sqrt(1+grade*grade)
+                    points=[(g,g),((c-g)/grade,g),(g,c-grade*g)]
+                return b.Wire.make_polygon([
+                    (cx+tx*u+inward*nx*v,cy+ty*u+inward*ny*v,z)
+                    for v,z in points],close=True)
+            rim_outer=b.Solid.make_loft([rim_section(-7.5),rim_section(7.5)],ruled=True)
+            rim_void=b.Solid.make_loft([rim_section(-7.7,True),rim_section(7.7,True)],ruled=True)
+            shell=shell+((rim_outer-rim_void) & outer_hull)
 
     for cut in bezel_cuts: shell=shell-cut
     body=body+shell
