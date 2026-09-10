@@ -175,6 +175,13 @@ fn invert4(A: [4][4]f64) [4][4]f32 {
 }
 
 const World = struct {
+    // HiL (rung-3): latest per-motor thrust from the real FC over UDP (HIL1).
+    hil_t: [4]f32 = .{ 0, 0, 0, 0 },
+    hil_active: bool = false,
+    hil_seq: u32 = 0,
+    hil_last_ns: i128 = 0,
+    hil_mutex: std.Thread.Mutex = .{},
+
     world: bullet.CbtWorldHandle,
     body: bullet.CbtBodyHandle,
     shape: bullet.CbtShapeHandle,
@@ -355,6 +362,14 @@ const World = struct {
             var t: [4]f32 = undefined;
             inline for (0..4) |i| {
                 t[i] = d.mix_inv[i][0] * cmd[0] + d.mix_inv[i][1] * cmd[1] + d.mix_inv[i][2] * cmd[2] + d.mix_inv[i][3] * cmd[3];
+            }
+            if (self.hil_active) {
+                // HiL: per-motor thrust from the real FC replaces the sim
+                // rate-PID + mixer. Downstream (ESC latency queue, motor_v2
+                // electrical, Bullet integration) unchanged.
+                self.hil_mutex.lock();
+                t = self.hil_t;
+                self.hil_mutex.unlock();
             }
             const avg = (t[0] + t[1] + t[2] + t[3]) / 4.0;
             const min_t = @max(0.1, avg * 0.1); // his dynamic minimum
@@ -785,6 +800,35 @@ const World = struct {
         return out;
     }
 };
+
+/// HiL motor-packet listener: parses 24B HIL1 packets from the real FC into
+/// per-motor thrust commands. DShot throttle 48..2047 -> fraction -> N.
+fn hilListenThread(world: *World, sock: std.posix.socket_t) void {
+    var buf: [64]u8 = undefined;
+    while (true) {
+        const n = std.posix.recvfrom(sock, &buf, 0, null, null) catch continue;
+        if (n != 24) continue;
+        if (!std.mem.eql(u8, buf[0..4], "HIL1")) continue;
+        const seq = std.mem.readInt(u32, buf[4..8], .little);
+        const thr = [4]u16{
+            std.mem.readInt(u16, buf[8..10], .little),
+            std.mem.readInt(u16, buf[10..12], .little),
+            std.mem.readInt(u16, buf[12..14], .little),
+            std.mem.readInt(u16, buf[14..16], .little),
+        };
+        const maxt = world.dyn.motor_max_thrust;
+        var t: [4]f32 = undefined;
+        inline for (0..4) |i| {
+            const frac = std.math.clamp(@as(f32, @floatFromInt(thr[i] -| 48)) / 1999.0, 0.0, 1.0);
+            t[i] = frac * maxt;
+        }
+        world.hil_mutex.lock();
+        world.hil_t = t;
+        world.hil_seq = seq;
+        world.hil_last_ns = std.time.nanoTimestamp();
+        world.hil_mutex.unlock();
+    }
+}
 
 fn writeObsReply(writer: anytype, w: *World, reward: f32, done: bool, with_info: bool) !void {
     if (w.obs_v4) {
@@ -1291,6 +1335,37 @@ pub fn main() !void {
             world.fast_telemetry = (on_v == .bool and on_v.bool);
             try stdout.print("{{\"ok\":true,\"fast_telemetry\":{}}}\n", .{world.fast_telemetry});
             try stdout_buf.flush();
+        } else if (std.mem.eql(u8, cmd, "hil_listen")) {
+            const port: u16 = @intFromFloat(f32FromJson(root.object.get("port") orelse .null, 5100));
+            const addr = try std.net.Address.parseIp("0.0.0.0", port);
+            const sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
+            try std.posix.bind(sock, &addr.any, addr.getOsSockLen());
+            world.hil_active = true;
+            _ = try std.Thread.spawn(.{}, hilListenThread, .{ world, sock });
+            try stdout.print("{s}\n", .{"{\"ok\":true,\"hil_listen\":true}"});
+            try stdout.context.flush();
+        } else if (std.mem.eql(u8, cmd, "hil_step")) {
+            // N 500Hz physics ticks applying the latest FC motor state.
+            const ticks: usize = @intFromFloat(f32FromJson(root.object.get("ticks") orelse .null, 10));
+            for (0..ticks) |_| {
+                if (world.done) break;
+                world.fastStep(.{ 0, 0, 0 }, 0);
+            }
+            world.steps += 1;
+            try writeObsReply(stdout, world, 0.0, world.done, false);
+        } else if (std.mem.eql(u8, cmd, "hil_state")) {
+            const p = world.bodyPos();
+            const q = world.bodyQuat();
+            const v = world.bodyVel();
+            const om = world.bodyOmega();
+            world.hil_mutex.lock();
+            const hseq = world.hil_seq;
+            const hage = std.time.nanoTimestamp() - world.hil_last_ns;
+            const ht = world.hil_t;
+            world.hil_mutex.unlock();
+            const mo = world.dyn.m2_omega;
+            try stdout.print("{{\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.6},{d:.6},{d:.6},{d:.6}],\"vel\":[{d:.4},{d:.4},{d:.4}],\"omega\":[{d:.4},{d:.4},{d:.4}],\"motor_omega\":[{d:.1},{d:.1},{d:.1},{d:.1}],\"hil_t\":[{d:.3},{d:.3},{d:.3},{d:.3}],\"hil_seq\":{d},\"hil_age_ms\":{d:.2}}}\n", .{ p.x(), p.y(), p.z(), q.data[0], q.data[1], q.data[2], q.data[3], v.x(), v.y(), v.z(), om.x(), om.y(), om.z(), mo[0], mo[1], mo[2], mo[3], ht[0], ht[1], ht[2], ht[3], hseq, @as(f64, @floatFromInt(hage)) / 1e6 });
+            try stdout.context.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
             const arr = act_v.array.items;
