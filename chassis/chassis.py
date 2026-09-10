@@ -1,9 +1,9 @@
-"""v112-g111a: compact sensor waist with folded internal rim beams.
+"""v113-g112a: low compound camera brows and a vaulted nose monocoque.
 
-The waist wraps closer to its fixed sensor carriers and the unused hood
-corners contract. Hollow inward rim folds replace broad flat lower chords,
-carrying shell reactions through bed-founded pitched sections inside the
-reference envelope. All payload, optical and motor interfaces remain fixed.
+Additional inward roof folds flatten the stereo camera brows between
+unchanged outboard shoulders, keeping the complete fixed PCB clearance.
+Taller swept cheek vaults leave continuous bed and eave chords; the deep
+closed waist sills and all eight optical mounts retain their load paths.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -932,6 +932,23 @@ def build_chassis(p: ChassisParams) -> b.Part:
             no=no & half
             drop=wall*1.025*math.sqrt(1+(1.12/sy)**2+back_rake**2)
             ni=ni & half.moved(b.Pos(0,0,-drop))
+        # Close-wrap each camera with a shallow central roof fold. Its
+        # intersection with the reference 1.12:1 shoulder lies 10 mm
+        # from the ridge, inside the full PCB corners. Those outer
+        # shoulders still set the envelope; the new crown only contracts.
+        # Opposing longitudinal rakes remove both tall brow ends. True
+        # normal skin and a 1.025:1 transverse pitch remain printable.
+        if ridge_y != 0.0:
+            for end in (-1,1):
+                for side in (-1,1):
+                    rake=end*.03/sx
+                    plane=b.Plane(origin=(83.0*sx,ridge_y*sy,42.05),
+                                  z_dir=(rake,side*1.025/sy,1))
+                    half=plane*b.Box(800,800,600,
+                        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                    no=no & half
+                    drop=wall*1.025*math.sqrt(1+(1.025/sy)**2+rake*rake)
+                    ni=ni & half.moved(b.Pos(0,0,-drop))
         nose_outer.append(no);nose_inner.append(ni)
     hip=b.Plane(origin=(71.0*sx,0,45.3),z_dir=(1.20/sx,0,1))
     half=hip*b.Box(800,800,600,
@@ -1192,8 +1209,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Both roof edges rise more than 2:1, and the widening vertical jambs
     # grow directly from the bed. The upper camera brows stay unchanged.
     for gx in (71.5,85.0):
-        outline=[(gx-5.0,3.0),(gx+4.0,3.0),(gx+5.5,13.0),
-                 (gx+0.3,24.2),(gx-4.1,13.0)]
+        # Deep eave and belly chords carry the lower, folded brow.
+        # Spread the pitched vault into the empty skirt; the narrowest
+        # intervening pier is still over 3 mm along X. The inner seats
+        # are separate features, and both roof edges rise over 2:1.
+        outline=[(gx-5.3,2.8),(gx+4.3,2.8),(gx+5.8,13.0),
+                 (gx+0.3,25.2),(gx-4.4,13.0)]
         wire=b.Wire.make_polygon([(x*sx,-100.0,z) for x,z in outline],close=True)
         shell=shell-b.Solid.extrude(b.Face(wire),(0,200.0,0))
 
