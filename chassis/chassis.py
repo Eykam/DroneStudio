@@ -1,11 +1,11 @@
-"""v130-g129a: low twin-fold cardinal hoods and a close-wrapped rear fin.
+"""v131-g130b: deeper closed roots and compact flange-biased outer wings.
 
-Replace the tall central nose hood and rear fin crown with paired pitched
-creases around the pinned radial carriers. A rising tail hip joins the low
-fin to the existing battery shoulders; the shell remains the structural
-skin. Shorten the rear wall inside the old envelope, preserving all sensor
-seats, window reveals, service paths and the full normal wall gauge.
-The cockpit and closed arm load paths retain the reference geometry.
+Redistribute the swept spar into deeper inboard webs and shorter outer-wing
+chines, reducing developed skin while raising root bending inertia. Keep
+both upper compression shoulders broad for lateral impact, and shorten the
+internal roof bridges. True spanwise-normal offsets retain the full skin
+gauge; the fixed sensor crossings and motor diaphragms retain their datums.
+The current low cardinal hoods, internal seats and belly cassette persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -416,6 +416,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
         for blend, depth, breadth, bed, ridge, lower, web in (
                 (hub, 0.010000000, 0.000878357, 0.018879946, -0.080131619, -0.000249188, 0.000000000),
                 (wing, -0.010991290, 0.034478194, 0.081025883, 0.011316185, -0.017697678, 0.000000000)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
+        # Form a deep closed root and a compact, broad-shouldered wing.
+        # Separate the upper flange, lower chine and first-layer keel so
+        # each carries bending with less developed skin. The bed rails
+        # stay continuous and both roofs close on a >45-degree pitch.
+        # True adjacent-span normal offsets below retain the full gauge.
+        # Preserve the complete fixed sensor saddle and motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend, depth, breadth, bed, ridge, lower, web in (
+                (hub, 0.011619381, -0.019587292, 0.133109880, -0.053247137, -0.001846679, 0.000000000),
+                (wing, -0.018668759, 0.024981460, -0.243218541, -0.120490894, -0.002734398, 0.000000000)):
             height*=1.0+depth*blend
             shoulder_half*=1.0+breadth*blend
             keel+=bed*blend
