@@ -1,9 +1,10 @@
-"""v119-g118b: deep closed blade roots and shorter-perimeter outer wings.
+"""v121-g120b: flange-biased closed arms and rib-supported belly skins.
 
 Independently re-form the arm flanges and lower chines to preserve lateral
 inertia while recovering root bending depth. Full 3D normal wall offsets,
 fixed carrier crossings and original motor diaphragms retain their load
-paths; the enclosed fuselage and payload seats remain integrated.
+paths; shallow rib-supported payload skins recover the added root mass.
+The enclosed shell, pinned sensor interfaces and seating datums remain.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -372,6 +373,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
         for blend, depth, breadth, bed, ridge, lower, web in (
                 (hub, 0.010000000, -0.020124556, -0.150000000, -0.011094996, -0.024540654, 0.000000000),
                 (wing, -0.043904600, 0.046563976, 0.009395786, 0.043315842, -0.049598282, 0.000000000)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
+        # Form a deep closed root and a compact, broad-shouldered wing.
+        # Separate the upper flange, lower chine and first-layer keel so
+        # each carries bending with less developed skin. The bed rails
+        # stay continuous and both roofs close on a >45-degree pitch.
+        # True adjacent-span normal offsets below retain the full gauge.
+        # Preserve the complete fixed sensor saddle and motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend, depth, breadth, bed, ridge, lower, web in (
+                (hub, 0.010000000, -0.008056680, -0.149989750, 0.171019501, 0.001718026, 0.000000000),
+                (wing, -0.011024899, 0.023959210, 0.043693606, 0.036100808, -0.006935741, 0.000000000)):
             height*=1.0+depth*blend
             shoulder_half*=1.0+breadth*blend
             keel+=bed*blend
@@ -1624,7 +1644,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     body=body-battery_clear
     # Bed skin takes shear; orthogonal ribs transfer battery inertia into
     # the perimeter sills. Rib tops retain the fixed Z=2 seating plane.
-    gauge=p.structural_gauge_mm
+    # Remove only excess skin under the rib-supported payload floors.
+    # Full-height ribs and capture sills keep every seating datum. The
+    # continuous 1.22 mm belly sheet remains above the 1.2 mm DFAM floor.
+    gauge=max(1.22,p.structural_gauge_mm-.02)
     tray=box(bx,by,0,dx+2*wall+0.6,dy+2*wall+0.6,gauge)
     for ry in (-dy/2,0.0,dy/2):
         tray=tray+box(bx,by+ry,0,dx+2*wall+.6,gauge,bz)
@@ -1640,7 +1663,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     def ribbed_pad(x,y,dx,dy,seat_z):
         # Continuous bed skin and orthogonal ribs retain the original
         # seating plane and perimeter, with pockets between contact ribs.
-        g=p.structural_gauge_mm
+        g=max(1.22,p.structural_gauge_mm-.02)
         pad=box(x,y,0,dx,dy,g)
         nx=max(1,math.ceil((dx-g)/p.tray_rib_pitch_mm))
         ny=max(1,math.ceil((dy-g)/p.tray_rib_pitch_mm))
@@ -1840,7 +1863,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
     for mx,my in p.motor_positions():
         arm_sweep_sign=-1.0 if mx*my>0 else 1.0
         ang=math.degrees(math.atan2(my,mx))
-        for x,ro,ri,h in ((45.0,3.2,1.6,3.2),(115.0,2.3,1.0,2.5)):
+        # Put the wiring drain in the deeper part of the closed wing.
+        # At X=115 its collar cuts a stress concentration into the shallow
+        # keel; X=109 carries the same throat through taller side webs.
+        # The full collar gauge and fixed motor diaphragm remain intact.
+        for x,ro,ri,h in ((45.0,3.2,1.6,3.2),(109.0,2.3,1.0,2.5)):
             collar=b.Pos(x,sweep_center(x),0)*b.Cylinder(ro,h,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
             throat=b.Pos(x,sweep_center(x),-.2)*b.Cylinder(ri,h+.8,
@@ -1858,7 +1885,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The central opening above the pocket remains available for removal.
     pcx,pcy,pcz=(v*1000 for v in placements['pad_camera'])
     pcw,pcl,pch=(v*1000 for v in LIBRARY['pad_camera'].dims_m)
-    pg=max(1.24,p.structural_gauge_mm)
+    pg=max(1.22,p.structural_gauge_mm-.02)
     pocket_w,pocket_l=pcw+.6,pcl+.6
     body=body-box(pcx,pcy,pcz,pocket_w,pocket_l,pch+.6)
     camera_floor=box(pcx,pcy,0,pocket_w+2*pg,pocket_l+2*pg,pg)
