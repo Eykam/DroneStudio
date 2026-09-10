@@ -1,9 +1,10 @@
-"""v115-g114b: low lenticular wings and compact cardinal sensor beds.
+"""v116-g115b: deeper hub haunches and lower closed outer wings.
 
-Independently reshape the roots and free spans into lower lenticular closed
-sections, retaining the upper shoulder breadth and lateral section inertia.
-Shorter cardinal carrier beds shed peripheral mass while preserving their
-folded seats, mounting posts and optical datums inside the original shell.
+Raise the enclosed hub compression flange and redistribute the free-span
+skin into lower crowns and shorter lower chines with full-width shoulders.
+The original motor pads retain their collar load paths, while narrower
+internal carrier floor ties repay the added root depth. The shell, pinned
+sensor seats and complete optical cuts remain coupled.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -325,6 +326,24 @@ def build_chassis(p: ChassisParams) -> b.Part:
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*fold
             straight=keel+(shoulder_half-keel)*chine/shoulder
             half+=(straight-half)*web*fold
+        # A deeper root and lower outer wing split the bending task.
+        # Lift the hub compression flange, while the lower-moment free
+        # span loses crown depth and shortens its lower chines. The upper
+        # shoulder breadth is preserved for lateral impact. Both
+        # profiles retain the full neighboring-span normal wall offsets.
+        # Blend out before the sensor saddle and terminal diaphragm.
+        root_resection=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing_resection=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for resection, gain, roof_delta, keel_delta, chine_delta, web in (
+                (root_resection, 0.003107146, 0.058928268, -0.050000000, -0.010176905, 0.024771051),
+                (wing_resection, -0.023601424, 0.059870506, -0.044136589, -0.040740184, 0.000000000)):
+            height*=1.0+gain*resection
+            crown+=roof_delta*resection
+            keel+=keel_delta*resection
+            chine+=chine_delta*height*resection
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*resection
+            straight=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(straight-half)*web*resection
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -1403,9 +1422,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Three first-layer rails tie the existing vaulted shelf into the
         # perimeter sill. Open bays between them remove the redundant apron;
         # the pitched shelf vaults, PCB support ledge and bosses stay intact.
-        foot=local(box(5.5,0,0,23.0,p.cradle_foot_rail_mm,wall))
+        foot=local(box(5.5,0,0,23.0,max(1.24,p.cradle_foot_rail_mm-0.35),wall))
         for t in (-9.4,9.4):
-            foot=foot+local(box(5.5,t,0,23.0,p.cradle_foot_rail_mm,wall))
+            foot=foot+local(box(5.5,t,0,23.0,max(1.24,p.cradle_foot_rail_mm-0.35),wall))
         # At the nose the stereo optical cuts interrupt narrow floor ties.
         # Keep this one full apron to connect its cradle to the common shell.
         if key == 'vl53l9cx_breakout#n':
