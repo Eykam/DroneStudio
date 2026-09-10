@@ -246,10 +246,19 @@ pub const TofSensor = struct {
 };
 
 pub const TofConfig = struct {
-    max_range_m: f32 = 4.0, // VL53L9CX-class clamp
-    sigma_floor_mm: f32 = 5.0,
-    sigma_rel: f32 = 0.01, // 1% of range
+    // VL53L9CX data brief (Farnell 4759648 / ST): ranging <5cm - 9m.
+    max_range_m: f32 = 9.0,
+    min_range_m: f32 = 0.05,
+    // Noise v0 (TOF_SIM_SCOPE.md): sigma = base + k*range^2 (ST family
+    // behavior; k is an ESTIMATE pending a bench capture), scaled by an
+    // ambient-light factor (1.0 = benign indoor; >1 = strong ambient).
+    sigma_base_mm: f32 = 5.0,
+    sigma_k_mm_per_m2: f32 = 3.0, // ESTIMATE
+    ambient_factor: f32 = 1.0,
     base_dropout: f32 = 0.01,
+    // Dropout ramps past ~80% of max range (scope v0).
+    far_dropout_start: f32 = 0.8,
+    far_dropout_max: f32 = 0.5, // ESTIMATE: 50% no-return at the 9m edge
     graze_cos: f32 = 0.3, // below this |cos(incidence)| dropout ramps up
     arm_block_p: f32 = 0.56, // measured ~56% of diagonal cone blocked
     // arm reading distribution: 2:1 weighted U(40,100) : U(100,140) mm
@@ -336,19 +345,103 @@ pub fn readTof(
     };
     if (clean_mm > 65000.0) return out; // no surface within clamp
 
-    // dropout: base rate + grazing-incidence ramp (arm reads exempt)
-    var p_drop = cfg.base_dropout;
-    if (grazing) {
-        const c = @abs(rd.dot(hit.n));
-        p_drop += (1.0 - c / cfg.graze_cos) * (1.0 - cfg.base_dropout);
-    }
-    if (rng.float(f32) < p_drop) return out;
-
-    // range-dependent sigma, Gaussian draw, clamp to physical range
-    const sigma = @max(cfg.sigma_floor_mm, cfg.sigma_rel * clean_mm);
-    var noisy = clean_mm + rng.floatNorm(f32) * sigma;
-    noisy = @max(10.0, @min(noisy, cfg.max_range_m * 1000.0));
-    out.range_mm = @intFromFloat(noisy);
+    const mm = applyTofNoise(clean_mm, grazing, rd, hit.n, rng, cfg) orelse return out;
+    out.range_mm = mm;
     out.valid = true;
     return out;
+}
+
+/// Scoped noise model (TOF_SIM_SCOPE.md v0): returns null on no-return.
+fn applyTofNoise(clean_mm: f32, grazing: bool, rd: Vec3, n: Vec3, rng: std.Random, cfg: TofConfig) ?u32 {
+    var p_drop = cfg.base_dropout;
+    const range_m = clean_mm / 1000.0;
+    if (grazing) {
+        const c = @abs(rd.dot(n));
+        p_drop += (1.0 - c / cfg.graze_cos) * (1.0 - cfg.base_dropout);
+    }
+    const far = range_m / cfg.max_range_m;
+    if (far > cfg.far_dropout_start) {
+        p_drop += (far - cfg.far_dropout_start) / (1.0 - cfg.far_dropout_start) * cfg.far_dropout_max;
+    }
+    if (rng.float(f32) < @min(p_drop, 1.0)) return null;
+    const sigma = (cfg.sigma_base_mm + cfg.sigma_k_mm_per_m2 * range_m * range_m) * cfg.ambient_factor;
+    var noisy = clean_mm + rng.floatNorm(f32) * sigma;
+    noisy = @max(cfg.min_range_m * 1000.0, @min(noisy, cfg.max_range_m * 1000.0));
+    return @intFromFloat(noisy);
+}
+
+/// Per-zone scan grid (tof_scan): the real module is multizone dToF -
+/// 54x42 zones max, binned modes in-spec. Pinned (ST product page +
+/// Farnell data brief 4759648): FoV 55 x 42 deg (71 diagonal),
+/// ranging <5cm - 9m, up to 100 Hz frame rate.
+pub const TofScanConfig = struct {
+    rows: u32 = 8,
+    cols: u32 = 8,
+    hfov_deg: f32 = 55.0,
+    vfov_deg: f32 = 42.0,
+    noise: TofConfig = .{},
+};
+
+pub const TofZone = struct {
+    range_mm: u32, // 0 when status != 0
+    status: u8, // 0 ok, 1 over-range, 2 no-return
+    cls: SegClass,
+};
+
+/// Scan one sensor zone grid. out must hold rows*cols zones, row-major.
+/// Zone (r,c): r=0 is the TOP of the sensor FoV, c=0 is LEFT (boresight).
+pub fn scanTof(
+    scene: RasterScene,
+    s: TofSensor,
+    cfg: TofScanConfig,
+    body_pos: Vec3,
+    body_quat: Quaternion,
+    rng: std.Random,
+    out: []TofZone,
+) void {
+    const yaw_q = Quaternion.from_axis_angle(Vec3.init(0, 1, 0), s.azimuth_deg);
+    const pitch_q = Quaternion.from_axis_angle(Vec3.init(0, 0, 1), s.elevation_deg);
+    const q = body_quat.multiply(yaw_q).multiply(pitch_q);
+    const ro = body_pos.add(Vec3.rotate_by_quaternion(s.offset, body_quat));
+    const tu = @tan(0.5 * cfg.hfov_deg * std.math.pi / 180.0);
+    const tv = @tan(0.5 * cfg.vfov_deg * std.math.pi / 180.0);
+    var idx: usize = 0;
+    for (0..cfg.rows) |r| {
+        const v: f32 = (0.5 - (@as(f32, @floatFromInt(r)) + 0.5) / @as(f32, @floatFromInt(cfg.rows))) * 2.0 * tv;
+        for (0..cfg.cols) |c| {
+            const u: f32 = ((@as(f32, @floatFromInt(c)) + 0.5) / @as(f32, @floatFromInt(cfg.cols)) - 0.5) * 2.0 * tu;
+            const rd = Vec3.rotate_by_quaternion(Vec3.init(1.0, v, u), q).normalize();
+            const hit = castRay(scene, ro, rd);
+            var clean_mm: f32 = 65535.0;
+            var cls: SegClass = .sky;
+            var grazing = false;
+            if (!std.math.isInf(hit.t)) {
+                cls = hit.class;
+                if (hit.t <= cfg.noise.max_range_m) {
+                    clean_mm = hit.t * 1000.0;
+                    grazing = @abs(rd.dot(hit.n)) < cfg.noise.graze_cos;
+                }
+            }
+            if (s.role == .arm_monitor and rng.float(f32) < cfg.noise.arm_block_p) {
+                const x = rng.float(f32);
+                const arm_mm = if (rng.float(f32) < 0.6667)
+                    cfg.noise.arm_lo_mm + x * (cfg.noise.arm_mid_mm - cfg.noise.arm_lo_mm)
+                else
+                    cfg.noise.arm_mid_mm + x * (cfg.noise.arm_hi_mm - cfg.noise.arm_mid_mm);
+                if (arm_mm < clean_mm) {
+                    clean_mm = arm_mm;
+                    cls = .obstacle;
+                    grazing = false;
+                }
+            }
+            if (clean_mm > 65000.0) {
+                out[idx] = .{ .range_mm = 0, .status = 1, .cls = cls };
+            } else if (applyTofNoise(clean_mm, grazing, rd, hit.n, rng, cfg.noise)) |mm| {
+                out[idx] = .{ .range_mm = mm, .status = 0, .cls = cls };
+            } else {
+                out[idx] = .{ .range_mm = 0, .status = 2, .cls = cls };
+            }
+            idx += 1;
+        }
+    }
 }

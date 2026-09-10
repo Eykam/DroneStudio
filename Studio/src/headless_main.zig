@@ -1236,6 +1236,52 @@ pub fn main() !void {
             try stdout.writeAll("]}\n");
             try stdout_buf.flush();
             alloc.free(robst_t);
+        } else if (std.mem.eql(u8, cmd, "tof_scan")) {
+            // Multizone dToF scan per ring sensor (vision_raster.zig
+            // scanTof): rows x cols zones over the pinned 55x42 deg FoV.
+            // Optional: "rows","cols" (binned mode), "seed", "ambient",
+            // "max_range_m". Zone arrays are row-major, top-left origin.
+            var scfg = VR.TofScanConfig{};
+            scfg.rows = @intFromFloat(f32FromJson(root.object.get("rows") orelse .null, 8));
+            scfg.cols = @intFromFloat(f32FromJson(root.object.get("cols") orelse .null, 8));
+            scfg.noise.ambient_factor = f32FromJson(root.object.get("ambient") orelse .null, 1.0);
+            scfg.noise.max_range_m = f32FromJson(root.object.get("max_range_m") orelse .null, scfg.noise.max_range_m);
+            if (root.object.get("seed")) |s| {
+                const sd: u64 = switch (s) {
+                    .integer => |n| @intCast(n),
+                    .float => |f| @intFromFloat(f),
+                    else => 0,
+                };
+                world.tof_rng = std.Random.Xoshiro256.init(sd);
+            }
+            const robst_s = try alloc.alloc(VR.RasterObstacle, world.scene.obstacles.len);
+            for (world.scene.obstacles, 0..) |ob, i| robst_s[i] = .{ .center = ob.center, .radius = ob.radius };
+            const rscene_s = VR.RasterScene{
+                .ground_y = GROUND_Y,
+                .obstacles = robst_s,
+                .goal = world.scene.goal,
+                .goal_radius = world.scene.success_radius,
+            };
+            const nz: usize = @as(usize, scfg.rows) * @as(usize, scfg.cols);
+            const zones = try alloc.alloc(VR.TofZone, nz);
+            const ring_s = VR.defaultTofRing();
+            const bp_s = world.bodyPos();
+            const bq_s = world.bodyQuat();
+            try stdout.print("{{\"tof_scan\":{{\"rows\":{d},\"cols\":{d},\"sensors\":[", .{ scfg.rows, scfg.cols });
+            for (ring_s, 0..) |sen, si| {
+                VR.scanTof(rscene_s, sen, scfg, bp_s, bq_s, world.tof_rng.random(), zones);
+                try stdout.print("{s}{{\"name\":\"{s}\",\"range_mm\":[", .{ if (si > 0) "," else "", sen.name });
+                for (zones, 0..) |z, i| try stdout.print("{s}{d}", .{ if (i > 0) "," else "", z.range_mm });
+                try stdout.writeAll("],\"status\":[");
+                for (zones, 0..) |z, i| try stdout.print("{s}{d}", .{ if (i > 0) "," else "", z.status });
+                try stdout.writeAll("],\"cls\":[");
+                for (zones, 0..) |z, i| try stdout.print("{s}{d}", .{ if (i > 0) "," else "", @intFromEnum(z.cls) });
+                try stdout.writeAll("]}");
+            }
+            try stdout.writeAll("]}}\n");
+            try stdout_buf.flush();
+            alloc.free(robst_s);
+            alloc.free(zones);
         } else if (std.mem.eql(u8, cmd, "fast_telemetry")) {
             const on_v = root.object.get("on") orelse continue;
             world.fast_telemetry = (on_v == .bool and on_v.bool);

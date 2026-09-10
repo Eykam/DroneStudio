@@ -54,7 +54,16 @@ GL_ARB_bindless_texture; no CPU rasterizer implements it
   scanline/ray-caster, and it matters for VIO.
 - ToF: ray-cast rangefinder array with a noise model (range-dependent
   sigma, dropout on grazing angles / low reflectance, max-range clamp).
-  No ToF exists in the codebase today (only camera prefabs).
+  LANDED 2026-09-09 (vision_raster.zig readTof/scanTof + headless
+  tof/tof_scan cmds): the decided 8-sensor suite - 4 cardinal nav
+  (0/90/180/270 deg) + 4 diagonal arm/proximity monitors (45-deg seats,
+  measured 56% cone-blocked at the 40-140mm arm baseline, 2:1 weighted).
+  Datasheet-true per TOF_SIM_SCOPE.md: VL53L9CX multizone dToF - 55x42
+  deg FoV, <5cm-9m range, up to 100Hz, zone grids up to 54x42 (binned
+  8x8 default). Noise v0: sigma = 5mm + 3mm/m^2 * range^2 (k ESTIMATE),
+  grazing-incidence ramp, far-dropout ramp past 80% of max range,
+  ambient-light factor, per-zone arm occlusion. Timing (update rate /
+  integration latency) is a stub until estimator integration.
 - IMU already exists for the fast loop; VIO consumes camera + IMU.
 
 ### 3. Procedural scenes + domain randomization
