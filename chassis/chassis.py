@@ -1,11 +1,11 @@
-"""v129-g128a: tucked diagonal optical facets in a compact folded monocoque.
+"""v130-g129a: low twin-fold cardinal hoods and a close-wrapped rear fin.
 
-Pull the four diagonal sensor planes 1.2 mm inward, shorten their recessed
-window returns, and lower the shoulder eaves. True normal shell offsets
-and placement-driven optical reveals retain the full skin and clear cone.
-All eight carriers keep their bed-founded internal seats; the cockpit folds
-move down within
-the unchanged hips, retaining the deep waist sills and closed arm roots.
+Replace the tall central nose hood and rear fin crown with paired pitched
+creases around the pinned radial carriers. A rising tail hip joins the low
+fin to the existing battery shoulders; the shell remains the structural
+skin. Shorten the rear wall inside the old envelope, preserving all sensor
+seats, window reveals, service paths and the full normal wall gauge.
+The cockpit and closed arm load paths retain the reference geometry.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -827,6 +827,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # smaller perimeter, so no pod, apron or outer fairing is added.
         if abs(abs(nx)-abs(ny)) < 1e-6:
             tuck=1.20
+        # The rear carrier has spare axial clearance behind its window.
+        # Bring the fin end 0.5 mm inward; recompute the full optical
+        # reveal from this perimeter, with no change to its internal seat.
+        if nx < -0.9999:
+            tuck=0.5
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
     compact=[]
     for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
@@ -1137,6 +1142,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 camera_folds_o.append(fo);camera_folds_i.append(fi)
             no=no & (camera_folds_o[0]+camera_folds_o[1])
             ni=ni & (camera_folds_i[0]+camera_folds_i[1])
+        # Two shallow ridges wrap the north carrier, replacing its tall
+        # single peak. The valley clears the complete service box, and
+        # >45-degree faces brace the hood without a flat ceiling. Every
+        # face keeps its normal offset, including the longitudinal rake.
+        if ridge_y == 0.0:
+            cardinal_o=[]; cardinal_i=[]
+            for local_y in (-5.0,5.0):
+                co=box(0,0,-.2,600,600,200)
+                ci=box(0,0,-.2,600,600,200)
+                for end in (-1,1):
+                    for face_side in (-1,1):
+                        rake=end*.06/sx
+                        plane=b.Plane(origin=(83.0*sx,local_y*sy,38.55),
+                            z_dir=(rake,face_side*1.025/sy,1))
+                        half=plane*b.Box(800,800,600,
+                            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                        co=co & half
+                        drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
+                        ci=ci & half.moved(b.Pos(0,0,-drop))
+                cardinal_o.append(co);cardinal_i.append(ci)
+            no=no & (cardinal_o[0]+cardinal_o[1])
+            ni=ni & (cardinal_i[0]+cardinal_i[1])
         nose_outer.append(no);nose_inner.append(ni)
     hip=b.Plane(origin=(71.0*sx,0,45.3),z_dir=(1.20/sx,0,1))
     half=hip*b.Box(800,800,600,
@@ -1146,6 +1173,30 @@ def build_chassis(p: ChassisParams) -> b.Part:
         nose_o=nose_o+no;nose_i=nose_i+ni
     outer=outer & nose_o
     inner=inner & nose_i
+    # A compact twin-crease tail fin encloses the south carrier and GPS.
+    # Its two peaks replace unused height over the rear sensor; a steep
+    # forward hip grows into the battery roof with no suspended step.
+    # Intersect with the old hull so all plan and height limits only shrink.
+    tail_o=[];tail_i=[]
+    for local_y in (-5.0,5.0):
+        co=box(0,0,-.2,600,600,200)
+        ci=box(0,0,-.2,600,600,200)
+        for face_side in (-1,1):
+            rake=-.03/sx
+            plane=b.Plane(origin=(-130.0*sx,local_y*sy,38.30),
+                          z_dir=(rake,face_side*1.025/sy,1))
+            half=plane*b.Box(800,800,600,
+                align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+            co=co & half
+            drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
+            ci=ci & half.moved(b.Pos(0,0,-drop))
+        tail_o.append(co);tail_i.append(ci)
+    plane=b.Plane(origin=(-127.0*sx,0,34.0),z_dir=(-1.25/sx,0,1))
+    hip=plane*b.Box(800,800,600,
+        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+    inner_hip=hip.moved(b.Pos(0,0,-wall*1.005*math.sqrt(1+(1.25/sx)**2)))
+    outer=outer & (tail_o[0]+tail_o[1]+hip)
+    inner=inner & (tail_i[0]+tail_i[1]+inner_hip)
     outer_hull=outer&outer_plan; inner_hull=inner&inner_plan
     shell=outer_hull-inner_hull
     # Flared access shoulders follow the battery bay instead of carrying
