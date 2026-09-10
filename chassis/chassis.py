@@ -1,11 +1,11 @@
-"""v131-g130b: deeper closed roots and compact flange-biased outer wings.
+"""v132-g131a: low eight-crease cockpit and deep enclosed waist sills.
 
-Redistribute the swept spar into deeper inboard webs and shorter outer-wing
-chines, reducing developed skin while raising root bending inertia. Keep
-both upper compression shoulders broad for lateral impact, and shorten the
-internal roof bridges. True spanwise-normal offsets retain the full skin
-gauge; the fixed sensor crossings and motor diaphragms retain their datums.
-The current low cardinal hoods, internal seats and belly cassette persist.
+Close-wrap the flight board with four pitched folds on each shoulder,
+lowering the cockpit 0.8 mm. Wider, short normal-cut vents unload the skin
+between continuous ridge/valley chords; full shear ties remain where the
+roof bands enter. Taller, narrower internal sills recover ring depth inside
+the existing hull. The current closed arms, eight internal ToF seats and
+windows, stereo optical voids and central pad-camera cassette persist.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -1014,14 +1014,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
         outer=outer & half
         drop=wall*1.005*math.sqrt(1+cockpit_pitch**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
-    # Three compact folds per shoulder replace the high paired cockpit
-    # ridges. Their tighter pitch closes unused headroom over the CM4,
-    # while six longitudinal creases brace the thin structural roof.
-    # At the aft Y=27 service corner the inner skin remains above 59.6;
-    # every face keeps a >45-degree pitch and its full 3D normal gauge.
-    # The dorsal channel and all ring/optical hips retain their datums.
+    # Four ridges per shoulder lower the cockpit by 0.8 mm. The 5.25 mm
+    # pitch leaves every internal valley above the CM4 insertion box;
+    # the outermost fold clears its Y=27 corner at the aft rake as well.
+    # Opposing faces close at 1.025:1 with the full 3D normal skin offset.
+    # Additional continuous creases stiffen the thin, low structural roof.
     crease_pitch=1.025
-    crease_centers=((9.2,66.05),(16.2,66.05),(23.2,66.05))
+    crease_centers=((8.45,65.25),(13.70,65.25),(18.95,65.25),(24.20,65.25))
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
         for crease_y,local_crease_z in crease_centers:
@@ -1334,17 +1333,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # skin. Paired rows leave >=1.4 mm plan lands at their valleys;
     # transverse webs bridge at most 2.4 mm along the flight direction.
     for side in (-1,1):
+        # Each short vent stays on a single new roof face. Leave at
+        # least 1.3 mm of developed skin to every ridge/valley and the
+        # service-channel edge. The X bridges remain at most 2.9 mm.
         for vent_y,ridge_y,face_side,half_span in (
-                (7.85,9.2,-1,0.5),(11.0,9.2,1,1.0),
-                (14.4,16.2,-1,1.0),(18.0,16.2,1,1.0),
-                (21.4,23.2,-1,1.0),(25.2,23.2,1,1.1)):
+                (7.75,8.45,-1,0.30),(9.76,8.45,1,0.80),
+                (12.39,13.70,-1,0.80),(15.01,13.70,1,0.80),
+                (17.64,18.95,-1,0.80),(20.26,18.95,1,0.80),
+                (22.89,24.20,-1,0.80),(25.65,24.20,1,0.75)):
             for vent_x in (-43.0,-38.6,-34.2,-29.8,-25.4,-21.0,-16.6,-12.2,-7.8,-3.4):
+                # Preserve a continuous folded shear tie where the aft
+                # diagonal roof band enters the cockpit. Its reaction
+                # otherwise ends at the adjacent outer vent corner.
+                # Restore only these eight openings at full skin gauge;
+                # both the low roof and the other short vents persist.
+                if vent_y >= 22.0 and vent_x in (-25.4,-21.0):
+                    continue
                 z=dict(crease_centers)[ridge_y]-aft_rake*vent_x-crease_pitch*abs(vent_y-ridge_y)
                 plane=b.Plane(origin=(vent_x,side*vent_y,z),
                     x_dir=(1,0,-aft_rake),
                     z_dir=(aft_rake,side*face_side*crease_pitch,1))
                 along=math.sqrt(1+crease_pitch**2)
-                breadth=.6 if half_span < 1.0 else 1.2
+                breadth=.6 if half_span < .5 else 1.45
                 outline=[(0,-half_span*along),(breadth,-.2*along),
                          (breadth,.2*along),(0,half_span*along),
                          (-breadth,.2*along),(-breadth,-.2*along)]
@@ -1560,7 +1570,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # The full normal offset and open ends keep the enclosed rib
             # printable and drained inside the unchanged optical perimeter.
             g=p.structural_gauge_mm
-            breadth,depth=3.0,14.4
+            # A taller, narrower internal return increases ring depth;
+            # its steep roof grows from the bed within the same hull.
+            breadth,depth=2.85,15.4
             grade=depth/breadth
             def rim_section(u,inside=False):
                 points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
