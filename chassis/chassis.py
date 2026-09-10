@@ -1,9 +1,10 @@
-"""v126-g125a: split battery shoulders and deep compact perimeter sills.
+"""v127-g126a: low twin-ridge camera brows in an integrated folded shell.
 
-Paired inward roof folds close the empty headroom beside the battery
-service channel. Pointed, normal-cut vents retain continuous shoulder
-chords; deeper, shorter inward sills carry the ring with less stock.
-The fixed sensor seats, optical cuts and enclosed CM4 deck are preserved.
+Replace each tall camera brow with two lower structural folds that follow
+the fixed PCB corners, and lower the six cockpit creases. The ridges brace
+the normal-gauge skin while removing empty nose headroom; the existing
+hips bound every new surface. Deep ring sills, closed arms, internal
+sensor seats, service openings and placement-driven optics are retained.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -984,7 +985,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # every face keeps a >45-degree pitch and its full 3D normal gauge.
     # The dorsal channel and all ring/optical hips retain their datums.
     crease_pitch=1.025
-    crease_centers=((9.2,66.45),(16.2,66.45),(23.2,66.45))
+    crease_centers=((9.2,66.25),(16.2,66.25),(23.2,66.25))
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
         for crease_y,local_crease_z in crease_centers:
@@ -1099,6 +1100,31 @@ def build_chassis(p: ChassisParams) -> b.Part:
                     no=no & half
                     drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
                     ni=ni & half.moved(b.Pos(0,0,-drop))
+        # Two low folded brows follow the camera PCB instead of one
+        # tall triangular hood. Their common valley and two ridges brace
+        # the skin, with >=1.22 mm true normal gauge on every face.
+        # At the PCB edges the inner roof stays above the full camera
+        # service envelope. The old hood clips the folds, preserving the
+        # nose perimeter and the junction with the forward cockpit hip.
+        # Both roofs close at 1.025:1 directly from their printed eaves.
+        if ridge_y != 0.0:
+            camera_folds_o=[]; camera_folds_i=[]
+            for delta_y in (-6.0,6.0):
+                fo=box(0,0,-.2,600,600,200)
+                fi=box(0,0,-.2,600,600,200)
+                for end in (-1,1):
+                    for side in (-1,1):
+                        rake=end*.03/sx
+                        plane=b.Plane(origin=(83.0*sx,(ridge_y+delta_y)*sy,35.60),
+                            z_dir=(rake,side*1.025/sy,1))
+                        half=plane*b.Box(800,800,600,
+                            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                        fo=fo & half
+                        drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
+                        fi=fi & half.moved(b.Pos(0,0,-drop))
+                camera_folds_o.append(fo);camera_folds_i.append(fi)
+            no=no & (camera_folds_o[0]+camera_folds_o[1])
+            ni=ni & (camera_folds_i[0]+camera_folds_i[1])
         nose_outer.append(no);nose_inner.append(ni)
     hip=b.Plane(origin=(71.0*sx,0,45.3),z_dir=(1.20/sx,0,1))
     half=hip*b.Box(800,800,600,
@@ -1261,6 +1287,27 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 length=math.sqrt(1+1.025**2)
                 outline=[(0,-half_span*length),(1.2,-.2*length),
                          (1.2,.2*length),(0,half_span*length),
+                         (-1.2,.2*length),(-1.2,-.2*length)]
+                wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
+                shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
+
+    # Short normal-cut vents lighten each of the four low camera folds.
+    # Continuous ridge and valley chords retain the closed brow load path;
+    # the 2.4 mm X span bridges from its two jambs on every printed layer.
+    # Keep each cut on one transverse and longitudinal facet, away from
+    # the fold creases, fixed camera seats and the central ToF carrier.
+    for camera_y in (-28.0,28.0):
+        for delta_y,crease_y,face_side in ((-9.0,-6.0,-1),(-3.0,-6.0,1),
+                                          (3.0,6.0,-1),(9.0,6.0,1)):
+            for vent_x in (77.0,81.0,86.0,90.0):
+                rake=math.copysign(.03,vent_x-83.0)/sx
+                vent_y=(camera_y+delta_y)*sy
+                top=35.60-.03*abs(vent_x-83.0)-1.025*abs(delta_y-crease_y)
+                plane=b.Plane(origin=(vent_x*sx,vent_y,top),
+                    x_dir=(1,0,-rake),z_dir=(rake,face_side*1.025/sy,1))
+                length=math.sqrt(1+(1.025/sy)**2)
+                outline=[(0,-1.35*length),(1.2,-.2*length),
+                         (1.2,.2*length),(0,1.35*length),
                          (-1.2,.2*length),(-1.2,-.2*length)]
                 wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
                 shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
