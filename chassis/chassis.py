@@ -1,9 +1,9 @@
-"""v118-g117a: low folded cockpit and deep internal waist sills.
+"""v119-g118b: deep closed blade roots and shorter-perimeter outer wings.
 
-Close-wrap the declared CM4 service envelope with a lower split cockpit,
-and fold the central nose hood down toward the fixed forward ToF carrier.
-Short, deeper closed waist sills recover shell inertia within the old hull;
-the independent arms, eight internal carrier seats and lens cuts persist.
+Independently re-form the arm flanges and lower chines to preserve lateral
+inertia while recovering root bending depth. Full 3D normal wall offsets,
+fixed carrier crossings and original motor diaphragms retain their load
+paths; the enclosed fuselage and payload seats remain integrated.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -357,6 +357,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
             height*=1.0+depth*blend
             crown+=ridge*blend
             keel+=bed*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
+        # Form a deep closed root and a compact, broad-shouldered wing.
+        # Separate the upper flange, lower chine and first-layer keel so
+        # each carries bending with less developed skin. The bed rails
+        # stay continuous and both roofs close on a >45-degree pitch.
+        # True adjacent-span normal offsets below retain the full gauge.
+        # Preserve the complete fixed sensor saddle and motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend, depth, breadth, bed, ridge, lower, web in (
+                (hub, 0.010000000, -0.020124556, -0.150000000, -0.011094996, -0.024540654, 0.000000000),
+                (wing, -0.043904600, 0.046563976, 0.009395786, 0.043315842, -0.049598282, 0.000000000)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
             chine+=lower*height*blend
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
             direct=keel+(shoulder_half-keel)*chine/shoulder
