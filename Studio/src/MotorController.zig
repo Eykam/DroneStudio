@@ -2,6 +2,7 @@
 const std = @import("std");
 const Math = @import("core/Math.zig");
 const Drone = @import("core/Drone.zig");
+const build_options = @import("build_options");
 
 const time = std.time;
 const fs = std.fs;
@@ -308,6 +309,10 @@ pub const Controller = struct {
     motors: []Motor,
     pin_cache: ?[]PinRegisterCache = null,
     gpio_mem: *volatile GpioRegs,
+    // HiL (build_options.hil): UDP motor backend - no GPIO on the HiL host.
+    hil_sock: ?std.posix.socket_t = null,
+    hil_dest: ?std.net.Address = null,
+    hil_seq: u32 = 0,
     running: Atomic.Value(bool),
     thread: ?std.Thread = null,
     allocator: std.mem.Allocator,
@@ -353,19 +358,30 @@ pub const Controller = struct {
         // try setRealtimePriority();
         // try pinToCore(3);
 
-        // Open /dev/mem to map GPIO registers
-        const mem_file = try fs.openFileAbsolute("/dev/mem", .{ .mode = .read_write });
-        defer mem_file.close();
-
-        // Map GPIO memory region
-        const gpio_mem = try std.posix.mmap(
-            null,
-            @sizeOf(GpioRegs),
-            std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
-            std.os.linux.MAP{ .TYPE = .SHARED },
-            mem_file.handle,
-            GPIO_BASE,
-        );
+        // Hardware: map GPIO registers via /dev/mem. HiL: anonymous zero
+        // page (same type; no GPIO exists on the HiL host, and the HiL
+        // motor path never touches it - sendDshotPacket is a hil no-op).
+        const gpio_mem = if (comptime build_options.hil)
+            try std.posix.mmap(
+                null,
+                @sizeOf(GpioRegs),
+                std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
+                std.os.linux.MAP{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+                -1,
+                0,
+            )
+        else blk: {
+            const mem_file = try fs.openFileAbsolute("/dev/mem", .{ .mode = .read_write });
+            defer mem_file.close();
+            break :blk try std.posix.mmap(
+                null,
+                @sizeOf(GpioRegs),
+                std.os.linux.PROT.READ | std.os.linux.PROT.WRITE,
+                std.os.linux.MAP{ .TYPE = .SHARED },
+                mem_file.handle,
+                GPIO_BASE,
+            );
+        };
 
         // Initialize motors
         var motors = try allocator.alloc(Motor, config.len);
@@ -395,6 +411,17 @@ pub const Controller = struct {
             .orientation_mutex = Mutex{},
         };
         try controller.initPinCache();
+
+        if (comptime build_options.hil) {
+            // HiL motor sink: sim host:port from env, default loopback:5100.
+            const addr_str = std.process.getEnvVarOwned(allocator, "HIL_SIM_ADDR") catch try allocator.dupe(u8, "127.0.0.1:5100");
+            defer allocator.free(addr_str);
+            const colon = std.mem.lastIndexOfScalar(u8, addr_str, ':') orelse return error.InvalidHilAddr;
+            const port = try std.fmt.parseInt(u16, addr_str[colon + 1 ..], 10);
+            controller.hil_dest = try std.net.Address.parseIp(addr_str[0..colon], port);
+            controller.hil_sock = try std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, std.posix.IPPROTO.UDP);
+            std.debug.print("HiL motor backend: motor packets -> {s}\n", .{addr_str});
+        }
 
         std.debug.print(
             "Motor controller initialized with {d} Motors and battery type: {s} ({d} cells)\n",
@@ -481,6 +508,7 @@ pub const Controller = struct {
     }
 
     fn sendDshotPacket(self: *Self, pin: u8, packet: u16) void {
+        if (comptime build_options.hil) return; // HiL: throttle state rides the UDP packet, no GPIO
         var reg_idx: usize = undefined;
         var bit_mask: u32 = undefined;
 
@@ -701,6 +729,26 @@ pub const Controller = struct {
         }
     }
 
+    /// HiL motor sink: one 24-byte LE packet per 1ms tick:
+    /// magic 'HIL1' u32 | seq u32 | throttle[4] u16 (DShot values) |
+    /// armed_mask u32 | reserved u32.
+    fn hilSendMotors(self: *Self, thr: [4]u16) void {
+        const dest = self.hil_dest orelse return;
+        const sock = self.hil_sock orelse return;
+        var pkt: [24]u8 = undefined;
+        std.mem.writeInt(u32, pkt[0..4], 0x314C4948, .little);
+        std.mem.writeInt(u32, pkt[4..8], self.hil_seq, .little);
+        self.hil_seq +%= 1;
+        var amask: u32 = 0;
+        for (0..@min(4, self.motors.len)) |i| {
+            std.mem.writeInt(u16, pkt[8 + i * 2 ..][0..2], thr[i], .little);
+            if (self.motors[i].armed.load(.acquire)) amask |= (@as(u32, 1) << @as(u3, @intCast(i)));
+        }
+        std.mem.writeInt(u32, pkt[16..20], amask, .little);
+        std.mem.writeInt(u32, pkt[20..24], 0, .little);
+        _ = std.posix.sendto(sock, &pkt, 0, &dest.any, dest.getOsSockLen()) catch {};
+    }
+
     fn motorControlThread(self: *Self) void {
         Timing.setRealtimePriority() catch |err| {
             std.debug.print("Failed to set realtime priority for motor thread: {any}\n", .{err});
@@ -733,7 +781,27 @@ pub const Controller = struct {
                 continue;
             }
 
-            if (self.orientation_control_active.load(.acquire) and self.orientation_control != null) {
+            if (comptime build_options.hil) {
+                // HiL: same throttle computation, one UDP packet per tick.
+                var thr: [4]u16 = .{ DSHOT.MIN_THROTTLE, DSHOT.MIN_THROTTLE, DSHOT.MIN_THROTTLE, DSHOT.MIN_THROTTLE };
+                if (self.orientation_control_active.load(.acquire) and self.orientation_control != null) {
+                    motor_outputs_cache = self.orientation_control.?.getMotorOutputs();
+                    for (0..@min(self.motors.len, motor_outputs_cache.len)) |i| {
+                        if (self.motors[i].armed.load(.acquire)) {
+                            const throttle = DSHOT.percentage_to_throttle(motor_outputs_cache[i]);
+                            self.motors[i].throttle.store(throttle, .release);
+                            thr[i] = throttle;
+                        }
+                    }
+                } else {
+                    for (self.motors, 0..) |*motor, i| {
+                        if (motor.armed.load(.acquire)) {
+                            thr[i] = motor.throttle.load(.acquire);
+                        }
+                    }
+                }
+                self.hilSendMotors(thr);
+            } else if (self.orientation_control_active.load(.acquire) and self.orientation_control != null) {
                 motor_outputs_cache = self.orientation_control.?.getMotorOutputs();
 
                 for (0..@min(self.motors.len, motor_outputs_cache.len)) |i| {

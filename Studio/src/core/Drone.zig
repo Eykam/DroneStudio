@@ -1,5 +1,6 @@
 //Drone.zig
 const std = @import("std");
+const builtin = @import("builtin");
 const Math = @import("Math.zig");
 const Sensors = @import("Sensors.zig");
 
@@ -192,8 +193,14 @@ pub const TimingUtils = struct {
         const MCL_CURRENT: usize = 1;
         const MCL_FUTURE: usize = 2;
 
-        // Call mlockall directly using syscall
-        const mlockall_result = std.os.linux.syscall1(std.os.linux.syscalls.Arm64.mlock, MCL_CURRENT | MCL_FUTURE);
+        // Call mlockall directly using syscall (arch-portable enum; same
+        // syscall NAME as before - aarch64 behavior bit-identical)
+        const mlock_syscall = switch (builtin.cpu.arch) {
+            .aarch64 => std.os.linux.syscalls.Arm64.mlock,
+            .x86_64 => std.os.linux.syscalls.X64.mlock,
+            else => @compileError("unsupported arch for mlock"),
+        };
+        const mlockall_result = std.os.linux.syscall1(mlock_syscall, MCL_CURRENT | MCL_FUTURE);
         if (mlockall_result != 0) {
             std.debug.print("Warning: Failed to lock memory, paging may occur\n", .{});
         }

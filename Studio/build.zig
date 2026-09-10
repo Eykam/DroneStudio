@@ -300,6 +300,7 @@ pub fn build(b: *std.Build) void {
     const build_desktop = b.option(bool, "desktop", "Build the desktop application") orelse true;
     const build_pi = b.option(bool, "pi", "Build the Raspberry Pi applications") orelse true;
     const use_cuda = b.option(bool, "cuda", "Enable CUDA hardware acceleration for desktop") orelse false;
+    const hil = b.option(bool, "hil", "HiL mode: UDP motor backend for MotorController (x86_64)") orelse false;
     const test_gui = b.option(bool, "test-gui", "Enable GUI mode for physics tests") orelse false;
 
     // Get target modification options
@@ -339,6 +340,7 @@ pub fn build(b: *std.Build) void {
 
     const build_options = b.addOptions();
     build_options.addOption(u8, "render_profiler", render_profiler_level);
+    build_options.addOption(bool, "hil", hil);
 
     // Desktop Application
     var desktop_step: ?*std.Build.Step = null;
@@ -520,6 +522,19 @@ pub fn build(b: *std.Build) void {
         motor_exe.root_module.addOptions("build_options", build_options);
         b.installArtifact(motor_exe);
         pi_step.?.dependOn(&motor_exe.step);
+
+        // HiL build: same FC source, native (x86_64) target, UDP motor backend
+        // selected comptime via build_options.hil. Hardware binary unchanged.
+        if (hil) {
+            const hil_exe = b.addExecutable(.{
+                .name = "MotorController-hil",
+                .root_source_file = b.path("src/MotorController.zig"),
+                .target = b.resolveTargetQuery(.{}),
+                .optimize = optimize,
+            });
+            hil_exe.root_module.addOptions("build_options", build_options);
+            b.installArtifact(hil_exe);
+        }
 
         // Run commands for IMU (will only run if we're on the correct architecture)
         const run_imu_cmd = b.addRunArtifact(imu_exe);
