@@ -1140,6 +1140,10 @@ pub fn main() !void {
                     vis.fog_scale = f32FromJson(vo.get("fog_scale") orelse .null, vis.fog_scale);
                     vis.checker_m = f32FromJson(vo.get("checker_m") orelse .null, vis.checker_m);
                     vis.checker_gain = f32FromJson(vo.get("checker_gain") orelse .null, vis.checker_gain);
+                    vis.noise_gain = f32FromJson(vo.get("noise_gain") orelse .null, vis.noise_gain);
+                    vis.noise_scale_m = f32FromJson(vo.get("noise_scale_m") orelse .null, vis.noise_scale_m);
+                    vis.plank_m = f32FromJson(vo.get("plank_m") orelse .null, vis.plank_m);
+                    vis.plank_gain = f32FromJson(vo.get("plank_gain") orelse .null, vis.plank_gain);
                     vis.exposure = f32FromJson(vo.get("exposure") orelse .null, vis.exposure);
                     const cols = .{
                         .{ "sky_lo", &vis.sky_lo },     .{ "sky_hi", &vis.sky_hi },

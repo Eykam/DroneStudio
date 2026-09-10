@@ -8,7 +8,7 @@ randomization stays in vis_gen_dataset / scene_schema (unchanged).
 """
 import numpy as np
 
-def sample_visual(scene_id: int) -> dict:
+def sample_visual(scene_id: int, tex: bool = False) -> dict:
     rng = np.random.default_rng((int(scene_id) ^ 0x5E1A1) & 0x7FFFFFFF)
     # sun: azimuth anywhere, elevation 20-80 deg (y-up)
     az = rng.uniform(0, 2 * np.pi)
@@ -20,7 +20,7 @@ def sample_visual(scene_id: int) -> dict:
     sky_lo = vary([26.0, 34.0, 46.0], 0.5, 1.8, 8)               # dusk..bright horizon band
     sky_hi = vary([92.0, 108.0, 126.0], 0.6, 1.6, 25)
     fog_col = [(a + b) / 2 for a, b in zip(sky_lo, sky_hi)]      # fog tracks the sky
-    return {
+    d = {
         "sun_dir": sun_dir,
         "ambient": float(rng.uniform(0.18, 0.55)),
         "fog_scale": float(rng.uniform(20.0, 90.0)),             # denser..clearer
@@ -34,3 +34,11 @@ def sample_visual(scene_id: int) -> dict:
         "checker_gain": float(rng.uniform(0.7, 0.92)),
         "exposure": float(rng.uniform(0.7, 1.35)),
     }
+    if tex:
+        # procedural texture mode (Phase 2k): world-anchored noise everywhere +
+        # floor planks on most scenes; checker still possible per base sampling.
+        d["noise_gain"] = float(rng.uniform(0.18, 0.38))
+        d["noise_scale_m"] = float(rng.uniform(0.12, 0.45))
+        d["plank_m"] = 0.0 if rng.random() < 0.35 else float(rng.uniform(0.08, 0.18))
+        d["plank_gain"] = float(rng.uniform(0.45, 0.7))
+    return d

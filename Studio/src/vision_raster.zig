@@ -71,6 +71,10 @@ pub const Visual = struct {
     goal_col: [3]f32 = .{ 30.0, 150.0, 84.0 },
     checker_m: f32 = 0.0, // 0 = off; floor checker square size in meters
     checker_gain: f32 = 0.85, // albedo multiplier on alternating squares
+    noise_gain: f32 = 0.0, // 0 = off; multiplicative value-noise amplitude on floor/obstacle albedo
+    noise_scale_m: f32 = 0.35, // fine noise feature size in meters (2 octaves: 1x + 4x)
+    plank_m: f32 = 0.0, // 0 = off; floor plank strip width in meters (strips along x)
+    plank_gain: f32 = 0.55, // seam albedo multiplier
     exposure: f32 = 1.0, // global gain, clamped to [0,255]
 };
 
@@ -79,6 +83,36 @@ const Hit = struct { t: f32, class: SegClass, n: Vec3 };
 /// Sun-lit lambert shade + distance fog -> RGB model input / scene panel.
 /// All look parameters come from Visual so the dataset generator can
 /// randomize them per scene (domain randomization, rung-2).
+/// World-anchored integer-lattice hash -> [0,1). Stable under camera motion
+/// (function of world position only), so texture is trackable frame to frame.
+fn hash2(ix: i32, iz: i32) f32 {
+    var h: u32 = @bitCast(ix *% 374761393 +% iz *% 668265263);
+    h = (h ^ (h >> 13)) *% 1274126177;
+    h = h ^ (h >> 16);
+    return @as(f32, @floatFromInt(h & 0xFFFFFF)) / @as(f32, 0x1000000);
+}
+
+fn smoot(t: f32) f32 {
+    return t * t * (3.0 - 2.0 * t);
+}
+
+/// Bilinear value noise on the XZ plane, one octave at `scale` meters.
+fn vnoise(x: f32, z: f32, scale: f32) f32 {
+    const xs = x / scale;
+    const zs = z / scale;
+    const x0: i32 = @intFromFloat(@floor(xs));
+    const z0: i32 = @intFromFloat(@floor(zs));
+    const fx = smoot(xs - @floor(xs));
+    const fz = smoot(zs - @floor(zs));
+    const a = hash2(x0, z0);
+    const b = hash2(x0 + 1, z0);
+    const c = hash2(x0, z0 + 1);
+    const d = hash2(x0 + 1, z0 + 1);
+    const lo = a + (b - a) * fx;
+    const hi = c + (d - c) * fx;
+    return lo + (hi - lo) * fz;
+}
+
 fn mix3(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
     return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
 }
@@ -102,11 +136,29 @@ fn shade(hit: Hit, rd: Vec3, ro: Vec3, v: Visual) [3]u8 {
         .goal => v.goal_col,
         .sky => unreachable,
     };
-    if (hit.class == .floor and v.checker_m > 0.0) {
+    if ((hit.class == .floor or hit.class == .obstacle) and
+        (v.checker_m > 0.0 or v.noise_gain > 0.0 or v.plank_m > 0.0))
+    {
         const p = ro.add(rd.scale(hit.t));
-        const cx: i32 = @intFromFloat(@floor(p.x() / v.checker_m));
-        const cz: i32 = @intFromFloat(@floor(p.z() / v.checker_m));
-        if (@mod(cx + cz, 2) != 0) base = .{ base[0] * v.checker_gain, base[1] * v.checker_gain, base[2] * v.checker_gain };
+        if (hit.class == .floor and v.checker_m > 0.0) {
+            const cx: i32 = @intFromFloat(@floor(p.x() / v.checker_m));
+            const cz: i32 = @intFromFloat(@floor(p.z() / v.checker_m));
+            if (@mod(cx + cz, 2) != 0) base = .{ base[0] * v.checker_gain, base[1] * v.checker_gain, base[2] * v.checker_gain };
+        }
+        if (hit.class == .floor and v.plank_m > 0.0) {
+            const pi: i32 = @intFromFloat(@floor(p.z() / v.plank_m));
+            const pv = 0.9 + 0.2 * hash2(pi, 7919); // per-plank brightness
+            base = .{ base[0] * pv, base[1] * pv, base[2] * pv };
+            const seam = @mod(p.z(), v.plank_m);
+            if (seam < 0.012 or seam > v.plank_m - 0.012)
+                base = .{ base[0] * v.plank_gain, base[1] * v.plank_gain, base[2] * v.plank_gain };
+        }
+        if (v.noise_gain > 0.0) {
+            const n = 0.65 * vnoise(p.x(), p.z(), v.noise_scale_m) +
+                0.35 * vnoise(p.x(), p.z(), v.noise_scale_m * 4.0);
+            const g = 1.0 + v.noise_gain * (n - 0.5) * 2.0;
+            base = .{ base[0] * g, base[1] * g, base[2] * g };
+        }
     }
     const sun = if (v.sun_dir) |sd| sd.normalize() else Vec3.init(-0.4, 0.85, 0.35).normalize();
     const lam = v.ambient + (1.0 - v.ambient) * @max(0.0, hit.n.dot(sun));
