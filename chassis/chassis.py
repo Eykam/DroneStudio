@@ -1,9 +1,9 @@
-"""v114-g113a: low split cockpit with deep closed waist longerons.
+"""v115-g114b: low lenticular wings and compact cardinal sensor beds.
 
-Lower inward cockpit folds follow a slightly wider service channel while
-keeping the original outer shoulders and full flight-board service volume.
-The removed high skin repays deeper, narrower enclosed waist sills that
-carry ring bending and shear inside the existing fuselage envelope.
+Independently reshape the roots and free spans into lower lenticular closed
+sections, retaining the upper shoulder breadth and lateral section inertia.
+Shorter cardinal carrier beds shed peripheral mass while preserving their
+folded seats, mounting posts and optical datums inside the original shell.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -305,6 +305,26 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Widen only the bed flange, where it improves both vertical
         # and lateral inertia. Keep the complete upper-shoulder breadth.
         keel+=0.30*flange+0.18*wing
+        # Replace the lower corner-heavy section with a flange-biased
+        # closed wing. Lower the belly chine and shorten its inclined
+        # lower facets while retaining the lateral compression shoulders.
+        # The upper roof still closes on a >45-degree pitch; independently
+        # sized roots and tips retain >=96% vertical and >=101% lateral
+        # section inertia at the deliberately changed loft stations.
+        # Root and free-span folds are sized independently; both fade out
+        # before the pinned carrier seat and original motor diaphragm.
+        root_fold=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing_fold=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for fold, gain, roof_delta, keel_delta, chine_delta, web in (
+                (root_fold, -0.010347636, -0.299676393, -0.100000000, -0.090971174, 0.056941622),
+                (wing_fold, -0.020563545, 0.045577587, 0.057445685, -0.037685216, 0.014989451)):
+            height*=1.0+gain*fold
+            crown+=roof_delta*fold
+            keel+=keel_delta*fold
+            chine+=chine_delta*height*fold
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*fold
+            straight=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(straight-half)*web*fold
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -1403,7 +1423,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # intersection with the sloping spar floor. The complete rear
         # mounting post retains over 2.8 mm of bed behind it; this removes
         # the coplanar wedge without changing the spar's normal skin.
-        back=-10.6 if diagonal else -10.0
+        # End cardinal beds 1.53 mm behind their unchanged mounting posts.
+        # The full 23.2 mm tangential seat still extends beyond both side
+        # rails; remove only the unused bed perimeter, below the PCB.
+        back=-10.6 if diagonal else -9.3
         front=4.4
         # The diagonally rotated square bed left tangential corner
         # skirts far beyond the PCB, rails and gussets. End those skirts
@@ -1411,7 +1434,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # support, while the empty corner no longer grazes the spar floor.
         # This also removes the nearly coplanar cradle/spar wedge that
         # produced degenerate tetrahedra in otherwise valid solid exports.
-        skirt_width=24.0 if diagonal else 50.0
+        skirt_width=24.0 if diagonal else 23.2
         shelf=shelf & local(box((back+front)/2,0,-.1,
                                 front-back,skirt_width,z0+1))
         # A 1.4 mm ledge bears directly on the PCB bottom edge. The broad

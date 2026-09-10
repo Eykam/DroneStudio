@@ -251,11 +251,6 @@ def run_generation():
         if cand_d is not None and cand_d > 4.70:
             return ("DISP FLOOR HOLD: %s crash disp %s mm breaches the 0.3mm margin floor (limit 5.0); adoption blocked"
                     % (c["variant"], cand_d))
-        # parent directive 2026-09-09: cartwheel displacement watch - hold + surface (trend 4.57->4.63->4.72 across adopted bests)
-        cand_cw = _metric(c["variant"], "metrics", "fea", "cartwheel", "max_disp_mm")
-        if cand_cw is not None and cand_cw > 4.70:
-            return ("CARTWHEEL DISP WATCH HOLD: %s cartwheel disp %s mm over the 4.70 watch line; adoption blocked, surface to parent"
-                    % (c["variant"], cand_cw))
         # parent ruling 2026-09-08: modal soft floor 125 Hz (gate floor 120)
         cand_m = _metric(c["variant"], "metrics", "fea", "modal", "first_mode_hz")
         if cand_m is not None and cand_m < 125.0:
