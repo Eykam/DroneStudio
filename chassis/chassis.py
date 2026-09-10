@@ -1,9 +1,9 @@
-"""v122-g121b: early straight arm chines with deeper root flanges.
+"""v123-g122a: close-wrapped cockpit and waist with deeper closed sills.
 
-Start the direct free-wing chine earlier, beyond the complete optical
-reveal; re-form the arm flanges to retain lateral inertia and root depth. Full 3D normal wall offsets,
-fixed carrier crossings and original motor diaphragms retain their load
-paths; the enclosed fuselage and payload seats remain integrated.
+A lower transverse cockpit roof follows the CM4 service box while keeping
+the existing inner folds and narrow service channel. Contract the empty
+waist and battery flanks; deeper, narrower closed ring sills carry bending
+without thickening the skin. All optical seats remain at their fixed datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -729,8 +729,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # the full lens bezel and its upper land intact, while shortening the
     # broad vertical skirt. The raised inboard hip still covers each carrier.
     # A separate longitudinal rake below follows the battery-to-CM4 envelope.
-    # The planar roofs below retain 1.01 times the specified normal gauge
-    # (1.2322 mm at defaults); vertical shell faces keep the full 1.22 mm.
+    # The planar roofs below retain 1.005 times the specified normal gauge
+    # (1.2261 mm at defaults); vertical shell faces keep the full 1.22 mm.
     # Deeper waist sills provide the local section depth independently.
     wall = p.body_thickness_mm
     # Raise the inboard roof through its pitch, rather than restoring
@@ -813,9 +813,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # their junctions aligned and the diagonal optical planes fixed.
         # The bezel aperture follows the shortened optical standoff below.
         if not protected_facet and abs(mid_x) < 44.0:
-            tuck=3.10
+            # Retain the full conservative east/west sensor envelope;
+            # only the empty oblique waist facets move further inward.
+            tuck=3.10 if abs(nx) < 0.1 else 3.50
         if not protected_facet and -122.0 < mid_x < -65.0:
-            tuck=3.65
+            tuck=4.45
         compact_lines.append((nx,ny,nx*a[0]+ny*a[1]-tuck))
     compact=[]
     for a,d in zip(compact_lines[-1:]+compact_lines[:-1],compact_lines):
@@ -844,7 +846,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             pl=b.Plane(origin=(nx*c,ny*c,28.0),z_dir=(pitch*nx,pitch*ny,1))
             half=pl*b.Box(600,600,500,align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             outer=outer & half
-            inner=inner & half.moved(b.Pos(0,0,-wall*1.010*math.sqrt(1+pitch*pitch)))
+            inner=inner & half.moved(b.Pos(0,0,-wall*1.005*math.sqrt(1+pitch*pitch)))
         outs.append(outer);ins.append(inner)
     outer=outs[0];inner=ins[0]
     for o in outs[1:]: outer=outer+o
@@ -867,7 +869,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             half=pl*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             roof_outer=roof_outer & half
-            drop=wall*1.010*math.sqrt(1+slope*slope+(rake/sx)**2)
+            drop=wall*1.005*math.sqrt(1+slope*slope+(rake/sx)**2)
             roof_inner=roof_inner & half.moved(b.Pos(0,0,-drop))
         # A shallow central fold lowers the battery turtledeck while
         # the original outboard pitch remains its envelope limit. Their
@@ -883,7 +885,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 half = plane*b.Box(800,800,600,
                     align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
                 roof_outer = roof_outer & half
-                drop = wall*1.010*math.sqrt(1+battery_pitch**2+(rake/sx)**2)
+                drop = wall*1.005*math.sqrt(1+battery_pitch**2+(rake/sx)**2)
                 roof_inner = roof_inner & half.moved(b.Pos(0,0,-drop))
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
     roof_outer=roof_outers[0];roof_inner=roof_inners[0]
@@ -907,7 +909,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         half=pl*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         outer=outer & half
-        drop=wall*1.010*math.sqrt(1+1.12**2+roof_rake**2)
+        drop=wall*1.005*math.sqrt(1+1.12**2+roof_rake**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     # A second, opposing longitudinal pitch shortens the high aft
     # cockpit shoulders. The compound hip uses shallower 1.015:1 inner
@@ -925,7 +927,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         half=plane*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         outer=outer & half
-        drop=wall*1.010*math.sqrt(1+1.12**2+(-0.015/sx)**2)
+        drop=wall*1.005*math.sqrt(1+1.12**2+(-0.015/sx)**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     cockpit_pitch=1.015
     # Follow the declared 108 x 52 x 22 mm CM4 board with 1 mm
@@ -939,7 +941,20 @@ def build_chassis(p: ChassisParams) -> b.Part:
         half=plane*b.Box(800,800,600,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
         outer=outer & half
-        drop=wall*1.010*math.sqrt(1+cockpit_pitch**2+aft_rake**2)
+        drop=wall*1.005*math.sqrt(1+cockpit_pitch**2+aft_rake**2)
+        inner=inner & half.moved(b.Pos(0,0,-drop))
+    # Close-wrap the outer cockpit with a lower transverse roof. The
+    # original compound hips remain envelope limits, so this only removes
+    # volume. Its normal-offset underside clears the full CM4 service box
+    # by 0.25 mm at Y=27; the original inner folds and hatch stay intact.
+    # Both sides grow at 1.015:1 without an unsupported horizontal cap.
+    for roof_side in (-1,1):
+        plane=b.Plane(origin=(0,0,88.98),
+                      z_dir=(0,roof_side*cockpit_pitch,1))
+        half=plane*b.Box(800,800,600,
+            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+        outer=outer & half
+        drop=wall*1.005*math.sqrt(1+cockpit_pitch**2)
         inner=inner & half.moved(b.Pos(0,0,-drop))
     # Twin inward cockpit creases replace the tall inner shoulders with
     # a low folded crown on each side of the service channel. Their
@@ -979,7 +994,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             half=plane*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             co=co & half
-            drop=wall*1.010*math.sqrt(1+local_pitch**2+aft_rake**2)
+            drop=wall*1.005*math.sqrt(1+local_pitch**2+aft_rake**2)
             ci=ci & half.moved(b.Pos(0,0,-drop))
         creased_outer.append(co); creased_inner.append(ci)
     outer=outer & (creased_outer[0]+creased_outer[1])
@@ -1008,7 +1023,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             half=plane*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             fold_o=fold_o & half
-            drop=wall*1.010*math.sqrt(1+(run/sx)**2+1.12**2)
+            drop=wall*1.005*math.sqrt(1+(run/sx)**2+1.12**2)
             fold_i=fold_i & half.moved(b.Pos(0,0,-drop))
         folds_outer.append(fold_o)
         folds_inner.append(fold_i)
@@ -1044,7 +1059,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             half=plane*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             no=no & half
-            drop=wall*1.010*math.sqrt(1+(1.12/sy)**2+rake*rake)
+            drop=wall*1.005*math.sqrt(1+(1.12/sy)**2+rake*rake)
             ni=ni & half.moved(b.Pos(0,0,-drop))
         # Opposing roof pitches meet above each fixed lens/PCB. The
         # inboard half rises from the existing cockpit hip at 0.16:1,
@@ -1060,7 +1075,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             half=plane*b.Box(800,800,600,
                 align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
             no=no & half
-            drop=wall*1.010*math.sqrt(1+(1.12/sy)**2+back_rake**2)
+            drop=wall*1.005*math.sqrt(1+(1.12/sy)**2+back_rake**2)
             ni=ni & half.moved(b.Pos(0,0,-drop))
         # Close-wrap each camera with a shallow central roof fold. Its
         # intersection with the reference 1.12:1 shoulder lies 10 mm
@@ -1077,13 +1092,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
                     half=plane*b.Box(800,800,600,
                         align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
                     no=no & half
-                    drop=wall*1.010*math.sqrt(1+(1.025/sy)**2+rake*rake)
+                    drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
                     ni=ni & half.moved(b.Pos(0,0,-drop))
         nose_outer.append(no);nose_inner.append(ni)
     hip=b.Plane(origin=(71.0*sx,0,45.3),z_dir=(1.20/sx,0,1))
     half=hip*b.Box(800,800,600,
         align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
-    nose_o=half;nose_i=half.moved(b.Pos(0,0,-wall*1.010*math.sqrt(1+(1.20/sx)**2)))
+    nose_o=half;nose_i=half.moved(b.Pos(0,0,-wall*1.005*math.sqrt(1+(1.20/sx)**2)))
     for no,ni in zip(nose_outer,nose_inner):
         nose_o=nose_o+no;nose_i=nose_i+ni
     outer=outer & nose_o
@@ -1161,8 +1176,12 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # junction. This retains a little existing structural skin
             # across the crash-stress notch, within the original hull.
             if key in ('vl53l9cx_breakout#e','vl53l9cx_breakout#w'):
-                hood=[(-8.4,-13.4),(14.0,-14.8),(18.0,-11.4),
-                      (18.0,11.4),(14.0,14.8),(-8.4,13.4)]
+                # Fan the existing pitched skin across the cardinal
+                # hood/rim reaction. The broader outer shoulder spreads
+                # crash load around the tucked waist's acute rim return;
+                # its entire patch remains inside the old outer hull.
+                hood=[(-8.4,-13.4),(14.0,-16.0),(18.0,-11.4),
+                      (18.0,11.4),(14.0,16.0),(-8.4,13.4)]
             hood=[(r*scale,t*scale) for r,t in hood]
             cap=prism(hood,0,150).rotate(b.Axis.Z,angle).moved(b.Pos(cx,cy,0))
             protected=protected+cap
@@ -1381,8 +1400,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                      (lean,apex),(-9.8+lean,13.0)]
             # Center the normal tool on the newly tucked facet.
             inward=-side
-            cy+=inward*3.10*ny
-            cx=waist_x*sx+inward*3.10*nx
+            cy+=inward*3.50*ny
+            cx=waist_x*sx+inward*3.50*nx
             wire=b.Wire.make_polygon([
                 (cx+tx*u-4*nx,cy+ty*u-4*ny,z)
                 for u,z in outline],close=True)
@@ -1400,7 +1419,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # normal offset; the sensor-facing wall and external hull stay.
             # A shorter, deeper triangular sill puts material into vertical
             # web depth; the full-gauge pitched lid grows from its inner toe.
-            breadth,depth=3.7,10.2
+            # Increase sill depth at the shell/arm reaction, retaining
+            # its outer wall datum and full normal gauge. The narrower
+            # toe reduces inward bulk while the roof remains >45 degrees.
+            breadth,depth=3.5,11.0
             grade=depth/breadth
             def rim_section(u,inside=False):
                 points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
