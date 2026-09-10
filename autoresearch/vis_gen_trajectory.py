@@ -12,6 +12,7 @@ import numpy as np
 sys.path.insert(0, "/workspace/DroneStudio/autoresearch")
 from env_quad import QuadNavEnv
 from scene_schema import SceneDistribution
+from vis_visual import sample_visual
 
 BIN = "/workspace/zig-out/bin/dronestudio-headless"
 W, H = 128, 96
@@ -58,6 +59,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenes", type=int, default=12)
     ap.add_argument("--poses-per-scene", type=int, default=60)
+    ap.add_argument("--visual", choices=["none", "dr", "checker"], default="none")
     ap.add_argument("--scene-offset", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--out", default="/workspace/vision_model/traj")
@@ -106,10 +108,19 @@ def main():
                               "goal": [float(path[-1][0]), 0.0, float(path[-1][2])],
                               "obstacles": obs_arr.tolist(),
                               "extent": ext, "max_steps": 10}})
-            f = h.call({"cmd": "render", "width": W, "height": H,
-                        "yaw": float(np.radians(yaw)),
-                        "pitch": float(np.radians(pitch)),
-                        "hfov_deg": HFOV_DEG})
+            rc = {"cmd": "render", "width": W, "height": H,
+                  "yaw": float(np.radians(yaw)),
+                  "pitch": float(np.radians(pitch)),
+                  "hfov_deg": HFOV_DEG}
+            if a.visual != "none":
+                vis = sample_visual(scene_id)
+                if a.visual == "checker":
+                    import numpy as _np
+                    crng = _np.random.default_rng(int(scene_id) ^ 0xC4EC)
+                    vis["checker_m"] = float(crng.uniform(0.5, 3.0))
+                    vis["checker_gain"] = float(crng.uniform(0.75, 0.88))
+                rc["visual"] = vis
+            f = h.call(rc)
             rgb = np.array(f["rgb"], dtype=np.uint32)
             RGB[n, :, :, 0] = ((rgb >> 16) & 255).reshape(H, W)
             RGB[n, :, :, 1] = ((rgb >> 8) & 255).reshape(H, W)
