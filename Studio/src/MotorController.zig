@@ -244,7 +244,9 @@ pub const QuadcopterController = struct {
             const yaw_output = self.yaw_pid.update(current_euler_cache[2], current_time);
 
             // Apply motor mixing algorithm
-            self.applyMotorMixing(roll_output, pitch_output, yaw_output);
+            // HiL rung-3 (2026-09-11): yaw authority ran positive-feedback vs the
+            // physically-correct sim plant (yaw-sign A/B test hil_yawsign.py). Negate.
+            self.applyMotorMixing(roll_output, pitch_output, -yaw_output);
 
             self.mutex.unlock();
 
