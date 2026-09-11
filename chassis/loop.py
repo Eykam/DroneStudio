@@ -291,15 +291,16 @@ def run_generation():
                     and cand_s > inc_s):
                 return ("QUALITY HOLD: crash stress margin %.2f MPa < 1.0 and %s erodes it (%s->%s MPa); adoption blocked"
                         % (16.5 - inc_s, c["variant"], inc_s, cand_s))
+        except Exception as e:
+            print(f"[gen {gen}] stress-guard check failed (non-gating): {e}", flush=True)
         # parent ruling 2026-09-11: candidate-side floor - a candidate whose OWN crash
         # stress margin is < 1.0 MPa may not be adopted for mass reduction, regardless
         # of the incumbent's margin (closes the 1.6->0.1 single-step hole, v133-g132b)
-        if (cand_s is not None and 16.5 - cand_s < 1.0
+        cand_s2 = _metric(c["variant"], "metrics", "fea", "crash", "max_von_mises_mpa")
+        if (cand_s2 is not None and 16.5 - cand_s2 < 1.0
                 and c["mass_g"] and best_mass and c["mass_g"] < best_mass):
             return ("QUALITY HOLD: %s own crash stress margin %.2f MPa < 1.0; mass-reduction adoption blocked"
-                    % (c["variant"], 16.5 - cand_s))
-        except Exception as e:
-            print(f"[gen {gen}] stress-guard check failed (non-gating): {e}", flush=True)
+                    % (c["variant"], 16.5 - cand_s2))
         # parent standing rule 2026-09-06: crash displacement hard floor 0.3mm margin (limit 5.0)
         cand_d = _metric(c["variant"], "metrics", "fea", "crash", "max_disp_mm")
         if cand_d is not None and cand_d > 4.70:
