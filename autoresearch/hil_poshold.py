@@ -8,7 +8,7 @@ def qmul(a, b):
     return (aw*bw - ax*bx - ay*by - az*bz, aw*bx + ax*bw + ay*bz - az*by,
             aw*by - ax*bz + ay*bw + az*bx, aw*bz + ax*by - ay*bx + az*bw)
 PKP = float(sys.argv[1]) if len(sys.argv) > 1 else 0.08
-PKI = float(sys.argv[2]) if len(sys.argv) > 2 else 0.02
+PKI = float(sys.argv[2]) if len(sys.argv) > 2 else 0.005
 PKD = float(sys.argv[3]) if len(sys.argv) > 3 else 0.15
 SX = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0   # sim spawn x (fwd)
 SZ = float(sys.argv[5]) if len(sys.argv) > 5 else -0.5  # sim spawn z (right)

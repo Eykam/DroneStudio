@@ -192,8 +192,8 @@ pub const QuadcopterController = struct {
             .pitch_pid = PidController.init(pitch_kp, pitch_ki, pitch_kd, max_integral, max_output),
             .yaw_pid = PidController.init(yaw_kp, yaw_ki, yaw_kd, max_integral, max_output),
             .alt_pid = PidController.init(0.0, 0.0, 0.0, 10.0, 30.0),
-            .pos_pid_x = PidController.init(0.0, 0.0, 0.0, 5.0, 0.14),
-            .pos_pid_y = PidController.init(0.0, 0.0, 0.0, 5.0, 0.14),
+            .pos_pid_x = PidController.init(0.0, 0.0, 0.0, 1.0, 0.14),
+            .pos_pid_y = PidController.init(0.0, 0.0, 0.0, 1.0, 0.14),
             .motor_outputs = [_]f32{0.0} ** 4,
             .motor_config = config,
             .base_throttle = base_throttle,
@@ -379,8 +379,16 @@ pub const QuadcopterController = struct {
             if (pos_hold and pos_age_ms < 100.0) {
                 const px_out = self.pos_pid_x.updateWithRate(pos_x_cache, vel_x_cache, current_time_pre);
                 const py_out = self.pos_pid_y.updateWithRate(pos_y_cache, vel_y_cache, current_time_pre);
-                pitch_offset = std.math.clamp(-px_out, -0.14, 0.14);
-                roll_offset = std.math.clamp(py_out, -0.14, 0.14);
+                // Yaw-aware: rotate world-frame accel demand into body frame by
+                // current heading (FC NED yaw, euler[2]). yaw=0 reduces to the
+                // A/B-verified mapping (nose-down=+x, right-wing-down=+y).
+                const yaw_now = current_euler_cache[2];
+                const cy = @cos(yaw_now);
+                const sy = @sin(yaw_now);
+                const fwd = px_out * cy + py_out * sy;
+                const right = -px_out * sy + py_out * cy;
+                pitch_offset = std.math.clamp(-fwd, -0.14, 0.14);
+                roll_offset = std.math.clamp(right, -0.14, 0.14);
             }
 
             // Set PID setpoints

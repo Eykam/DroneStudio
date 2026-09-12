@@ -8,6 +8,7 @@ def qmul(a, b):
     return (aw*bw - ax*bx - ay*by - az*bz, aw*bx + ax*bw + ay*bz - az*by,
             aw*by - ax*bz + ay*bw + az*bx, aw*bz + ax*by - ay*bx + az*bw)
 DT = float(sys.argv[1]) if len(sys.argv) > 1 else 0.080
+HEADING = math.radians(float(sys.argv[2])) if len(sys.argv) > 2 else 0.0
 # waypoints in FC world frame (x fwd, y right); 1m square back to origin
 WPS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
 ARRIVE = 0.25; DWELL = 0.5; LEG_TIMEOUT = 8.0
@@ -33,7 +34,7 @@ assert ' 0 1 ' in r.decode(), 'not armed'
 send('UpdatePidParams Roll 9 2.0 0.6'); send('UpdatePidParams Pitch 9 2.0 0.6')
 send('UpdatePidParams Yaw 1.5 0.0 0.5')
 send('UpdatePidParams Altitude 15 4 8')
-send('UpdatePidParams PosX 0.12 0.02 0.3'); send('UpdatePidParams PosY 0.12 0.02 0.3')
+send('UpdatePidParams PosX 0.12 0.005 0.3'); send('UpdatePidParams PosY 0.12 0.005 0.3')
 p = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
 def call(d):
     p.stdin.write(json.dumps(d) + '\n'); p.stdin.flush()
@@ -44,7 +45,7 @@ call({'cmd': 'motor_v2', 'on': True})
 call({'cmd': 'hil_listen', 'port': 5100, 'perm': [1, 0, 2, 3]})
 send('UpdateBaseThrottle 11.1')
 LEVEL = (1.0, 0.0, 0.0, 0.0)
-q_fc_t = qmul(C, qmul(LEVEL, C_INV))
+q_fc_t = (math.cos(HEADING/2), 0.0, 0.0, math.sin(HEADING/2))  # FC-frame heading about z
 send(f'SetOrientation {q_fc_t[0]} {q_fc_t[1]} {q_fc_t[2]} {q_fc_t[3]}')
 send('SetAltitude 1.5')
 wi = 0
