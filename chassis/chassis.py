@@ -1,7 +1,7 @@
-"""v149-g148b: deep tapered arm roots and rebalanced closed wing flanges.
+"""v153-g152b: deep root webs and straight lower wing facets.
 
-Recover root bending inertia through depth and keep broad load flanges
-while tucking the lower side chines of the swept outer wings.
+Deepen the enclosed root webs, straighten the free-wing lower facets,
+and reclaim carrier-bed web material under the unchanged folded seats.
 Retain the complete optical saddles, enclosed fuselage and motor datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
@@ -500,6 +500,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
             direct=keel+(shoulder_half-keel)*chine/shoulder
             half+=(direct-half)*web*blend
+        # Re-form the load path, rather than thinning the spar skin.
+        # Deeper inboard webs carry bending into the hub; outside the
+        # carrier saddle, straighten the lower facet toward its chord.
+        # Full-width upper flanges preserve the lateral-impact load path.
+        # Both transitions end before the fixed sensor and motor datums.
+        root_depth=max(0.0,min(1.0,(48.0-x)/16.0))
+        free_wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        height*=1.0+0.015*root_depth
+        shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*root_depth
+        chine*=1.0+0.015*root_depth
+        direct=keel+(shoulder_half-keel)*chine/shoulder
+        half+=(direct-half)*0.32*free_wing
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -1738,7 +1750,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # Wider crossed vaults unload the carrier-bed web centers.
             # Four-mm center piers and >=2.4 mm end piers retain the
             # full folded bearing sheet and both PCB mounting ears.
-            half=4.9 if cardinal else 4.3
+            # Retain 1.8 mm center piers and >=1.3 mm outer piers;
+            # the folded roof, screw ears and separate arm skin remain.
+            half=5.1 if cardinal else 4.6
             apex=z0-5.4*1.11/2-p.structural_gauge_mm-(0.0 if cardinal else 0.6)
             eave=apex-1.12*half
             w=b.Wire.make_polygon([(cx+radial-half,cy-12.6,-.2),
