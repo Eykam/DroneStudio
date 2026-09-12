@@ -1,7 +1,7 @@
-"""v153-g152b: deep root webs and straight lower wing facets.
+"""v154-g153b: deeper closed roots and lean crossed carrier-bed vaults.
 
-Deepen the enclosed root webs, straighten the free-wing lower facets,
-and reclaim carrier-bed web material under the unchanged folded seats.
+Raise the inboard compression flange of each closed arm and relieve
+the crossed bed webs beneath the unchanged diagonal carrier seats.
 Retain the complete optical saddles, enclosed fuselage and motor datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
@@ -512,6 +512,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
         chine*=1.0+0.015*root_depth
         direct=keel+(shoulder_half-keel)*chine/shoulder
         half+=(direct-half)*0.32*free_wing
+        # Increase the closed inboard shear depth without widening the
+        # hull or changing the carrier saddle. The bed keel and upper
+        # flange breadth persist; the full normal offset follows the
+        # deeper section and its transition into the unchanged ring.
+        height*=1.0+0.012*root_depth
+        chine*=1.0+0.012*root_depth
+        shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*root_depth
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -1752,8 +1759,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # full folded bearing sheet and both PCB mounting ears.
             # Retain 1.8 mm center piers and >=1.3 mm outer piers;
             # the folded roof, screw ears and separate arm skin remain.
-            half=5.1 if cardinal else 4.6
-            apex=z0-5.4*1.11/2-p.structural_gauge_mm-(0.0 if cardinal else 0.6)
+            half=5.1 if cardinal else 5.0
+            apex=z0-5.4*1.11/2-p.structural_gauge_mm-(0.0 if cardinal else 0.3)
             eave=apex-1.12*half
             w=b.Wire.make_polygon([(cx+radial-half,cy-12.6,-.2),
                 (cx+radial+half,cy-12.6,-.2),
