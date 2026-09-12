@@ -1,4 +1,4 @@
-"""v143-g142b: deep closed arm flanges with shortened neutral-axis side skins.
+"""v144-g143a: low four-fold stereo brows and close-wrapped cockpit.
 
 Recover root bending inertia through depth and keep broad load flanges
 while tucking the lower side chines of the swept outer wings.
@@ -250,7 +250,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Its adjoining shoulder sheds excess skin allowance below, using
         # section depth inboard instead of extra sidewall around sensors.
         haunch=max(0.0,min(1.0,(48.0-x)/16.0))
-        depth=1.025
+        depth=1.035
         height*=1.0+(depth-1.0)*haunch
         shoulder*=1.0+(depth-1.0)*haunch
         chine*=1.0+(depth-1.0)*haunch
@@ -1040,7 +1040,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Opposing faces close at 1.025:1 with the full 3D normal skin offset.
     # Additional continuous creases stiffen the thin, low structural roof.
     crease_pitch=1.025
-    crease_centers=((8.45,65.25),(13.70,65.25),(18.95,65.25),(24.20,65.25))
+    crease_centers=((8.45,65.12),(13.70,65.12),(18.95,65.12),(24.20,65.12))
     creased_outer=[]; creased_inner=[]
     for side in (-1,1):
         for crease_y,local_crease_z in crease_centers:
@@ -1155,22 +1155,22 @@ def build_chassis(p: ChassisParams) -> b.Part:
                     no=no & half
                     drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
                     ni=ni & half.moved(b.Pos(0,0,-drop))
-        # Three low folded brows follow the camera PCB instead of one
+        # Four low folded brows follow the camera PCB instead of one
         # tall triangular hood. Their common valleys and three ridges brace
-        # the skin, with >=1.22 mm true normal gauge on every face.
+        # the skin, with the unchanged true normal gauge on every face.
         # At the PCB edges the inner roof stays above the full camera
         # service envelope. The old hood clips the folds, preserving the
         # nose perimeter and the junction with the forward cockpit hip.
         # Both roofs close at 1.025:1 directly from their printed eaves.
         if ridge_y != 0.0:
             camera_folds_o=[]; camera_folds_i=[]
-            for delta_y in (-8.0,0.0,8.0):
+            for delta_y in (-9.0,-3.0,3.0,9.0):
                 fo=box(0,0,-.2,600,600,200)
                 fi=box(0,0,-.2,600,600,200)
                 for end in (-1,1):
                     for side in (-1,1):
                         rake=end*.03/sx
-                        plane=b.Plane(origin=(83.0*sx,(ridge_y+delta_y)*sy,33.90),
+                        plane=b.Plane(origin=(83.0*sx,(ridge_y+delta_y)*sy,32.50),
                             z_dir=(rake,side*1.025/sy,1))
                         half=plane*b.Box(800,800,600,
                             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
@@ -1178,8 +1178,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                         drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
                         fi=fi & half.moved(b.Pos(0,0,-drop))
                 camera_folds_o.append(fo);camera_folds_i.append(fi)
-            no=no & (camera_folds_o[0]+camera_folds_o[1]+camera_folds_o[2])
-            ni=ni & (camera_folds_i[0]+camera_folds_i[1]+camera_folds_i[2])
+            no=no & (camera_folds_o[0]+camera_folds_o[1]+camera_folds_o[2]+camera_folds_o[3])
+            ni=ni & (camera_folds_i[0]+camera_folds_i[1]+camera_folds_i[2]+camera_folds_i[3])
         # Two shallow ridges wrap the north carrier, replacing its tall
         # single peak. The valley clears the complete service box, and
         # >45-degree faces brace the hood without a flat ceiling. Every
@@ -1410,18 +1410,19 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Keep each cut on one transverse and longitudinal facet, away from
     # the fold creases, fixed camera seats and the central ToF carrier.
     for camera_y in (-28.0,28.0):
-        for delta_y,crease_y,face_side in ((-10.0,-8.0,-1),(-6.0,-8.0,1),
-                                          (-2.0,0.0,-1),(2.0,0.0,1),
-                                          (6.0,8.0,-1),(10.0,8.0,1)):
+        for delta_y,crease_y,face_side in ((-10.5,-9.0,-1),(-7.5,-9.0,1),
+                                          (-4.5,-3.0,-1),(-1.5,-3.0,1),
+                                          (1.5,3.0,-1),(4.5,3.0,1),
+                                          (7.5,9.0,-1),(10.5,9.0,1)):
             for vent_x in (77.0,81.0,86.0,90.0):
                 rake=math.copysign(.03,vent_x-83.0)/sx
                 vent_y=(camera_y+delta_y)*sy
-                top=33.90-.03*abs(vent_x-83.0)-1.025*abs(delta_y-crease_y)
+                top=32.50-.03*abs(vent_x-83.0)-1.025*abs(delta_y-crease_y)
                 plane=b.Plane(origin=(vent_x*sx,vent_y,top),
                     x_dir=(1,0,-rake),z_dir=(rake,face_side*1.025/sy,1))
                 length=math.sqrt(1+(1.025/sy)**2)
-                outline=[(0,-1.05*length),(1.2,-.2*length),
-                         (1.2,.2*length),(0,1.05*length),
+                outline=[(0,-0.60*length),(1.2,-.2*length),
+                         (1.2,.2*length),(0,0.60*length),
                          (-1.2,.2*length),(-1.2,-.2*length)]
                 wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
                 shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
@@ -1933,7 +1934,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     deck_z=fz-1.2
     deck_x0=fx-55.3
     deck_x1=fx+55.3
-    # A 1.265 mm normal corrugated sheet preserves the PCB bearing
+    # A 1.224 mm normal corrugated sheet preserves the PCB bearing
     # datums while removing excess underside allowance. The shallow
     # contact flats and all >45-degree folded faces stay supported.
     profile=[]
@@ -1941,6 +1942,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
         profile.append((y,deck_z-6.71))
         if y<26:
             profile.extend([(y+6.1,deck_z),(y+6.9,deck_z)])
+    # Recover the new close-wrapped roof folds' material from the deck.
+    # A 1.82 mm vertical offset keeps 1.224 mm normal fold thickness.
     # V-vault the underside of each narrow ridge bearing land. The
     # old 0.8 mm horizontal bridge retained 1.94 mm of material; a
     # 1.12:1 pointed underside now leaves >=1.26 mm normal skin and
@@ -1950,10 +1953,10 @@ def build_chassis(p: ChassisParams) -> b.Part:
     lower=[]
     for i in range(len(profile)-1,-1,-1):
         y,z=profile[i]
-        lower.append((y,z-1.88))
+        lower.append((y,z-1.82))
         if i>0 and abs(z-profile[i-1][1])<1e-9:
             prev_y=profile[i-1][0]
-            lower.append(((y+prev_y)/2,z-1.88+1.12*(y-prev_y)/2))
+            lower.append(((y+prev_y)/2,z-1.82+1.12*(y-prev_y)/2))
     wire=b.Wire.make_polygon([(deck_x0,fy+y,z) for y,z in profile+lower],close=True)
     deck=b.Solid.extrude(b.Face(wire),(deck_x1-deck_x0,0,0))
     # Keep the two outer load-bearing deck rails; the open center admits
