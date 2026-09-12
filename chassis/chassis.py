@@ -1,9 +1,9 @@
-"""v134-g133a: low three-fold camera brows integrated into the nose shell.
+"""v135-g134a: four low battery-shoulder creases in the integrated shell.
 
-Three shallow ridges replace each twin-peaked camera hood, reducing nose
-bulk with a 1.20 mm minimum normally offset shell and fixed seats.
-Short face-normal vents follow the new folds; continuous ridge and valley
-lands carry shear into the existing cockpit hip and optical ring.
+Split each battery shoulder into two shallow ridges, lowering the turtledeck
+inside the original hull. Continuous creases carry shear around the service
+channel; all faces retain true normal offsets and support-free pitches.
+The original arms, carrier seats and placement-driven optical cuts remain.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -929,20 +929,28 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # box. True normal offsets include the longitudinal rake.
         if ridge_x == -104.0 and rake > 0:
             paired_o=[]; paired_i=[]
+            # Two ridges per side replace the high battery shoulder. The
+            # 4.4 mm spacing puts the valley underside above Z=36.2 at
+            # the rear pack corner, with the longitudinal rake included.
+            # Intersect both skins with the old hip: no envelope grows.
             for shoulder_side in (-1,1):
-                po=box(0,0,-.2,600,600,200)
-                pi=box(0,0,-.2,600,600,200)
-                for face_side in (-1,1):
-                    plane=b.Plane(origin=(ridge_x*sx,shoulder_side*14.0,41.65),
-                        z_dir=(-rake/sx,face_side*1.025,1))
-                    half=plane*b.Box(800,800,600,
-                        align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
-                    po=po & half
-                    drop=wall*1.005*math.sqrt(1+1.025**2+(rake/sx)**2)
-                    pi=pi & half.moved(b.Pos(0,0,-drop))
-                paired_o.append(po);paired_i.append(pi)
-            roof_outer=roof_outer & (paired_o[0]+paired_o[1])
-            roof_inner=roof_inner & (paired_i[0]+paired_i[1])
+                for shoulder_y in (12.0,16.4):
+                    po=box(0,0,-.2,600,600,200)
+                    pi=box(0,0,-.2,600,600,200)
+                    for face_side in (-1,1):
+                        plane=b.Plane(origin=(ridge_x*sx,shoulder_side*shoulder_y,40.65),
+                            z_dir=(-rake/sx,face_side*1.025,1))
+                        half=plane*b.Box(800,800,600,
+                            align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
+                        po=po & half
+                        drop=wall*1.005*math.sqrt(1+1.025**2+(rake/sx)**2)
+                        pi=pi & half.moved(b.Pos(0,0,-drop))
+                    paired_o.append(po);paired_i.append(pi)
+            folded_o=paired_o[0]; folded_i=paired_i[0]
+            for po,pi in zip(paired_o[1:],paired_i[1:]):
+                folded_o=folded_o+po; folded_i=folded_i+pi
+            roof_outer=roof_outer & folded_o
+            roof_inner=roof_inner & folded_i
         roof_outers.append(roof_outer);roof_inners.append(roof_inner)
     roof_outer=roof_outers[0];roof_inner=roof_inners[0]
     for ro,ri in zip(roof_outers[1:],roof_inners[1:]):
@@ -1359,24 +1367,25 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
                 shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
 
-    # Pointed vents in the rising and falling battery shoulders.
-    # The true fold intersection lies near |Y|=13.9; both rows stay
-    # entirely on one face, leaving continuous ridge and service-edge
-    # chords. Each 2.4 mm X span bridges between printed jambs, and
-    # the normal cut preserves wall gauge at the opening returns.
+    # Short face-normal vents follow all four battery creases. Keep
+    # continuous ridge and valley lands, plus the unchanged service rim.
     for side in (-1,1):
-        for vent_y,half_span,face_side in ((12.1,.65,-1),(16.0,.6,1)):
+        # Leave the two short central facets solid: clipping against the
+        # former hip moves their effective ridges away from nominal ones.
+        for vent_y,ridge_y,face_side in ((11.0,12.0,-1),(17.4,16.4,1)):
             for vent_x in (-97.0,-91.0,-85.0,-79.0):
                 rake=.08/sx
-                if face_side < 0:
-                    z=41.65+.08*(vent_x/sx+104.0)-1.025*(14.0-vent_y)
-                else:
-                    z=55.8+.08*(vent_x/sx+104.0)-1.025*vent_y
+                # The old outward hip remains the limit of the new folds.
+                folded=40.65+.08*(vent_x/sx+104.0)-1.025*abs(vent_y-ridge_y)
+                old_in=41.65+.08*(vent_x/sx+104.0)-1.025*(14.0-vent_y)
+                old_out=55.8+.08*(vent_x/sx+104.0)-1.025*vent_y
+                z=min(folded,old_in,old_out)
+                actual_side=(-1 if old_in == z else 1 if old_out == z else face_side)
                 plane=b.Plane(origin=(vent_x,side*vent_y,z),
-                    x_dir=(1,0,rake),z_dir=(-rake,side*face_side*1.025,1))
+                    x_dir=(1,0,rake),z_dir=(-rake,side*actual_side*1.025,1))
                 length=math.sqrt(1+1.025**2)
-                outline=[(0,-half_span*length),(1.2,-.2*length),
-                         (1.2,.2*length),(0,half_span*length),
+                outline=[(0,-.55*length),(1.2,-.2*length),
+                         (1.2,.2*length),(0,.55*length),
                          (-1.2,.2*length),(-1.2,-.2*length)]
                 wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
                 shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
