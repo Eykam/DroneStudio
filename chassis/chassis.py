@@ -1,4 +1,4 @@
-"""v144-g143a: low four-fold stereo brows and close-wrapped cockpit.
+"""v145-g144b: deep tapered arm roots and rebalanced closed wing flanges.
 
 Recover root bending inertia through depth and keep broad load flanges
 while tucking the lower side chines of the swept outer wings.
@@ -455,6 +455,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
             direct=keel+(shoulder_half-keel)*chine/shoulder
             half+=(direct-half)*web*blend
+        # Flange-biased closed sections shorten the side skin while
+        # recovering bending inertia through depth. Blend completely out
+        # before each fixed carrier saddle and terminal motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend,depth,breadth,bed,ridge,lower,web in (
+                (hub, 0.017116969688328106,0.008883959957529438,-0.18095526287572403,0.025970123509048815,-0.005359550287280515,0.06669197728359888), (wing, 0.020702732368157353,0.009475055423559076,-0.10060750443462105,-0.06446469522761805,0.0215782334609467,0.005611985582419876)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -464,11 +479,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
         if inner:
             root_blend = max(0.0,min(1.0,(75.0-x)/30.0))
             folded_root=max(0.0,min(1.0,(48.0-x)/16.0))
-            # Preserve the 1.22 mm hub skin and a 1.24 mm shoulder.
+            # Use a 1.20 mm nominal arm offset with the mandatory 3D
+            # normal allowance below (at least 1.206 mm normal skin).
+            # Deeper closed sections recover vertical inertia while this
+            # small reduction of excess allowance pays back their mass.
             # The deeper hub haunch above supplies the bending load path;
             # both adjacent loft spans still contribute their full 3D
             # normal correction to the swept faces and pitched flanges.
-            wall = (max(1.21,p.arm_rib_thickness_mm-0.14)
+            wall = (max(1.20,p.arm_rib_thickness_mm-0.15)
                     +min(0.01,0.10*root_blend-0.10*folded_root))
             # The section's YZ normal alone underestimates wall thickness on
             # the optical bypass. Include both adjacent loft spans and both
@@ -493,7 +511,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
                         gradient = max(gradient,abs((ny*delta_y+nz*delta_z)/(nx-x)))
                 # The folded ring supplies the extra load path. Remove
                 # excess spar allowance while retaining the complete 3D
-                # normal offset and the >=1.22 mm nominal arm skin.
+                # normal offset and the >=1.20 mm nominal arm skin.
                 gauge = wall*max(1.010,1.005*math.sqrt(1+gradient*gradient))
                 lines.append((ny,nz,ny*y0+nz*z0+gauge))
             inset = []
