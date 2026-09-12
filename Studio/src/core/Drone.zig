@@ -243,6 +243,7 @@ pub const Protocol = struct {
         ReverseDirection,
         Battery,
         UpdateOrientation,
+        UpdateGyro,
         SetOrientation,
         StopOrientation,
         UpdatePidParams,

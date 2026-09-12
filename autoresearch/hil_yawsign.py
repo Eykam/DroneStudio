@@ -52,6 +52,7 @@ def loop_window(dur, target_sim):
         nn = math.sqrt(sum(v*v for v in dq)); dq = tuple(v/nn for v in dq)
         q_fc = qmul(C, qmul(qmul(q_sim, dq), C_INV))
         send(f"UpdateOrientation {q_fc[0]} {q_fc[1]} {q_fc[2]} {q_fc[3]}")
+        send(f"UpdateGyro {om[0]:.5f} {om[2]:.5f} {-om[1]:.5f}")  # R_x(-90): sim(x,y,z)->fc(x,z,-y)
         call({"cmd": "hil_step", "ticks": 5})
         n += 1
         w, x, y, z = q[3], q[0], q[1], q[2]

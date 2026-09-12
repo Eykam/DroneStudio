@@ -31,7 +31,7 @@ threading.Thread(target=hb_daemon, daemon=True).start()  # covers setup gaps (wa
 
 send("CONNECT")
 r, _ = s.recvfrom(4096); assert "ACK" in r.decode()
-send(json.dumps({"dshot_protocol": 2, "motors": [{"pin": 17, "direction": 0}, {"pin": 27, "direction": 1}, {"pin": 22, "direction": 0}, {"pin": 23, "direction": 1}], "battery": {"cells": 3}}))
+send(json.dumps({"dshot_protocol": 300, "motors": [{"pin": 17, "direction": 0}, {"pin": 27, "direction": 1}, {"pin": 22, "direction": 0}, {"pin": 23, "direction": 1}], "battery": {"cells": 3}}))
 r, _ = s.recvfrom(4096); assert "CONFIG_ACK" in r.decode()
 send("Battery 16.4")
 for i in range(4):
@@ -67,6 +67,7 @@ def run_combo(kp, kd):
         nn = math.sqrt(sum(v*v for v in dq)); dq = tuple(v/nn for v in dq)
         q_fc = qmul(C, qmul(qmul(q_sim, dq), C_INV))
         send(f"UpdateOrientation {q_fc[0]} {q_fc[1]} {q_fc[2]} {q_fc[3]}")
+        send(f"UpdateGyro {om[0]:.5f} {om[2]:.5f} {-om[1]:.5f}")
         call({"cmd": "hil_step", "ticks": 5})
         n += 1
         tilts.append(math.degrees(2 * math.acos(min(1.0, abs(q[3])))))

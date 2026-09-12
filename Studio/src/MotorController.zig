@@ -103,6 +103,30 @@ pub const PidController = struct {
 
         return self.output;
     }
+
+    /// Rung-3 HiL rate feed: derivative-on-measurement from a true body rate.
+    /// Pass measured_rate=null to fall back to euler-error differencing.
+    pub fn updateWithRate(self: *Self, current_value: f32, measured_rate: ?f32, current_time: i128) f32 {
+        const err = self.setpoint - current_value;
+
+        var dt: f32 = 0.01;
+        if (self.last_time > 0) {
+            dt = @floatFromInt(current_time - self.last_time);
+            dt /= @as(f32, 1_000_000_000.0);
+        }
+        self.last_time = current_time;
+        if (dt < 0.001) dt = 0.001;
+
+        self.integral += err * dt;
+        self.integral = @min(self.max_integral, @max(-self.max_integral, self.integral));
+
+        const derivative = if (measured_rate) |r| -r else (err - self.last_error) / dt;
+        self.last_error = err;
+
+        const output = self.kp * err + self.ki * self.integral + self.kd * derivative;
+        self.output = @min(self.max_output, @max(-self.max_output, output));
+        return self.output;
+    }
 };
 
 pub const QuadcopterController = struct {
@@ -132,6 +156,10 @@ pub const QuadcopterController = struct {
     base_throttle: f32,
 
     current_orientation: Quaternion,
+
+    // Rung-3 HiL: true body rates (FC frame), fed via UpdateGyro
+    gyro_rates: [3]f32 = .{ 0.0, 0.0, 0.0 },
+    gyro_last_ns: i128 = 0,
     target_orientation: Quaternion,
 
     running: std.atomic.Value(bool),
@@ -185,6 +213,14 @@ pub const QuadcopterController = struct {
         self.current_orientation = quaternion;
     }
 
+    pub fn updateGyro(self: *Self, rates: [3]f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.gyro_rates = rates;
+        self.gyro_last_ns = std.time.nanoTimestamp();
+    }
+
     pub fn getMotorOutputs(self: *Self) [4]f32 {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -205,6 +241,8 @@ pub const QuadcopterController = struct {
 
         var current_euler_cache: [3]f32 = undefined;
         var target_euler_cache: [3]f32 = undefined;
+        var gyro_cache: [3]f32 = .{ 0.0, 0.0, 0.0 };
+        var gyro_age_ms: f32 = 1e9;
 
         var frame_count: u64 = 0;
         var overrun_count: u64 = 0;
@@ -221,6 +259,8 @@ pub const QuadcopterController = struct {
                 self.mutex.lock();
                 current_quat = self.current_orientation;
                 target_quat = self.target_orientation;
+                gyro_cache = self.gyro_rates;
+                gyro_age_ms = @as(f32, @floatFromInt(start_time - self.gyro_last_ns)) / 1e6;
                 self.mutex.unlock();
             }
 
@@ -239,9 +279,11 @@ pub const QuadcopterController = struct {
 
             // Update PID controllers
             const current_time = std.time.nanoTimestamp();
-            const roll_output = self.roll_pid.update(current_euler_cache[0], current_time);
-            const pitch_output = self.pitch_pid.update(current_euler_cache[1], current_time);
-            const yaw_output = self.yaw_pid.update(current_euler_cache[2], current_time);
+            // D term: true body rate when gyro feed is fresh (<50ms), euler diff otherwise
+            const gyro_fresh = gyro_age_ms < 50.0;
+            const roll_output = self.roll_pid.updateWithRate(current_euler_cache[0], if (gyro_fresh) gyro_cache[0] else null, current_time);
+            const pitch_output = self.pitch_pid.updateWithRate(current_euler_cache[1], if (gyro_fresh) gyro_cache[1] else null, current_time);
+            const yaw_output = self.yaw_pid.updateWithRate(current_euler_cache[2], if (gyro_fresh) gyro_cache[2] else null, current_time);
 
             // Apply motor mixing algorithm
             // HiL rung-3 (2026-09-11): yaw authority ran positive-feedback vs the
@@ -706,6 +748,12 @@ pub const Controller = struct {
 
         if (self.orientation_control) |*control| {
             control.updateCurrentOrientation(quaternion);
+        }
+    }
+
+    pub fn updateGyro(self: *Self, rates: [3]f32) void {
+        if (self.orientation_control) |*control| {
+            control.updateGyro(rates);
         }
     }
 
@@ -1213,6 +1261,15 @@ const Server = struct {
 
                 if (self.controller) |controller| {
                     controller.updateCurrentOrientation(quaternion);
+                }
+            },
+            .UpdateGyro => {
+                const gx = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidGyroCommand);
+                const gy = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidGyroCommand);
+                const gz = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidGyroCommand);
+
+                if (self.controller) |controller| {
+                    controller.updateGyro(.{ gx, gy, gz });
                 }
             },
             .SetOrientation => {

@@ -7,7 +7,7 @@ def qmul(a, b):
     aw, ax, ay, az = a; bw, bx, by, bz = b
     return (aw*bw - ax*bx - ay*by - az*bz, aw*bx + ax*bw + ay*bz - az*by,
             aw*by - ax*bz + ay*bw + az*bx, aw*bz + ax*by - ay*bx + az*bw)
-KP, KD, DT_MS = 3.0, 2.0, 80.0
+KP = float(sys.argv[1]) if len(sys.argv) > 1 else 3.0; KD = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0; DT_MS = 80.0
 fc = subprocess.Popen([FCBIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1.5)
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3.0)
@@ -20,7 +20,7 @@ def hb_daemon():
         time.sleep(0.4)
 threading.Thread(target=hb_daemon, daemon=True).start()
 send("CONNECT"); r,_ = s.recvfrom(4096); assert "ACK" in r.decode()
-send(json.dumps({"dshot_protocol": 2, "motors": [{"pin": 17, "direction": 0}, {"pin": 27, "direction": 1}, {"pin": 22, "direction": 0}, {"pin": 23, "direction": 1}], "battery": {"cells": 3}}))
+send(json.dumps({"dshot_protocol": 300, "motors": [{"pin": 17, "direction": 0}, {"pin": 27, "direction": 1}, {"pin": 22, "direction": 0}, {"pin": 23, "direction": 1}], "battery": {"cells": 3}}))
 r,_ = s.recvfrom(4096); assert "CONFIG_ACK" in r.decode()
 send("Battery 16.4")
 for i in range(4):
@@ -56,6 +56,7 @@ def loop_window(dur, target_sim):
         nn = math.sqrt(sum(v*v for v in dq)); dq = tuple(v/nn for v in dq)
         q_fc = qmul(C, qmul(qmul(q_sim, dq), C_INV))
         send(f"UpdateOrientation {q_fc[0]} {q_fc[1]} {q_fc[2]} {q_fc[3]}")
+        send(f"UpdateGyro {om[0]:.5f} {om[2]:.5f} {-om[1]:.5f}")
         call({"cmd": "hil_step", "ticks": 5})
         n += 1
         w, x, y, z = q[3], q[0], q[1], q[2]

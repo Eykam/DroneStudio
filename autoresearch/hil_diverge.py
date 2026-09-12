@@ -24,7 +24,7 @@ def hb_daemon():
         time.sleep(0.4)
 threading.Thread(target=hb_daemon, daemon=True).start()
 send("CONNECT"); r,_ = s.recvfrom(4096); assert "ACK" in r.decode()
-send(json.dumps({"dshot_protocol": 2, "motors": [{"pin": 17, "direction": 0}, {"pin": 27, "direction": 1}, {"pin": 22, "direction": 0}, {"pin": 23, "direction": 1}], "battery": {"cells": 3}}))
+send(json.dumps({"dshot_protocol": 300, "motors": [{"pin": 17, "direction": 0}, {"pin": 27, "direction": 1}, {"pin": 22, "direction": 0}, {"pin": 23, "direction": 1}], "battery": {"cells": 3}}))
 r,_ = s.recvfrom(4096); assert "CONFIG_ACK" in r.decode()
 send("Battery 16.4")
 for i in range(4):
