@@ -7,7 +7,7 @@ def qmul(a, b):
     aw, ax, ay, az = a; bw, bx, by, bz = b
     return (aw*bw - ax*bx - ay*by - az*bz, aw*bx + ax*bw + ay*bz - az*by,
             aw*by - ax*bz + ay*bw + az*bx, aw*bz + ax*by - ay*bx + az*bw)
-KP = float(sys.argv[1]) if len(sys.argv) > 1 else 3.0; KD = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0; DT_MS = 80.0
+KP = float(sys.argv[1]) if len(sys.argv) > 1 else 3.0; KD = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0; KI = float(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] != 'trace' else 0.05; DT_MS = 80.0
 fc = subprocess.Popen([FCBIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1.5)
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3.0)
@@ -29,7 +29,7 @@ s.sendto(b"HEARTBEAT", FC); r,_ = s.recvfrom(4096)
 st = r.decode()
 assert " 0 1 " in st and " 1 1 " in st, f"not armed: {st}"
 print("armed+battery ok:", st.strip()[:120], flush=True)
-send(f"UpdatePidParams Roll {KP} 0.05 {KD}"); send(f"UpdatePidParams Pitch {KP} 0.05 {KD}")
+send(f"UpdatePidParams Roll {KP} {KI} {KD}"); send(f"UpdatePidParams Pitch {KP} {KI} {KD}")
 send("UpdatePidParams Yaw 0.1 0.0 0.0")
 p = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
 def call(d):
@@ -78,6 +78,7 @@ def metrics(trace, axis, target_deg):
         if t10 is None and v >= 0.1 * target_deg: t10 = t
         if t90 is None and v >= 0.9 * target_deg: t90 = t
     band = 0.05 * target_deg
+    t_end = vals[-1][0]
     for i in range(len(vals) - 1, -1, -1):
         t, v = vals[i]
         if abs(v - target_deg) > band:
@@ -85,6 +86,8 @@ def metrics(trace, axis, target_deg):
             break
     else:
         settle = 0.0
+    if settle is not None and settle >= t_end - 0.05:
+        settle = None  # still outside band at window end
     rise = (t90 - t10) if (t10 is not None and t90 is not None) else None
     ovs = max(0.0, (peak - target_deg) / target_deg * 100.0)
     return rise, ovs, settle, peak
@@ -94,13 +97,16 @@ c5, s5 = math.cos(math.radians(5)), math.sin(math.radians(5))
 print("settle 1.5s level", flush=True)
 loop_window(1.5, LEVEL)
 print("STEP +10deg roll (sim-x)", flush=True)
-tr = loop_window(2.5, (c5, s5, 0.0, 0.0))
+tr = loop_window(4.0, (c5, s5, 0.0, 0.0))
 r = metrics(tr, 0, 10.0)
+if 'trace' in sys.argv[3:]:
+    print('RTRACE(0.1s):', [round(v,2) for v in [x[1] for x in tr][::10]], flush=True)
+    print('YAW during roll:', [round(v,2) for v in [x[2] for x in tr][::10]], flush=True)
 print(f"ROLL: rise={r[0]}s overshoot={r[1]:.1f}% settle(5%)={r[2]}s peak={r[3]:.2f}deg", flush=True)
 print("back to level 1.5s", flush=True)
 loop_window(1.5, LEVEL)
 print("STEP +10deg pitch (sim-z, world right axis)", flush=True)
-tp = loop_window(2.5, (c5, 0.0, 0.0, s5))
+tp = loop_window(4.0, (c5, 0.0, 0.0, s5))
 r2 = metrics(tp, 2, 10.0)
 print(f"PITCH: rise={r2[0]}s overshoot={r2[1]:.1f}% settle(5%)={r2[2]}s peak={r2[3]:.2f}deg", flush=True)
 p.terminate(); fc.terminate()
