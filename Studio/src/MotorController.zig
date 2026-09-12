@@ -142,6 +142,7 @@ pub const QuadcopterController = struct {
         Roll,
         Pitch,
         Yaw,
+        Altitude,
         Any,
     };
 
@@ -160,6 +161,13 @@ pub const QuadcopterController = struct {
     // Rung-3 HiL: true body rates (FC frame), fed via UpdateGyro
     gyro_rates: [3]f32 = .{ 0.0, 0.0, 0.0 },
     gyro_last_ns: i128 = 0,
+
+    // Rung-3 HiL: altitude hold - fed via UpdateAltitude (up-positive meters)
+    alt_pid: PidController,
+    altitude: f32 = 0.0,
+    climb_rate: f32 = 0.0,
+    alt_last_ns: i128 = 0,
+    alt_hold_active: bool = false,
     target_orientation: Quaternion,
 
     running: std.atomic.Value(bool),
@@ -171,6 +179,7 @@ pub const QuadcopterController = struct {
             .roll_pid = PidController.init(roll_kp, roll_ki, roll_kd, max_integral, max_output),
             .pitch_pid = PidController.init(pitch_kp, pitch_ki, pitch_kd, max_integral, max_output),
             .yaw_pid = PidController.init(yaw_kp, yaw_ki, yaw_kd, max_integral, max_output),
+            .alt_pid = PidController.init(0.0, 0.0, 0.0, 10.0, 30.0),
             .motor_outputs = [_]f32{0.0} ** 4,
             .motor_config = config,
             .base_throttle = base_throttle,
@@ -221,6 +230,31 @@ pub const QuadcopterController = struct {
         self.gyro_last_ns = std.time.nanoTimestamp();
     }
 
+    pub fn updateAltitude(self: *Self, alt: f32, climb: f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.altitude = alt;
+        self.climb_rate = climb;
+        self.alt_last_ns = std.time.nanoTimestamp();
+    }
+
+    pub fn setTargetAltitude(self: *Self, alt: f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.alt_pid.setSetpoint(alt);
+        self.alt_pid.reset();
+        self.alt_hold_active = true;
+    }
+
+    pub fn disableAltHold(self: *Self) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.alt_hold_active = false;
+    }
+
     pub fn getMotorOutputs(self: *Self) [4]f32 {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -243,6 +277,10 @@ pub const QuadcopterController = struct {
         var target_euler_cache: [3]f32 = undefined;
         var gyro_cache: [3]f32 = .{ 0.0, 0.0, 0.0 };
         var gyro_age_ms: f32 = 1e9;
+        var alt_cache: f32 = 0.0;
+        var climb_cache: f32 = 0.0;
+        var alt_age_ms: f32 = 1e9;
+        var alt_hold: bool = false;
 
         var frame_count: u64 = 0;
         var overrun_count: u64 = 0;
@@ -261,6 +299,10 @@ pub const QuadcopterController = struct {
                 target_quat = self.target_orientation;
                 gyro_cache = self.gyro_rates;
                 gyro_age_ms = @as(f32, @floatFromInt(start_time - self.gyro_last_ns)) / 1e6;
+                alt_cache = self.altitude;
+                climb_cache = self.climb_rate;
+                alt_age_ms = @as(f32, @floatFromInt(start_time - self.alt_last_ns)) / 1e6;
+                alt_hold = self.alt_hold_active;
                 self.mutex.unlock();
             }
 
@@ -286,9 +328,15 @@ pub const QuadcopterController = struct {
             const yaw_output = self.yaw_pid.updateWithRate(current_euler_cache[2], if (gyro_fresh) gyro_cache[2] else null, current_time);
 
             // Apply motor mixing algorithm
+            // Altitude hold: throttle delta from altitude PID (D on measured climb rate)
+            var throttle = self.base_throttle;
+            if (alt_hold and alt_age_ms < 100.0) {
+                throttle += self.alt_pid.updateWithRate(alt_cache, climb_cache, current_time);
+            }
+
             // HiL rung-3 (2026-09-11): yaw authority ran positive-feedback vs the
             // physically-correct sim plant (yaw-sign A/B test hil_yawsign.py). Negate.
-            self.applyMotorMixing(roll_output, pitch_output, -yaw_output);
+            self.applyMotorMixing(throttle, roll_output, pitch_output, -yaw_output);
 
             self.mutex.unlock();
 
@@ -306,7 +354,7 @@ pub const QuadcopterController = struct {
         }
     }
 
-    fn applyMotorMixing(self: *Self, roll: f32, pitch: f32, yaw: f32) void {
+    fn applyMotorMixing(self: *Self, throttle: f32, roll: f32, pitch: f32, yaw: f32) void {
         // Calculate motor outputs based on PID controller outputs
         // Motors are numbered:
         //   X Configuration:     Plus Configuration:
@@ -320,16 +368,16 @@ pub const QuadcopterController = struct {
         switch (self.motor_config) {
             .X_Configuration => {
                 // Front-left, front-right, back-right, back-left
-                self.motor_outputs[0] = self.base_throttle - roll - pitch - yaw;
-                self.motor_outputs[1] = self.base_throttle + roll - pitch + yaw;
-                self.motor_outputs[2] = self.base_throttle - roll + pitch + yaw;
-                self.motor_outputs[3] = self.base_throttle + roll + pitch - yaw;
+                self.motor_outputs[0] = throttle - roll - pitch - yaw;
+                self.motor_outputs[1] = throttle + roll - pitch + yaw;
+                self.motor_outputs[2] = throttle - roll + pitch + yaw;
+                self.motor_outputs[3] = throttle + roll + pitch - yaw;
             },
             .Plus_Configuration => {
                 // Front, right, back, left
-                self.motor_outputs[0] = self.base_throttle - pitch - yaw;
-                self.motor_outputs[1] = self.base_throttle + roll + yaw;
-                self.motor_outputs[2] = self.base_throttle + pitch - yaw;
+                self.motor_outputs[0] = throttle - pitch - yaw;
+                self.motor_outputs[1] = throttle + roll + yaw;
+                self.motor_outputs[2] = throttle + pitch - yaw;
                 self.motor_outputs[3] = self.base_throttle - roll + yaw;
             },
         }
@@ -754,6 +802,24 @@ pub const Controller = struct {
     pub fn updateGyro(self: *Self, rates: [3]f32) void {
         if (self.orientation_control) |*control| {
             control.updateGyro(rates);
+        }
+    }
+
+    pub fn updateAltitude(self: *Self, alt: f32, climb: f32) void {
+        if (self.orientation_control) |*control| {
+            control.updateAltitude(alt, climb);
+        }
+    }
+
+    pub fn setTargetAltitude(self: *Self, alt: f32) void {
+        if (self.orientation_control) |*control| {
+            control.setTargetAltitude(alt);
+        }
+    }
+
+    pub fn disableAltHold(self: *Self) void {
+        if (self.orientation_control) |*control| {
+            control.disableAltHold();
         }
     }
 
@@ -1272,6 +1338,30 @@ const Server = struct {
                     controller.updateGyro(.{ gx, gy, gz });
                 }
             },
+            .UpdateAltitude => {
+                const alt = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidAltitudeCommand);
+                const climb = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidAltitudeCommand);
+
+                if (self.controller) |controller| {
+                    controller.updateAltitude(alt, climb);
+                }
+            },
+            .SetAltitude => {
+                const alt = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidAltitudeCommand);
+
+                if (self.controller) |controller| {
+                    controller.setTargetAltitude(alt);
+
+                    if (!controller.orientation_control_active.load(.acquire)) {
+                        try controller.startOrientationControl();
+                    }
+                }
+            },
+            .StopAltitude => {
+                if (self.controller) |controller| {
+                    controller.disableAltHold();
+                }
+            },
             .SetOrientation => {
                 const w = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
                 const x = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
@@ -1330,6 +1420,13 @@ const Server = struct {
                             control.yaw_pid.kd = kd;
                             control.yaw_pid.reset();
                             std.debug.print("Updated Yaw PID: kp={d:.3} ki={d:.3} kd={d:.3}\n", .{ kp, ki, kd });
+                        },
+                        .Altitude => {
+                            control.alt_pid.kp = kp;
+                            control.alt_pid.ki = ki;
+                            control.alt_pid.kd = kd;
+                            control.alt_pid.reset();
+                            std.debug.print("Updated Altitude PID: kp={d:.3} ki={d:.3} kd={d:.3}\n", .{ kp, ki, kd });
                         },
                         .Any => {
                             // Update all PIDs with the same values
