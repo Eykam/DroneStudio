@@ -1,7 +1,7 @@
-"""v154-g153b: deeper closed roots and lean crossed carrier-bed vaults.
+"""v156-g155a: tucked aft fuselage with deep ring sills and vaulted deck piers.
 
-Raise the inboard compression flange of each closed arm and relieve
-the crossed bed webs beneath the unchanged diagonal carrier seats.
+Tuck the empty battery flanks inward and deepen the internal ring sills.
+Taller pointed deck vaults repay the sill mass while retaining PCB rails.
 Retain the complete optical saddles, enclosed fuselage and motor datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
@@ -919,7 +919,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # only the empty oblique waist facets move further inward.
             tuck=3.10 if abs(nx) < 0.1 else 3.50
         if not protected_facet and -122.0 < mid_x < -65.0:
-            tuck=4.45
+            tuck=4.80
         # Move the diagonal shell plane toward its fixed internal carrier.
         # Seats and bearings stay pinned; the window below is recomputed
         # at the shorter optical standoff, retaining its complete cone.
@@ -1664,7 +1664,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
             g=p.structural_gauge_mm
             # A taller, narrower internal return increases ring depth;
             # its steep roof grows from the bed within the same hull.
-            breadth,depth=2.85,15.4
+            breadth,depth=2.85,16.0
             grade=depth/breadth
             def rim_section(u,inside=False):
                 points=[(0.0,0.0),(breadth,0.0),(0.0,depth)]
@@ -2065,9 +2065,9 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # retaining the 2 mm lower flange and >1.2 mm piers at both deck ends.
     # The roofs rise 1.12:1; the small side lean also builds from below.
     for x in (-44.0,-22.0,0.0,22.0,44.0):
-        half=p.deck_arch_half_span_mm+1.6
+        half=p.deck_arch_half_span_mm+1.85
         lean=math.copysign(0.3 if abs(x)>40 else 1.2,x) if x else 0.0
-        apex=deck_z-7.7
+        apex=deck_z-7.45
         shoulder=apex-1.12*half
         arch=b.Wire.make_polygon([(fx+x-half,fy-28,2.0),
             (fx+x+half,fy-28,2.0),(fx+x+half+lean,fy-28,shoulder),
