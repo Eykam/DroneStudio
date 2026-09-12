@@ -1,9 +1,8 @@
-"""v135-g134a: four low battery-shoulder creases in the integrated shell.
+"""v143-g142b: deep closed arm flanges with shortened neutral-axis side skins.
 
-Split each battery shoulder into two shallow ridges, lowering the turtledeck
-inside the original hull. Continuous creases carry shear around the service
-channel; all faces retain true normal offsets and support-free pitches.
-The original arms, carrier seats and placement-driven optical cuts remain.
+Recover root bending inertia through depth and keep broad load flanges
+while tucking the lower side chines of the swept outer wings.
+Retain the complete optical saddles, enclosed fuselage and motor datums.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -441,6 +440,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
             direct=keel+(shoulder_half-keel)*chine/shoulder
             half+=(direct-half)*web*blend
+        # Flange-biased closed sections shorten the side skin while
+        # recovering bending inertia through depth. Blend completely out
+        # before each fixed carrier saddle and terminal motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend,depth,breadth,bed,ridge,lower,web in (
+                (hub, 0.005779292816046385,-0.015782766699164594,0.14805844880202512,0.11432978417088613,0.001525681685773108,0.0015772122069204197), (wing, 0.016507943923150498,-0.00601553335791598,-0.1606767183423805,-0.0751781144962359,-0.03503023397786549,0.04553123458262892)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -454,8 +468,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
             # The deeper hub haunch above supplies the bending load path;
             # both adjacent loft spans still contribute their full 3D
             # normal correction to the swept faces and pitched flanges.
-            wall = (max(1.22,p.arm_rib_thickness_mm-0.13)
-                    +min(0.02,0.10*root_blend-0.10*folded_root))
+            wall = (max(1.21,p.arm_rib_thickness_mm-0.14)
+                    +min(0.01,0.10*root_blend-0.10*folded_root))
             # The section's YZ normal alone underestimates wall thickness on
             # the optical bypass. Include both adjacent loft spans and both
             # endpoints of each face, then miter those true normal offsets.
