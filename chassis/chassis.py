@@ -1,4 +1,4 @@
-"""v148-g147b: deep tapered arm roots and rebalanced closed wing flanges.
+"""v149-g148b: deep tapered arm roots and rebalanced closed wing flanges.
 
 Recover root bending inertia through depth and keep broad load flanges
 while tucking the lower side chines of the swept outer wings.
@@ -485,6 +485,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
             shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
             direct=keel+(shoulder_half-keel)*chine/shoulder
             half+=(direct-half)*web*blend
+        # Flange-biased closed sections shorten the side skin while
+        # recovering bending inertia through depth. Blend completely out
+        # before each fixed carrier saddle and terminal motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend,depth,breadth,bed,ridge,lower,web in (
+                (hub, 0.014093871531971811,0.028510842472337938,-0.1094522152994269,0.038640667285727015,0.001580450466075578,0.10046581868218724), (wing, 0.0010121521695603281,0.014670813750772251,0.1868289661928027,-0.14682843501131154,-0.029896509812572206,0.08249537365895626)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -731,6 +746,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                 [(x,y,z) for y,z in points],close=True))
         pad = pad + b.Solid.make_loft(nacelle_sections,ruled=True)
 
+        # Retain >=1.226 mm normal skin in the motor approach, taking
+        # excess gallery allowance back to fund the deeper arm roots.
         # Core the motor saddle with a conformal five-face gallery.
         # The former narrow triangular bore left solid wedges beside its
         # lower corners. True 3D normal offsets retain >=1.24 mm walls,
@@ -758,8 +775,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                         dy0=other[j][0]-points[j][0]
                         dz0=other[j][1]-points[j][1]
                         gradient=max(gradient,abs((ny*dy0+nz*dz0)/(nx-x)))
-                gauge=max(1.24,p.arm_rib_thickness_mm-0.11)
-                gauge*=max(1.035,1.01*math.sqrt(1+gradient*gradient))
+                gauge=max(1.22,p.arm_rib_thickness_mm-0.13)
+                gauge*=max(1.020,1.005*math.sqrt(1+gradient*gradient))
                 lines.append((ny,nz,ny*y0+nz*z0+gauge))
             inner=[]
             for (ay,az,ac),(by,bz,bc) in zip(lines[-1:]+lines[:-1],lines):
@@ -1738,12 +1755,14 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # global bounding box. Side rails have 0.3 mm insertion clearance.
         # A low radial foot joins the shelf to the common perimeter sill.
         # It stays well below the RX/TX optical corridor.
+        # Three 1.30 mm first-layer rails recover the deeper spar mass
+        # from the sensor-bed ties; the complete folded seats stay intact.
         # Three first-layer rails tie the existing vaulted shelf into the
         # perimeter sill. Open bays between them remove the redundant apron;
         # the pitched shelf vaults, PCB support ledge and bosses stay intact.
-        foot=local(box(5.5,0,0,23.0,max(1.24,p.cradle_foot_rail_mm-0.35),wall))
+        foot=local(box(5.5,0,0,23.0,max(1.24,p.cradle_foot_rail_mm-0.70),wall))
         for t in (-9.4,9.4):
-            foot=foot+local(box(5.5,t,0,23.0,max(1.24,p.cradle_foot_rail_mm-0.35),wall))
+            foot=foot+local(box(5.5,t,0,23.0,max(1.24,p.cradle_foot_rail_mm-0.70),wall))
         # At the nose the stereo optical cuts interrupt narrow floor ties.
         # Keep this one full apron to connect its cradle to the common shell.
         if key == 'vl53l9cx_breakout#n':
