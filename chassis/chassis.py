@@ -1,4 +1,4 @@
-"""v145-g144b: deep tapered arm roots and rebalanced closed wing flanges.
+"""v148-g147b: deep tapered arm roots and rebalanced closed wing flanges.
 
 Recover root bending inertia through depth and keep broad load flanges
 while tucking the lower side chines of the swept outer wings.
@@ -462,6 +462,21 @@ def build_chassis(p: ChassisParams) -> b.Part:
         wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
         for blend,depth,breadth,bed,ridge,lower,web in (
                 (hub, 0.017116969688328106,0.008883959957529438,-0.18095526287572403,0.025970123509048815,-0.005359550287280515,0.06669197728359888), (wing, 0.020702732368157353,0.009475055423559076,-0.10060750443462105,-0.06446469522761805,0.0215782334609467,0.005611985582419876)):
+            height*=1.0+depth*blend
+            shoulder_half*=1.0+breadth*blend
+            keel+=bed*blend
+            crown+=ridge*blend
+            chine+=lower*height*blend
+            shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*blend
+            direct=keel+(shoulder_half-keel)*chine/shoulder
+            half+=(direct-half)*web*blend
+        # Flange-biased closed sections shorten the side skin while
+        # recovering bending inertia through depth. Blend completely out
+        # before each fixed carrier saddle and terminal motor diaphragm.
+        hub=max(0.0,min(1.0,(48.0-x)/16.0))
+        wing=max(0.0,min(1.0,(x-86.0)/18.0,(136.0-x)/12.0))
+        for blend,depth,breadth,bed,ridge,lower,web in (
+                (hub, 0.0160605756589062,-0.013792478339412483,0.31121022132627707,-0.09996870716487623,0.01094306188534494,0.015360887248623667), (wing, 0.005730177944133909,0.016761011043937436,0.055109930361551616,0.17666230999158095,0.02716609962916532,0.0023914884134168535)):
             height*=1.0+depth*blend
             shoulder_half*=1.0+breadth*blend
             keel+=bed*blend
@@ -1888,7 +1903,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Remove only excess skin under the rib-supported payload floors.
     # Full-height ribs and capture sills keep every seating datum. The
     # continuous 1.22 mm belly sheet remains above the 1.2 mm DFAM floor.
-    gauge=max(1.22,p.structural_gauge_mm-.02)
+    gauge=max(1.20,p.structural_gauge_mm-.04)
     tray=box(bx,by,0,dx+2*wall+0.6,dy+2*wall+0.6,gauge)
     for ry in (-dy/2,0.0,dy/2):
         tray=tray+box(bx,by+ry,0,dx+2*wall+.6,gauge,bz)
@@ -1904,7 +1919,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     def ribbed_pad(x,y,dx,dy,seat_z):
         # Continuous bed skin and orthogonal ribs retain the original
         # seating plane and perimeter, with pockets between contact ribs.
-        g=max(1.22,p.structural_gauge_mm-.02)
+        g=max(1.20,p.structural_gauge_mm-.04)
         pad=box(x,y,0,dx,dy,g)
         nx=max(1,math.ceil((dx-g)/p.tray_rib_pitch_mm))
         ny=max(1,math.ceil((dy-g)/p.tray_rib_pitch_mm))
@@ -2065,9 +2080,11 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Do not introduce a deck wall through the original arm wiring galleries.
     for cavity in arm_cavities: deck=deck-cavity
     body=body+deck
+    # Recover spar-depth mass from the tall mounting sleeves: 1.225 mm
+    # radial wall at defaults, with the existing M3 bores and PCB datum.
     sh=p.stack_spacing_mm/2
     for x,y in ((sh,sh),(-sh,sh),(-sh,-sh),(sh,-sh)):
-        body=body+b.Pos(x,y,0)*b.Cylinder(p.stack_standoff_dia_mm/2,fz,
+        body=body+b.Pos(x,y,0)*b.Cylinder(max(p.stack_hole_dia_mm+2.4,p.stack_standoff_dia_mm-.35)/2,fz,
             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
         hole=b.Pos(x,y,-1)*b.Cylinder(p.stack_hole_dia_mm/2,fz+3,
              align=(b.Align.CENTER,b.Align.CENTER,b.Align.MIN))
@@ -2128,7 +2145,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The central opening above the pocket remains available for removal.
     pcx,pcy,pcz=(v*1000 for v in placements['pad_camera'])
     pcw,pcl,pch=(v*1000 for v in LIBRARY['pad_camera'].dims_m)
-    pg=max(1.22,p.structural_gauge_mm-.02)
+    pg=max(1.20,p.structural_gauge_mm-.04)
     pocket_w,pocket_l=pcw+.6,pcl+.6
     body=body-box(pcx,pcy,pcz,pocket_w,pocket_l,pch+.6)
     camera_floor=box(pcx,pcy,0,pocket_w+2*pg,pocket_l+2*pg,pg)
