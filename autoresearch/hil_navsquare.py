@@ -7,11 +7,10 @@ def qmul(a, b):
     aw, ax, ay, az = a; bw, bx, by, bz = b
     return (aw*bw - ax*bx - ay*by - az*bz, aw*bx + ax*bw + ay*bz - az*by,
             aw*by - ax*bz + ay*bw + az*bx, aw*bz + ax*by - ay*bx + az*bw)
-PKP = float(sys.argv[1]) if len(sys.argv) > 1 else 0.08
-PKI = float(sys.argv[2]) if len(sys.argv) > 2 else 0.02
-PKD = float(sys.argv[3]) if len(sys.argv) > 3 else 0.15
-SX = float(sys.argv[4]) if len(sys.argv) > 4 else 1.0   # sim spawn x (fwd)
-SZ = float(sys.argv[5]) if len(sys.argv) > 5 else -0.5  # sim spawn z (right)
+DT = float(sys.argv[1]) if len(sys.argv) > 1 else 0.080
+# waypoints in FC world frame (x fwd, y right); 1m square back to origin
+WPS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]
+ARRIVE = 0.25; DWELL = 0.5; LEG_TIMEOUT = 8.0
 fc = subprocess.Popen([FCBIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1.5)
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(3.0)
@@ -34,26 +33,28 @@ assert ' 0 1 ' in r.decode(), 'not armed'
 send('UpdatePidParams Roll 9 2.0 0.6'); send('UpdatePidParams Pitch 9 2.0 0.6')
 send('UpdatePidParams Yaw 1.5 0.0 0.5')
 send('UpdatePidParams Altitude 15 4 8')
-send(f'UpdatePidParams PosX {PKP} {PKI} {PKD}'); send(f'UpdatePidParams PosY {PKP} {PKI} {PKD}')
+send('UpdatePidParams PosX 0.12 0.02 0.3'); send('UpdatePidParams PosY 0.12 0.02 0.3')
 p = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
 def call(d):
     p.stdin.write(json.dumps(d) + '\n'); p.stdin.flush()
     return json.loads(p.stdout.readline())
-call({'cmd': 'reset', 'seed': 42, 'scene': {'spawn': [SX, 1.5, SZ], 'goal': [0.0, 0.0, 0.0], 'obstacles': [], 'extent': 10, 'max_steps': 2500}})
+call({'cmd': 'reset', 'seed': 42, 'scene': {'spawn': [0.0, 1.5, 0.0], 'goal': [0.0, 0.0, 0.0], 'obstacles': [], 'extent': 10, 'max_steps': 4000}})
 call({'cmd': 'set_dynamics', 'path': '/workspace/DroneStudio/autoresearch/fixtures/chassis_v1.manifest.json'})
 call({'cmd': 'motor_v2', 'on': True})
 call({'cmd': 'hil_listen', 'port': 5100, 'perm': [1, 0, 2, 3]})
 send('UpdateBaseThrottle 11.1')
-DT = float(sys.argv[6]) if len(sys.argv) > 6 else 0.080
 LEVEL = (1.0, 0.0, 0.0, 0.0)
 q_fc_t = qmul(C, qmul(LEVEL, C_INV))
 send(f'SetOrientation {q_fc_t[0]} {q_fc_t[1]} {q_fc_t[2]} {q_fc_t[3]}')
 send('SetAltitude 1.5')
-send('SetPosition 0.0 0.0')
-out = []
+wi = 0
+send(f'SetPosition {WPS[wi][0]} {WPS[wi][1]}')
+leg_start = time.time(); dwell_start = None
 t0 = time.time(); n = 0
-DUR = 10.0
-while time.time() - t0 < DUR:
+trace = []
+leg_times = []
+MAXT = 50.0
+while time.time() - t0 < MAXT and wi < len(WPS):
     stj = call({'cmd': 'hil_state'})
     q = stj['quat']; om = stj['omega']; pos = stj['pos']; vel = stj['vel']
     q_sim = (q[3], q[0], q[1], q[2])
@@ -66,11 +67,27 @@ while time.time() - t0 < DUR:
     send(f'UpdatePosition {pos[0]:.4f} {pos[2]:.4f} {vel[0]:.4f} {vel[2]:.4f}')
     call({'cmd': 'hil_step', 'ticks': 5})
     n += 1
-    out.append((time.time() - t0, pos[0], pos[2], pos[1]))
+    err = math.hypot(pos[0] - WPS[wi][0], pos[2] - WPS[wi][1])
+    trace.append((time.time() - t0, pos[0], pos[2], pos[1], err))
+    if err < ARRIVE:
+        if dwell_start is None: dwell_start = time.time()
+        elif time.time() - dwell_start >= DWELL:
+            leg_times.append(time.time() - leg_start)
+            wi += 1
+            if wi < len(WPS):
+                send(f'SetPosition {WPS[wi][0]} {WPS[wi][1]}')
+                leg_start = time.time(); dwell_start = None
+    else:
+        dwell_start = None
+    if time.time() - leg_start > LEG_TIMEOUT:
+        leg_times.append(-(time.time() - leg_start))  # negative = timed out
+        wi += 1
+        if wi < len(WPS):
+            send(f'SetPosition {WPS[wi][0]} {WPS[wi][1]}')
+            leg_start = time.time(); dwell_start = None
     time.sleep(max(0, 0.01 - (time.time() - t0 - n * 0.01)))
-errs = [math.hypot(px, pz) for _, px, pz, _ in out]
-alts = [a for _, _, _, a in out]
-late = [e for t, e in zip([o[0] for o in out], errs) if t > 3.0]
-print(f'POSHOLD kp={PKP} ki={PKI} kd={PKD} spawn=({SX},{SZ}): end_err={errs[-1]:.3f}m late_mean={sum(late)/max(1,len(late)):.3f} late_max={max(late):.3f} alt_end={alts[-1]:.2f}')
-print('ERR(0.5s):', [round(e,2) for e in errs[::50]])
+final_err = math.hypot(trace[-1][1], trace[-1][2])
+alt_min = min(t[3] for t in trace); alt_max = max(t[3] for t in trace)
+print(f'NAVSQUARE DT={DT}: legs_done={wi}/{len(WPS)} leg_times={[round(t,1) for t in leg_times]} final_err={final_err:.3f}m alt_range=[{alt_min:.2f},{alt_max:.2f}]')
+print('TRACE(1s):', [(round(t[0]), round(t[1],2), round(t[2],2)) for t in trace[::100]])
 p.terminate(); fc.terminate()
