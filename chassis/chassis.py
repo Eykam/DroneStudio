@@ -1,11 +1,9 @@
-"""v132-g131a: low eight-crease cockpit and deep enclosed waist sills.
+"""v134-g133a: low three-fold camera brows integrated into the nose shell.
 
-Close-wrap the flight board with four pitched folds on each shoulder,
-lowering the cockpit 0.8 mm. Wider, short normal-cut vents unload the skin
-between continuous ridge/valley chords; full shear ties remain where the
-roof bands enter. Taller, narrower internal sills recover ring depth inside
-the existing hull. The current closed arms, eight internal ToF seats and
-windows, stereo optical voids and central pad-camera cassette persist.
+Three shallow ridges replace each twin-peaked camera hood, reducing nose
+bulk with a 1.20 mm minimum normally offset shell and fixed seats.
+Short face-normal vents follow the new folds; continuous ridge and valley
+lands carry shear into the existing cockpit hip and optical ring.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -753,7 +751,7 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # The planar roofs below retain 1.005 times the specified normal gauge
     # (1.2261 mm at defaults); vertical shell faces keep the full 1.22 mm.
     # Deeper waist sills provide the local section depth independently.
-    wall = p.body_thickness_mm
+    wall = max(1.20, p.body_thickness_mm - 0.02)
     # Raise the inboard roof through its pitch, rather than restoring
     # the heavy skirt. The aft hip starts 4 mm earlier so its inner face
     # clears the CM4 service corners without a flat clipped underside.
@@ -1135,8 +1133,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                     no=no & half
                     drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
                     ni=ni & half.moved(b.Pos(0,0,-drop))
-        # Two low folded brows follow the camera PCB instead of one
-        # tall triangular hood. Their common valley and two ridges brace
+        # Three low folded brows follow the camera PCB instead of one
+        # tall triangular hood. Their common valleys and three ridges brace
         # the skin, with >=1.22 mm true normal gauge on every face.
         # At the PCB edges the inner roof stays above the full camera
         # service envelope. The old hood clips the folds, preserving the
@@ -1144,13 +1142,13 @@ def build_chassis(p: ChassisParams) -> b.Part:
         # Both roofs close at 1.025:1 directly from their printed eaves.
         if ridge_y != 0.0:
             camera_folds_o=[]; camera_folds_i=[]
-            for delta_y in (-6.0,6.0):
+            for delta_y in (-8.0,0.0,8.0):
                 fo=box(0,0,-.2,600,600,200)
                 fi=box(0,0,-.2,600,600,200)
                 for end in (-1,1):
                     for side in (-1,1):
                         rake=end*.03/sx
-                        plane=b.Plane(origin=(83.0*sx,(ridge_y+delta_y)*sy,35.60),
+                        plane=b.Plane(origin=(83.0*sx,(ridge_y+delta_y)*sy,33.90),
                             z_dir=(rake,side*1.025/sy,1))
                         half=plane*b.Box(800,800,600,
                             align=(b.Align.CENTER,b.Align.CENTER,b.Align.MAX))
@@ -1158,8 +1156,8 @@ def build_chassis(p: ChassisParams) -> b.Part:
                         drop=wall*1.005*math.sqrt(1+(1.025/sy)**2+rake*rake)
                         fi=fi & half.moved(b.Pos(0,0,-drop))
                 camera_folds_o.append(fo);camera_folds_i.append(fi)
-            no=no & (camera_folds_o[0]+camera_folds_o[1])
-            ni=ni & (camera_folds_i[0]+camera_folds_i[1])
+            no=no & (camera_folds_o[0]+camera_folds_o[1]+camera_folds_o[2])
+            ni=ni & (camera_folds_i[0]+camera_folds_i[1]+camera_folds_i[2])
         # Two shallow ridges wrap the north carrier, replacing its tall
         # single peak. The valley clears the complete service box, and
         # >45-degree faces brace the hood without a flat ceiling. Every
@@ -1389,17 +1387,18 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Keep each cut on one transverse and longitudinal facet, away from
     # the fold creases, fixed camera seats and the central ToF carrier.
     for camera_y in (-28.0,28.0):
-        for delta_y,crease_y,face_side in ((-9.0,-6.0,-1),(-3.0,-6.0,1),
-                                          (3.0,6.0,-1),(9.0,6.0,1)):
+        for delta_y,crease_y,face_side in ((-10.0,-8.0,-1),(-6.0,-8.0,1),
+                                          (-2.0,0.0,-1),(2.0,0.0,1),
+                                          (6.0,8.0,-1),(10.0,8.0,1)):
             for vent_x in (77.0,81.0,86.0,90.0):
                 rake=math.copysign(.03,vent_x-83.0)/sx
                 vent_y=(camera_y+delta_y)*sy
-                top=35.60-.03*abs(vent_x-83.0)-1.025*abs(delta_y-crease_y)
+                top=33.90-.03*abs(vent_x-83.0)-1.025*abs(delta_y-crease_y)
                 plane=b.Plane(origin=(vent_x*sx,vent_y,top),
                     x_dir=(1,0,-rake),z_dir=(rake,face_side*1.025/sy,1))
                 length=math.sqrt(1+(1.025/sy)**2)
-                outline=[(0,-1.35*length),(1.2,-.2*length),
-                         (1.2,.2*length),(0,1.35*length),
+                outline=[(0,-1.05*length),(1.2,-.2*length),
+                         (1.2,.2*length),(0,1.05*length),
                          (-1.2,.2*length),(-1.2,-.2*length)]
                 wire=b.Wire.make_polygon([(u,v,-2*wall) for u,v in outline],close=True)
                 shell=shell-plane*b.Solid.extrude(b.Face(wire),(0,0,4*wall))
