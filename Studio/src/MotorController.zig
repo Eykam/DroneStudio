@@ -143,6 +143,8 @@ pub const QuadcopterController = struct {
         Pitch,
         Yaw,
         Altitude,
+        PosX,
+        PosY,
         Any,
     };
 
@@ -168,6 +170,16 @@ pub const QuadcopterController = struct {
     climb_rate: f32 = 0.0,
     alt_last_ns: i128 = 0,
     alt_hold_active: bool = false,
+
+    // Rung-3 HiL: X/Y position hold - fed via UpdatePosition (FC NED world: x fwd, y right)
+    pos_pid_x: PidController,
+    pos_pid_y: PidController,
+    pos_x: f32 = 0.0,
+    pos_y: f32 = 0.0,
+    vel_x: f32 = 0.0,
+    vel_y: f32 = 0.0,
+    pos_last_ns: i128 = 0,
+    pos_hold_active: bool = false,
     target_orientation: Quaternion,
 
     running: std.atomic.Value(bool),
@@ -180,6 +192,8 @@ pub const QuadcopterController = struct {
             .pitch_pid = PidController.init(pitch_kp, pitch_ki, pitch_kd, max_integral, max_output),
             .yaw_pid = PidController.init(yaw_kp, yaw_ki, yaw_kd, max_integral, max_output),
             .alt_pid = PidController.init(0.0, 0.0, 0.0, 10.0, 30.0),
+            .pos_pid_x = PidController.init(0.0, 0.0, 0.0, 5.0, 0.14),
+            .pos_pid_y = PidController.init(0.0, 0.0, 0.0, 5.0, 0.14),
             .motor_outputs = [_]f32{0.0} ** 4,
             .motor_config = config,
             .base_throttle = base_throttle,
@@ -255,6 +269,35 @@ pub const QuadcopterController = struct {
         self.alt_hold_active = false;
     }
 
+    pub fn updatePosition(self: *Self, x: f32, y: f32, vx: f32, vy: f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.pos_x = x;
+        self.pos_y = y;
+        self.vel_x = vx;
+        self.vel_y = vy;
+        self.pos_last_ns = std.time.nanoTimestamp();
+    }
+
+    pub fn setTargetPosition(self: *Self, x: f32, y: f32) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.pos_pid_x.setSetpoint(x);
+        self.pos_pid_y.setSetpoint(y);
+        self.pos_pid_x.reset();
+        self.pos_pid_y.reset();
+        self.pos_hold_active = true;
+    }
+
+    pub fn disablePosHold(self: *Self) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        self.pos_hold_active = false;
+    }
+
     pub fn getMotorOutputs(self: *Self) [4]f32 {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -281,6 +324,12 @@ pub const QuadcopterController = struct {
         var climb_cache: f32 = 0.0;
         var alt_age_ms: f32 = 1e9;
         var alt_hold: bool = false;
+        var pos_x_cache: f32 = 0.0;
+        var pos_y_cache: f32 = 0.0;
+        var vel_x_cache: f32 = 0.0;
+        var vel_y_cache: f32 = 0.0;
+        var pos_age_ms: f32 = 1e9;
+        var pos_hold: bool = false;
 
         var frame_count: u64 = 0;
         var overrun_count: u64 = 0;
@@ -303,6 +352,12 @@ pub const QuadcopterController = struct {
                 climb_cache = self.climb_rate;
                 alt_age_ms = @as(f32, @floatFromInt(start_time - self.alt_last_ns)) / 1e6;
                 alt_hold = self.alt_hold_active;
+                pos_x_cache = self.pos_x;
+                pos_y_cache = self.pos_y;
+                vel_x_cache = self.vel_x;
+                vel_y_cache = self.vel_y;
+                pos_age_ms = @as(f32, @floatFromInt(start_time - self.pos_last_ns)) / 1e6;
+                pos_hold = self.pos_hold_active;
                 self.mutex.unlock();
             }
 
@@ -311,12 +366,26 @@ pub const QuadcopterController = struct {
             current_euler_cache = current_quat.to_euler();
             target_euler_cache = target_quat.to_euler();
 
+            const current_time_pre = std.time.nanoTimestamp();
+
             // Update PID controllers (with lock)
             self.mutex.lock();
 
+            // Position hold: tilt offsets into attitude setpoints (max ~8deg).
+            // FC body at yaw~0: -rotY (nose down) accelerates +x fwd; +rotX (right
+            // wing down) accelerates +y right. Signs A/B-verified against sim.
+            var roll_offset: f32 = 0.0;
+            var pitch_offset: f32 = 0.0;
+            if (pos_hold and pos_age_ms < 100.0) {
+                const px_out = self.pos_pid_x.updateWithRate(pos_x_cache, vel_x_cache, current_time_pre);
+                const py_out = self.pos_pid_y.updateWithRate(pos_y_cache, vel_y_cache, current_time_pre);
+                pitch_offset = std.math.clamp(-px_out, -0.14, 0.14);
+                roll_offset = std.math.clamp(py_out, -0.14, 0.14);
+            }
+
             // Set PID setpoints
-            self.roll_pid.setSetpoint(target_euler_cache[0]);
-            self.pitch_pid.setSetpoint(target_euler_cache[1]);
+            self.roll_pid.setSetpoint(target_euler_cache[0] + roll_offset);
+            self.pitch_pid.setSetpoint(target_euler_cache[1] + pitch_offset);
             self.yaw_pid.setSetpoint(target_euler_cache[2]);
 
             // Update PID controllers
@@ -820,6 +889,24 @@ pub const Controller = struct {
     pub fn disableAltHold(self: *Self) void {
         if (self.orientation_control) |*control| {
             control.disableAltHold();
+        }
+    }
+
+    pub fn updatePosition(self: *Self, x: f32, y: f32, vx: f32, vy: f32) void {
+        if (self.orientation_control) |*control| {
+            control.updatePosition(x, y, vx, vy);
+        }
+    }
+
+    pub fn setTargetPosition(self: *Self, x: f32, y: f32) void {
+        if (self.orientation_control) |*control| {
+            control.setTargetPosition(x, y);
+        }
+    }
+
+    pub fn disablePosHold(self: *Self) void {
+        if (self.orientation_control) |*control| {
+            control.disablePosHold();
         }
     }
 
@@ -1362,6 +1449,33 @@ const Server = struct {
                     controller.disableAltHold();
                 }
             },
+            .UpdatePosition => {
+                const px = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidPositionCommand);
+                const py = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidPositionCommand);
+                const pvx = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidPositionCommand);
+                const pvy = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidPositionCommand);
+
+                if (self.controller) |controller| {
+                    controller.updatePosition(px, py, pvx, pvy);
+                }
+            },
+            .SetPosition => {
+                const px = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidPositionCommand);
+                const py = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidPositionCommand);
+
+                if (self.controller) |controller| {
+                    controller.setTargetPosition(px, py);
+
+                    if (!controller.orientation_control_active.load(.acquire)) {
+                        try controller.startOrientationControl();
+                    }
+                }
+            },
+            .StopPosition => {
+                if (self.controller) |controller| {
+                    controller.disablePosHold();
+                }
+            },
             .SetOrientation => {
                 const w = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
                 const x = try std.fmt.parseFloat(f32, iterator.next() orelse return error.InvalidQuaternion);
@@ -1427,6 +1541,20 @@ const Server = struct {
                             control.alt_pid.kd = kd;
                             control.alt_pid.reset();
                             std.debug.print("Updated Altitude PID: kp={d:.3} ki={d:.3} kd={d:.3}\n", .{ kp, ki, kd });
+                        },
+                        .PosX => {
+                            control.pos_pid_x.kp = kp;
+                            control.pos_pid_x.ki = ki;
+                            control.pos_pid_x.kd = kd;
+                            control.pos_pid_x.reset();
+                            std.debug.print("Updated PosX PID: kp={d:.3} ki={d:.3} kd={d:.3}\n", .{ kp, ki, kd });
+                        },
+                        .PosY => {
+                            control.pos_pid_y.kp = kp;
+                            control.pos_pid_y.ki = ki;
+                            control.pos_pid_y.kd = kd;
+                            control.pos_pid_y.reset();
+                            std.debug.print("Updated PosY PID: kp={d:.3} ki={d:.3} kd={d:.3}\n", .{ kp, ki, kd });
                         },
                         .Any => {
                             // Update all PIDs with the same values
