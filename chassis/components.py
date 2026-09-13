@@ -149,9 +149,24 @@ LIBRARY = {
         "Beitian BN-220 GPS", 10.8, (0.022, 0.020, 0.007), "box", "deck",
         "https://grabcad.com/library/gps-beitian-bn-220-1 (bbox 22.0x20.0x6.9mm vs 22x20x6mm spec); mass from vendor listings, verify when he names his GPS",
         step_path="parts/gps_bn220.step"),
-    "mpu9250": Component(
-        "MPU-9250 breakout (GY-9250)", 0.0, (0.025, 0.015, 0.003), "box", "stack",
-        "mass zeroed 2026-09-05: IMU is U6 on the ee-flight PCBA (0.03g, carried in fc_esc_stack mass); entry kept for pose/lever-arm gate"),
+    # MPU-9250 replacement pair (user pick 2026-09-12 via parent; sim schema
+    # commit dd38e53): icm42688p takes over the IMU pose/lever-arm role,
+    # mmc5983ma gets its own placement (interference decision - near the GPS
+    # perch, away from motor/ESC current loops). Masses zeroed: both dies are
+    # U6/U7 on the ee-flight PCBA, carried in fc_esc_stack mass (same
+    # convention as the retired mpu9250 entry; spec mass override would
+    # double-count, hence _SENSOR_SPEC_SKIP).
+    "icm42688p": Component(
+        "ICM-42688-P 6-axis IMU (LGA-14 die on ee-flight PCBA)", 0.0, (0.0025, 0.003, 0.00091), "box", "stack",
+        "dronestudio.sensor/1 icm42688p.json (datasheet dims 2.5x3x0.91mm, mass 0.144g unzeroed there; CAD zeroed - carried in fc_esc_stack); pose/lever-arm gate role inherited from retired mpu9250 stub 2026-09-12"),
+    "mmc5983ma": Component(
+        "MMC5983MA 3-axis magnetometer (LGA-16 die on ee-flight PCBA)", 0.0, (0.003, 0.003, 0.001), "box", "deck",
+        "dronestudio.sensor/1 mmc5983ma.json (datasheet dims 3x3x1.0mm; mass unverified in spec, CAD zeroed - carried in fc_esc_stack); own placement near GPS perch per interference note 2026-09-12"),
+    # Legacy alias: adopted chassis sources and placement.json still key the
+    # IMU pose as "mpu9250". Same object, so containment/manifest/lever-arm all
+    # resolve to the real part. Drop when no adopted source references it.
+    "mpu9250": None,  # rebound after dict literal
+
     "vl53l9cx_breakout": Component(
         "VL53L9CX dToF breakout", 2.0, (0.0228, 0.0228, 0.0155), "box", "perimeter",
         "REAL ee-tof v2 carrier (TOF6, released, DRC-zero, consumed 2026-09-06): board 15x20x1.0mm, U1 VL53L9CX body 12.83x6.10x4.64 (DS14879 Rev 7), J1 2x4 2.54mm vertical header (front, 8.54mm tall), J2 Hirose FH12 FFC (back, 2.0mm), assembly radial span 11.54mm; H1/H2 NPTH 2.2mm with 4.5mm sacred disks extending 0.25mm past board sides / 0.65mm past mount edge. Envelope 22.8x22.8x15.5 covers all 8 bearings (diagonal projection (20.65+11.54)/sqrt2=22.77). Orientation: board Y tangential (mount-end holes), board X vertical with X=15 edge DOWN (optical axes at board X=11.6 -> lens z = placement z + 3.4mm). Mass 2.0g UNMEASURED estimate (EE: no defensible mass source yet). Sources: geometry_tof001.json (ee-tof.geometry.v1 released) + ee_tof_carrier.step (board sha256 d929d57f)",
@@ -169,12 +184,19 @@ LIBRARY = {
 # shape/mount are NOT overridden: schema enums ("pcb-module",
 # "breakout-screws") do not map onto the build/seat logic keys ("box",
 # "perimeter") - reconciling that is a deliberate follow-up, not implicit.
+LIBRARY["mpu9250"] = LIBRARY["icm42688p"]  # legacy alias, see above
+
 _SENSOR_SPEC_SKIP = {
-    # schema models the bare MPU-9250 die (3x3x1mm qfn); the CAD entry is the
-    # GY-9250 BREAKOUT pose stub kept only for the pose/lever-arm gate
-    # (mass zeroed, carried in fc_esc_stack). Overriding its dims to the die
-    # bbox would silently move the gate geometry. Reconcile when the EOL
-    # replacement part lands (procurement.status eol-replacement-pending).
+    # icm42688p/mmc5983ma (mpu9250 replacement pair, reconciled 2026-09-12 with
+    # the sim side per parent): CAD keeps their masses ZEROED - both dies ride
+    # the ee-flight PCBA and are carried in fc_esc_stack mass, so the spec's
+    # physical.mass_g override would double-count. Dims likewise stay CAD-side:
+    # the entries exist for pose/lever-arm + containment, not for die bboxes.
+    "icm42688p",
+    "mmc5983ma",
+    # "mpu9250" is the legacy alias key bound to the icm42688p Component -
+    # letting the RETIRED mpu9250.json override it would clobber the live IMU
+    # entry with the old die's dims (caught in verification 2026-09-12).
     "mpu9250",
 }
 def _apply_sensor_specs():
@@ -188,7 +210,13 @@ def _apply_sensor_specs():
         if not os.path.exists(f):
             continue
         try:
-            phys = json.load(open(f)).get("physical", {})
+            spec = json.load(open(f))
+            # only ACTIVE parts drive geometry - retired specs (status eol,
+            # e.g. mpu9250) are records, not overrides
+            status = spec.get("procurement", {}).get("status")
+            if status is not None and status != "active":
+                continue
+            phys = spec.get("physical", {})
             if phys.get("mass_g") is not None:
                 comp.mass_g = float(phys["mass_g"])
             dims = phys.get("dims_m")
@@ -232,6 +260,7 @@ DEFAULT_PLACEMENT = {
     "pi_camera_3#left": [0.083, -0.028, 0.002],  # user directive 2026-09-05: +4mm to nose apertures (was 0.079)
     "pi_camera_3#right": [0.083, 0.028, 0.002],
     "mpu9250": [0.0, 0.0, 0.022],
+    "mmc5983ma": [-0.110, 0.0, 0.0095],  # GPS perch area, above the GPS module
     "gps": [-0.045, 0.0, 0.045],  # rear deck, typical FPV GPS perch
     # VL53L9CX 360-degree ring (user directive 2026-09-05): 8 breakouts at 45 deg
     # bearing spacing, recessed at the shell, sensor facing radially outward
