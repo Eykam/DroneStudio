@@ -218,9 +218,23 @@ def parse_buckle_factors(dat_path):
                 in_buckle = False
     return factors
 
+_CCX_DIAG = {}
+
 def run_ccx(job_base, ccx="ccx"):
     r = subprocess.run([ccx, "-i", job_base], capture_output=True, text=True, timeout=1800)
-    return r.returncode == 0 and os.path.exists(job_base + ".frd")
+    ok = r.returncode == 0 and os.path.exists(job_base + ".frd")
+    if not ok:
+        diag = {"rc": r.returncode,
+                "stdout_tail": r.stdout[-200:],
+                "stderr_tail": r.stderr[-200:]}
+        dat = job_base + ".dat"
+        if os.path.exists(dat):
+            try:
+                diag["dat_tail"] = open(dat, errors="replace").read()[-200:]
+            except Exception:
+                pass
+        _CCX_DIAG[os.path.basename(job_base)] = diag
+    return ok
 
 def parse_frd(frd_path):
     """max von Mises (MPa) and max |U| (mm) from a ccx .frd text file."""
@@ -355,4 +369,11 @@ def evaluate_fea(step_path, motor_positions_mm, stack_spacing_mm, workdir, ccx="
     else:
         out["fatigue"] = {"passed": False, "error": "no hover_max stress"}
     out["passed"] = all(v.get("passed") for v in out.values())
+    if _CCX_DIAG:
+        try:
+            import json as _json
+            _json.dump({"step": step_path, "diag": _CCX_DIAG},
+                       open("/work/ccx_diag_latest.json", "w"), indent=1)
+        except Exception:
+            pass
     return out
