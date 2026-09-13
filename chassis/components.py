@@ -135,9 +135,9 @@ LIBRARY = {
         "5x4.5 3-blade prop (5045-class, AKK RS2205 recommended)", 4.0, (0.127, 0.127, 0.006), "cylinder-z", "motor_pad",
         "5045-class per AKK RS2205 2300KV specs (user motor 2026-09-04); specific prop model TBD"),
     "fc_esc_stack": Component(
-        "ee-flight single-board PCBA (CM4 + STM32F405 + 4x ESC + power tree)",
+        "ee-flight single-board PCBA (CM0 + STM32F405 + 4x ESC + power tree)",
         31.73, (0.108, 0.052, 0.022), "box", "stack",
-        "REAL board via pcba/1.0 contract: ee-flight v19 cand-097 (72 comps, SB1+SB2 populated, mass is spec-exact estimate; outline 108x52x1.635mm interim/unoptimized - SB6 targets stack-compatible shrink). GLB: parts/ee_flight_v19_pcba.glb. Pin ee-flight v19, re-pull on version bumps: https://dronestudio-dashboard-production.up.railway.app"),
+        "REAL board via pcba/1.0 contract: ee-flight v19 cand-097 (72 comps, SB1+SB2 populated, mass is spec-exact estimate; outline 108x52x1.635mm interim/unoptimized - SB6 targets stack-compatible shrink). GLB: parts/ee_flight_v19_pcba.glb. Pin ee-flight v19, re-pull on version bumps: https://dronestudio-dashboard-production.up.railway.app -- COMPUTE SWAP 2026-09-12 (user directive): CM0 castellated SoM (RP3A0 quad A53 1GHz, 512MB, 39x33x2.8mm, solders flat onto the carrier - datasheet RP-009251-DS, product brief RP-009404-MM) replaces the CM4; the CM4 envelope is DEAD. Envelope dims (108x52x22) and mass (31.73g) stay pinned to the pcba/1.0 contract until the EE carrier re-target lands an amended contract (outline/z/mass re-derive) - do NOT shrink unilaterally; the CM0 has no separate CAD placement, it is part of the carrier PCBA."),
     "battery": Component(
         "CNHL Black Series 1300mAh 14.8V 4S 100C (stock 1301004BK)", 163.0, (0.074, 0.034, 0.0335), "box", "deck",
         "user-named battery 2026-09-06. Manufacturer specs: 33.5x34x74mm, 163g incl. wire+connector, XT60 + JST-XH balance, 12AWG (https://chinahobbyline.com/products/cnhl-black-series-1300mah-14-8v-4s-100c-lipo-battery-with-xt60-plug; vendor tolerance +/-1-5mm, +/-5g). Replaces 180g Tattu-class estimate."),
