@@ -243,7 +243,7 @@ def run_generation():
         except subprocess.TimeoutExpired:
             print(f"[gen {gen}] {variant} evaluation timed out after 1800s; skipped", flush=True)
             continue
-        print(r2.stdout[-800:], flush=True)
+        print(r2.stdout[-2600:], flush=True)
         score = None
         for line in r2.stdout.splitlines():
             if line.startswith("RESULT_JSON "):
