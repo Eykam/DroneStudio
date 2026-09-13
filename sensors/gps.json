@@ -1,0 +1,37 @@
+{
+  "schema": "dronestudio.sensor/1",
+  "part_id": "gps",
+  "name": "Beitian BN-220 GPS/GLONASS module",
+  "category": "gps",
+  "procurement": {
+    "plm_opn": null,
+    "mpn": "BN-220",
+    "manufacturer": "Beitian",
+    "status": "active",
+    "note": "seeded by CAD 2026-09-12 during schema validation; module identity provisional - verify when Eyad names his GPS"
+  },
+  "physical": {
+    "mass_g": 10.8,
+    "mass_provenance": "unverified",
+    "mass_note": "from vendor listings, not measured; verify when the user names his GPS",
+    "dims_m": { "x": 0.022, "y": 0.020, "z": 0.007 },
+    "dims_provenance": "datasheet",
+    "dims_note": "grabcad bbox measured 22.0x20.0x6.9mm vs 22x20x6mm spec; CAD carries the slightly larger bbox",
+    "shape": "pcb-module",
+    "mount": { "style": "breakout-screws", "pattern": "deck mount, rear fin/perch cavity (CAD placement pin)" }
+  },
+  "orientation": {
+    "antenna_note": "ceramic patch faces +Z (sky) in CAD placement; no mount rotation",
+    "mount_rotation_quat_xyzw": [0, 0, 0, 1]
+  },
+  "ee": {
+    "kicad_footprint": null,
+    "footprint_note": "not a board-mounted part - UART module on a cable to the FC; EE links if a carrier ever lands on the flight board",
+    "interface": { "bus": "uart", "note": "9600/38400 baud NMEA+UBX, 4-wire (VCC/GND/TX/RX)" }
+  },
+  "dynamics": {
+    "gps": {
+      "provenance": "no sim consumer seeded with this schema revision; block reserved"
+    }
+  }
+}
