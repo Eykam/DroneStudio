@@ -74,6 +74,18 @@ const Quaternion = Math.Quaternion;
 
 // --- constants: identical to autoresearch/env_quad.py ---------------------
 const FAST_DT: f32 = 1.0 / 500.0;
+
+fn crossV(a: Vec3, b: Vec3) Vec3 {
+    return Vec3.init(a.y() * b.z() - a.z() * b.y(), a.z() * b.x() - a.x() * b.z(), a.x() * b.y() - a.y() * b.x());
+}
+
+/// Rotate a world-frame vector into the body frame (q^-1 * v * q for unit q).
+fn quatInvRotateVec(q: Quaternion, v: Vec3) Vec3 {
+    const qv = Vec3.init(-q.data[0], -q.data[1], -q.data[2]);
+    const t = crossV(qv, v).scale(2.0);
+    const r = v.add(qv.cross(t)).add(t.scale(q.data[3]));
+    return r;
+}
 const FAST_PER_POLICY: u32 = 25;
 const MAX_RATES = [3]f32{ 10.47, 10.47, 5.24 };
 const MAX_THRUST: f32 = 40.0;
@@ -246,6 +258,7 @@ const World = struct {
     hold_steps: u32 = 0, // hover_hold consecutive in-radius policy steps
     skim_steps: u32 = 0, // land: consecutive ground-skim policy steps (dag10)
     last_torque: [3]f32 = .{ 0, 0, 0 }, // PID torque output, body frame (telemetry)
+    accel_body: [3]f32 = .{ 0, 0, 0 }, // IMU truth (item 3): specific force, body frame
 
     fn init(alloc: std.mem.Allocator) !*World {
         _ = alloc;
@@ -530,7 +543,19 @@ const World = struct {
         }
         bullet.cbtBodyApplyCentralForce(self.body, &f);
         bullet.cbtBodyApplyTorque(self.body, &tq);
+        const v_before = self.bodyVel();
         _ = bullet.cbtWorldStepSimulation(self.world, FAST_DT, 1, FAST_DT);
+        {
+            // IMU truth (HiL item 3): accelerometer specific force = a - g in
+            // world frame, rotated into the body frame. Mount at the CoM for
+            // now (zero lever arm); mount offsets land with the chassis hookup.
+            const v_after = self.bodyVel();
+            const inv_dt: f32 = 1.0 / FAST_DT;
+            const aw = v_after.sub(v_before).scale(inv_dt);
+            const sf = Vec3.init(aw.x(), aw.y() + 9.80665, aw.z());
+            const sfb = quatInvRotateVec(self.bodyQuat(), sf);
+            self.accel_body = .{ sfb.x(), sfb.y(), sfb.z() };
+        }
     }
 
     /// One policy (20 Hz) step: 25 fast steps + reward/termination,
@@ -1407,6 +1432,12 @@ pub fn main() !void {
             world.hil_mutex.unlock();
             const mo = world.dyn.m2_omega;
             try stdout.print("{{\"pos\":[{d:.4},{d:.4},{d:.4}],\"quat\":[{d:.6},{d:.6},{d:.6},{d:.6}],\"vel\":[{d:.4},{d:.4},{d:.4}],\"omega\":[{d:.4},{d:.4},{d:.4}],\"motor_omega\":[{d:.1},{d:.1},{d:.1},{d:.1}],\"hil_t\":[{d:.3},{d:.3},{d:.3},{d:.3}],\"hil_seq\":{d},\"hil_age_ms\":{d:.2}}}\n", .{ p.x(), p.y(), p.z(), q.data[0], q.data[1], q.data[2], q.data[3], v.x(), v.y(), v.z(), om.x(), om.y(), om.z(), mo[0], mo[1], mo[2], mo[3], ht[0], ht[1], ht[2], ht[3], hseq, @as(f64, @floatFromInt(hage)) / 1e6 });
+            try stdout.context.flush();
+        } else if (std.mem.eql(u8, cmd, "imu_truth")) {
+            // HiL item 3: true body rates + true specific force (body frame).
+            // The harness-side IMU model adds the spec'd noise/bias/quant.
+            const omt = world.bodyOmega();
+            try stdout.print("{{\"omega\":[{d:.6},{d:.6},{d:.6}],\"accel\":[{d:.5},{d:.5},{d:.5}]}}\n", .{ omt.x(), omt.y(), omt.z(), world.accel_body[0], world.accel_body[1], world.accel_body[2] });
             try stdout.context.flush();
         } else if (std.mem.eql(u8, cmd, "step")) {
             const act_v = root.object.get("action") orelse continue;
