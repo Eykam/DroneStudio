@@ -38,6 +38,15 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
         fea_result = fea.evaluate_fea(out_base + ".step", params.motor_positions(), params.stack_spacing_mm,
                                       out_base + "_fea")
         checks.append(("fea", fea_result["passed"], json.dumps(fea_result), 0.0 if fea_result["passed"] else 0.5))
+        if not fea_result.get("passed"):
+            try:
+                import shutil, glob
+                os.makedirs("/work/failed_steps", exist_ok=True)
+                shutil.copy(out_base + ".step", f"/work/failed_steps/{variant_id}.step")
+                for oldf in sorted(glob.glob("/work/failed_steps/*.step"), key=os.path.getmtime)[:-20]:
+                    os.remove(oldf)
+            except Exception as e:
+                print(f"failed-step preserve error: {e}", flush=True)
         score = ev.score(checks)
     rec = sn.make_record(variant_id, parent_id, generation, dataclasses.asdict(params), checks, score, props, fea=fea_result)
     d = sn.save_snapshot(rec, out_base)
