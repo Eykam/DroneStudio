@@ -134,17 +134,24 @@ GL_ARB_bindless_texture; no CPU rasterizer implements it
   2 (option A).** His call: "figure it out" - default confirmed. The D->A
   order delivers both; the realism path stays the plan, not the first
   rung.
-- **Camera targets: match the real hardware.** Stereo pair = 2x Raspberry
-  Pi Camera Module 3 (IMX708) at the CAD manifest's 56mm baseline. Sim
-  camera model targets: 640x480 @ 30Hz per camera (VIO operating point;
+- **Camera targets: match the real hardware.** MONO (user decision
+  2026-09-12, relayed via parent): stereo pair dropped - single forward
+  Raspberry Pi Camera Module 3 (IMX708). Rationale: the estimator design
+  is monocular (KLT features + depth from the learned mono depth+seg net;
+  nothing consumed a second camera/baseline); stereo was insurance, not
+  foundation. Depth risk now rests on the mono net sim2real + 9x ToF
+  anchors. Sim camera model targets: 640x480 @ 30Hz (VIO operating point;
   native 4608x2592 is capture-side only), rolling shutter (IMX708 is
   rolling - per-row time offset in the rasterizer), ~75 deg horizontal
   FOV (standard lens variant; revisit if he mounts the 120 deg wide).
+  Stereo revisit note: if the mono net underperforms on real footage,
+  stereo remains the hardware-depth fallback and re-opens the host
+  constraint (2x CSI).
 - **VIO: our own implementation, in-repo.** His call: "we should write
   our own better and faster implementation" - no OpenVINS/VINS-Fusion
   wrap. Design consequences: deterministic, headless, runs inside the
   training loop; tight IMU preintegration against the existing 500Hz
-  sim IMU; stereo frontend (KLT features + depth from the rasterizer as
+  sim IMU; mono frontend (KLT features + depth from the rasterizer as
   ground truth for supervised signal during development); the estimator
   stays classical so it is testable against sim ground truth before the
   learned nav policy ever sees it.
