@@ -277,6 +277,10 @@ def check_camera_fov(m):
     # aperture plane from drop rays around the datum, put the emitter just
     # above the skin underside at the aperture, and require every cone ray
     # clear to 8m. No pocket + aperture -> fail.
+    # pad_camera REMOVED 2026-09-12 (user directive via parent): downward
+    # sensing is lidar-only (down VL53L9CX); cameras are the 2x nose Pi Cam 3
+    # stereo pair. Block kept dormant for the historical record; a future
+    # pad_camera placement key would re-activate it.
     from components import placement as _placement
     pad = _placement().get("pad_camera")
     if pad is not None:
@@ -310,7 +314,7 @@ def check_camera_fov(m):
                 problems.append(f"pad_camera: {nblocked}/{len(dirs)} down-cone rays blocked (65deg half-angle, emitter at aperture plane)")
     ok = not problems
     return ("camera_fov", ok, "; ".join(problems) if problems else
-            f"{len(poses)} cameras + pad_camera: FOV clear", 0.0 if ok else 0.5)
+            f"{len(poses)} cameras: FOV clear", 0.0 if ok else 0.5)
 
 def check_imu_lever_arm(m):
     """IMU must sit near the frame CoM (lever-arm corrections only work for small
