@@ -268,6 +268,7 @@ DEFAULT_PLACEMENT = {
     "vl53l9cx_breakout#sw":  [-0.045, -0.045, 0.0135],
     "vl53l9cx_breakout#w":   [ 0.000, -0.048, 0.0135],
     "vl53l9cx_breakout#nw":  [ 0.045, -0.045, 0.0135],
+    "vl53l9cx_breakout#down": [ 0.000,  0.000, 0.002],  # user directive 2026-09-12: 9th VL53L9CX, belly-center DOWN-facing (down sensing is lidar-only; replaces the removed pad camera), board flat lens -Z through a minimal belly-skin aperture
 }
 
 # User-directive fixed placements (2026-09-05): the exact 45-degree ToF ring
@@ -278,7 +279,7 @@ DEFAULT_PLACEMENT = {
 FIXED_PLACEMENT_KEYS = frozenset({
     "vl53l9cx_breakout#n", "vl53l9cx_breakout#ne", "vl53l9cx_breakout#e",
     "vl53l9cx_breakout#se", "vl53l9cx_breakout#s", "vl53l9cx_breakout#sw",
-    "vl53l9cx_breakout#w", "vl53l9cx_breakout#nw",
+    "vl53l9cx_breakout#w", "vl53l9cx_breakout#nw", "vl53l9cx_breakout#down",
     "pi_camera_3#left", "pi_camera_3#right",
 })
 

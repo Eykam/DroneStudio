@@ -129,7 +129,7 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-SENSOR_IDS = ["cam_left", "cam_right", "tof_e", "tof_n", "tof_ne", "tof_nw", "tof_s", "tof_se", "tof_sw", "tof_w"]  # cam_down removed 2026-09-12 (pad camera dropped, down sensing lidar-only)
+SENSOR_IDS = ["cam_left", "cam_right", "tof_e", "tof_n", "tof_ne", "tof_nw", "tof_s", "tof_se", "tof_sw", "tof_w", "tof_down"]  # 2026-09-12: cam_down replaced by tof_down (pad camera dropped; 9th down-facing VL53L9CX at belly center, axis -Z)
 
 
 def merge(variant, outpath):
