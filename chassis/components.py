@@ -247,13 +247,13 @@ def _apply_orientation(cname, sh):
     return sh.rotate(b.Axis((0, 0, 0), ax), spec[1])  # returns a copy
 
 # default placements relative to frame origin (m); z=0 is arm-plate bottom.
-# His physical layout: stereo pair 60mm apart at the nose (repo README),
+# His physical layout: single centered forward camera at the nose (mono per user
+# directive 2026-09-12; stereo pair dropped - estimator consumes monocular only),
 # stack center, battery on deck above the stack.
 DEFAULT_PLACEMENT = {
     "fc_esc_stack": [0.0, 0.0, 0.016],
     "battery": [0.0, 0.0, 0.045],
-    "pi_camera_3#left": [0.083, -0.028, 0.002],  # user directive 2026-09-05: +4mm to nose apertures (was 0.079)
-    "pi_camera_3#right": [0.083, 0.028, 0.002],
+    "pi_camera_3#main": [0.083, 0.0, 0.002],  # user directive 2026-09-12: MONO - stereo pair dropped, single centered forward camera (was #left/#right at y=+-28mm)
     "mpu9250": [0.0, 0.0, 0.022],
     "mmc5983ma": [-0.110, 0.0, 0.0095],  # GPS perch area, above the GPS module
     "gps": [-0.045, 0.0, 0.045],  # rear deck, typical FPV GPS perch
@@ -280,7 +280,7 @@ FIXED_PLACEMENT_KEYS = frozenset({
     "vl53l9cx_breakout#n", "vl53l9cx_breakout#ne", "vl53l9cx_breakout#e",
     "vl53l9cx_breakout#se", "vl53l9cx_breakout#s", "vl53l9cx_breakout#sw",
     "vl53l9cx_breakout#w", "vl53l9cx_breakout#nw", "vl53l9cx_breakout#down",
-    "pi_camera_3#left", "pi_camera_3#right",
+    "pi_camera_3#main",
 })
 
 def placement():

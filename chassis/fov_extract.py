@@ -129,7 +129,7 @@ def sha256_file(path):
     return h.hexdigest()
 
 
-SENSOR_IDS = ["cam_left", "cam_right", "tof_e", "tof_n", "tof_ne", "tof_nw", "tof_s", "tof_se", "tof_sw", "tof_w", "tof_down"]  # 2026-09-12: cam_down replaced by tof_down (pad camera dropped; 9th down-facing VL53L9CX at belly center, axis -Z)
+SENSOR_IDS = ["cam_main", "tof_e", "tof_n", "tof_ne", "tof_nw", "tof_s", "tof_se", "tof_sw", "tof_w", "tof_down"]  # 2026-09-12: mono - cam_left/cam_right merged into cam_main (pi_camera_3#main, centered nose)  # 2026-09-12: cam_down replaced by tof_down (pad camera dropped; 9th down-facing VL53L9CX at belly center, axis -Z)
 
 
 def merge(variant, outpath):
