@@ -7,6 +7,7 @@ import os, sys, json, subprocess, shutil, dataclasses, time, glob
 import progress
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+os.environ.setdefault("DRONE_SENSOR_SPEC_DIR", os.path.join(HERE, "sensors"))  # dronestudio.sensor/1, applies next batch
 STATE = os.path.join(HERE, "loop_state.json")
 ARCHIVE = os.path.join(HERE, "archive.jsonl")
 def codex_model_args():

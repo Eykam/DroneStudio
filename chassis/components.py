@@ -160,7 +160,43 @@ LIBRARY = {
         "Pad-marker down camera (provisional module - Pi Cam 3 placeholder, marker spec 65deg half-angle cone, 8m range)",
         4.0, (0.025, 0.024, 0.012), "box", "belly",
         "sim sibling pad-marker spec 2026-09-08 (65deg half-angle cone, 8m); module identity provisional pending Eyad pick; user directive 2026-09-09 via parent"),
+
+# --- dronestudio.sensor/1 consumption (2026-09-12) -------------------------
+# Env-gated: DRONE_SENSOR_SPEC_DIR unset = zero behavior change. When set,
+# physical.mass_g / physical.dims_m of matching part_ids override LIBRARY
+# entries; null fields keep LIBRARY values (weak data stays fallback-covered).
+# shape/mount are NOT overridden: schema enums ("pcb-module",
+# "breakout-screws") do not map onto the build/seat logic keys ("box",
+# "perimeter") - reconciling that is a deliberate follow-up, not implicit.
+_SENSOR_SPEC_SKIP = {
+    # schema models the bare MPU-9250 die (3x3x1mm qfn); the CAD entry is the
+    # GY-9250 BREAKOUT pose stub kept only for the pose/lever-arm gate
+    # (mass zeroed, carried in fc_esc_stack). Overriding its dims to the die
+    # bbox would silently move the gate geometry. Reconcile when the EOL
+    # replacement part lands (procurement.status eol-replacement-pending).
+    "mpu9250",
 }
+def _apply_sensor_specs():
+    spec_dir = os.environ.get("DRONE_SENSOR_SPEC_DIR")
+    if not spec_dir:
+        return
+    for key, comp in LIBRARY.items():
+        if key in _SENSOR_SPEC_SKIP:
+            continue
+        f = os.path.join(spec_dir, key + ".json")
+        if not os.path.exists(f):
+            continue
+        try:
+            phys = json.load(open(f)).get("physical", {})
+            if phys.get("mass_g") is not None:
+                comp.mass_g = float(phys["mass_g"])
+            dims = phys.get("dims_m")
+            if isinstance(dims, dict) and all(dims.get(k) is not None for k in ("x", "y", "z")):
+                comp.dims_m = (float(dims["x"]), float(dims["y"]), float(dims["z"]))
+        except Exception as e:
+            print(f"[sensors] spec override failed for {key}: {e} (LIBRARY kept)", flush=True)
+_apply_sensor_specs()
+# --- end dronestudio.sensor/1 consumption ----------------------------------
 
 ORIENTATIONS = {
     # Pi Camera Module 3 STEP is modeled board-flat with the LENS POINTING -Z

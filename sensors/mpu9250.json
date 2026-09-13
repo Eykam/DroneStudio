@@ -1,0 +1,47 @@
+{
+  "schema": "dronestudio.sensor/1",
+  "part_id": "mpu9250",
+  "name": "MPU-9250 9-axis IMU (accel/gyro + AK8963 mag)",
+  "category": "imu",
+  "procurement": {
+    "plm_opn": "OSP-IC-0003",
+    "mpn": "MPU-9250",
+    "manufacturer": "TDK InvenSense",
+    "status": "eol-replacement-pending",
+    "note": "EOL / 0-stock at LCSC (2026-09-12). Replacement pick lands from PLM shortlist; this entry is retired when the pick's spec lands. CAD holds mass zeroed for the pose/lever-arm gate - the replacement touches that entry first."
+  },
+  "physical": {
+    "mass_g": null,
+    "mass_provenance": "unverified",
+    "dims_m": { "x": 0.003, "y": 0.003, "z": 0.001 },
+    "dims_provenance": "datasheet",
+    "shape": "box",
+    "mount": { "style": "smd", "pattern": "qfn-24_3x3_p0.4" }
+  },
+  "orientation": {
+    "die_frame": "accel/gyro share one die frame; axes per datasheet",
+    "mag_note": "AK8963 mag die is rotated in-package; the estimator applies the mag remap, NOT the mount rotation",
+    "mount_rotation_quat_xyzw": [0, 0, 0, 1]
+  },
+  "ee": {
+    "kicad_footprint": "Sensor_Motion:InvenSense_QFN-24_3x3mm_P0.4mm",
+    "interface": { "bus": "i2c", "address_7bit": "0x68", "alt_address_7bit": "0x69", "aux_i2c": "AK8963 on internal aux bus" }
+  },
+  "dynamics": {
+    "imu": {
+      "sample_rate_hz": 1000,
+      "gyro": {
+        "noise_density_rad_per_s_rthz": 1.75e-4,
+        "bias_walk_rad_per_s_rts": 2e-5,
+        "range_dps": 2000,
+        "provenance": "noise density: datasheet-typ 0.01 dps/rtHz; bias walk: tunable, no datasheet number"
+      },
+      "accel": {
+        "noise_density_m_per_s2_rthz": 2.94e-3,
+        "bias_walk_m_per_s2_rts": 5e-4,
+        "range_g": 16,
+        "provenance": "noise density: datasheet-typ 300 ug/rtHz; bias walk: tunable"
+      }
+    }
+  }
+}
