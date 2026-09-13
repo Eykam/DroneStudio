@@ -1,0 +1,52 @@
+{
+  "schema": "dronestudio.sensor/1",
+  "part_id": "vl53l9cx_breakout",
+  "name": "VL53L9CX multi-zone ToF rangefinder breakout",
+  "category": "tof",
+  "procurement": {
+    "plm_opn": null,
+    "mpn": "VL53L9CX",
+    "manufacturer": "ST",
+    "status": "active",
+    "note": "OPN to be linked by EE from the v46 tof_ring manifest"
+  },
+  "physical": {
+    "mass_g": 2.0,
+    "mass_provenance": "estimate",
+    "mass_note": "UNMEASURED estimate (CAD flag 2026-09-12) - weigh a real breakout when hardware exists",
+    "dims_m": null,
+    "dims_provenance": "unverified",
+    "dims_note": "CAD fills from components.py during schema validation",
+    "shape": "pcb-module",
+    "mount": { "style": "breakout-screws", "pattern": "per-bearing carrier (CAD placement math)" }
+  },
+  "orientation": {
+    "optical_axis": "+Z (lens faces +Z off the breakout top)",
+    "lens_offset_m": [0, 0, 0.0034],
+    "lens_offset_note": "lens z offset = placement z + 3.4mm (CAD per-bearing mount math)",
+    "mount_rotation": "per-bearing orientation math lives CAD-side (placement.json); this file carries only the die/lens convention"
+  },
+  "ee": {
+    "kicad_footprint": null,
+    "footprint_note": "EE fills from tof_ring manifest / PLM OPN",
+    "interface": { "bus": "i2c", "xshut_pin": true, "address_7bit": "0x29 (reprogrammed per sensor via XSHUT sequencing)" }
+  },
+  "dynamics": {
+    "tof": {
+      "max_range_m": 9.0,
+      "min_range_m": 0.05,
+      "sigma_base_mm": 5.0,
+      "sigma_k_mm_per_m2": 3.0,
+      "ambient_factor": 1.0,
+      "base_dropout": 0.01,
+      "far_dropout_start": 0.8,
+      "far_dropout_max": 0.5,
+      "graze_cos": 0.3,
+      "arm_block_p": 0.56,
+      "arm_lo_mm": 40.0,
+      "arm_mid_mm": 100.0,
+      "arm_hi_mm": 140.0,
+      "provenance": "ranging limits: ST data brief (Farnell 4759648); sigma_k, far_dropout_max: ESTIMATES pending bench capture; arm_block_p + arm reading distribution: measured on v1 frame"
+    }
+  }
+}

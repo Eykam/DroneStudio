@@ -30,6 +30,40 @@ const Math = @import("core/Math.zig");
 const FC = @import("core/ecs/components/FlightController.zig");
 const CM = @import("core/ChassisManifest.zig");
 const VR = @import("vision_raster.zig");
+const SensorSpec = @import("core/SensorSpec.zig");
+
+fn tofSpecDynamics(alloc: std.mem.Allocator) ?SensorSpec.TofDynamics {
+    const spath = std.posix.getenv("DRONE_TOF_SPEC") orelse return null;
+    var spec = SensorSpec.SensorSpec.load(alloc, spath) catch |err| {
+        std.debug.print("SensorSpec: failed to load {s} ({}), using compiled ToF dynamics\n", .{ spath, err });
+        return null;
+    };
+    defer spec.deinit();
+    if (spec.value.dynamics) |d| {
+        if (d.tof) |t| {
+            std.debug.print("SensorSpec: ToF dynamics from {s} (part {s})\n", .{ spath, spec.value.part_id });
+            return t;
+        }
+    }
+    return null;
+}
+
+fn applyTofSpec(cfg: *VR.TofConfig, td: SensorSpec.TofDynamics) void {
+    cfg.max_range_m = @floatCast(td.max_range_m);
+    cfg.min_range_m = @floatCast(td.min_range_m);
+    cfg.sigma_base_mm = @floatCast(td.sigma_base_mm);
+    cfg.sigma_k_mm_per_m2 = @floatCast(td.sigma_k_mm_per_m2);
+    cfg.ambient_factor = @floatCast(td.ambient_factor);
+    cfg.base_dropout = @floatCast(td.base_dropout);
+    cfg.far_dropout_start = @floatCast(td.far_dropout_start);
+    cfg.far_dropout_max = @floatCast(td.far_dropout_max);
+    cfg.graze_cos = @floatCast(td.graze_cos);
+    cfg.arm_block_p = @floatCast(td.arm_block_p);
+    cfg.arm_lo_mm = @floatCast(td.arm_lo_mm);
+    cfg.arm_mid_mm = @floatCast(td.arm_mid_mm);
+    cfg.arm_hi_mm = @floatCast(td.arm_hi_mm);
+}
+
 
 const bullet = @cImport({
     @cInclude("cbullet.h");
@@ -1258,6 +1292,7 @@ pub fn main() !void {
                 world.tof_rng = std.Random.Xoshiro256.init(sd);
             }
             var tcfg = VR.TofConfig{};
+            if (tofSpecDynamics(alloc)) |td| applyTofSpec(&tcfg, td);
             tcfg.max_range_m = f32FromJson(root.object.get("max_range_m") orelse .null, tcfg.max_range_m);
             const robst_t = try alloc.alloc(VR.RasterObstacle, world.scene.obstacles.len);
             for (world.scene.obstacles, 0..) |ob, i| robst_t[i] = .{ .center = ob.center, .radius = ob.radius };
@@ -1291,6 +1326,7 @@ pub fn main() !void {
             // Optional: "rows","cols" (binned mode), "seed", "ambient",
             // "max_range_m". Zone arrays are row-major, top-left origin.
             var scfg = VR.TofScanConfig{};
+            if (tofSpecDynamics(alloc)) |td| applyTofSpec(&scfg.noise, td);
             scfg.rows = @intFromFloat(f32FromJson(root.object.get("rows") orelse .null, 8));
             scfg.cols = @intFromFloat(f32FromJson(root.object.get("cols") orelse .null, 8));
             scfg.noise.ambient_factor = f32FromJson(root.object.get("ambient") orelse .null, 1.0);

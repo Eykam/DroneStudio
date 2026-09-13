@@ -16,6 +16,7 @@ const SLAM = @import("../components/SLAMSystem.zig");
 const DroneCamera = @import("DroneCamera.zig");
 const SensorCamera = @import("SensorCamera.zig");
 const ChassisManifest = @import("../../ChassisManifest.zig");
+const SensorSpec = @import("../../SensorSpec.zig");
 const Sensors = @import("Sensors.zig");
 
 /// CAD glTF frame (+X fwd, +Z up) -> sim scene frame (+Y up). Rotation +90deg about X.
@@ -126,6 +127,29 @@ pub fn spawn(
     // Manifest (1.2): mount pose from imu.offset_from_com_m / rotation_quat_xyzw
     // (accel/gyro die frame; AK8963 mag remap happens in the estimator, not here).
     var imu_sensor = IMUSensor.IMUSensorComponent.init();
+    // Spec-driven sensor dynamics (dronestudio.sensor/1): DRONE_IMU_SPEC
+    // points at sensors/<part>.json and overrides the compiled-in noise/rate
+    // below. Mount pose stays manifest-driven (CAD placement pin). A part
+    // swap = new spec file + env repoint, no dynamics-code edit.
+    if (std.posix.getenv("DRONE_IMU_SPEC")) |spath| {
+        var imu_spec = SensorSpec.SensorSpec.load(alloc, spath) catch |err| blk: {
+            std.debug.print("SensorSpec: failed to load {s} ({}), using compiled IMU dynamics\n", .{ spath, err });
+            break :blk null;
+        };
+        defer if (imu_spec) |*s| s.deinit();
+        if (imu_spec) |*s| {
+            if (s.value.dynamics) |d| {
+                if (d.imu) |imu| {
+                    imu_sensor.sample_rate_hz = imu.sample_rate_hz;
+                    imu_sensor.noise_gyro_std = @floatCast(imu.gyro.noise_density_rad_per_s_rthz);
+                    imu_sensor.noise_accel_std = @floatCast(imu.accel.noise_density_m_per_s2_rthz);
+                    imu_sensor.bias_walk_gyro = @floatCast(imu.gyro.bias_walk_rad_per_s_rts);
+                    imu_sensor.bias_walk_accel = @floatCast(imu.accel.bias_walk_m_per_s2_rts);
+                    std.debug.print("SensorSpec: IMU dynamics from {s} (part {s}, {d} Hz)\n", .{ spath, s.value.part_id, imu.sample_rate_hz });
+                }
+            }
+        }
+    }
     if (manifest) |*m| {
         const off = glbPosToSim(m.value.imuOffsetFromComM());
         imu_sensor.pos_body = Vec3.init(off[0], off[1], off[2]);
