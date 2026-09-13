@@ -1,0 +1,46 @@
+{
+  "schema": "dronestudio.sensor/1",
+  "part_id": "mmc5983ma",
+  "name": "MMC5983MA 3-axis magnetometer",
+  "category": "mag",
+  "procurement": {
+    "plm_opn": null,
+    "mpn": "MMC5983MA",
+    "manufacturer": "MEMSIC",
+    "status": "active",
+    "note": "User pick 2026-09-12, magnetometer half of the MPU-9250 replacement pair (with icm42688p). OPN registration in flight via PLM."
+  },
+  "physical": {
+    "mass_g": null,
+    "mass_provenance": "unverified",
+    "dims_m": { "x": 0.003, "y": 0.003, "z": 0.001 },
+    "dims_provenance": "datasheet",
+    "shape": "box",
+    "mount": { "style": "smd", "pattern": "lga-16_3x3" }
+  },
+  "orientation": {
+    "die_frame": "axes per datasheet; alignment error +/-1 deg typ (+/-3 max) - note for estimator calibration",
+    "mount_rotation_quat_xyzw": [0, 0, 0, 1],
+    "mount_note": "Keep away from motor/ESC current loops; mag placement is an interference decision, CAD/EE coordinate"
+  },
+  "ee": {
+    "kicad_footprint": null,
+    "footprint_note": "LGA-16 3.0x3.0x1.0mm - EE to create/select during SB2 re-spin",
+    "interface": { "bus": "i2c+spi", "i2c_max_hz": 400000, "spi_max_hz": 10000000, "supply_v": 3.0 }
+  },
+  "design_notes": [
+    "Integrated SET/RESET (degauss) clears residual magnetization and null-field offset temp drift - driver should use it periodically or on temp change",
+    "Supply is 3.0V nominal (abs max 3.6V) - NOT 5V tolerant; share the clean IMU rail with care"
+  ],
+  "dynamics": {
+    "mag": {
+      "fsr_gauss": 8,
+      "resolution_bits": 18,
+      "rms_noise_mg": { "bw00": 0.4, "bw01": 0.6, "bw10": 0.8, "bw11": 1.2 },
+      "rms_noise_nt_at_bw00": 40,
+      "max_odr_hz": 1000,
+      "heading_accuracy_deg": 0.5,
+      "provenance": "MEMSIC MMC5983MA datasheet Rev A (memsic.com); no sim consumer yet - reserved"
+    }
+  }
+}

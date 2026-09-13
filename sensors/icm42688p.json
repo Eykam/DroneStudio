@@ -1,0 +1,60 @@
+{
+  "schema": "dronestudio.sensor/1",
+  "part_id": "icm42688p",
+  "name": "ICM-42688-P 6-axis IMU (accel/gyro)",
+  "category": "imu",
+  "procurement": {
+    "plm_opn": null,
+    "mpn": "ICM-42688-P",
+    "manufacturer": "TDK InvenSense",
+    "status": "active",
+    "note": "User pick 2026-09-12, replaces MPU-9250 (OSP-IC-0003, EOL). OPN registration in flight via PLM. Pair with mmc5983ma for mag."
+  },
+  "physical": {
+    "mass_g": 0.144,
+    "mass_provenance": "datasheet",
+    "mass_note": "TDK product center weight field; CAD to sanity-check against reel/unit convention",
+    "dims_m": { "x": 0.0025, "y": 0.003, "z": 0.00091 },
+    "dims_provenance": "datasheet",
+    "shape": "box",
+    "mount": { "style": "smd", "pattern": "lga-14_2.5x3_p0.5" }
+  },
+  "orientation": {
+    "die_frame": "single die frame for accel+gyro; axes per DS-000347 fig 16 (orientation of axes of sensitivity)",
+    "mount_rotation_quat_xyzw": [0, 0, 0, 1],
+    "note": "No in-package mag die - mag is the separate mmc5983ma part; no mag remap needed in the estimator"
+  },
+  "ee": {
+    "kicad_footprint": null,
+    "footprint_note": "LGA-14 2.5x3.0x0.91mm pitch 0.5mm - EE to create/select during SB2 re-spin",
+    "interface": { "bus": "i2c+spi", "i2c_max_hz": 1000000, "spi_max_hz": 24000000, "i3c": "12.5MHz SDR", "fifo_bytes": 2048 }
+  },
+  "design_notes": [
+    "Gyro spike-artefact quirk: documented on flight controllers (Betaflight #12970); firmware mitigation pattern exists. ArduPilot observed events severe enough to force in-flight IMU lane switches.",
+    "Wants a clean low-noise 3.3V rail - layout/decoupling care on the TPS62132 rail (design note, not a blocker).",
+    "External clock input (31-50kHz) available to reduce ODR sensitivity to temperature."
+  ],
+  "dynamics": {
+    "imu": {
+      "sample_rate_hz": 1000,
+      "part_odr_hz": { "gyro_max": 32000, "accel_max": 32000 },
+      "gyro": {
+        "noise_density_rad_per_s_rthz": 4.887e-5,
+        "bias_walk_rad_per_s_rts": 2e-5,
+        "range_dps": 2000,
+        "fsr_options_dps": [15.625, 31.25, 62.5, 125, 250, 500, 1000, 2000],
+        "zero_rate_offset_dps": 0.5,
+        "offset_tempco_dps_per_c": 0.005,
+        "provenance": "noise density: DS-000347 typ 2.8 mdps/rtHz; ZRO/tempco: datasheet; bias walk: TUNABLE carried from mpu9250 model pending characterization"
+      },
+      "accel": {
+        "noise_density_m_per_s2_rthz": 6.865e-4,
+        "bias_walk_m_per_s2_rts": 5e-4,
+        "range_g": 16,
+        "fsr_options_g": [2, 4, 8, 16],
+        "offset_tempco_mg_per_c": 0.15,
+        "provenance": "noise density: DS-000347 typ 65-70 ug/rtHz (70 used); tempco: datasheet; bias walk: TUNABLE carried"
+      }
+    }
+  }
+}
