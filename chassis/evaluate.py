@@ -14,6 +14,8 @@ import trimesh
 RHO_PETG = 1240e-9   # kg/mm^3
 OVERHANG_LIMIT_DEG = 45.0
 MIN_WALL_MM = 1.2    # 3 perimeters at 0.4 mm nozzle
+BED_FIT_XY_MM = 220.0  # user directive 2026-09-12: printers are Bambu P1S (256) / Ender-3 V3 KE (220) - design to the smaller bed
+MAX_SPLIT_BODIES = 4   # split-body print strategy: monolithic frame cannot fit 220mm (arm length is sim-contract-fixed)
 MAX_THRUST_PER_MOTOR_N = 9.7  # AKK RS2205 2300KV fitted full-throttle equilibrium (sim MOTOR_V2.md, kf=7.9e-7 @ 3560 rad/s cap); conservative availability basis for hover margin
 
 def load(path):
@@ -24,9 +26,26 @@ def check_sanity(m):
     out = []
     out.append(("watertight", m.is_watertight, f"watertight={m.is_watertight}", 0.0 if m.is_watertight else 0.3))
     bodies = m.split(only_watertight=False)
-    single = len(bodies) == 1
-    out.append(("single_body", single, f"{len(bodies)} bodies", 0.0 if single else 0.1))
+    n = len(bodies)
+    ok = 1 <= n <= MAX_SPLIT_BODIES
+    out.append(("body_count", ok, f"{n} bodies (1-{MAX_SPLIT_BODIES} allowed: split-body print strategy 2026-09-12)", 0.0 if ok else 0.1))
     return out
+
+def check_bed_fit(m):
+    """Per-body XY extents must fit the 220x220mm bed at flat-on-plate orientation.
+    Per-body (not whole-mesh bbox): an assembled split frame spans >220mm; each
+    PRINTED piece must fit. In-plane rotation cannot save the monolithic frame
+    (260x234 bbox -> min enclosing square (a+b)/sqrt2 ~ 349mm), so axis-aligned
+    extents are the binding measure."""
+    worst = 0.0
+    worst_dim = None
+    for body in m.split(only_watertight=False):
+        ext = body.bounds[1] - body.bounds[0]
+        w = max(float(ext[0]), float(ext[1]))
+        if w > worst:
+            worst, worst_dim = w, (round(float(ext[0]),1), round(float(ext[1]),1))
+    ok = worst <= BED_FIT_XY_MM
+    return ("bed_fit", ok, f"largest body XY {worst_dim[0]}x{worst_dim[1]} mm (limit {BED_FIT_XY_MM:.0f} mm)", 0.0 if ok else 0.5)
 
 def check_overhang(m):
     n = m.face_normals
@@ -255,6 +274,7 @@ if __name__ == "__main__":
     checks += check_sanity(m)
     checks.append(check_overhang(m))
     checks.append(check_wall_thickness(m))
+    checks.append(check_bed_fit(m))
     ok_clear, adj, need = p.check_prop_clearance()
     checks.append(("prop_clearance", ok_clear, f"{adj:.0f} mm vs {need:.0f} mm needed", 0.0 if ok_clear else 0.5))
     props, total = mass_properties(m, p.motor_positions(), p.arm_length_mm)

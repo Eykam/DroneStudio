@@ -15,7 +15,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     progress.set_stage("rendering", f"{variant_id}: exporting STEP/GLB/manifest")
     em.export(params, out_base, part=part)  # STEP/GLB/manifest first: FEA consumes the STEP
     m = trimesh.load(out_base + ".stl", force='mesh')
-    checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m)]
+    checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m), ev.check_bed_fit(m)]
     ok_c, adj, need = params.check_prop_clearance()
     checks.append(("prop_clearance", ok_c, f"{adj:.0f} mm vs {need:.0f} mm needed", 0.0 if ok_c else 0.5))
     import containment
