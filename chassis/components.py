@@ -160,6 +160,7 @@ LIBRARY = {
         "Pad-marker down camera (provisional module - Pi Cam 3 placeholder, marker spec 65deg half-angle cone, 8m range)",
         4.0, (0.025, 0.024, 0.012), "box", "belly",
         "sim sibling pad-marker spec 2026-09-08 (65deg half-angle cone, 8m); module identity provisional pending Eyad pick; user directive 2026-09-09 via parent"),
+}
 
 # --- dronestudio.sensor/1 consumption (2026-09-12) -------------------------
 # Env-gated: DRONE_SENSOR_SPEC_DIR unset = zero behavior change. When set,
