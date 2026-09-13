@@ -132,6 +132,8 @@ def check_bed_fit(m, split_planes=None):
         # that are not printed pieces - exclude below 100 mm3 (>2 orders under
         # any real frame piece)
         bodies = [b for b in bodies if abs(b.volume) >= 100.0] or bodies
+    else:
+        bodies = [m]
     worst = 0.0
     worst_dim = None
     for body in bodies:
