@@ -287,7 +287,7 @@ test "ground plane below" {
 // Noise model (NAV_STACK.md): range-dependent sigma, dropout on grazing
 // incidence, max-range clamp. VL53L9CX class: ~4m practical ceiling.
 
-pub const TofRole = enum { nav, arm_monitor };
+pub const TofRole = enum { nav, arm_monitor, altitude };
 
 pub const TofSensor = struct {
     name: []const u8,
@@ -328,7 +328,7 @@ pub const TofReading = struct {
 };
 
 /// The decided suite (sensor-suite-coverage decision, 2026-09-09).
-pub fn defaultTofRing() [8]TofSensor {
+pub fn defaultTofRing() [9]TofSensor {
     const r_nav: f32 = 0.035; // frame edge
     const r_arm: f32 = 0.040; // arm root
     return .{
@@ -340,6 +340,9 @@ pub fn defaultTofRing() [8]TofSensor {
         .{ .name = "SE", .azimuth_deg = 135, .offset = Vec3.init(-r_arm * 0.7071, 0, r_arm * 0.7071), .role = .arm_monitor },
         .{ .name = "SW", .azimuth_deg = 225, .offset = Vec3.init(-r_arm * 0.7071, 0, -r_arm * 0.7071), .role = .arm_monitor },
         .{ .name = "NW", .azimuth_deg = 315, .offset = Vec3.init(r_arm * 0.7071, 0, -r_arm * 0.7071), .role = .arm_monitor },
+        // 9th: belly-center down-facing (CAD tof_down, lidar-only below, 2026-09-12).
+        // Explicit elevation -90: no radial bearing exists at (0,0).
+        .{ .name = "DOWN", .azimuth_deg = 0, .elevation_deg = -90, .offset = Vec3.init(0, 0, 0), .role = .altitude },
     };
 }
 
