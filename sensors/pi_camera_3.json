@@ -13,23 +13,39 @@
   "physical": {
     "mass_g": 4.0,
     "mass_provenance": "datasheet",
-    "dims_m": { "x": 0.025, "y": 0.024, "z": 0.012 },
+    "dims_m": {
+      "x": 0.025,
+      "y": 0.024,
+      "z": 0.012
+    },
     "dims_provenance": "datasheet",
     "dims_note": "board bbox; CAD uses manufacturer STEP (RP-008154-DS-1) for the exact B-rep - lens barrel solids extend below the board bbox face, see orientation",
     "shape": "pcb-module",
-    "mount": { "style": "breakout-screws", "pattern": "nose lens-forward pair (CAD placement pins pi_camera_3#left/right)" }
+    "mount": {
+      "style": "breakout-screws",
+      "pattern": "nose lens-forward pair (CAD placement pins pi_camera_3#left/right)"
+    }
   },
   "orientation": {
     "optical_axis": "+X after mount rotation (lens-forward out the nose aperture)",
     "die_frame": "native manufacturer STEP models the board flat with the LENS POINTING -Z (lens-barrel solids sit at native z < -2mm, below the board face)",
-    "mount_rotation_quat_xyzw": [0.0, -0.7071068, 0.0, 0.7071068],
+    "mount_rotation_quat_xyzw": [
+      0.0,
+      -0.7071068,
+      0.0,
+      0.7071068
+    ],
     "mount_rotation_note": "-90deg about Y maps the native -Z lens axis to +X lens-forward. (+90 about Y stands the board up but points the lens BACKWARD -X; shipped that way once in CAD d69c9de and was user-reported wrong 2026-09-04.)",
-    "fov_note": "66.3h x 41.6v deg FOV pyramid; chassis must keep frame material out of it (CAD cam_down hard gate)"
+    "fov_note": "66.3h x 41.6v deg FOV pyramid; chassis must keep frame material out of it (CAD cam_main FoV hard gate; cam_down removed 2026-09-12, down cone is now the tof_down gate)"
   },
   "ee": {
     "kicad_footprint": null,
     "footprint_note": "not a board-mounted part - connects via CSI flex to the SB4 camera host (CM4 2x CSI); no footprint needed",
-    "interface": { "bus": "csi-2", "connector": "15-pin 1mm CSI flex", "note": "pair mounts lens-forward at the nose, feeds the CM4 dual CSI" }
+    "interface": {
+      "bus": "csi-2",
+      "connector": "15-pin 1mm CSI flex",
+      "note": "pair mounts lens-forward at the nose, feeds the CM4 dual CSI"
+    }
   },
   "dynamics": {
     "camera": {

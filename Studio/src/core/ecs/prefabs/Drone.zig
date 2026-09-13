@@ -194,11 +194,13 @@ pub fn spawn(
     // Stereo camera configuration. Manifest (1.2) cameras[] drives poses +
     // module FOV (Pi Cam 3 Standard sensor/lens); else legacy 75mm baseline.
     var baseline: f32 = 0.075; // 75mm stereo baseline
+    var mono_cam = false; // single-cam manifest (user decision 2026-09-12): skip right camera, zero baseline
     var cam_module = Sensors.Default;
     var cam_left_pos: [3]f32 = .{ -baseline / 2.0, 0.0, 0.15 };
     var cam_right_pos: [3]f32 = .{ baseline / 2.0, 0.0, 0.15 };
     if (manifest) |*m| {
         const cams = m.value.cameras;
+        if (cams.len == 1) mono_cam = true;
         if (cams.len >= 1) {
             const c0 = cams[0];
             cam_module = Sensors.CameraModule{
@@ -223,20 +225,24 @@ pub fn spawn(
 
     // Spawn cameras (each prefab spawns entity + frustum child)
     const drone_cam_eid = try DroneCamera.spawn(alloc, ecs, .{}, scene_width, scene_height);
-    const sensor_cam_left_eid = try SensorCamera.spawn(alloc, ecs, "sensor_cam_left", .{ .pos = cam_left_pos, .module = cam_module });
-    const sensor_cam_right_eid = try SensorCamera.spawn(alloc, ecs, "sensor_cam_right", .{ .pos = cam_right_pos, .module = cam_module });
+    const sensor_cam_left_eid = try SensorCamera.spawn(alloc, ecs, "sensor_cam_main", .{ .pos = cam_left_pos, .module = cam_module });
+    var sensor_cam_right_eid = sensor_cam_left_eid; // mono: right aliases main (stereo SLAM path degenerate, baseline 0)
+    if (!mono_cam) {
+        sensor_cam_right_eid = try SensorCamera.spawn(alloc, ecs, "sensor_cam_right", .{ .pos = cam_right_pos, .module = cam_module });
+    }
 
     // Parent cameras to drone
     try ecs.transform_system.addChild(root_eid, drone_body_entity);
     try ecs.transform_system.addChild(root_eid, drone_cam_eid);
     try ecs.transform_system.addChild(root_eid, sensor_cam_left_eid);
-    try ecs.transform_system.addChild(root_eid, sensor_cam_right_eid);
+    if (!mono_cam) try ecs.transform_system.addChild(root_eid, sensor_cam_right_eid);
 
     // Create SLAM component with stereo camera viewports
     const left_vp = ecs.viewport_components.get(sensor_cam_left_eid).?;
     const right_vp = ecs.viewport_components.get(sensor_cam_right_eid).?;
     const drone_tf = ecs.transform_components.get(root_eid).?;
 
+    if (mono_cam) baseline = 0.0; // mono: no stereo baseline (ECS SLAM stub is stereo-legacy; real VIO is autoresearch/)
     var slam_component = try SLAM.SLAMComponent.init(alloc, .{
         .config = SLAM.SLAMConfig.initWithIntrinsics(
             sensor_config.resolution_width,
