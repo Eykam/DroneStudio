@@ -14,22 +14,37 @@
     "mass_g": 2.0,
     "mass_provenance": "estimate",
     "mass_note": "UNMEASURED estimate (CAD flag 2026-09-12) - weigh a real breakout when hardware exists",
-    "dims_m": null,
-    "dims_provenance": "unverified",
-    "dims_note": "CAD fills from components.py during schema validation",
+    "dims_m": {
+      "x": 0.0228,
+      "y": 0.0228,
+      "z": 0.0155
+    },
+    "dims_provenance": "measured",
+    "dims_note": "Filled by CAD during schema validation 2026-09-12: envelope 22.8x22.8x15.5mm covers all 8 bearings (diagonal projection (20.65+11.54)/sqrt2=22.77), derived from real ee-tof v2 carrier ee_tof_carrier.step (board sha256 d929d57f) + geometry_tof001.json.",
     "shape": "pcb-module",
-    "mount": { "style": "breakout-screws", "pattern": "per-bearing carrier (CAD placement math)" }
+    "mount": {
+      "style": "breakout-screws",
+      "pattern": "per-bearing carrier (CAD placement math)"
+    }
   },
   "orientation": {
     "optical_axis": "+Z (lens faces +Z off the breakout top)",
-    "lens_offset_m": [0, 0, 0.0034],
+    "lens_offset_m": [
+      0,
+      0,
+      0.0034
+    ],
     "lens_offset_note": "lens z offset = placement z + 3.4mm (CAD per-bearing mount math)",
     "mount_rotation": "per-bearing orientation math lives CAD-side (placement.json); this file carries only the die/lens convention"
   },
   "ee": {
     "kicad_footprint": null,
     "footprint_note": "EE fills from tof_ring manifest / PLM OPN",
-    "interface": { "bus": "i2c", "xshut_pin": true, "address_7bit": "0x29 (reprogrammed per sensor via XSHUT sequencing)" }
+    "interface": {
+      "bus": "i2c",
+      "xshut_pin": true,
+      "address_7bit": "0x29 (reprogrammed per sensor via XSHUT sequencing)"
+    }
   },
   "dynamics": {
     "tof": {
