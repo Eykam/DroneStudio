@@ -1,8 +1,8 @@
-"""v156-g155a: tucked aft fuselage with deep ring sills and vaulted deck piers.
+"""v163-g162b: deep flanged roots and compact lenticular wings.
 
-Tuck the empty battery flanks inward and deepen the internal ring sills.
-Taller pointed deck vaults repay the sill mass while retaining PCB rails.
-Retain the complete optical saddles, enclosed fuselage and motor datums.
+Re-form the closed spar to retain lateral inertia and increase vertical
+section inertia while shedding lower-web perimeter at full normal gauge.
+All fixed optical and motor interfaces retain their reference geometry.
 
 Parametric 5-inch quad chassis (quad-X), build123d.
 
@@ -519,6 +519,26 @@ def build_chassis(p: ChassisParams) -> b.Part:
         height*=1.0+0.012*root_depth
         chine*=1.0+0.012*root_depth
         shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*root_depth
+        # Redistribute stock into deep root flanges and shorter outer
+        # wing facets, with full spanwise-normal wall offsets. The closed
+        # root gains bending depth without enlarging the overall hull;
+        # the sensor crossing and motor diaphragm remain unchanged.
+        height*=1.0+0.026227506056405295*root_depth
+        shoulder_half*=1.0+-0.04002176153720939*root_depth
+        keel+=-0.03882895638613401*root_depth
+        crown+=-0.21658980132614525*root_depth
+        chine+=-0.06442001811681433*height*root_depth
+        shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*root_depth
+        direct=keel+(shoulder_half-keel)*chine/shoulder
+        half+=(direct-half)*0.023269888947062223*root_depth
+        height*=1.0+0.010575667247208619*free_wing
+        shoulder_half*=1.0+0.019437341108739938*free_wing
+        keel+=0.04279052658024468*free_wing
+        crown+=-0.11215006441311307*free_wing
+        chine+=0.0007139043561929341*height*free_wing
+        shoulder+=(height-1.035*(shoulder_half-crown)-shoulder)*free_wing
+        direct=keel+(shoulder_half-keel)*chine/shoulder
+        half+=(direct-half)*0.04583718043822205*free_wing
         return [(-keel,0),(keel,0),(half,chine),(shoulder_half,shoulder),
                 (crown,height),(-crown,height),(-shoulder_half,shoulder),(-half,chine)]
 
@@ -2063,14 +2083,15 @@ def build_chassis(p: ChassisParams) -> b.Part:
     # Swept piers carry the edge deck into the arm roots through a deep
     # open web. Broader, taller vaults remove unloaded panel centers while
     # retaining the 2 mm lower flange and >1.2 mm piers at both deck ends.
-    # The roofs rise 1.12:1; the small side lean also builds from below.
+    # Taller vaults repay the deeper spar roots; a 1.3 mm lower chord
+    # remains above the DFAM floor. Pitched roofs retain their 1.12:1 rise.
     for x in (-44.0,-22.0,0.0,22.0,44.0):
         half=p.deck_arch_half_span_mm+1.85
         lean=math.copysign(0.3 if abs(x)>40 else 1.2,x) if x else 0.0
-        apex=deck_z-7.45
+        apex=deck_z-6.85
         shoulder=apex-1.12*half
-        arch=b.Wire.make_polygon([(fx+x-half,fy-28,2.0),
-            (fx+x+half,fy-28,2.0),(fx+x+half+lean,fy-28,shoulder),
+        arch=b.Wire.make_polygon([(fx+x-half,fy-28,1.3),
+            (fx+x+half,fy-28,1.3),(fx+x+half+lean,fy-28,shoulder),
             (fx+x+lean,fy-28,apex),(fx+x-half+lean,fy-28,shoulder)],close=True)
         deck=deck-b.Solid.extrude(b.Face(arch),(0,56,0))
     # Paired rows of normal-cut slots lighten the folded rail between its
