@@ -316,6 +316,48 @@ def check_camera_fov(m):
     return ("camera_fov", ok, "; ".join(problems) if problems else
             f"{len(poses)} cameras: FOV clear", 0.0 if ok else 0.5)
 
+def check_down_tof(m):
+    """Hard gate (user directive 2026-09-12): the belly-center down-facing
+    VL53L9CX (vl53l9cx_breakout#down) is the ONLY downward sensor - an occluded
+    aperture breaks landing. Require a clear drop from the belly-center datum
+    and every ray of the rectangular 55x42deg (half 27.5/21) downward pyramid
+    clear of frame material. Fails closed if the pinned placement key is
+    missing."""
+    from components import placement as _placement
+    pos = _placement().get("vl53l9cx_breakout#down")
+    if pos is None:
+        return ("down_tof", False, "vl53l9cx_breakout#down placement missing (pinned key - fails closed)", 0.5)
+    problems = []
+    o0 = np.array([pos[0] * 1000.0, pos[1] * 1000.0, pos[2] * 1000.0])
+    down = np.array([0.0, 0.0, -1.0])
+    probe_origins = [o0] + [o0 + 6.0 * (math.cos(t) * np.array([1.0, 0, 0]) + math.sin(t) * np.array([0, 1.0, 0]))
+                            for t in [2 * math.pi * i / 8 for i in range(8)]]
+    probe_hits = [_mt_hit_dists(m, po, down[None, :], first_only=False)[0] for po in probe_origins]
+    probe_hits = [[h for h in hs if h <= 60.0] for hs in probe_hits]
+    center_hits = probe_hits[0]
+    ring_bottoms = [hs[-1] for hs in probe_hits[1:] if hs]
+    if center_hits:
+        problems.append("down_tof: no clear drop from belly-center datum (aperture missing or occluded)")
+    elif not ring_bottoms:
+        problems.append("down_tof: no belly skin found under datum (drop probe found no aperture plane)")
+    else:
+        bottom = sorted(ring_bottoms)[len(ring_bottoms) // 2]
+        o = o0 + (bottom - 0.15) * down  # emitter just above the aperture plane
+        th, tv = math.radians(27.5), math.radians(21.0)
+        dirs = [down]
+        for sx in (-1.0, -0.5, 0.5, 1.0):
+            for sy in (-1.0, -0.5, 0.5, 1.0):
+                d = down + math.tan(th * sx) * np.array([1.0, 0, 0]) + math.tan(tv * sy) * np.array([0.0, 1.0, 0])
+                dirs.append(d / np.linalg.norm(d))
+        hits = _mt_hit_dists(m, o, np.array(dirs))
+        nblocked = int(np.sum(np.isfinite(hits)))
+        if nblocked:
+            problems.append(f"down_tof: {nblocked}/{len(dirs)} downward FoV rays blocked (55x42deg pyramid, emitter at aperture plane)")
+    ok = not problems
+    return ("down_tof", ok, "; ".join(problems) if problems else
+            "down ToF 55x42deg pyramid clear", 0.0 if ok else 0.5)
+
+
 def check_imu_lever_arm(m):
     """IMU must sit near the frame CoM (lever-arm corrections only work for small
     offsets); its full transform still exports to the manifest for the estimator."""

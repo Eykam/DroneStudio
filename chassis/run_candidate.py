@@ -22,6 +22,7 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     import containment
     checks.append(containment.check_containment(part=part, mesh=m))
     checks.append(ev.check_camera_fov(m))
+    checks.append(ev.check_down_tof(m))
     checks.append(ev.check_imu_lever_arm(m))
     checks.append(ev.check_joint_stress(params, m))
     checks.append(ev.check_dfam(m))
