@@ -250,6 +250,8 @@ def run_generation():
                 score = json.loads(line[len("RESULT_JSON "):])["score"]
         if score is None:
             print(f"[gen {gen}] {variant} failed to evaluate; skipped", flush=True)
+            if r2.stderr:
+                print(f"[gen {gen}] {variant} stderr tail: {r2.stderr[-600:]}", flush=True)  # 2026-09-13: eval failures were invisible without stderr
             continue
         check_lines = [l for l in r2.stdout.splitlines() if l.strip().startswith(("[PASS]", "[FAIL]"))]
         all_pass = bool(check_lines) and all("[PASS]" in l for l in check_lines)
