@@ -31,21 +31,116 @@ def check_sanity(m):
     out.append(("body_count", ok, f"{n} bodies (1-{MAX_SPLIT_BODIES} allowed: split-body print strategy 2026-09-12)", 0.0 if ok else 0.1))
     return out
 
-def check_bed_fit(m):
-    """Per-body XY extents must fit the 220x220mm bed at flat-on-plate orientation.
-    Per-body (not whole-mesh bbox): an assembled split frame spans >220mm; each
-    PRINTED piece must fit. In-plane rotation cannot save the monolithic frame
-    (260x234 bbox -> min enclosing square (a+b)/sqrt2 ~ 349mm), so axis-aligned
-    extents are the binding measure."""
+def _split_pieces(m, planes):
+    """Partition the mesh at declared split planes (capped slices). Arm-style
+    vertical planes cut sequentially; each plane only intersects the piece(s)
+    it actually splits, so 4 arm planes -> 5 pieces, not 16."""
+    import trimesh.intersections as _ti
+    pieces = [m]
+    for pl in planes:
+        o = np.array(pl["origin_mm"], float)
+        n = np.array(pl["normal"], float)
+        n = n / np.linalg.norm(n)
+        nxt = []
+        for p in pieces:
+            kept = False
+            for nn in (n, -n):
+                try:
+                    q = _ti.slice_mesh_plane(p, nn, o, cap=True)
+                except Exception:
+                    q = None
+                if q is not None and len(q.faces) > 4 and abs(q.volume) > 1.0:
+                    nxt.append(q)
+                    kept = True
+            if not kept:
+                nxt.append(p)
+        pieces = nxt
+    return pieces
+
+PETG_JOINT_ALLOW_MPA = 16.5   # same vertical-load aniso allowable as the FEA crash gate
+BOLT_SHEAR_ALLOW_MPA = 192.0  # M3 class 8.8, double shear, FoS 2
+JOINT_CASES = (("crash", 3.0, "vertical"), ("cartwheel", 2.0, "lateral"), ("torsion", 1.5, "vertical"))
+MOTOR_PAD_THRUST_N = 11.0     # matches fea.py MAX_THRUST_N basis
+
+def check_joint_stress(params, m):
+    """Interim fastener screen for split-body designs (parent GO 2026-09-12).
+    Arm-split section loads are statically determinate from the FEA load cases:
+    the outboard piece carries exactly the motor-pad loads, so section resultants
+    at a declared split plane come from statics - no contact FEA needed. Checks
+    bolt shear (M3 double-shear), boss bearing, and boss section bending against
+    PETG/steel allowables. FAILS CLOSED on anything it cannot verify (non-arm
+    splits, missing declarations) - no split adoption without passing."""
+    planes = getattr(params, "split_planes", None) or []
+    if not planes:
+        return ("joint_stress", True, "monolithic: no split planes declared", 0.0)
+    try:
+        motors = [np.array(mp, float)[:2] for mp in params.motor_positions()]
+    except Exception as e:
+        return ("joint_stress", False, f"joint screen needs params.motor_positions(): {e}", 0.5)
+    ok_all = True
+    notes = []
+    for i, pl in enumerate(planes):
+        try:
+            o = np.array(pl["origin_mm"], float)
+            n = np.array(pl["normal"], float)
+            n = n / np.linalg.norm(n)
+        except Exception:
+            ok_all = False; notes.append(f"plane {i}: bad origin/normal declaration"); continue
+        if abs(n[2]) > 0.1:
+            ok_all = False; notes.append(f"plane {i}: non-vertical split - screen verifies arm splits only"); continue
+        best = None
+        for mp in motors:
+            rel = mp - o[:2]
+            along = float(np.dot(rel, n[:2]))
+            off = abs(float(n[0] * rel[1] - n[1] * rel[0]))
+            if along > 5.0 and off < 25.0 and (best is None or along < best[0]):
+                best = (along, off)
+        if best is None:
+            ok_all = False; notes.append(f"plane {i}: no motor outboard on this bearing - screen verifies arm splits only"); continue
+        lever = best[0]
+        nb = int(pl.get("n_bolts", 2))
+        grip = float(pl.get("bolt_grip_mm", 6.0))
+        w = float(pl.get("boss_width_mm", 12.0))
+        h = float(pl.get("boss_height_mm", 8.0))
+        worst_ratio, worst_txt = 0.0, ""
+        for case, scale, kind in JOINT_CASES:
+            V = MOTOR_PAD_THRUST_N * scale
+            M = V * lever
+            checks_here = (
+                ("bolt_shear", V / (nb * 2 * (math.pi / 4) * 3.0**2), BOLT_SHEAR_ALLOW_MPA),
+                ("boss_bearing", V / (nb * 3.0 * grip), PETG_JOINT_ALLOW_MPA),
+                ("boss_bending", 6 * M / ((w * h**2) if kind == "vertical" else (h * w**2)), PETG_JOINT_ALLOW_MPA),
+            )
+            for name, val, allow in checks_here:
+                if val > allow:
+                    ok_all = False
+                    notes.append(f"plane {i} {case} {name} {val:.1f} > {allow:.0f} MPa FAIL")
+                if val / allow > worst_ratio:
+                    worst_ratio, worst_txt = val / allow, f"{case} {name} {val:.1f}/{allow:.0f} MPa"
+        notes.append(f"plane {i}: lever {lever:.0f}mm, worst {worst_txt}")
+    return ("joint_stress", ok_all, " | ".join(notes)[:400], 0.0 if ok_all else 0.5)
+
+def check_bed_fit(m, split_planes=None):
+    """Per-PRINTED-PIECE XY extents must fit the 220x220mm bed at flat-on-plate
+    orientation. Pieces come from real mesh bodies, or from slicing at declared
+    split planes (design exports one solid; the split is declarative). In-plane
+    rotation cannot save the monolith (min enclosing square ~349mm), so
+    axis-aligned extents are the binding measure."""
+    if split_planes:
+        bodies = _split_pieces(m, split_planes)
+        # slicing debris: planes grazing root fairings produce mm3-scale slivers
+        # that are not printed pieces - exclude below 100 mm3 (>2 orders under
+        # any real frame piece)
+        bodies = [b for b in bodies if abs(b.volume) >= 100.0] or bodies
     worst = 0.0
     worst_dim = None
-    for body in m.split(only_watertight=False):
+    for body in bodies:
         ext = body.bounds[1] - body.bounds[0]
         w = max(float(ext[0]), float(ext[1]))
         if w > worst:
             worst, worst_dim = w, (round(float(ext[0]),1), round(float(ext[1]),1))
     ok = worst <= BED_FIT_XY_MM
-    return ("bed_fit", ok, f"largest body XY {worst_dim[0]}x{worst_dim[1]} mm (limit {BED_FIT_XY_MM:.0f} mm)", 0.0 if ok else 0.5)
+    return ("bed_fit", ok, f"largest piece XY {worst_dim[0]}x{worst_dim[1]} mm of {len(bodies)} piece(s) (limit {BED_FIT_XY_MM:.0f} mm)", 0.0 if ok else 0.5)
 
 def check_overhang(m):
     n = m.face_normals

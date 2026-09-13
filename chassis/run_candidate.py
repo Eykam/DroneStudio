@@ -15,13 +15,15 @@ def run(variant_id, parent_id, generation, params: ChassisParams, out_base):
     progress.set_stage("rendering", f"{variant_id}: exporting STEP/GLB/manifest")
     em.export(params, out_base, part=part)  # STEP/GLB/manifest first: FEA consumes the STEP
     m = trimesh.load(out_base + ".stl", force='mesh')
-    checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m), ev.check_bed_fit(m)]
+    split_planes = getattr(params, "split_planes", None) or []
+    checks = ev.check_sanity(m) + [ev.check_overhang(m), ev.check_wall_thickness(m), ev.check_bed_fit(m, split_planes)]
     ok_c, adj, need = params.check_prop_clearance()
     checks.append(("prop_clearance", ok_c, f"{adj:.0f} mm vs {need:.0f} mm needed", 0.0 if ok_c else 0.5))
     import containment
     checks.append(containment.check_containment(part=part, mesh=m))
     checks.append(ev.check_camera_fov(m))
     checks.append(ev.check_imu_lever_arm(m))
+    checks.append(ev.check_joint_stress(params, m))
     checks.append(ev.check_dfam(m))
     props, _ = ev.mass_properties(m, params.motor_positions(), params.arm_length_mm)
     hover_ok = props["hover_thrust_frac"] < 0.65
