@@ -3,49 +3,49 @@
   "kind": "cad.chassis.snapshot",
   "parent_id": "cad-chassis-v163-g162b",
   "name": "Chassis v189-g188b",
-  "ts": "2026-09-14T04:23:31.041040+00:00",
+  "ts": "2026-09-14T05:16:50.394184+00:00",
   "glb_path": "snapshots/v189-g188b/chassis.glb",
   "metrics": {
-    "mass_g": 122.0,
-    "all_up_mass_kg": 0.465,
+    "mass_g": 120.1,
+    "all_up_mass_kg": 0.463,
     "inertia": {
-      "ixx": 0.00183601,
-      "iyy": 0.00196188,
-      "izz": 0.00389946
+      "ixx": 0.00182835,
+      "iyy": 0.00195804,
+      "izz": 0.00388837
     },
     "printability": {
-      "overhang": "0.83% of surface overhangs > 45.0deg (1359 mm^2)",
+      "overhang": "0.82% of surface overhangs > 45.0deg (1348 mm^2)",
       "wall_thickness": "0.00% of samples below 1.2 mm wall",
       "prop_clearance": "212 mm vs 137 mm needed"
     },
     "fea": {
       "hover_max": {
-        "max_von_mises_mpa": 6.8,
-        "max_disp_mm": 1.41,
+        "max_von_mises_mpa": 7.9,
+        "max_disp_mm": 1.34,
         "limit_mpa": 16.5,
         "passed": true
       },
       "crash": {
-        "max_von_mises_mpa": 20.3,
-        "max_disp_mm": 4.24,
+        "max_von_mises_mpa": 23.7,
+        "max_disp_mm": 4.02,
         "limit_mpa": 16.5,
         "passed": false
       },
       "torsion": {
-        "max_von_mises_mpa": 9.7,
-        "max_disp_mm": 2.13,
+        "max_von_mises_mpa": 11.8,
+        "max_disp_mm": 2.17,
         "limit_mpa": 24.0,
         "passed": true
       },
       "pullout": {
-        "max_von_mises_mpa": 6.6,
-        "max_disp_mm": 1.37,
+        "max_von_mises_mpa": 7.9,
+        "max_disp_mm": 1.36,
         "limit_mpa": 16.5,
         "passed": true
       },
       "cartwheel": {
-        "max_von_mises_mpa": 9.0,
-        "max_disp_mm": 4.13,
+        "max_von_mises_mpa": 8.9,
+        "max_disp_mm": 4.09,
         "limit_mpa": 30.0,
         "passed": true
       },
@@ -57,40 +57,40 @@
       },
       "modal": {
         "modes_hz": [
-          151.1,
-          155.2,
-          179.3,
-          181.5,
-          194.2,
-          212.0,
-          259.6,
-          268.1
+          149.2,
+          156.2,
+          181.3,
+          183.4,
+          195.0,
+          212.2,
+          236.8,
+          273.6
         ],
-        "first_mode_hz": 151.1,
+        "first_mode_hz": 149.2,
         "min_first_mode_hz": 120.0,
         "passed": true
       },
       "buckling": {
         "load_factors": [
-          8034280000.0,
-          20786680000.0
+          20261930000.0,
+          21149220000.0
         ],
-        "first_factor": 8034280000.0,
+        "first_factor": 20261930000.0,
         "min_factor": 2.0,
         "passed": true
       },
       "fatigue": {
-        "stress_amplitude_mpa": 2.0,
+        "stress_amplitude_mpa": 2.4,
         "endurance_limit_mpa": 10.0,
         "assumption": "cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)",
         "passed": true
       },
       "passed": false
     },
-    "score": 0.5,
-    "hover_thrust_frac": 0.118
+    "score": 0.09999999999999998,
+    "hover_thrust_frac": 0.117
   },
-  "notes": "failing: fea",
+  "notes": "failing: dfam, fea",
   "variant": {
     "id": "v189-g188b",
     "parent_id": "v163-g162b",
@@ -145,7 +145,7 @@
       "cradle_post_depth_mm": 4.0,
       "structural_gauge_mm": 1.24,
       "cradle_ring_web_mm": 1.24,
-      "tray_rib_pitch_mm": 26.0,
+      "tray_rib_pitch_mm": 28.0,
       "arm_box_depth_scale": 0.97,
       "arm_box_width_scale": 0.98,
       "split_planes": [
@@ -161,9 +161,9 @@
             0.0
           ],
           "n_bolts": 2,
-          "boss_width_mm": 10.0,
-          "boss_height_mm": 12.0,
-          "bolt_grip_mm": 12.0
+          "boss_width_mm": 9.6,
+          "boss_height_mm": 10.8,
+          "bolt_grip_mm": 10.8
         },
         {
           "origin_mm": [
@@ -177,9 +177,9 @@
             0.0
           ],
           "n_bolts": 2,
-          "boss_width_mm": 10.0,
-          "boss_height_mm": 12.0,
-          "bolt_grip_mm": 12.0
+          "boss_width_mm": 9.6,
+          "boss_height_mm": 10.8,
+          "bolt_grip_mm": 10.8
         },
         {
           "origin_mm": [
@@ -193,15 +193,15 @@
             0.0
           ],
           "n_bolts": 2,
-          "boss_width_mm": 10.0,
-          "boss_height_mm": 12.0,
-          "bolt_grip_mm": 12.0
+          "boss_width_mm": 9.6,
+          "boss_height_mm": 10.8,
+          "bolt_grip_mm": 10.8
         }
       ]
     },
-    "git_commit": "86fcc0acd335821ce3378dc5d63509c8a9f288d5"
+    "git_commit": "88787a3977d7e767187f6de89aa6bfe6f75993dc"
   },
-  "score": 0.5,
+  "score": 0.09999999999999998,
   "evaluator": [
     {
       "name": "watertight",
@@ -216,7 +216,7 @@
     {
       "name": "overhang",
       "passed": true,
-      "detail": "0.83% of surface overhangs > 45.0deg (1359 mm^2)"
+      "detail": "0.82% of surface overhangs > 45.0deg (1348 mm^2)"
     },
     {
       "name": "wall_thickness",
@@ -256,12 +256,12 @@
     {
       "name": "joint_stress",
       "passed": true,
-      "detail": "plane 0: lever 81mm, worst crash boss_bending 11.1/16 MPa | plane 1: lever 57mm, worst crash boss_bending 7.9/16 MPa | plane 2: lever 65mm, worst crash boss_bending 9.0/16 MPa"
+      "detail": "plane 0: lever 81mm, worst crash boss_bending 14.3/16 MPa | plane 1: lever 57mm, worst crash boss_bending 10.1/16 MPa | plane 2: lever 65mm, worst crash boss_bending 11.5/16 MPa"
     },
     {
       "name": "dfam",
-      "passed": true,
-      "detail": "watertight=True, wall p05=1.2mm (limit 1.2), min=0.19mm, support~25.6% of part (limit 30)"
+      "passed": false,
+      "detail": "watertight=True, wall p05=1.179mm (limit 1.2), min=0.032mm, support~25.7% of part (limit 30)"
     },
     {
       "name": "hover_margin",
@@ -271,8 +271,8 @@
     {
       "name": "fea",
       "passed": false,
-      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 6.8, \"max_disp_mm\": 1.41, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 20.3, \"max_disp_mm\": 4.24, \"limit_mpa\": 16.5, \"passed\": false}, \"torsion\": {\"max_von_mises_mpa\": 9.7, \"max_disp_mm\": 2.13, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 6.6, \"max_disp_mm\": 1.37, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 9.0, \"max_disp_mm\": 4.13, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 16.7, \"max_disp_mm\": 0.26, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [151.1, 155.2, 179.3, 181.5, 194.2, 212.0, 259.6, 268.1], \"first_mode_hz\": 151.1, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [8034280000.0, 20786680000.0], \"first_factor\": 8034280000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 2.0, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": false}"
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 7.9, \"max_disp_mm\": 1.34, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 23.7, \"max_disp_mm\": 4.02, \"limit_mpa\": 16.5, \"passed\": false}, \"torsion\": {\"max_von_mises_mpa\": 11.8, \"max_disp_mm\": 2.17, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 7.9, \"max_disp_mm\": 1.36, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 8.9, \"max_disp_mm\": 4.09, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 16.7, \"max_disp_mm\": 0.26, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [149.2, 156.2, 181.3, 183.4, 195.0, 212.2, 236.8, 273.6], \"first_mode_hz\": 149.2, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [20261930000.0, 21149220000.0], \"first_factor\": 20261930000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 2.4, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": false}"
     }
   ],
-  "created_at": "2026-09-14T04:23:31.044085+00:00"
+  "created_at": "2026-09-14T05:16:50.395502+00:00"
 }
