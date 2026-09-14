@@ -3,84 +3,84 @@
   "kind": "cad.chassis.snapshot",
   "parent_id": "cad-chassis-v163-g162b",
   "name": "Chassis v186-g185a",
-  "ts": "2026-09-14T01:19:29.479969+00:00",
+  "ts": "2026-09-14T02:00:07.666461+00:00",
   "glb_path": "snapshots/v186-g185a/chassis.glb",
   "metrics": {
-    "mass_g": 123.8,
-    "all_up_mass_kg": 0.467,
+    "mass_g": 122.9,
+    "all_up_mass_kg": 0.466,
     "inertia": {
-      "ixx": 0.00184319,
-      "iyy": 0.00196422,
-      "izz": 0.00390864
+      "ixx": 0.00184034,
+      "iyy": 0.00196358,
+      "izz": 0.0039053
     },
     "printability": {
-      "overhang": "0.81% of surface overhangs > 45.0deg (1348 mm^2)",
+      "overhang": "0.82% of surface overhangs > 45.0deg (1348 mm^2)",
       "wall_thickness": "0.00% of samples below 1.2 mm wall",
       "prop_clearance": "212 mm vs 137 mm needed"
     },
     "fea": {
       "hover_max": {
-        "max_von_mises_mpa": 6.0,
-        "max_disp_mm": 1.32,
+        "max_von_mises_mpa": 6.7,
+        "max_disp_mm": 1.43,
         "limit_mpa": 16.5,
         "passed": true
       },
       "crash": {
-        "max_von_mises_mpa": 18.0,
-        "max_disp_mm": 3.96,
+        "max_von_mises_mpa": 20.2,
+        "max_disp_mm": 4.28,
         "limit_mpa": 16.5,
         "passed": false
       },
       "torsion": {
         "max_von_mises_mpa": 9.6,
-        "max_disp_mm": 2.15,
+        "max_disp_mm": 2.16,
         "limit_mpa": 24.0,
         "passed": true
       },
       "pullout": {
-        "max_von_mises_mpa": 6.0,
-        "max_disp_mm": 1.34,
+        "max_von_mises_mpa": 6.6,
+        "max_disp_mm": 1.38,
         "limit_mpa": 16.5,
         "passed": true
       },
       "cartwheel": {
-        "max_von_mises_mpa": 8.3,
-        "max_disp_mm": 3.83,
+        "max_von_mises_mpa": 8.9,
+        "max_disp_mm": 4.04,
         "limit_mpa": 30.0,
         "passed": true
       },
       "battery_eject": {
-        "max_von_mises_mpa": 16.8,
+        "max_von_mises_mpa": 16.7,
         "max_disp_mm": 0.26,
         "limit_mpa": 30.0,
         "passed": true
       },
       "modal": {
         "modes_hz": [
-          150.9,
-          157.9,
-          182.0,
-          182.9,
-          199.6,
-          214.1,
-          258.1,
-          279.9
+          150.8,
+          154.9,
+          180.1,
+          180.8,
+          196.1,
+          211.5,
+          258.2,
+          270.5
         ],
-        "first_mode_hz": 150.9,
+        "first_mode_hz": 150.8,
         "min_first_mode_hz": 120.0,
         "passed": true
       },
       "buckling": {
         "load_factors": [
-          1668181.0,
-          5250652.0
+          10513560000.0,
+          19409720000.0
         ],
-        "first_factor": 1668181.0,
+        "first_factor": 10513560000.0,
         "min_factor": 2.0,
         "passed": true
       },
       "fatigue": {
-        "stress_amplitude_mpa": 1.8,
+        "stress_amplitude_mpa": 2.0,
         "endurance_limit_mpa": 10.0,
         "assumption": "cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)",
         "passed": true
@@ -199,7 +199,7 @@
         }
       ]
     },
-    "git_commit": "bc16082833ddb6c8b219f975868f0137bc6f28fe"
+    "git_commit": "3123b28623d5028f2829042d981fcfb392910caf"
   },
   "score": 0.5,
   "evaluator": [
@@ -216,7 +216,7 @@
     {
       "name": "overhang",
       "passed": true,
-      "detail": "0.81% of surface overhangs > 45.0deg (1348 mm^2)"
+      "detail": "0.82% of surface overhangs > 45.0deg (1348 mm^2)"
     },
     {
       "name": "wall_thickness",
@@ -261,7 +261,7 @@
     {
       "name": "dfam",
       "passed": true,
-      "detail": "watertight=True, wall p05=1.2mm (limit 1.2), min=0.19mm, support~24.9% of part (limit 30)"
+      "detail": "watertight=True, wall p05=1.2mm (limit 1.2), min=0.19mm, support~25.1% of part (limit 30)"
     },
     {
       "name": "hover_margin",
@@ -271,8 +271,8 @@
     {
       "name": "fea",
       "passed": false,
-      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 6.0, \"max_disp_mm\": 1.32, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 18.0, \"max_disp_mm\": 3.96, \"limit_mpa\": 16.5, \"passed\": false}, \"torsion\": {\"max_von_mises_mpa\": 9.6, \"max_disp_mm\": 2.15, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 6.0, \"max_disp_mm\": 1.34, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 8.3, \"max_disp_mm\": 3.83, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 16.8, \"max_disp_mm\": 0.26, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [150.9, 157.9, 182.0, 182.9, 199.6, 214.1, 258.1, 279.9], \"first_mode_hz\": 150.9, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [1668181.0, 5250652.0], \"first_factor\": 1668181.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 1.8, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": false}"
+      "detail": "{\"hover_max\": {\"max_von_mises_mpa\": 6.7, \"max_disp_mm\": 1.43, \"limit_mpa\": 16.5, \"passed\": true}, \"crash\": {\"max_von_mises_mpa\": 20.2, \"max_disp_mm\": 4.28, \"limit_mpa\": 16.5, \"passed\": false}, \"torsion\": {\"max_von_mises_mpa\": 9.6, \"max_disp_mm\": 2.16, \"limit_mpa\": 24.0, \"passed\": true}, \"pullout\": {\"max_von_mises_mpa\": 6.6, \"max_disp_mm\": 1.38, \"limit_mpa\": 16.5, \"passed\": true}, \"cartwheel\": {\"max_von_mises_mpa\": 8.9, \"max_disp_mm\": 4.04, \"limit_mpa\": 30.0, \"passed\": true}, \"battery_eject\": {\"max_von_mises_mpa\": 16.7, \"max_disp_mm\": 0.26, \"limit_mpa\": 30.0, \"passed\": true}, \"modal\": {\"modes_hz\": [150.8, 154.9, 180.1, 180.8, 196.1, 211.5, 258.2, 270.5], \"first_mode_hz\": 150.8, \"min_first_mode_hz\": 120.0, \"passed\": true}, \"buckling\": {\"load_factors\": [10513560000.0, 19409720000.0], \"first_factor\": 10513560000.0, \"min_factor\": 2.0, \"passed\": true}, \"fatigue\": {\"stress_amplitude_mpa\": 2.0, \"endurance_limit_mpa\": 10.0, \"assumption\": \"cruise ripple 0.3x hover_max stress; endurance ~0.2x yield (1e7 cycles)\", \"passed\": true}, \"passed\": false}"
     }
   ],
-  "created_at": "2026-09-14T01:19:29.484753+00:00"
+  "created_at": "2026-09-14T02:00:07.668075+00:00"
 }

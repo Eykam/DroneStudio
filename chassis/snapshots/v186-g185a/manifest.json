@@ -16,28 +16,28 @@
     "yield_mpa": 50
   },
   "dynamics": {
-    "total_mass_kg": 0.482527,
+    "total_mass_kg": 0.481656,
     "com_m": [
-      -0.027878,
-      0.000305,
+      -0.027928,
+      0.000306,
       0.00941
     ],
     "inertia_about_com_kgm2": {
-      "ixx": 0.0019085896670013125,
-      "iyy": 0.0024905749530229116,
-      "izz": 0.0042564045504718115,
-      "ixy": -1.5355989402981132e-05,
-      "ixz": -9.940280747727166e-05,
-      "iyz": 2.5695406550568286e-06
+      "ixx": 0.0019058108923994336,
+      "iyy": 0.0024893261426192454,
+      "izz": 0.00425238616252159,
+      "ixy": -1.5373582180358412e-05,
+      "ixz": -9.94821895308394e-05,
+      "iyz": 2.576480232114528e-06
     },
     "composition": [
       {
         "name": "frame",
-        "mass_kg": 0.123797,
+        "mass_kg": 0.122926,
         "com_m": [
-          -0.010967,
-          0.00119,
-          0.016858
+          -0.011045,
+          0.001198,
+          0.016912
         ]
       },
       {
@@ -281,26 +281,26 @@
     "note": "fully composed rigid body: frame + 4 motors + payload (real components, see chassis/components.py). Sim should use these directly."
   },
   "inertial": {
-    "frame_mass_kg": 0.123797,
+    "frame_mass_kg": 0.122926,
     "frame_com_m": [
-      -0.010967,
-      0.00119,
-      0.016858
+      -0.011045,
+      0.001198,
+      0.016912
     ],
     "frame_inertia_kgm2_about_origin": {
-      "ixx": 0.0003423953590031331,
-      "iyy": 0.00046343764681399237,
-      "izz": 0.0007477879577010278,
-      "ixy": -1.0864406254621813e-05,
-      "ixz": 5.410074987604914e-06,
-      "iyz": 1.2001054314680673e-06
+      "ixx": 0.000339542821091143,
+      "iyy": 0.0004627970339073512,
+      "izz": 0.0007444516522637257,
+      "ixy": -1.0875486573626934e-05,
+      "ixz": 5.336246182810276e-06,
+      "iyz": 1.2073057760146753e-06
     }
   },
   "aero": {
     "projected_area_m2": {
-      "x": 0.032111,
-      "y": 0.046136,
-      "z": 0.029857
+      "x": 0.032092,
+      "y": 0.045706,
+      "z": 0.029708
     },
     "cd_flat_plate_estimate": 1.1,
     "note": "linear drag ~ 0.5*rho_air*cd*area*v^2 per axis; rho_air=1.225"
@@ -413,8 +413,8 @@
       1.0
     ],
     "offset_from_com_m": [
-      0.009878,
-      0.019195,
+      0.009928,
+      0.019194,
       0.02759
     ],
     "note": "MPU-9250 (GY-9250 breakout) real pose in the GLB frame (+X fwd, +Z up); chassis-side assumption: breakout module ~15x25mm, NOT the bare QFN-24 chip (flagged to user; EE board may dictate bare chip later). offset_from_com_m = imu.position_m - dynamics.com_m; correct accel readings with a_imu = a_com + alpha x r + omega x (omega x r), r = offset rotated by the body attitude. MAGNETOMETER QUIRK: the MPU-9250s AK8963 mag die is rotated in-package vs the accel/gyro die - this transform is the accel/gyro chip frame; the estimator must apply the AK8963 axis remap separately (see MPU-9250 datasheet)."
